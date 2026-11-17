@@ -8,16 +8,18 @@ import (
 	"path/filepath"
 )
 
-// Endpoint creates a short Unix-socket location and exposes the familiar
-// .omo/omo.sock path as a symlink. Agents receive Actual, avoiding sun_path's
-// byte limit even when the office lives deep in the filesystem.
-func Endpoint(officeDir string) (actual, display string, cleanup func(), err error) {
+const socketName = "omo.sock"
+
+// Endpoint creates a short Unix-socket location and exposes runDir/omo.sock as
+// a symlink to it. Clients dial the short target, which avoids sun_path's
+// byte limit even when the home lives deep in the filesystem.
+func Endpoint(runDir string) (actual, display string, cleanup func(), err error) {
 	tmp, err := os.MkdirTemp("", "omo-sock-")
 	if err != nil {
 		return "", "", nil, err
 	}
-	actual = filepath.Join(tmp, "omo.sock")
-	display = filepath.Join(officeDir, ".omo", "omo.sock")
+	actual = filepath.Join(tmp, socketName)
+	display = filepath.Join(runDir, socketName)
 	if err := os.Remove(display); err != nil && !os.IsNotExist(err) {
 		os.RemoveAll(tmp)
 		return "", "", nil, fmt.Errorf("remove stale socket link: %w", err)
@@ -31,4 +33,10 @@ func Endpoint(officeDir string) (actual, display string, cleanup func(), err err
 		os.RemoveAll(tmp)
 	}
 	return actual, display, cleanup, nil
+}
+
+// ClientEndpoint resolves the socket link in runDir to the short path the
+// server listens on.
+func ClientEndpoint(runDir string) (string, error) {
+	return os.Readlink(filepath.Join(runDir, socketName))
 }

@@ -1,0 +1,14 @@
+# Invented configuration in the shape of codex-cli 0.46.0.
+experimental_use_rmcp_client = true
+
+[mcp_servers.legacy]
+url = "https://legacy.example.invalid/mcp"
+bearer_token = "codex-legacy-secret-0046"
+
+[mcp_servers.slowstart]
+command = "slow-mcp"
+startup_timeout_ms = 45000
+
+[mcp_servers.omo]
+command = "/usr/local/bin/omo"
+args = ["mcp", "stdio"]

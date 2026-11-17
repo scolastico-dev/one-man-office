@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="0" width="1280" height="520" viewBox="0 0 1280 520">
+  <!-- The README's title banner: name, claim, a small board and the snail. -->
+  <rect class="frame" x="1" y="1" width="1278" height="518"/>
+
+  <text class="muted" x="64" y="68" font-size="16" letter-spacing="2">SELF-HOSTED · ONE GO BINARY · AGPL-3.0</text>
+  <text class="fg bold" x="60" y="152" font-size="80">one-man-office</text>
+  <text class="fg" x="64" y="204" font-size="26">A browser-first kanban board</text>
+  <text class="fg" x="64" y="240" font-size="26">where <tspan class="accent bold">AI agents</tspan> work your tickets.</text>
+
+  <!-- The board: five columns, as in the app. -->
+  <g transform="translate(64 292)">
+    <!-- Planning -->
+    <rect class="panel" x="0" y="0" width="136" height="172"/>
+    <text class="muted" x="12" y="26" font-size="14">Planning</text>
+    <line class="rule" x1="0" y1="40" x2="136" y2="40"/>
+    <rect class="card" x="10" y="52" width="116" height="30"/>
+    <rect class="bar" x="20" y="64" width="78" height="6"/>
+    <rect class="card" x="10" y="90" width="116" height="30"/>
+    <rect class="bar" x="20" y="102" width="56" height="6"/>
+    <rect class="card" x="10" y="128" width="116" height="30"/>
+    <rect class="bar" x="20" y="140" width="88" height="6"/>
+
+    <!-- Ready For Dev -->
+    <rect class="panel" x="148" y="0" width="136" height="172"/>
+    <text class="muted" x="160" y="26" font-size="14">Ready For Dev</text>
+    <line class="rule" x1="148" y1="40" x2="284" y2="40"/>
+    <rect class="card" x="158" y="52" width="116" height="30"/>
+    <rect class="bar" x="168" y="64" width="64" height="6"/>
+    <rect class="card" x="158" y="90" width="116" height="30"/>
+    <rect class="bar" x="168" y="102" width="84" height="6"/>
+
+    <!-- In Progress: agents at work -->
+    <rect class="panel" x="296" y="0" width="136" height="172"/>
+    <text class="muted" x="308" y="26" font-size="14">In Progress</text>
+    <line class="rule" x1="296" y1="40" x2="432" y2="40"/>
+    <rect class="card-sel" x="306" y="52" width="116" height="48"/>
+    <rect class="edge-accent" x="306" y="52" width="3" height="48"/>
+    <rect class="bar-sel" x="318" y="62" width="80" height="6"/>
+    <text class="accent" x="318" y="90" font-size="13">● claude</text>
+    <rect class="card" x="306" y="108" width="116" height="48"/>
+    <rect class="edge-accent" x="306" y="108" width="3" height="48"/>
+    <rect class="bar" x="318" y="118" width="64" height="6"/>
+    <text class="accent" x="318" y="146" font-size="13">● codex</text>
+
+    <!-- Review -->
+    <rect class="panel" x="444" y="0" width="136" height="172"/>
+    <text class="muted" x="456" y="26" font-size="14">Review</text>
+    <line class="rule" x1="444" y1="40" x2="580" y2="40"/>
+    <rect class="card" x="454" y="52" width="116" height="48"/>
+    <rect class="edge-warn" x="454" y="52" width="3" height="48"/>
+    <rect class="bar" x="466" y="62" width="72" height="6"/>
+    <text class="warn" x="466" y="90" font-size="13">● reviewer</text>
+
+    <!-- Done -->
+    <rect class="panel" x="592" y="0" width="136" height="172"/>
+    <text class="muted" x="604" y="26" font-size="14">Done</text>
+    <line class="rule" x1="592" y1="40" x2="728" y2="40"/>
+    <rect class="card" x="602" y="52" width="116" height="30"/>
+    <rect class="bar-soft" x="612" y="64" width="70" height="6"/>
+    <text class="ok" x="700" y="72" font-size="14">✓</text>
+    <rect class="card" x="602" y="90" width="116" height="30"/>
+    <rect class="bar-soft" x="612" y="102" width="58" height="6"/>
+    <text class="ok" x="700" y="110" font-size="14">✓</text>
+    <rect class="card" x="602" y="128" width="116" height="30"/>
+    <rect class="bar-soft" x="612" y="140" width="76" height="6"/>
+    <text class="ok" x="700" y="148" font-size="14">✓</text>
+  </g>
+
+  <!-- The snail, crawling towards the board. -->
+  <image href="logo" x="830" y="44" width="420" height="420"/>
+</svg>

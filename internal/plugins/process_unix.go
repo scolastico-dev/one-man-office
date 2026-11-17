@@ -3,49 +3,48 @@
 package plugins
 
 import (
-	"errors"
-	"os"
 	"os/exec"
 	"sync"
 	"syscall"
 )
 
-type luaCommandLifecycle struct {
+// processGroup ends a program together with everything it started: the
+// program runs in its own process group, and cancelling its command or
+// closing the group kills the whole group.
+type processGroup struct {
 	mu  sync.Mutex
 	pid int
 }
 
-func configureLuaCommandCancellation(cmd *exec.Cmd) (*luaCommandLifecycle, error) {
+// newProcessGroup prepares cmd to run in its own group. Call started after
+// cmd.Start and close once cmd ended.
+func newProcessGroup(cmd *exec.Cmd) (*processGroup, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	lifecycle := &luaCommandLifecycle{}
+	g := &processGroup{}
 	cmd.Cancel = func() error {
-		lifecycle.mu.Lock()
-		pid := lifecycle.pid
-		lifecycle.mu.Unlock()
-		if pid <= 0 {
-			return nil
-		}
-		err := syscall.Kill(-pid, syscall.SIGKILL)
-		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-		return err
+		g.kill()
+		return nil
 	}
-	return lifecycle, nil
+	return g, nil
 }
 
-func (p *luaCommandLifecycle) Started(cmd *exec.Cmd) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pid = cmd.Process.Pid
+func (g *processGroup) started(cmd *exec.Cmd) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pid = cmd.Process.Pid
 	return nil
 }
 
-func (p *luaCommandLifecycle) Close() {
-	p.mu.Lock()
-	pid := p.pid
-	p.mu.Unlock()
-	if pid > 0 {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+func (g *processGroup) kill() {
+	g.mu.Lock()
+	pid := g.pid
+	g.mu.Unlock()
+	if pid <= 0 {
+		return
 	}
+	// The group may be gone already (ESRCH); nothing is left to do then.
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
+
+// close kills what is left of the group.
+func (g *processGroup) close() { g.kill() }

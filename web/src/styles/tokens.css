@@ -1,0 +1,196 @@
+/*
+ * Design tokens. Components use these (directly as var(--omo-*) or through
+ * the Tailwind names mapped in main.css) and never literal values.
+ *
+ * Dark is the default. Light applies when the system prefers it and the user
+ * has not chosen dark, or when the user has chosen light. The two light
+ * blocks must stay identical; a test checks that.
+ */
+
+:root {
+  /* Type: the only place the font family is named. */
+  --omo-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --omo-text-xs: 12px;
+  --omo-text-xs-lh: 1.5;
+  --omo-text-sm: 13px;
+  --omo-text-sm-lh: 1.5;
+  --omo-text-base: 14px;
+  --omo-text-base-lh: 1.55;
+  --omo-text-lg: 16px;
+  --omo-text-lg-lh: 1.45;
+  --omo-text-xl: 20px;
+  --omo-text-xl-lh: 1.4;
+  --omo-text-2xl: 22px;
+  --omo-text-2xl-lh: 1.35;
+
+  /* Spacing: one unit; Tailwind's p-1, gap-2, … are multiples of it. */
+  --omo-space: 4px;
+
+  /* Lines. */
+  --omo-border: 1px;
+  --omo-focus-width: 2px;
+  --omo-focus-offset: 3px;
+  --omo-edge: 3px;
+
+  /*
+   * Controls: every button, field, select, picker button and switch is this
+   * tall, so controls that share a row line up. A compact row (the top bar,
+   * small buttons, a compact field) uses the small height throughout.
+   */
+  --omo-control-h: calc(var(--omo-space) * 10);
+  --omo-control-h-sm: calc(var(--omo-space) * 8);
+
+  /* Motion: short state transitions only. */
+  --omo-duration: 140ms;
+
+  /* Colours, dark. The logo is white line art; the light theme darkens it. */
+  color-scheme: dark;
+  --omo-bg: #111111;
+  --omo-surface: #141414;
+  --omo-raised: #202020;
+  --omo-line: #343234;
+  --omo-line-strong: #75707a;
+  --omo-fg: #d0ced3;
+  --omo-muted: #96919d;
+  --omo-accent: #bb9add;
+  --omo-accent-hover: #ceb0eb;
+  --omo-accent-fg: #17131c;
+  --omo-accent-soft: #2a2430;
+  --omo-select: #28232e;
+  --omo-select-line: #665276;
+  --omo-ok: #8cc9ad;
+  --omo-warn: #dfbd86;
+  --omo-danger: #e49aaa;
+  --omo-danger-soft: #322125;
+  --omo-backdrop: #000000bb;
+  --omo-logo-filter: none;
+
+  /*
+   * Terminals take the page's own ground and text; the sixteen ANSI colours
+   * keep the hues of the palette (red is danger, green ok, yellow warn,
+   * magenta the accent; blue and cyan are set beside them at the same
+   * lightness) and the bright ones step towards accent-hover.
+   */
+  --omo-term-bg: #111111;
+  --omo-term-fg: #d0ced3;
+  --omo-term-cursor: #bb9add;
+  --omo-term-selection: #28232e;
+  --omo-ansi-black: #343234;
+  --omo-ansi-red: #e49aaa;
+  --omo-ansi-green: #8cc9ad;
+  --omo-ansi-yellow: #dfbd86;
+  --omo-ansi-blue: #90b1df;
+  --omo-ansi-magenta: #bb9add;
+  --omo-ansi-cyan: #89c7cd;
+  --omo-ansi-white: #d0ced3;
+  --omo-ansi-bright-black: #75707a;
+  --omo-ansi-bright-red: #f0b2bf;
+  --omo-ansi-bright-green: #9edbbf;
+  --omo-ansi-bright-yellow: #ecce9c;
+  --omo-ansi-bright-blue: #a7c4ec;
+  --omo-ansi-bright-magenta: #ceb0eb;
+  --omo-ansi-bright-cyan: #9cd8de;
+  --omo-ansi-bright-white: #f4f3f6;
+
+  /* Fills behind text: diff lines and hunk heads, and a mention of you. Soft like danger-soft. */
+  --omo-diff-add: #1e2e27;
+  --omo-diff-del: #322125;
+  --omo-diff-hunk: #2a2430;
+  --omo-mention: #312a1e;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --omo-bg: #f4f3f6;
+    --omo-surface: #ffffff;
+    --omo-raised: #ecebef;
+    --omo-line: #d6d2db;
+    --omo-line-strong: #8a8491;
+    --omo-fg: #1f1d22;
+    --omo-muted: #5f5a66;
+    --omo-accent: #6d4a94;
+    --omo-accent-hover: #5a3b7d;
+    --omo-accent-fg: #ffffff;
+    --omo-accent-soft: #efe8f6;
+    --omo-select: #e6dcf1;
+    --omo-select-line: #a58cc4;
+    --omo-ok: #2a6950;
+    --omo-warn: #7c590e;
+    --omo-danger: #a3364c;
+    --omo-danger-soft: #f8e4e8;
+    --omo-backdrop: #1f1d2266;
+    --omo-logo-filter: brightness(0.13);
+    --omo-term-bg: #f4f3f6;
+    --omo-term-fg: #1f1d22;
+    --omo-term-cursor: #6d4a94;
+    --omo-term-selection: #e6dcf1;
+    --omo-ansi-black: #1f1d22;
+    --omo-ansi-red: #a3364c;
+    --omo-ansi-green: #2a6950;
+    --omo-ansi-yellow: #7c590e;
+    --omo-ansi-blue: #335d99;
+    --omo-ansi-magenta: #6d4a94;
+    --omo-ansi-cyan: #1b636a;
+    --omo-ansi-white: #8a8491;
+    --omo-ansi-bright-black: #5f5a66;
+    --omo-ansi-bright-red: #892a3d;
+    --omo-ansi-bright-green: #1e523d;
+    --omo-ansi-bright-yellow: #5d4209;
+    --omo-ansi-bright-blue: #284d81;
+    --omo-ansi-bright-magenta: #5a3b7d;
+    --omo-ansi-bright-cyan: #124a4f;
+    --omo-ansi-bright-white: #d6d2db;
+    --omo-diff-add: #e1f4eb;
+    --omo-diff-del: #f8e4e8;
+    --omo-diff-hunk: #efe8f6;
+    --omo-mention: #f7e8cf;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --omo-bg: #f4f3f6;
+  --omo-surface: #ffffff;
+  --omo-raised: #ecebef;
+  --omo-line: #d6d2db;
+  --omo-line-strong: #8a8491;
+  --omo-fg: #1f1d22;
+  --omo-muted: #5f5a66;
+  --omo-accent: #6d4a94;
+  --omo-accent-hover: #5a3b7d;
+  --omo-accent-fg: #ffffff;
+  --omo-accent-soft: #efe8f6;
+  --omo-select: #e6dcf1;
+  --omo-select-line: #a58cc4;
+  --omo-ok: #2a6950;
+  --omo-warn: #7c590e;
+  --omo-danger: #a3364c;
+  --omo-danger-soft: #f8e4e8;
+  --omo-backdrop: #1f1d2266;
+  --omo-logo-filter: brightness(0.13);
+  --omo-term-bg: #f4f3f6;
+  --omo-term-fg: #1f1d22;
+  --omo-term-cursor: #6d4a94;
+  --omo-term-selection: #e6dcf1;
+  --omo-ansi-black: #1f1d22;
+  --omo-ansi-red: #a3364c;
+  --omo-ansi-green: #2a6950;
+  --omo-ansi-yellow: #7c590e;
+  --omo-ansi-blue: #335d99;
+  --omo-ansi-magenta: #6d4a94;
+  --omo-ansi-cyan: #1b636a;
+  --omo-ansi-white: #8a8491;
+  --omo-ansi-bright-black: #5f5a66;
+  --omo-ansi-bright-red: #892a3d;
+  --omo-ansi-bright-green: #1e523d;
+  --omo-ansi-bright-yellow: #5d4209;
+  --omo-ansi-bright-blue: #284d81;
+  --omo-ansi-bright-magenta: #5a3b7d;
+  --omo-ansi-bright-cyan: #124a4f;
+  --omo-ansi-bright-white: #d6d2db;
+  --omo-diff-add: #e1f4eb;
+  --omo-diff-del: #f8e4e8;
+  --omo-diff-hunk: #efe8f6;
+  --omo-mention: #f7e8cf;
+}

@@ -1,0 +1,38 @@
+{
+  "name": "omo-web",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build && node scripts/keep-dist.mjs",
+    "typecheck": "vue-tsc -b --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "screenshots": "node scripts/screenshots.ts",
+    "readme-art": "node scripts/readme-art.ts",
+    "readme-shots": "playwright test --config e2e/readme/playwright.config.ts"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "markdown-it": "15.0.3",
+    "vue": "3.5.45",
+    "vue-router": "5.5.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.1",
+    "@tailwindcss/vite": "4.3.5",
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "26.6.6",
+    "@vitejs/plugin-vue": "6.0.11",
+    "@vue/test-utils": "2.6.0",
+    "happy-dom": "21.0.4",
+    "tailwindcss": "4.3.5",
+    "typescript": "6.0.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "vue-tsc": "3.3.14"
+  }
+}

@@ -1,0 +1,135 @@
+# Merging and export
+
+When a ticket's review is approved, its work leaves omo in one of two ways:
+omo merges it into the base branch on this machine, or it exports it as a pull
+request per repository. The ticket's **When approved** setting decides:
+**Merge locally** or **Export as a pull request** (default: Settings → Review,
+Merge locally). A task in a story always merges into the story's branch; the
+story's setting decides how the work leaves omo.
+
+- [Merging locally](#merging-locally)
+- [Merge commit or squash](#merge-commit-or-squash)
+- [Exporting as pull requests](#exporting-as-pull-requests)
+- [Branch names](#branch-names)
+
+## Merging locally
+
+omo builds the merge without touching any checkout: it computes the merge
+commit inside git and moves the target branch to it. Your project folder is
+changed only when it has the target branch checked out: then omo runs
+`git merge --ff-only` there (without hooks), and only after checking that
+nothing is in the way. omo never runs `merge --abort`, `reset` or `checkout` in
+your folder and never edits your git config.
+
+- **A conflict** sends the ticket back to In Progress with a comment that
+  lists the files; the developer merges the base into its branch, resolves it
+  and hands in again. A story's conflict asks for a task that resolves it.
+- **Something in your folder in the way** (uncommitted changes to the merged
+  files, a rebase in progress) flags the ticket: "Uncommitted changes to … in
+  … block merging into main. Commit, stash or discard them there, then retry."
+  Fix it and press **Retry merge**.
+- **Commits added after the hand-in**: omo merges only what was reviewed.
+  When the branch moved after the hand-in, it merges nothing and asks: retry
+  (merge the reviewed commit, leave the rest) or reject (review the new commits
+  too).
+
+A merged ticket is Done (completed). Its branch is deleted when it is merged;
+the commits its diff ran between stay recorded (see
+[The Diff tab](board.md#the-diff-tab)). omo signs its merge commits when
+`commit.gpgsign` is set for it (the agent environment on Settings →
+Environment sets `commit.gpgSign=false` by default).
+
+## Merge commit or squash
+
+There are three kinds of merge, and each has its mode: a story into its base
+branch, a task without a story into its base branch, and a task into its
+story's branch. **Settings → General → Merge defaults** sets them for all
+projects (all **Merge commit** by default); a project overrides them on
+**Settings → Projects** (Edit, "Use global default (…)" or its own mode).
+
+- **Merge commit**: a commit titled "Merge: <title>".
+- **Squash into one commit**: one commit titled "<title>"; a story's squash
+  lists its completed tasks.
+
+No commit message omo writes contains a ticket number, which a forge would
+read as one of its own issues.
+
+## Exporting as pull requests
+
+With **Export as a pull request**, or **Export…** on a ticket whose review
+waits for you, omo pushes and an export agent opens a pull request per
+repository:
+
+1. A project whose branch has no commits of its own is left out of the export
+   (it has nothing to export).
+2. For every other project omo pushes the commit that was reviewed to the
+   repository's push remote (`branch.<base>.pushRemote`, `remote.pushDefault`,
+   `branch.<base>.remote`, then `origin`), as the ticket's branch. It never
+   force-pushes and never pushes onto a remote branch of that name that it did
+   not push itself, and runs no hooks. Your credentials for that remote are
+   used as git finds them. After a rejection, a later export of the ticket
+   moves the same remote branch on and edits the pull request that exists.
+3. An export agent runs per project in a folder under `OMO_HOME/run/export/`.
+   omo gives it `material.md` (the ticket, a story's tasks, this repository's
+   commits and changed files, the other repositories of the ticket and their
+   pull requests) and lets it read the repository. It writes a title and a
+   description **for this repository**: what this repository's change does
+   and why, how to verify it and what the reviewer should know, following the
+   repository's pull request template when it has one, with one line naming
+   the other repositories when the ticket has several.
+4. `omo ai export-text` checks the text; a missing, empty, too long or
+   ticket-numbered text is replaced by omo's own (the ticket's title and
+   description, with the commit subjects), so a bad text never stops the
+   export.
+5. The agent opens the pull request with `gh` (GitHub), `glab` (a host whose
+   name starts with `gitlab`) or `tea` (any other host), or updates the one
+   that exists for the branch, and reports its address. omo itself never runs
+   these tools: they must be installed and signed in for your user.
+
+While omo exports, the card says "exporting…"; other changes to the ticket
+are refused with that word until it is done.
+
+A comment links each pull request and says whether the agent or omo wrote its
+text. When every project has its pull request, the ticket is Done (exported).
+When one fails, the ticket stays in Review, flagged "Export of <project>
+failed: <reason>"; the exported projects keep their pull request. Then either
+approve the export again (only projects without a pull request are tried),
+choose **Merge locally instead** (merges only those), or take the failing
+project off the ticket (**Remove from ticket**).
+
+A repository whose remote is a folder on this machine has no forge, so its
+export fails; give it a real remote (`git remote add origin <address>`).
+
+Images are not uploaded: a pull request names each as "[image: <name>, not
+exported]".
+
+**After the pull request is merged**: an exported ticket counts as finished
+for tickets that depend on it only once its pull request is merged. omo notices
+that when the exported branch shows up in the base branch (it checks at the
+**Rescan interval**); **Mark as merged** on the ticket tells it at once.
+
+## Branch names
+
+omo names a ticket's branch by **Settings → General → Branch name template**
+(`branches.template`), `omo/{slug}` by default.
+
+| Placeholder | Value |
+|---|---|
+| `{slug}` | the title in lower case with dashes, at most 40 characters (`ticket` when it has no letter or digit) |
+| `{number}` | the ticket number |
+| `{type}` | `story` or `task` |
+| `{project}` | the project |
+| `{host}` | this machine's name |
+| `{user}` | your user name on it |
+
+Other text is kept as typed, so `feature/{number}-{slug}` or
+`{user}/{type}/{slug}` work. The template must contain `{slug}` or `{number}`
+and give valid git branch names of printable ASCII; the page shows an example
+while you type and refuses a template it cannot use. A name that is taken (a
+local or remote-tracking branch, a branch of another ticket in the same
+repository, the base branch, `main`, `master`, a remote's default branch) gets
+`-2`, `-3` and so on; names are compared without regard to case. A ticket keeps
+the branch it has when you change the template.
+
+omo pushes or deletes only the branch recorded for that ticket, never a base or
+default branch.

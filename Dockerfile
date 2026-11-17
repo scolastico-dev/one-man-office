@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
+FROM node:24-alpine AS web
+
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM golang:1.26.2-alpine AS builder
 
 ARG TARGETOS=linux
@@ -10,8 +18,11 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=web /src/web/dist ./web/dist
+COPY --from=web /src/web/third-party-notices.txt ./web/third-party-notices.txt
 RUN CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
-    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /out/omo ./cmd/omo
+    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /out/omo ./cmd/omo \
+    && go run ./tools/notices -o /out/THIRD_PARTY_NOTICES
 
 FROM alpine:3.23
 
@@ -53,6 +64,7 @@ RUN apk add --no-cache \
 
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder /out/omo /usr/local/bin/omo
+COPY --from=builder /src/LICENSE /src/NOTICE /out/THIRD_PARTY_NOTICES /usr/share/doc/omo/
 COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint
 
 ENV PATH="/usr/local/go/bin:/home/omo/.local/bin:/home/omo/.local/share/pnpm:$PATH"

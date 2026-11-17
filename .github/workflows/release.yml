@@ -4,6 +4,15 @@ on:
   release:
     types:
       - published
+  # The plugin list and the official plugins are read from the release
+  # branch. This copies the plugins folder of a tag, branch or commit there
+  # without a release (a list change, or the first sync).
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag, branch or commit whose plugins folder becomes the release branch
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,6 +20,7 @@ permissions:
 jobs:
   build-and-publish:
     name: Build and publish release
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,26 +36,41 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the board
+        run: make web
+
       - name: Test
         run: make check
 
       - name: Build release binaries
         run: make cross VERSION="${{ github.event.release.tag_name }}"
 
+      - name: Collect the third-party notices
+        run: make notices
+
       - name: Package release binaries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist staging
+          cp LICENSE NOTICE bin/THIRD_PARTY_NOTICES staging/
 
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             cp "bin/omo-${platform}" staging/omo
-            tar -C staging -czf "dist/omo-${platform}.tar.gz" omo
+            tar -C staging -czf "dist/omo-${platform}.tar.gz" omo LICENSE NOTICE THIRD_PARTY_NOTICES
           done
+          rm staging/omo
 
           for platform in windows-amd64 windows-arm64; do
             cp "bin/omo-${platform}.exe" staging/omo.exe
-            (cd staging && zip -q "../dist/omo-${platform}.zip" omo.exe)
+            (cd staging && zip -q "../dist/omo-${platform}.zip" omo.exe LICENSE NOTICE THIRD_PARTY_NOTICES)
           done
 
           (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)
@@ -59,15 +84,27 @@ jobs:
   sync-plugin-release:
     name: Sync release plugin branch
     needs: build-and-publish
+    if: >-
+      !cancelled() && (needs.build-and-publish.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && needs.build-and-publish.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Check out published release tag
+      - name: Check out the plugins' source
         uses: actions/checkout@v7
         with:
-          ref: "${{ github.event.release.tag_name }}"
+          ref: "${{ github.event.release.tag_name || inputs.ref }}"
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check the plugin list and the official plugins
+        run: go test ./internal/pluginmanager -run 'TestShippedCatalog' -count=1
 
       - name: Configure GitHub Actions identity
         run: |
@@ -77,9 +114,10 @@ jobs:
       - name: Sync plugin tree to release branch
         shell: bash
         env:
-          RELEASE_TAG: "${{ github.event.release.tag_name }}"
+          SOURCE_REF: "${{ github.event.release.tag_name || inputs.ref }}"
         run: |
           set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
 
           if git fetch origin release; then
             git switch --create release --track origin/release
@@ -89,14 +127,14 @@ jobs:
 
           git rm -rf . || true
           git clean -fdx
-          git checkout "$RELEASE_TAG" -- plugins
+          git checkout "$source_commit" -- plugins
           git add -A
 
           if git diff --cached --quiet; then
             exit 0
           fi
 
-          git commit -m "chore(release): sync plugins for $RELEASE_TAG"
+          git commit -m "chore(release): sync plugins for $SOURCE_REF"
           git push origin release
 
 

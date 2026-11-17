@@ -1,0 +1,449 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
+)
+
+// registerTickets adds the ticket, description, dependency, comment, agent
+// session and /api/ai/done routes. Handlers take the caller from
+// actorFrom(r), read bodies with decode, answer with writeJSON or
+// writeError, and write the response only after the board call returned.
+func (s *Server) registerTickets(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/tickets", s.listTickets)
+	mux.HandleFunc("POST /api/tickets", s.createTicket)
+	mux.HandleFunc("GET /api/tickets/{n}", s.getTicket)
+	mux.HandleFunc("PATCH /api/tickets/{n}", s.patchTicket)
+	mux.HandleFunc("PUT /api/tickets/{n}/description", s.putDescription)
+	mux.HandleFunc("GET /api/tickets/{n}/descriptions", s.getDescriptions)
+	mux.HandleFunc("POST /api/tickets/{n}/descriptions/{version}/restore", s.restoreDescription)
+	mux.HandleFunc("POST /api/tickets/{n}/move", s.moveTicket)
+	mux.HandleFunc("POST /api/tickets/{n}/approve", s.approveTicket)
+	mux.HandleFunc("POST /api/tickets/{n}/reject", s.rejectTicket)
+	mux.HandleFunc("POST /api/tickets/{n}/cancel", s.cancelTicket)
+	mux.HandleFunc("POST /api/tickets/{n}/mark-merged", s.markMerged)
+	mux.HandleFunc("POST /api/tickets/{n}/retry", s.retryTicket)
+	mux.HandleFunc("POST /api/tickets/{n}/dependencies", s.addDependency)
+	mux.HandleFunc("DELETE /api/tickets/{n}/dependencies/{m}", s.removeDependency)
+	mux.HandleFunc("GET /api/tickets/{n}/comments", s.getComments)
+	mux.HandleFunc("POST /api/tickets/{n}/comments", s.postComment)
+	mux.HandleFunc("GET /api/tickets/{n}/events", s.getTicketEvents)
+	mux.HandleFunc("GET /api/tickets/{n}/agents", s.getTicketAgents)
+	mux.HandleFunc("GET /api/agents", s.listAgents)
+	mux.HandleFunc("POST /api/ai/done", s.aiDone)
+	s.registerRoutes(mux, []apiRoute{
+		// The user and the CEO; the board refuses every other role.
+		{"POST /api/tickets/{n}/remove-project", s.removeTicketProject, agentWrite},
+		{"POST /api/tickets/{n}/remove-workdir", s.removeTicketWorkdir, userOnly},
+	})
+}
+
+// removeTicketWorkdir removes the working folder of a done task without a
+// project (engine.RemoveWorkdir).
+func (s *Server) removeTicketWorkdir(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	out, err := s.engine.RemoveWorkdir(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+// removeTicketProject takes a project off a ticket with the worktree and
+// branch omo made there (engine.RemoveProject).
+func (s *Server) removeTicketProject(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.RemoveProjectRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	out, err := s.engine.RemoveProject(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+// pathInt reads the integer path value name; anything else is bad_request.
+func pathInt(r *http.Request, name string) (int64, error) {
+	v, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+	if err != nil || v < 1 {
+		return 0, api.Errorf(api.CodeBadRequest, "%s must be a positive integer, got %q", name, r.PathValue(name))
+	}
+	return v, nil
+}
+
+// queryInt reads an optional integer query parameter.
+func queryInt(r *http.Request, name string) (int, bool, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0, false, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false, api.Errorf(api.CodeBadRequest, "%s must be an integer, got %q", name, raw)
+	}
+	return v, true, nil
+}
+
+// ticketFilter parses the query of GET /api/tickets.
+func ticketFilter(r *http.Request) (api.TicketFilter, error) {
+	q := r.URL.Query()
+	f := api.TicketFilter{
+		Column:     api.Column(q.Get("column")),
+		Type:       api.TicketType(q.Get("type")),
+		Project:    q.Get("project"),
+		Supervisor: api.Role(q.Get("supervisor")),
+		Search:     q.Get("q"),
+	}
+	story, ok, err := queryInt(r, "story")
+	if err != nil {
+		return f, err
+	}
+	if ok {
+		f.Story = &story
+	}
+	if f.DoneLimit, _, err = queryInt(r, "done_limit"); err != nil {
+		return f, err
+	}
+	if f.DoneBefore, _, err = queryInt(r, "done_before"); err != nil {
+		return f, err
+	}
+	if raw := q.Get("needs_me"); raw != "" {
+		if f.NeedsMe, err = strconv.ParseBool(raw); err != nil {
+			return f, api.Errorf(api.CodeBadRequest, "needs_me must be a boolean, got %q", raw)
+		}
+	}
+	return f, nil
+}
+
+func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
+	f, err := ticketFilter(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.List(r.Context(), actorFrom(r), f)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
+	var req api.CreateTicket
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Create(r.Context(), actorFrom(r), req)
+	reply(w, r, http.StatusCreated, out, err)
+}
+
+func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Get(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) patchTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.UpdateTicket
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Update(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) putDescription(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.DescriptionUpdate
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.SetDescription(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) getDescriptions(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Descriptions(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) restoreDescription(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	v, err := pathInt(r, "version")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.RestoreDescription(r.Context(), actorFrom(r), n, int(v))
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.MoveRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Move(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) approveTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.ApproveRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Approve(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) rejectTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.RejectRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Reject(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) cancelTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.CancelRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Cancel(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+// retryTicket clears a ticket's failed engine step, so the engine tries it
+// again; the board decides who may.
+func (s *Server) retryTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := decodeEmpty(w, r); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Retry(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) markMerged(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.MarkMerged(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) addDependency(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.DependencyRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.AddDependency(r.Context(), actorFrom(r), n, int64(req.DependsOn))
+	reply(w, r, http.StatusCreated, out, err)
+}
+
+func (s *Server) removeDependency(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	m, err := pathInt(r, "m")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.RemoveDependency(r.Context(), actorFrom(r), n, m)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) getComments(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Comments(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) postComment(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.CommentRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Comment(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusCreated, out, err)
+}
+
+func (s *Server) getTicketEvents(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.TicketEvents(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) getTicketAgents(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a := actorFrom(r)
+	out, err := s.board.TicketSessions(r.Context(), a, n)
+	if err == nil && a.Role == api.RoleUser {
+		s.addTerminalIDs(out)
+		s.addMCPMarks(out)
+	}
+	reply(w, r, http.StatusOK, out, err)
+}
+
+func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
+	live := false
+	if raw := r.URL.Query().Get("live"); raw != "" {
+		var err error
+		if live, err = strconv.ParseBool(raw); err != nil {
+			writeError(w, r, api.Errorf(api.CodeBadRequest, "live must be a boolean, got %q", raw))
+			return
+		}
+	}
+	a := actorFrom(r)
+	out, err := s.board.AgentSessions(r.Context(), a, live)
+	if err == nil && a.Role == api.RoleUser {
+		s.addTerminalIDs(out)
+		s.addMCPMarks(out)
+	}
+	reply(w, r, http.StatusOK, out, err)
+}
+
+// aiDone hands in an agent's work or verdict. With an engine the hand-in
+// guard runs first, outside every board transaction: a worktree with
+// uncommitted work is refused with conflict, listing the files.
+func (s *Server) aiDone(w http.ResponseWriter, r *http.Request) {
+	var req api.DoneRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a := actorFrom(r)
+	if s.beforeHandIn != nil {
+		s.beforeHandIn()
+	}
+	// An agent that is killed at the handoff deadline closes its connection
+	// while this request runs; a hand-in that reached the server is still
+	// recorded.
+	ctx, cancel := s.detached(r, detachedBound)
+	defer cancel()
+	if s.engine != nil {
+		if err := s.engine.CheckHandIn(ctx, a, req); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	out, err := s.board.Done(ctx, a, req)
+	reply(w, r, http.StatusOK, out, err)
+}
+
+// reply answers with v, or with err when the board call failed.
+func reply(w http.ResponseWriter, r *http.Request, status int, v any, err error) {
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, status, v)
+}
+
+// detachedBound bounds work that continues after its client left.
+const detachedBound = 30 * time.Second
+
+// detached returns a context for work that must finish even when the client
+// leaves: it keeps r's values but not its cancellation, ends after bound and
+// when the server closes.
+func (s *Server) detached(r *http.Request, bound time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), bound)
+	stop := context.AfterFunc(s.ctx, cancel)
+	return ctx, func() { stop(); cancel() }
+}

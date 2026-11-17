@@ -1,0 +1,32 @@
+// What a usage window is called. A script names each window technically
+// (`fable_weekly`: what a model's usage_windows and the per-window limits
+// refer to) and may give it a label for people ("Weekly, Fable"). Both come
+// from the script, so every text here goes through visibleText.
+import type { ModelUsage, UsageReading, UsageWindow } from '../../api/types'
+import { visibleText } from '../../components/ui/visibleText'
+
+type Named = Pick<UsageWindow, 'name'> & { label?: string }
+
+/** The window as people read it: its label, else its name. */
+export function windowTitle(w: Named): string {
+  return visibleText(w.label ? w.label : w.name)
+}
+
+/** "label (name)" where the window has a label, else its name: where the technical name matters too. */
+export function windowWithName(w: Named): string {
+  return w.label ? `${visibleText(w.label)} (${visibleText(w.name)})` : visibleText(w.name)
+}
+
+/** The windows a profile's account reports now, in words for the model editor; empty when there is no reading. */
+export function reportedWords(profile: string, readings: readonly Pick<UsageReading, 'profiles' | 'windows'>[] | null | undefined): string {
+  const r = (readings ?? []).find((x) => x.profiles.includes(profile))
+  if (!r || r.windows.length === 0) return ''
+  return `Its script reports now: ${r.windows.map(windowWithName).join('; ')}.`
+}
+
+/** The fullest window of a model as people read it ("Weekly, Fable at 99 %"): only where the script labelled it, else empty. */
+export function modelWindowWords(m: Pick<ModelUsage, 'window_label' | 'used_percent'>): string {
+  if (!m.window_label) return ''
+  const label = visibleText(m.window_label)
+  return m.used_percent === null ? label : `${label} at ${Math.round(m.used_percent)} %`
+}

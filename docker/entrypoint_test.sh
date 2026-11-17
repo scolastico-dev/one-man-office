@@ -74,7 +74,26 @@ status=$?
 set -e
 [[ "$status" -ne 0 ]] || fail "symlinked NVM directory was accepted"
 
-container="$(docker run -d --rm -e OMO_UID=12345 -e OMO_GID=12345 "$image" --listen 0.0.0.0:0)"
+# A home of omo 0.11 or older: without a terminal omo says what it found and
+# changes nothing, and the entrypoint gets that far.
+mkdir -p "$fixture/home-old/.local/omo"
+printf 'trusted_offices: []\n' >"$fixture/home-old/.local/omo/config.yaml"
+printf '[]\n' >"$fixture/home-old/.local/omo/known_plugins.json"
+set +e
+old_output="$(docker run --rm \
+    -v "$fixture/home-old:/home/omo" \
+    -e OMO_UID="$host_uid" \
+    -e OMO_GID="$host_gid" \
+    "$image" 2>&1)"
+status=$?
+set -e
+[[ "$status" -ne 0 ]] || fail "omo started on a home of omo 0.11"
+[[ "$old_output" == *'omo found the files of omo 0.11 or older'* && "$old_output" == *'started without a terminal'* ]] ||
+    fail "omo did not explain the home of omo 0.11: $old_output"
+[[ -f "$fixture/home-old/.local/omo/config.yaml" && ! -e "$fixture/home-old/.local/omo/layout.json" ]] ||
+    fail "the home of omo 0.11 was changed"
+
+container="$(docker run -d --rm -e OMO_UID=12345 -e OMO_GID=12345 "$image")"
 for _ in {1..50}; do
     uid="$(docker exec "$container" awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
     if [[ "$uid" == "12345" ]]; then
@@ -88,4 +107,4 @@ for _ in {1..50}; do
 done
 
 docker logs "$container" >&2 || true
-fail "company did not remain running"
+fail "omo did not remain running"

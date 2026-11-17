@@ -31,8 +31,8 @@ body:
       label: Affected area
       options:
         - CLI
-        - TUI
-        - company dashboard
+        - server and API
+        - web interface
         - plugins
         - supervisor/lifecycle
         - docs

@@ -1,195 +1,559 @@
-// Package fakeagent is a tiny scenario-driven stand-in for a real AI CLI.
-// Integration tests and --mock offices run it instead of claude.
+// Package fakeagent is a scripted stand-in for an agent CLI. omo starts it as
+// a command in a terminal, hands it a start prompt like it would a real CLI,
+// and the fake then acts through the same client a real agent uses (`omo ai`
+// is a thin layer over it), reads lines typed into its terminal as
+// notifications, and exits or keeps running as its script says.
+//
+// Tests run it as their own test binary, re-executed with OMO_FAKEAGENT=1:
+//
+//	func TestMain(m *testing.M) {
+//		if fakeagent.Enabled() {
+//			os.Exit(fakeagent.Main())
+//		}
+//		os.Exit(m.Run())
+//	}
+//
+// No model, no network beyond the local omo socket and no user configuration
+// is involved. The session id (OMO_AGENT_ID) is a credential: it is never
+// printed, anything that would contain it is replaced.
+//
+// A script is one op per line, fields separated by "|", "#" starts a comment
+// line. The last field of an op that takes free text may contain "|". The
+// placeholders $TICKET, $STORY, $PROJECT (the agent's own project: a
+// reviewer's or an export job's, else the ticket's first), $OTHERS (the
+// ticket's other projects, joined by ", "), $OUTPUT (the last line the
+// last sh-block printed) and $NAME are replaced in every field. See Ops for
+// the list.
 package fakeagent
 
 import (
 	"bufio"
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
-	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/scolastico-dev/one-man-office/internal/proto"
-	"github.com/scolastico-dev/one-man-office/internal/sockc"
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/apiclient"
+	"github.com/scolastico-dev/one-man-office/internal/mcpbridge"
 )
 
-// Embedded per-role default scenarios for --mock offices: a minimal but
-// complete org-chart pass (CEO → PM → developer → reviewer → merge).
-var autoScenarios = map[string]string{
-	"ceo": `ready
-jobcreate|product_manager|demo spec|Build the demo feature: create hello.txt containing "hello".|
-sleep|1h`,
-	"product_manager": `ready
-jobcreate|developer|create hello.txt|Create hello.txt containing "hello", commit it.|$REPO|$JOB
-wait`,
-	"developer": `ready
-shell|echo hello > hello.txt && git add hello.txt && git commit -m "feat: hello"
-done|hello.txt created and committed
-wait`,
-	"reviewer": `ready
-verdict|merge|looks good
-done|merged`,
-	"freelancer": `ready
-done|nothing to do
-wait`,
-	"smokealarm": `ready
-done|round complete: 0 incidents`,
-	"firefighter": `ready
-resolvefirst|auto-resolved by mock firefighter
-done|incident resolved`,
-}
+// Environment variables the fake agent reads.
+const (
+	// EnvEnable is "1" in a process that must run as the fake agent.
+	EnvEnable = "OMO_FAKEAGENT"
+	// EnvScript holds a whole script and wins over everything else.
+	EnvScript = "OMO_FAKE_SCRIPT"
+	// EnvScriptRolePrefix plus the upper-case role (CEO, PM, DEVELOPER,
+	// REVIEWER, EXPORT) holds the script of that role.
+	EnvScriptRolePrefix = "OMO_FAKE_SCRIPT_"
+	envAgentID          = "OMO_AGENT_ID"
+	// EnvBridge is "1" in a process the fake agent started as omo's MCP
+	// bridge (`omo mcp stdio`): its op mcp runs its own executable so.
+	EnvBridge = "OMO_FAKEAGENT_MCP_BRIDGE"
+)
 
-type state struct {
-	socket      string
-	agentID     string
-	autoRole    string
-	jobID       int64
-	prompt      string
-	out         io.Writer
-	branchNamed bool
-}
+// Exit codes of Run besides the ones a script asks for.
+const (
+	// ExitFailed is returned when an op fails.
+	ExitFailed = 1
+	// ExitBadScript is returned, before any call is made, when the script
+	// does not parse.
+	ExitBadScript = 2
+)
 
-// Run executes a scenario file, or the embedded default for autoRole.
-func Run(out io.Writer, scenarioPath, autoRole string) error {
-	socket, agentID, err := sockc.Env()
-	if err != nil {
-		return err
+// Enabled reports whether this process must run as the fake agent.
+func Enabled() bool { return os.Getenv(EnvEnable) == "1" }
+
+// Main runs the fake agent as a process: arguments, standard input and
+// output, working directory and environment are the process's own.
+// With EnvSwallowEnters or EnvDeafFor set it reads its terminal like a
+// full-screen CLI with an input line (see composer).
+func Main() int {
+	if os.Getenv(EnvBridge) == "1" {
+		return bridgeMain()
 	}
-	var script string
+	var in io.Reader = os.Stdin
+	if swallow, deaf, ok := composerSettings(); ok {
+		if err := rawInput(os.Stdin); err != nil {
+			fmt.Fprintf(os.Stdout, "fake: %v\n", err)
+			return ExitFailed
+		}
+		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf))
+	}
+	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: in, Stdout: os.Stdout})
+}
+
+// bridgeMain runs the process as `omo mcp stdio` does.
+func bridgeMain() int {
+	session, dial, err := mcpbridge.Environment()
+	if err == nil {
+		err = mcpbridge.Run(context.Background(), mcpbridge.Options{Dial: dial, Session: session, In: os.Stdin, Out: os.Stdout,
+			Log: log.New(os.Stderr, "fake bridge: ", 0), Version: "fake"})
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake bridge: %v\n", err)
+		return ExitFailed
+	}
+	return 0
+}
+
+// Env returns the environment variables that make a process run script as the
+// fake agent. Add them to the environment of the agent profile.
+func Env(script string) map[string]string {
+	return map[string]string{EnvEnable: "1", EnvScript: script}
+}
+
+// EnvForRole is like Env for the script of one role only; other roles keep
+// their built-in script.
+func EnvForRole(role api.Role, script string) map[string]string {
+	return map[string]string{EnvEnable: "1", EnvScriptRolePrefix + strings.ToUpper(string(role)): script}
+}
+
+// Command returns the command a profile runs to start the fake agent: the
+// running executable. The caller sets Env (or EnvForRole) in the environment.
+// Run as the test binary, it needs the TestMain hook shown in the package
+// documentation; the command line may carry anything, the fake ignores
+// -test.* flags.
+func Command() (string, error) { return os.Executable() }
+
+// Options configure Run. The zero value is a quiet agent without input in the
+// current directory; Main fills in the process's own.
+type Options struct {
+	// Script overrides the script lookup of the environment.
+	Script string
+	// Args are the command line arguments of the agent (without the
+	// program name); a start prompt may arrive in them.
+	Args []string
+	// Stdin is the terminal input: the typed start prompt and notifications.
+	// Nil means no input.
+	Stdin io.Reader
+	// Stdout receives everything the agent prints (it is the transcript).
+	// Nil discards.
+	Stdout io.Writer
+	// Dir is the working directory of write and commit; empty is ".".
+	Dir string
+}
+
+// Run executes the script and returns the exit code. It returns early with 1
+// when ctx ends. The client comes from OMO_SOCKET and OMO_AGENT_ID like a
+// real agent's; it is only created when an op needs the server.
+func Run(ctx context.Context, o Options) int {
+	r := &runner{o: o, readyIdx: -1}
+	if o.Dir == "" {
+		r.o.Dir = "."
+	}
+	r.out = &redactor{w: o.Stdout, secret: strings.TrimSpace(os.Getenv(envAgentID))}
+	if o.Stdin != nil {
+		r.lines = newLineQueue(o.Stdin, r.say)
+	}
+	return r.run(ctx)
+}
+
+type runner struct {
+	o   Options
+	out *redactor
+
+	steps    []Step
+	readyIdx int
+
+	lines *lineQueue
+
+	client  *apiclient.Client
+	me      *api.Me
+	story   *int
+	project string
+	name    string
+	prompt  string // last answer of ready
+	reason  string // last answer of wait
+	output  string // last line the last sh-block printed
+	others  string // the ticket's other projects
+	created []int  // the tickets create-ticket made
+}
+
+// say prints one line to the transcript.
+func (r *runner) say(format string, args ...any) {
+	fmt.Fprintf(r.out, format+"\n", args...)
+}
+
+func (r *runner) run(ctx context.Context) int {
+	text := strings.TrimSpace(r.o.Script)
+	if text == "" {
+		text = strings.TrimSpace(os.Getenv(EnvScript))
+	}
+	if text == "" {
+		var err error
+		if text, err = r.roleScript(ctx); err != nil {
+			r.say("fake: %v", err)
+			return ExitFailed
+		}
+	}
+	steps, err := Parse(text)
+	if err != nil {
+		r.say("fake: %v", err)
+		return ExitBadScript
+	}
+	r.steps = steps
+	for _, s := range steps {
+		if s.Op == "ready" {
+			r.readyIdx = s.Index
+			break
+		}
+	}
+	err = r.runRange(ctx, 0, len(steps))
+	var ex exitError
 	switch {
-	case scenarioPath != "":
-		raw, err := os.ReadFile(scenarioPath)
-		if err != nil {
+	case err == nil:
+		return 0
+	case errors.As(err, &ex):
+		return ex.code
+	case ctx.Err() != nil:
+		r.say("fake: interrupted")
+		return ExitFailed
+	default:
+		return ExitFailed
+	}
+}
+
+// runRange executes steps[from:to].
+func (r *runner) runRange(ctx context.Context, from, to int) error {
+	for i := from; i < to; i++ {
+		s := r.steps[i]
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		script = string(raw)
-	case autoRole != "":
-		s, ok := autoScenarios[autoRole]
-		if !ok {
-			return fmt.Errorf("no auto scenario for role %q", autoRole)
+		args, err := r.expand(ctx, s.Args)
+		if err != nil {
+			return r.fail(s, err)
 		}
-		script = s
-	default:
-		return fmt.Errorf("need --scenario or --auto-role")
-	}
-	st := &state{socket: socket, agentID: agentID, autoRole: autoRole, out: out}
-	sc := bufio.NewScanner(strings.NewReader(script))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if err := st.step(line); err != nil {
-			return fmt.Errorf("step %q: %w", line, err)
-		}
-		if st.branchNamed {
-			return nil
+		s.Args = args
+		if err := ops[s.Op].run(ctx, r, s); err != nil {
+			var ex exitError
+			if errors.As(err, &ex) || ctx.Err() != nil {
+				return err
+			}
+			return r.fail(s, err)
 		}
 	}
 	return nil
 }
 
-func (st *state) call(verb string, args, resp any) error {
-	return sockc.Call(st.socket, st.agentID, verb, args, resp)
+func (r *runner) fail(s Step, err error) error {
+	r.say("fake: line %d (%s) failed: %v", s.Line, s.Op, err)
+	return err
 }
 
-func (st *state) step(line string) error {
-	f := strings.Split(line, "|")
-	op := f[0]
-	arg := func(i int) string {
-		if i < len(f) {
-			return f[i]
+type exitError struct{ code int }
+
+func (e exitError) Error() string { return "exit " + strconv.Itoa(e.code) }
+
+// Step is one parsed script line.
+type Step struct {
+	Index int // position among the steps
+	Line  int // line number in the script
+	Op    string
+	Args  []string
+}
+
+// Parse reads a script. Every line is checked (op, number of fields, numbers
+// and durations) before anything runs, so a typo fails at once with its line
+// number.
+func Parse(text string) ([]Step, error) {
+	var steps []Step
+	for i, raw := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
-		return ""
-	}
-	switch op {
-	case "ready":
-		var r proto.ReadyResponse
-		if err := st.call("ready", nil, &r); err != nil {
-			return err
+		name, rest, _ := strings.Cut(line, "|")
+		name = strings.TrimSpace(name)
+		spec, ok := ops[name]
+		if !ok {
+			return nil, fmt.Errorf("script line %d: unknown op %q", i+1, name)
 		}
-		st.jobID, st.prompt = r.JobID, r.Prompt
-		fmt.Fprintln(st.out, r.Prompt)
-		if st.autoRole == "smokealarm" && strings.HasPrefix(st.agentID, "branch-namer-") {
-			if err := st.call("branch.name", proto.BranchNameArgs{Name: "chore/mock-branch"}, nil); err != nil {
-				return err
+		var args []string
+		if strings.Contains(line, "|") {
+			if spec.max == 0 {
+				args = strings.Split(rest, "|")
+			} else {
+				args = strings.SplitN(rest, "|", spec.max)
 			}
-			st.branchNamed = true
 		}
-		return nil
-	case "sleep":
-		d, err := time.ParseDuration(arg(1))
-		if err != nil {
-			return err
+		if len(args) < spec.min || len(args) > spec.max {
+			return nil, fmt.Errorf("script line %d: op %s takes %s", i+1, name, spec.usage)
 		}
-		time.Sleep(d)
-		return nil
-	case "send":
-		return st.call("send", proto.SendArgs{To: arg(1), Subject: arg(2), Body: arg(3), Priority: "normal"}, nil)
-	case "branchname":
-		return st.call("branch.name", proto.BranchNameArgs{Name: arg(1)}, nil)
-	case "jobcreate":
-		repo := arg(4)
-		if repo == "$REPO" {
-			// --mock works in any office: the supervisor passes a real repo
-			// key from the config rather than assuming one is called "demo".
-			repo = os.Getenv("OMO_MOCK_REPO")
+		if spec.check != nil {
+			if err := spec.check(args); err != nil {
+				return nil, fmt.Errorf("script line %d: op %s: %w", i+1, name, err)
+			}
 		}
-		parent := int64(0)
-		if p := arg(5); p == "$JOB" {
-			parent = st.jobID
-		} else if p != "" {
-			parent, _ = strconv.ParseInt(p, 10, 64)
+		steps = append(steps, Step{Index: len(steps), Line: i + 1, Op: name, Args: args})
+	}
+	return steps, nil
+}
+
+// roleScript picks the script of the caller's role: the environment's, else
+// the built-in default.
+func (r *runner) roleScript(ctx context.Context) (string, error) {
+	me, err := r.whoami(ctx)
+	if err != nil {
+		return "", err
+	}
+	role := me.Actor.Role
+	if role == api.RoleDeveloper {
+		t, err := r.ownTicket(ctx)
+		if err == nil && t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting {
+			role = "export"
 		}
-		return st.call("job.create", proto.JobCreateArgs{
-			Role: arg(1), Title: arg(2), Goal: arg(3), Repo: repo, Parent: parent}, nil)
-	case "verdict":
-		return st.call("job.verdict", proto.VerdictArgs{JobID: st.jobID, Verdict: arg(1), Notes: arg(2)}, nil)
-	case "incident":
-		return st.call("incident.create", proto.IncidentCreateArgs{Agent: arg(1), Class: arg(2), Detail: arg(3)}, nil)
-	case "resolvefirst":
-		m := regexp.MustCompile(`INCIDENT_ID: (\d+)`).FindStringSubmatch(st.prompt)
-		if m == nil {
-			return fmt.Errorf("no INCIDENT_ID in ready prompt")
+	}
+	if s := strings.TrimSpace(os.Getenv(EnvScriptRolePrefix + strings.ToUpper(string(role)))); s != "" {
+		return s, nil
+	}
+	s, ok := defaults[string(role)]
+	if !ok {
+		return "", fmt.Errorf("no script for role %q: set %s", role, EnvScript)
+	}
+	return s, nil
+}
+
+// defaults are the built-in scripts per role.
+var defaults = map[string]string{
+	"developer": `ready
+write|fake-$TICKET.txt|done by $NAME
+commit|feat: fake work for #$TICKET
+done|fake work
+wait-loop|10m`,
+	"pm": `ready
+create-tasks|2|chain
+release-all
+until-tasks-done|10m
+done|story complete
+wait-loop|10m`,
+	"reviewer": `ready
+verdict|approve|looks good
+wait-loop|10m`,
+	"export": `ready
+done-url|https://example.invalid/you/app/pull/$TICKET
+wait|10m`,
+	"ceo": `ready
+hang`,
+}
+
+// whoami fetches and caches the caller's identity.
+func (r *runner) whoami(ctx context.Context) (api.Me, error) {
+	if r.me != nil {
+		return *r.me, nil
+	}
+	c, err := r.api()
+	if err != nil {
+		return api.Me{}, err
+	}
+	me, err := c.Me(ctx)
+	if err != nil {
+		return api.Me{}, err
+	}
+	r.me = &me
+	r.name = me.Actor.Name
+	return me, nil
+}
+
+// api returns the client, created from the environment on first use.
+func (r *runner) api() (*apiclient.Client, error) {
+	if r.client != nil {
+		return r.client, nil
+	}
+	c, err := apiclient.FromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	r.client = c
+	return c, nil
+}
+
+// ownTicket fetches the ticket the session is bound to (not cached: its
+// column changes).
+func (r *runner) ownTicket(ctx context.Context) (api.Ticket, error) {
+	me, err := r.whoami(ctx)
+	if err != nil {
+		return api.Ticket{}, err
+	}
+	if me.Ticket == nil {
+		return api.Ticket{}, errors.New("this session has no ticket")
+	}
+	c, err := r.api()
+	if err != nil {
+		return api.Ticket{}, err
+	}
+	t, err := c.Ticket(ctx, *me.Ticket)
+	if err != nil {
+		return api.Ticket{}, err
+	}
+	r.story = t.Story
+	if t.Type == api.TypeStory {
+		n := t.Number
+		r.story = &n
+	}
+	// $PROJECT is the agent's own project (a reviewer's, an export job's),
+	// else the ticket's first.
+	r.project = ""
+	if len(t.Projects) > 0 {
+		r.project = t.Projects[0].Project
+	}
+	for _, a := range t.Agents {
+		if a.Name == me.Actor.Name && a.Project != "" {
+			r.project = a.Project
 		}
-		id, _ := strconv.ParseInt(m[1], 10, 64)
-		return st.call("incident.resolve", proto.IncidentResolveArgs{ID: id, Report: arg(1)}, nil)
-	case "agentkill":
-		return st.call("agent.kill", proto.AgentNameArgs{Name: arg(1)}, nil)
-	case "pause":
-		return st.call("office.pause", nil, nil)
-	case "resume":
-		return st.call("office.resume", nil, nil)
-	case "shell":
-		cmd := exec.Command("sh", "-c", strings.Join(f[1:], "|"))
-		cmd.Stdout, cmd.Stderr = st.out, st.out
-		return cmd.Run()
-	case "done":
-		return st.call("done", proto.DoneArgs{Result: arg(1)}, nil)
-	case "wait":
-		var w proto.WaitResponse
-		return st.call("wait", nil, &w)
-	case "waiterror":
-		var w proto.WaitResponse
-		err := st.call("wait", nil, &w)
-		if err == nil {
-			return fmt.Errorf("wait unexpectedly succeeded; want error containing %q", arg(1))
+	}
+	var others []string
+	for _, p := range t.Projects {
+		if p.Project != r.project {
+			others = append(others, p.Project)
 		}
-		if !strings.Contains(err.Error(), arg(1)) {
-			return fmt.Errorf("wait error %q does not contain %q", err, arg(1))
+	}
+	r.others = strings.Join(others, ", ")
+	return t, nil
+}
+
+// expand replaces the placeholders in args.
+func (r *runner) expand(ctx context.Context, args []string) ([]string, error) {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if !strings.Contains(a, "$") {
+			out[i] = a
+			continue
 		}
-		return nil
-	case "hang":
-		// Deliberately never returns. A plain `select {}` would trip Go's
-		// deadlock detector and exit the process instead of hanging.
+		if strings.Contains(a, "$NAME") {
+			if _, err := r.whoami(ctx); err != nil {
+				return nil, err
+			}
+			a = strings.ReplaceAll(a, "$NAME", r.name)
+		}
+		a = strings.ReplaceAll(a, "$OUTPUT", r.output)
+		if strings.Contains(a, "$TICKET") || strings.Contains(a, "$STORY") || strings.Contains(a, "$PROJECT") || strings.Contains(a, "$OTHERS") {
+			t, err := r.ownTicket(ctx)
+			if err != nil {
+				return nil, err
+			}
+			a = strings.ReplaceAll(a, "$TICKET", strconv.Itoa(t.Number))
+			a = strings.ReplaceAll(a, "$PROJECT", r.project)
+			a = strings.ReplaceAll(a, "$OTHERS", r.others)
+			story := ""
+			if r.story != nil {
+				story = strconv.Itoa(*r.story)
+			}
+			a = strings.ReplaceAll(a, "$STORY", story)
+		}
+		out[i] = a
+	}
+	return out, nil
+}
+
+// redactor writes to w and replaces the secret by a marker.
+type redactor struct {
+	mu     sync.Mutex
+	w      io.Writer
+	secret string
+}
+
+func (r *redactor) Write(p []byte) (int, error) {
+	if r.w == nil {
+		return len(p), nil
+	}
+	out := p
+	if r.secret != "" {
+		out = bytes.ReplaceAll(p, []byte(r.secret), []byte("[session id]"))
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, err := r.w.Write(out); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// lineQueue collects the lines typed into the agent's terminal.
+type lineQueue struct {
+	mu     sync.Mutex
+	lines  []string
+	closed bool
+	wake   chan struct{}
+}
+
+// newLineQueue starts reading in and echoes every line through say as a
+// notification the agent received. Lines nobody awaits are simply ignored.
+func newLineQueue(in io.Reader, say func(string, ...any)) *lineQueue {
+	q := &lineQueue{wake: make(chan struct{}, 1)}
+	go func() {
+		br := bufio.NewReader(in)
 		for {
-			time.Sleep(time.Hour)
+			line, err := br.ReadString('\n')
+			if line = strings.TrimRight(line, "\r\n"); line != "" {
+				say("fake: typed: %s", line)
+				q.mu.Lock()
+				q.lines = append(q.lines, line)
+				q.mu.Unlock()
+				q.signal()
+			}
+			if err != nil {
+				q.mu.Lock()
+				q.closed = true
+				q.mu.Unlock()
+				q.signal()
+				return
+			}
 		}
+	}()
+	return q
+}
+
+func (q *lineQueue) signal() {
+	select {
+	case q.wake <- struct{}{}:
 	default:
-		return fmt.Errorf("unknown scenario op %q", op)
+	}
+}
+
+// next returns the first typed line for which match is true, dropping the
+// lines before it. It fails when ctx ends or the input is closed.
+func (q *lineQueue) next(ctx context.Context, match func(string) bool) (string, error) {
+	for {
+		q.mu.Lock()
+		for len(q.lines) > 0 {
+			l := q.lines[0]
+			q.lines = q.lines[1:]
+			if match(l) {
+				q.mu.Unlock()
+				return l, nil
+			}
+		}
+		closed := q.closed
+		q.mu.Unlock()
+		if closed {
+			return "", errors.New("terminal input closed")
+		}
+		select {
+		case <-q.wake:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+}
+
+// sleep waits d or until ctx ends.
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

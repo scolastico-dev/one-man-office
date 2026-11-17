@@ -1,0 +1,23 @@
+# The plugins omo lists on its Plugins page ("Available plugins"). omo reads
+# this file from the release branch of its repository; README.md in this
+# folder says how a plugin gets listed and what the tags mean.
+#
+# official:    kept in this repository by omo's maintainers; give its folder
+#              in path, no source or ref (it installs from the branch this
+#              file is read from).
+# recommended: someone else's plugin the maintainers looked at; give source,
+#              ref (a tag or a full commit id) and path.
+# community:   listed, not reviewed; give source, ref and path.
+plugins:
+  - name: pushover
+    tag: official
+    description: Pushover notifications when a ticket needs your attention or an agent asks you a question.
+    path: plugins/pushover
+  - name: discord
+    tag: official
+    description: Discord messages through a channel webhook when a ticket needs your attention or an agent asks you a question.
+    path: plugins/discord
+  - name: pause-notice
+    tag: official
+    description: Tells every running agent to halt when you pause omo, and to continue where it stopped when you lift the pause.
+    path: plugins/pause-notice

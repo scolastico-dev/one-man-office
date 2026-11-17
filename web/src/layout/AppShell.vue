@@ -1,0 +1,67 @@
+<script setup lang="ts">
+// The page frame: top bar, an optional sidebar on the left, and the main area.
+</script>
+
+<template>
+  <div class="shell" :class="{ 'shell--sidebar': $slots.sidebar }">
+    <div v-if="$slots.sidebar" class="shell__sidebar"><slot name="sidebar" /></div>
+    <header class="shell__top"><slot name="topbar" /></header>
+    <main class="shell__main"><slot /></main>
+  </div>
+</template>
+
+<style scoped>
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'top'
+    'main';
+  /*
+   * Exactly the window: the document never scrolls, the panes inside do.
+   * Positioned and clipped (not hidden: a hidden box can still be scrolled
+   * by a script or by focus), so nothing inside can reach past it, not even
+   * an absolutely placed element such as a screen-reader-only label in a
+   * scrolled list, whose containing block would otherwise be the document.
+   */
+  position: relative;
+  height: 100dvh;
+  overflow: clip;
+}
+.shell--sidebar {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'side top'
+    'side main';
+}
+.shell__sidebar {
+  grid-area: side;
+  min-height: 0;
+}
+/*
+ * The sidebar takes the page's two rows as its own (subgrid): its head is
+ * exactly as tall as the top bar, so the line below both is one line.
+ */
+.shell--sidebar > .shell__sidebar {
+  display: grid;
+  grid-template-rows: subgrid;
+}
+.shell__top {
+  grid-area: top;
+  min-width: 0;
+}
+.shell__main {
+  /* A ticket's panel covers exactly this area (the board's), not the sidebar or the top bar. */
+  position: relative;
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  padding: calc(var(--omo-space) * 3) calc(var(--omo-space) * 4) calc(var(--omo-space) * 3);
+}
+@media (max-width: 767.98px) {
+  .shell__main {
+    padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3) calc(var(--omo-space) * 2);
+  }
+}
+</style>

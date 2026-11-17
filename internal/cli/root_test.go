@@ -2,19 +2,11 @@ package cli
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/scolastico-dev/one-man-office/internal/agentcli"
-	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/office"
-	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
-	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
 
-func TestRootHelpMentionsOffice(t *testing.T) {
+func TestRootHelpListsOnlyUpdate(t *testing.T) {
 	cmd := Root("test")
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -23,210 +15,12 @@ func TestRootHelpMentionsOffice(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	for _, want := range []string{"one-man-office", "--safe-mode"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("help output missing %q:\n%s", want, out.String())
+	if !strings.Contains(out.String(), "update") {
+		t.Fatalf("help output missing update:\n%s", out.String())
+	}
+	for _, unwanted := range []string{"setup", "company", "job", "mail", "self-update"} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Fatalf("help output contains %q:\n%s", unwanted, out.String())
 		}
-	}
-}
-
-func TestReadOnlyFlagRejectsMutatingStartupModes(t *testing.T) {
-	for _, flags := range []officeFlags{
-		{readOnly: true, mock: true},
-		{readOnly: true, noTUI: true},
-		{readOnly: true, safeMode: true},
-	} {
-		if err := validateOfficeFlags(flags); err == nil || !strings.Contains(err.Error(), "--read-only cannot be combined") {
-			t.Fatalf("flags %+v returned %v", flags, err)
-		}
-	}
-	if err := validateOfficeFlags(officeFlags{readOnly: true, skipStartupChecks: true}); err != nil {
-		t.Fatalf("--skip-startup-checks should be harmless in read-only mode: %v", err)
-	}
-}
-
-func TestResolveSetupProviderDetectsAndAllowsOverride(t *testing.T) {
-	detected := func() (agentcli.Provider, bool) { return agentcli.Claude, true }
-
-	provider, automatic, err := resolveSetupProvider("auto", detected)
-	if err != nil || provider != agentcli.Claude || !automatic {
-		t.Fatalf("automatic selection = (%q, %v, %v)", provider, automatic, err)
-	}
-
-	provider, automatic, err = resolveSetupProvider("gemini", detected)
-	if err != nil || provider != agentcli.Gemini || automatic {
-		t.Fatalf("explicit override = (%q, %v, %v)", provider, automatic, err)
-	}
-
-	provider, automatic, err = resolveSetupProvider("auto", func() (agentcli.Provider, bool) { return "", false })
-	if err != nil || provider != agentcli.Claude || automatic {
-		t.Fatalf("no-CLI fallback = (%q, %v, %v)", provider, automatic, err)
-	}
-
-	if _, _, err := resolveSetupProvider("unknown", detected); err == nil {
-		t.Fatal("invalid explicit provider accepted")
-	}
-}
-
-func TestSetupWarnsWhenGeminiIsExplicitlySelected(t *testing.T) {
-	dir := t.TempDir()
-	cmd := Root("test")
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"setup", "--agent-cli", "gemini", dir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); !strings.Contains(got, "WARNING: Gemini is not recommended") {
-		t.Fatalf("setup output missing Gemini recommendation warning:\n%s", got)
-	}
-}
-
-func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := office.Setup(dir); err != nil {
-		t.Fatal(err)
-	}
-	common := filepath.Join(dir, prompts.Dir, "common.md")
-	if err := os.WriteFile(common, []byte("CUSTOM PROMPT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := Root("test")
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"setup", "--update", dir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("setup --update: %v", err)
-	}
-	if !strings.Contains(out.String(), "replaced .omo/messages/") ||
-		!strings.Contains(out.String(), "replaced .omo/prompts/") ||
-		!strings.Contains(out.String(), "replaced .omo/plugins/nudge/") ||
-		!strings.Contains(out.String(), "replaced .omo/plugins/tools/") {
-		t.Fatalf("update output does not describe all replacements:\n%s", out.String())
-	}
-	if !strings.Contains(out.String(), "will update .omo/prompts/common.md") ||
-		strings.Index(out.String(), "will update .omo/prompts/common.md") > strings.Index(out.String(), "replaced .omo/prompts/") {
-		t.Fatalf("update did not preview files before replacement:\n%s", out.String())
-	}
-	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {
-		t.Fatalf("common prompt was not replaced: %q, err %v", raw, err)
-	}
-}
-
-func TestSetupSyncRejectsIncompatibleFlags(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := office.Setup(dir); err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"setup", "--sync", "--update", dir}, "--sync and --update cannot be combined"},
-		{[]string{"setup", "--sync", "--agent-cli", "codex", dir}, "--sync cannot be combined with --agent-cli"},
-		{[]string{"setup", "--sync", "--with-git", dir}, "--sync cannot be combined with --with-git"},
-	} {
-		cmd := Root("test")
-		cmd.SetArgs(test.args)
-		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), test.want) {
-			t.Fatalf("setup %v error = %v, want %q", test.args[1:], err, test.want)
-		}
-	}
-}
-
-func TestRepoCommandsAddListAndRemove(t *testing.T) {
-	officeDir := t.TempDir()
-	if _, err := office.Setup(officeDir); err != nil {
-		t.Fatal(err)
-	}
-	repoDir := filepath.Join(t.TempDir(), "payments")
-	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(officeDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
-
-	run := func(args ...string) string {
-		t.Helper()
-		cmd := Root("test")
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(&out)
-		cmd.SetArgs(args)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("omo %s: %v", strings.Join(args, " "), err)
-		}
-		return out.String()
-	}
-	if out := run("repo", "add", repoDir); !strings.Contains(out, "added repository payments") {
-		t.Fatalf("unexpected add output: %s", out)
-	}
-	if out := run("repo", "list"); !strings.Contains(out, "payments\t"+repoDir) {
-		t.Fatalf("unexpected list output: %s", out)
-	}
-	if out := run("repo", "remove", "payments"); !strings.Contains(out, "removed repository payments") {
-		t.Fatalf("unexpected remove output: %s", out)
-	}
-	cfg, err := config.Load(filepath.Join(officeDir, office.ConfigPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := cfg.Repos["payments"]; exists {
-		t.Fatal("removed repository is still configured")
-	}
-}
-
-func TestPluginCommandsListAndToggleWithoutDeleting(t *testing.T) {
-	officeDir := t.TempDir()
-	if _, err := office.Setup(officeDir); err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(officeDir, office.ConfigPath)
-	entry := config.Plugin{Source: "https://gitea.example/acme/nudge.git", Subpath: "plugins/nudge", Enabled: true}
-	if err := pluginmanager.UpsertConfig(configPath, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(officeDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
-	run := func(args ...string) string {
-		t.Helper()
-		cmd := Root("test")
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(&out)
-		cmd.SetArgs(args)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("omo %s: %v", strings.Join(args, " "), err)
-		}
-		return out.String()
-	}
-	if out := run("plugin", "list"); !strings.Contains(out, "nudge\tenabled") {
-		t.Fatalf("unexpected plugin list: %s", out)
-	}
-	if out := run("plugin", "disable", "nudge"); !strings.Contains(out, "disabled plugin nudge") {
-		t.Fatalf("unexpected disable output: %s", out)
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, exists := cfg.Plugins.Installed["nudge"]
-	if !exists || got.Enabled || got.Source != entry.Source {
-		t.Fatalf("disabled plugin was deleted or changed: %+v", got)
 	}
 }

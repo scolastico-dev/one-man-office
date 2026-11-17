@@ -4,6 +4,7 @@
 package agentcli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -16,13 +17,16 @@ const (
 	Claude Provider = "claude"
 	Codex  Provider = "codex"
 	Gemini Provider = "gemini"
+	// Agy is Google's Antigravity CLI, which Google recommends in place of
+	// Gemini CLI.
+	Agy Provider = "agy"
 )
 
-var Supported = []Provider{Claude, Codex, Gemini}
+var Supported = []Provider{Claude, Codex, Agy, Gemini}
 
 // DetectInstalled returns the first supported CLI available on PATH. The
 // Supported order is intentional: Claude is preferred, then Codex, then
-// Gemini.
+// Antigravity, then Gemini.
 func DetectInstalled() (Provider, bool) {
 	return detectInstalled(exec.LookPath)
 }
@@ -63,7 +67,7 @@ func (p Provider) Valid() bool {
 func Parse(value string) (Provider, error) {
 	p := Provider(strings.ToLower(strings.TrimSpace(value)))
 	if !p.Valid() {
-		return "", fmt.Errorf("unsupported agent CLI %q (choose claude, codex, or gemini)", value)
+		return "", fmt.Errorf("unsupported agent CLI %q (choose claude, codex, agy or gemini)", value)
 	}
 	return p, nil
 }
@@ -95,8 +99,10 @@ type Launch struct {
 }
 
 // Prepare adapts only startup mechanics. Permissions and model selection stay
-// visible in the configured profile arguments.
-func Prepare(provider Provider, command string, args []string, env map[string]string, workdir, prompt string, trustWorkdir, injectPrompt bool) Launch {
+// visible in the configured profile arguments. A non-empty bridge is the
+// absolute path of the omo executable: Claude Code and Codex then get
+// BridgeArgs, omo's MCP server for this session only.
+func Prepare(provider Provider, command string, args []string, env map[string]string, workdir, prompt string, trustWorkdir, injectPrompt bool, bridge string) Launch {
 	provider = Resolve(provider, command)
 	launch := Launch{
 		Args: append([]string(nil), args...),
@@ -117,6 +123,11 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 		}
 	}
 	switch provider {
+	case Claude:
+		// --mcp-config takes several values: nothing may follow it.
+		if bridge != "" {
+			launch.Args = append(launch.Args, BridgeArgs(Claude, bridge)...)
+		}
 	case Codex:
 		// Codex accepts an initial prompt positionally while retaining its TUI.
 		// Workspace config and installed plugin hooks have separate trust gates
@@ -126,6 +137,9 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 			if !hasArg(launch.Args, "--dangerously-bypass-hook-trust") {
 				launch.Args = append(launch.Args, "--dangerously-bypass-hook-trust")
 			}
+		}
+		if bridge != "" {
+			launch.Args = append(launch.Args, BridgeArgs(Codex, bridge)...)
 		}
 		if injectPrompt && !launch.PromptInjected {
 			launch.Args = append(launch.Args, prompt)
@@ -141,8 +155,88 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 		if trustWorkdir {
 			launch.Env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 		}
+	case Agy:
+		// Antigravity asks whether to trust a new folder before it reads
+		// anything, also with --dangerously-skip-permissions. --settings
+		// lays settings over its settings.json for this session only and
+		// never saves them, so the folder is trusted without a lasting entry.
+		if trustWorkdir {
+			trusted, _ := json.Marshal(map[string][]string{"trustedWorkspaces": {workdir}})
+			launch.Args = append(launch.Args, "--settings", string(trusted))
+		}
+		// Like Gemini's: -p is headless, --prompt-interactive runs the
+		// prompt and keeps the session.
+		if injectPrompt && !launch.PromptInjected {
+			launch.Args = append(launch.Args, "--prompt-interactive", prompt)
+			launch.PromptInjected = true
+		}
 	}
 	return launch
+}
+
+// BridgeName is the name of omo's MCP server in an agent program.
+const BridgeName = "omo"
+
+// bridgeVariables are the variables the bridge reads: the session it acts
+// as and the socket. Codex passes a stdio server only the variables it
+// lists.
+var bridgeVariables = []string{"OMO_AGENT_ID", "OMO_SOCKET"}
+
+// BridgeArgs are the launch arguments that give one session of provider
+// omo's MCP server: `<omo> mcp stdio`, started by the program with the
+// session's environment, so it acts as the session as `omo ai` does. They
+// hold no session id and no token. Antigravity and Gemini CLI have no flag
+// for a server of one session: nil.
+func BridgeArgs(provider Provider, omo string) []string {
+	switch provider {
+	case Claude:
+		var b strings.Builder
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		type server struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		}
+		_ = enc.Encode(map[string]any{"mcpServers": map[string]server{BridgeName: {Type: "stdio", Command: omo, Args: []string{"mcp", "stdio"}}}})
+		return []string{"--mcp-config", strings.TrimSuffix(b.String(), "\n")}
+	case Codex:
+		key := "mcp_servers." + BridgeName + "."
+		return []string{
+			"-c", key + "command=" + tomlString(omo),
+			"-c", key + "args=" + tomlArray([]string{"mcp", "stdio"}),
+			"-c", key + "env_vars=" + tomlArray(bridgeVariables),
+		}
+	}
+	return nil
+}
+
+// tomlString is s as a TOML basic string.
+func tomlString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, "\\u%04X", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// tomlArray is a TOML array of basic strings.
+func tomlArray(items []string) string {
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = tomlString(item)
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 func hasArg(args []string, want string) bool {

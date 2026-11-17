@@ -2,533 +2,245 @@ package plugins
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
-	"time"
+	"unicode/utf8"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/luabox"
 )
 
-func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Event, error) {
-	updated, _, err := m.runLuaResult(ctx, hook, event)
-	return updated, err
-}
+// Bounds of a plugin's stored values.
+const (
+	// MaxStoreKeys is the number of keys one plugin may store.
+	MaxStoreKeys = 1000
+	// MaxStoreKeyBytes bounds one key.
+	MaxStoreKeyBytes = 200
+	// MaxStoreValueBytes bounds one value, as JSON.
+	MaxStoreValueBytes = 64 << 10
+)
 
-func (m *Manager) runLuaResult(ctx context.Context, hook loadedHook, event Event) (Event, any, error) {
-	state := lua.NewState(lua.Options{SkipOpenLibs: true})
-	defer state.Close()
-	state.SetContext(ctx)
-	openSafeLibraries(state)
-	if osModule, ok := state.GetGlobal(lua.OsLibName).(*lua.LTable); ok {
-		osModule.RawSetString("execute", state.NewFunction(m.luaOSExecute(ctx, hook)))
+// hookFunction is the global function a Lua hook's source becomes: the
+// script's top level is its body, so a "return" of the script is the
+// hook's answer. The name is not one a sandbox global can have.
+const hookFunction = "omo_plugin_hook__"
+
+// runLua runs a Lua hook in a fresh sandbox: the globals event (the event
+// as plugins see it) and config (the plugin's configuration), the helpers of
+// the package doc, the hook's time limit. It returns the script's answer,
+// the run's log lines (cleaned) and "" or the cleaned error text.
+func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any, []string, string) {
+	box := luabox.New(ctx, luabox.Limits{Timeout: h.timeout, MaxSource: len(h.source) + 64})
+	defer box.Close()
+	red := box.Redactor()
+	for _, s := range p.secrets {
+		red.Add(s)
 	}
-
-	state.SetGlobal("event", goToLua(state, map[string]any{
-		"event": event.Name, "data": event.Data, "mutable": event.Mutable,
-	}))
-	state.SetGlobal("config", goToLua(state, hook.config))
-	api := state.NewTable()
-	state.SetFuncs(api, map[string]lua.LGFunction{
-		"global_get":           m.luaGet(hook.plugin, "global"),
-		"global_set":           m.luaSet(hook.plugin, "global"),
-		"global_delete":        m.luaDelete(hook.plugin, "global"),
-		"global_keys":          m.luaKeys(hook.plugin, "global"),
-		"local_get":            m.luaGet(hook.plugin, "local"),
-		"local_set":            m.luaSet(hook.plugin, "local"),
-		"local_delete":         m.luaDelete(hook.plugin, "local"),
-		"local_keys":           m.luaKeys(hook.plugin, "local"),
-		"duration":             luaDuration,
-		"exec":                 m.luaExec(ctx, hook),
-		"list_files":           luaListFiles,
-		"mkdir_all":            luaMkdirAll,
-		"path_is_absolute":     luaPathIsAbsolute,
-		"path_is_within":       luaPathIsWithin,
-		"platform":             luaPlatform,
-		"read_file":            luaReadFile,
-		"write_file_exclusive": luaWriteFileExclusive,
-		"http":                 m.luaHTTP(ctx),
-		"log":                  m.luaLog(hook.plugin),
+	box.Set("http", (&luabox.HTTP{Client: m.o.HTTP}).Func(box))
+	box.Set("exec", m.luaExec(box, p, ev.Name))
+	box.Set("sleep", box.Sleep())
+	box.Set("store_get", m.luaStoreGet(p.name))
+	box.Set("store_set", m.luaStoreSet(p.name))
+	box.Set("store_delete", m.luaStoreDelete(p.name))
+	box.Set("store_keys", m.luaStoreKeys(p.name))
+	box.Set("agents", m.luaAgents(box))
+	box.Set("send_to_agent", m.luaSendToAgent(box))
+	box.Set("data_dir", func(L *lua.LState) int {
+		dir, err := m.dataDir(p.name)
+		if err != nil {
+			return fail(L, err.Error())
+		}
+		L.Push(lua.LString(dir))
+		return 1
 	})
-	state.SetGlobal("omo", api)
-	if err := state.DoFile(filepath.Join(hook.dir, hook.hook.Lua)); err != nil {
-		return event, nil, err
+
+	run := func() (any, error) {
+		if err := box.SetGlobal("event", ev.wire()); err != nil {
+			return nil, errors.New("the event cannot be handed to Lua: " + err.Error())
+		}
+		if err := box.SetGlobal("config", p.config); err != nil {
+			return nil, errors.New("the configuration cannot be handed to Lua: " + err.Error())
+		}
+		// The source is the body of one function; the line numbers stay
+		// those of the file.
+		if err := box.Load("function "+hookFunction+"(...) "+h.source+"\nend", h.chunk); err != nil {
+			return nil, err
+		}
+		return box.Call(hookFunction)
 	}
-	var result any
-	if event.Name == EventManual && state.GetTop() > 0 {
-		result = luaToGo(state.Get(-1))
-		state.SetTop(0)
+	result, err := run()
+	var lines []string
+	for _, l := range box.Log() {
+		lines = append(lines, cutRunes(l, maxLogLineRunes))
 	}
-	if !event.Mutable {
-		return event, result, nil
+	if err != nil {
+		return nil, lines, luabox.ErrorText(err, red)
 	}
-	updated, ok := luaToGo(state.GetGlobal("event")).(map[string]any)
-	if !ok {
-		return event, nil, fmt.Errorf("mutable Lua hook replaced event with a non-table value")
-	}
-	data, ok := updated["data"].(map[string]any)
-	if !ok {
-		return event, nil, fmt.Errorf("mutable Lua hook event.data must be a table")
-	}
-	event.Data = data
-	return event, result, nil
+	return result, lines, ""
 }
 
-func (m *Manager) luaOSExecute(ctx context.Context, hook loadedHook) lua.LGFunction {
-	return func(state *lua.LState) int {
-		command := state.CheckString(1)
-		executable, args := luaShellCommand(command)
-		cmd := exec.CommandContext(ctx, executable, args...)
-		cmd.Dir = hook.dir
-		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		lifecycle, err := configureLuaCommandCancellation(cmd)
-		if err != nil {
-			state.RaiseError("os.execute: %v", err)
-			return 0
+// fail returns nil and a fixed phrase to Lua, the way helpers fail.
+func fail(L *lua.LState, phrase string) int {
+	L.Push(lua.LNil)
+	L.Push(lua.LString(phrase))
+	return 2
+}
+
+// luaExec is omo.exec(program, args…): runs program with the arguments as
+// they are (no shell), in the plugin's folder with the plugin environment,
+// bounded by the run's time limit. It returns the program's output
+// (standard output and error, at most 1 MiB) and "" or a fixed error
+// phrase.
+func (m *Manager) luaExec(box *luabox.Box, p *plugin, event string) lua.LGFunction {
+	return func(L *lua.LState) int {
+		top := L.GetTop()
+		if top < 1 || top > maxArgs {
+			L.RaiseError("omo.exec takes a program and at most %d arguments", maxArgs-1)
 		}
-		defer lifecycle.Close()
-		if err := cmd.Start(); err != nil {
-			state.RaiseError("os.execute: %v", err)
-			return 0
-		}
-		if err := lifecycle.Started(cmd); err != nil {
-			lifecycle.Close()
-			_ = cmd.Wait()
-			state.RaiseError("os.execute: %v", err)
-			return 0
-		}
-		if err := cmd.Wait(); err != nil {
-			if ctx.Err() != nil {
-				state.RaiseError("os.execute: %v", ctx.Err())
-				return 0
+		args := make([]string, 0, top)
+		for i := 1; i <= top; i++ {
+			s := L.CheckString(i)
+			if len(s) > maxArgBytes || containsNUL(s) {
+				L.RaiseError("omo.exec: argument %d is longer than %d bytes or holds a NUL character", i, maxArgBytes)
 			}
-			state.Push(lua.LNumber(1))
-			return 1
+			args = append(args, s)
 		}
-		state.Push(lua.LNumber(0))
-		return 1
-	}
-}
-
-func luaShellCommand(command string) (string, []string) {
-	if runtime.GOOS == "windows" {
-		shell := os.Getenv("COMSPEC")
-		if shell == "" {
-			shell = "cmd.exe"
+		if args[0] == "" {
+			L.RaiseError("omo.exec names no program")
 		}
-		return shell, []string{"/c", command}
-	}
-	return "/bin/sh", []string{"-c", command}
-}
-
-func (m *Manager) luaLog(plugin string) lua.LGFunction {
-	return func(state *lua.LState) int {
-		m.log(plugin, state.CheckString(1))
-		return 0
-	}
-}
-
-// luaDuration converts a Go-style duration string to seconds. Numeric values
-// are already interpreted as seconds, which keeps generated JSON/YAML config
-// equally convenient for Lua plugins.
-func luaDuration(state *lua.LState) int {
-	value := state.CheckAny(1)
-	if number, ok := value.(lua.LNumber); ok {
-		state.Push(number)
-		return 1
-	}
-	duration, err := time.ParseDuration(state.CheckString(1))
-	if err != nil {
-		state.RaiseError("invalid duration: %v", err)
-		return 0
-	}
-	state.Push(lua.LNumber(duration.Seconds()))
-	return 1
-}
-
-// luaMkdirAll and luaWriteFileExclusive are deliberately small filesystem
-// primitives for plugins that need cross-platform paths without invoking a
-// shell. Their second return value is an error string, matching omo.exec.
-func luaMkdirAll(state *lua.LState) int {
-	path := state.CheckString(1)
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	state.Push(lua.LTrue)
-	state.Push(lua.LString(""))
-	return 2
-}
-
-func luaListFiles(state *lua.LState) int {
-	directory := state.CheckString(1)
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		state.Push(state.NewTable())
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	files := state.NewTable()
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
-			continue
-		}
-		files.Append(lua.LString(entry.Name()))
-	}
-	state.Push(files)
-	state.Push(lua.LString(""))
-	return 2
-}
-
-func luaPathIsWithin(state *lua.LState) int {
-	root := state.CheckString(1)
-	target := state.CheckString(2)
-	rootPath, err := filepath.Abs(root)
-	if err != nil {
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	targetPath, err := filepath.Abs(target)
-	if err != nil {
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(rootPath); resolveErr == nil {
-		rootPath = resolved
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(targetPath); resolveErr == nil {
-		targetPath = resolved
-	}
-	relative, err := filepath.Rel(rootPath, targetPath)
-	if err != nil {
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	within := relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
-	state.Push(lua.LBool(within))
-	state.Push(lua.LString(""))
-	return 2
-}
-
-func luaReadFile(state *lua.LState) int {
-	path := state.CheckString(1)
-	file, err := os.Open(path)
-	if err != nil {
-		state.Push(lua.LString(""))
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	defer file.Close()
-	contents, err := io.ReadAll(file)
-	if err != nil {
-		state.Push(lua.LString(""))
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	state.Push(lua.LString(string(contents)))
-	state.Push(lua.LString(""))
-	return 2
-}
-
-func luaWriteFileExclusive(state *lua.LState) int {
-	path := state.CheckString(1)
-	contents := state.CheckString(2)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	if _, err := file.WriteString(contents); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(path)
-		state.Push(lua.LFalse)
-		state.Push(lua.LString(err.Error()))
-		return 2
-	}
-	state.Push(lua.LTrue)
-	state.Push(lua.LString(""))
-	return 2
-}
-
-func luaPlatform(state *lua.LState) int {
-	platform := state.NewTable()
-	platform.RawSetString("os", lua.LString(runtime.GOOS))
-	platform.RawSetString("arch", lua.LString(runtime.GOARCH))
-	state.Push(platform)
-	return 1
-}
-
-func luaPathIsAbsolute(state *lua.LState) int {
-	path := state.CheckString(1)
-	state.Push(lua.LBool(isAbsolutePath(runtime.GOOS, path)))
-	return 1
-}
-
-func isAbsolutePath(platform, path string) bool {
-	if platform != "windows" {
-		return strings.HasPrefix(path, "/")
-	}
-	if runtime.GOOS == "windows" {
-		return filepath.IsAbs(path) && isWindowsAbsolutePath(path)
-	}
-	return isWindowsAbsolutePath(path)
-}
-
-func isWindowsAbsolutePath(path string) bool {
-	if len(path) >= 2 && isWindowsSeparator(path[0]) && isWindowsSeparator(path[1]) {
-		return true
-	}
-	return len(path) >= 3 && isWindowsDriveLetter(path[0]) && path[1] == ':' && isWindowsSeparator(path[2])
-}
-
-func isWindowsSeparator(char byte) bool {
-	return char == '/' || char == '\\'
-}
-
-func isWindowsDriveLetter(char byte) bool {
-	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
-}
-
-func openSafeLibraries(state *lua.LState) {
-	for _, lib := range []struct {
-		name string
-		open lua.LGFunction
-	}{
-		{lua.BaseLibName, lua.OpenBase},
-		{lua.TabLibName, lua.OpenTable},
-		{lua.StringLibName, lua.OpenString},
-		{lua.MathLibName, lua.OpenMath},
-		{lua.IoLibName, lua.OpenIo},
-		{lua.OsLibName, lua.OpenOs},
-	} {
-		state.Push(state.NewFunction(lib.open))
-		state.Push(lua.LString(lib.name))
-		state.Call(1, 0)
-	}
-	// Dynamic code loading remains unavailable; file and process access are
-	// explicitly exposed through Lua's io/os libraries and omo.exec.
-	state.SetGlobal("dofile", lua.LNil)
-	state.SetGlobal("loadfile", lua.LNil)
-}
-
-func (m *Manager) luaGet(plugin, scope string) lua.LGFunction {
-	return func(state *lua.LState) int {
-		key := state.CheckString(1)
-		owner := pluginOwner(plugin, scope)
-		var raw string
-		err := m.DB.QueryRow(`SELECT value FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, scope, owner, key).Scan(&raw)
-		if errors.Is(err, sql.ErrNoRows) {
-			state.Push(lua.LNil)
-			return 1
-		}
+		env, err := m.environment(p, event)
 		if err != nil {
-			state.RaiseError("load stored value: %v", err)
-			return 0
-		}
-		var value any
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			state.RaiseError("decode stored value: %v", err)
-			return 0
-		}
-		state.Push(goToLua(state, value))
-		return 1
-	}
-}
-
-func (m *Manager) luaKeys(plugin, scope string) lua.LGFunction {
-	return func(state *lua.LState) int {
-		prefix := state.OptString(1, "")
-		rows, err := m.DB.Query(`SELECT key FROM plugin_storage WHERE scope=? AND plugin=? ORDER BY key`, scope, pluginOwner(plugin, scope))
-		if err != nil {
-			state.RaiseError("list stored keys: %v", err)
-			return 0
-		}
-		defer rows.Close()
-		keys := state.NewTable()
-		for rows.Next() {
-			var key string
-			if err := rows.Scan(&key); err != nil {
-				state.RaiseError("scan stored key: %v", err)
-				return 0
-			}
-			if strings.HasPrefix(key, prefix) {
-				keys.Append(lua.LString(key))
-			}
-		}
-		if err := rows.Err(); err != nil {
-			state.RaiseError("list stored keys: %v", err)
-			return 0
-		}
-		state.Push(keys)
-		return 1
-	}
-}
-
-func (m *Manager) luaSet(plugin, scope string) lua.LGFunction {
-	return func(state *lua.LState) int {
-		key := state.CheckString(1)
-		if strings.TrimSpace(key) == "" {
-			state.RaiseError("storage key must not be empty")
-			return 0
-		}
-		raw, err := json.Marshal(luaToGo(state.CheckAny(2)))
-		if err != nil {
-			state.RaiseError("encode stored value: %v", err)
-			return 0
-		}
-		owner := pluginOwner(plugin, scope)
-		_, err = m.DB.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value, updated_at)
-			VALUES(?,?,?,?,datetime('now')) ON CONFLICT(scope,plugin,key)
-			DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, scope, owner, key, string(raw))
-		if err != nil {
-			state.RaiseError("store value: %v", err)
-		}
-		return 0
-	}
-}
-
-func (m *Manager) luaDelete(plugin, scope string) lua.LGFunction {
-	return func(state *lua.LState) int {
-		key := state.CheckString(1)
-		_, err := m.DB.Exec(`DELETE FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, scope, pluginOwner(plugin, scope), key)
-		if err != nil {
-			state.RaiseError("delete value: %v", err)
-		}
-		return 0
-	}
-}
-
-func pluginOwner(plugin, scope string) string {
-	if scope == "global" {
-		return ""
-	}
-	return plugin
-}
-
-func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
-	return func(state *lua.LState) int {
-		command := state.CheckString(1)
-		args := make([]string, 0, state.GetTop()-1)
-		for i := 2; i <= state.GetTop(); i++ {
-			args = append(args, state.CheckString(i))
-		}
-		cmd := exec.CommandContext(ctx, command, args...)
-		cmd.Dir = hook.dir
-		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
-		if isLifecycleEvent(hook.hook.Event) {
-			cmd.Stdout = io.Discard
-			stderr, err := runLifecycleCommand(ctx, cmd)
-			state.Push(lua.LString(stderr.String()))
-			if err != nil {
-				state.Push(lua.LString(err.Error()))
-			} else {
-				state.Push(lua.LString(""))
-			}
+			L.Push(lua.LString(""))
+			L.Push(lua.LString(err.Error()))
 			return 2
 		}
-		// Match command hooks: inherited pipes must not hold shutdown open.
-		cmd.WaitDelay = time.Second
-		output, err := cmd.CombinedOutput()
-		state.Push(lua.LString(string(output)))
-		if err != nil {
-			state.Push(lua.LString(err.Error()))
-		} else {
-			state.Push(lua.LString(""))
+		ctx := box.Context()
+		out := newHeadBuffer(maxOutputBytes)
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = p.dir
+		cmd.Env = env
+		cmd.Stdout = out
+		cmd.Stderr = out
+		text := runProgram(ctx, cmd)
+		if text == "" && out.overflow {
+			text = fmt.Sprintf("output exceeds %d bytes", maxOutputBytes)
 		}
+		L.Push(lua.LString(out.Bytes()))
+		L.Push(lua.LString(text))
 		return 2
 	}
 }
 
-func goToLua(state *lua.LState, value any) lua.LValue {
-	switch value := value.(type) {
-	case nil:
-		return lua.LNil
-	case bool:
-		return lua.LBool(value)
-	case string:
-		return lua.LString(value)
-	case float64:
-		return lua.LNumber(value)
-	case float32:
-		return lua.LNumber(value)
-	case int:
-		return lua.LNumber(value)
-	case int64:
-		return lua.LNumber(value)
-	case []any:
-		table := state.NewTable()
-		for _, item := range value {
-			table.Append(goToLua(state, item))
+func containsNUL(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0 {
+			return true
 		}
-		return table
-	case map[string]any:
-		table := state.NewTable()
-		for key, item := range value {
-			table.RawSetString(key, goToLua(state, item))
+	}
+	return false
+}
+
+// storeKey checks a key of omo.store_*.
+func storeKey(L *lua.LState) string {
+	key := L.CheckString(1)
+	if key == "" || len(key) > MaxStoreKeyBytes || !utf8.ValidString(key) {
+		L.RaiseError("a storage key is 1 to %d bytes of text", MaxStoreKeyBytes)
+	}
+	return key
+}
+
+// luaStoreGet is omo.store_get(key): the stored value or nil.
+func (m *Manager) luaStoreGet(plugin string) lua.LGFunction {
+	return func(L *lua.LState) int {
+		key := storeKey(L)
+		if m.o.DB == nil {
+			return fail(L, "storage is not available")
 		}
-		return table
-	default:
-		raw, err := json.Marshal(value)
+		raw, ok, err := db.PluginStoreGet(m.o.DB, plugin, key)
 		if err != nil {
-			return lua.LNil
+			return fail(L, "storage failed")
 		}
-		var normalized any
-		if json.Unmarshal(raw, &normalized) != nil {
-			return lua.LNil
+		if !ok {
+			L.Push(lua.LNil)
+			return 1
 		}
-		return goToLua(state, normalized)
+		v, err := luabox.DecodeJSON(raw, nil)
+		if err != nil {
+			return fail(L, "the stored value cannot be read")
+		}
+		lv, err := luabox.FromGo(L, v)
+		if err != nil {
+			return fail(L, "the stored value cannot be read")
+		}
+		L.Push(lv)
+		return 1
 	}
 }
 
-func luaToGo(value lua.LValue) any {
-	switch value := value.(type) {
-	case *lua.LNilType:
-		return nil
-	case lua.LBool:
-		return bool(value)
-	case lua.LString:
-		return string(value)
-	case lua.LNumber:
-		return float64(value)
-	case *lua.LTable:
-		array := make([]any, 0, value.Len())
-		isArray := true
-		count := 0
-		value.ForEach(func(key, item lua.LValue) {
-			count++
-			if number, ok := key.(lua.LNumber); !ok || int(number) != count {
-				isArray = false
-			}
-			array = append(array, luaToGo(item))
-		})
-		if isArray && count == value.Len() {
-			return array
+// luaStoreSet is omo.store_set(key, value): true, or nil and a phrase.
+// value is anything omo.json_encode takes, at most 64 KiB as JSON; a plugin
+// has at most 1000 keys.
+func (m *Manager) luaStoreSet(plugin string) lua.LGFunction {
+	return func(L *lua.LState) int {
+		key := storeKey(L)
+		v, err := luabox.ToGo(L.CheckAny(2))
+		if err != nil {
+			return fail(L, "the value cannot be stored")
 		}
-		object := map[string]any{}
-		value.ForEach(func(key, item lua.LValue) { object[key.String()] = luaToGo(item) })
-		return object
-	default:
-		return value.String()
+		raw, err := luabox.EncodeJSON(v)
+		if err != nil {
+			return fail(L, "the value cannot be stored")
+		}
+		if len(raw) > MaxStoreValueBytes {
+			return fail(L, fmt.Sprintf("the value exceeds %d bytes", MaxStoreValueBytes))
+		}
+		if m.o.DB == nil {
+			return fail(L, "storage is not available")
+		}
+		if err := db.PluginStoreSet(m.o.DB, plugin, key, raw, MaxStoreKeys); err != nil {
+			if errors.Is(err, db.ErrPluginStoreFull) {
+				return fail(L, fmt.Sprintf("the plugin stores at most %d keys", MaxStoreKeys))
+			}
+			return fail(L, "storage failed")
+		}
+		L.Push(lua.LTrue)
+		return 1
+	}
+}
+
+// luaStoreDelete is omo.store_delete(key): true, or nil and a phrase.
+func (m *Manager) luaStoreDelete(plugin string) lua.LGFunction {
+	return func(L *lua.LState) int {
+		key := storeKey(L)
+		if m.o.DB == nil {
+			return fail(L, "storage is not available")
+		}
+		if err := db.PluginStoreDelete(m.o.DB, plugin, key); err != nil {
+			return fail(L, "storage failed")
+		}
+		L.Push(lua.LTrue)
+		return 1
+	}
+}
+
+// luaStoreKeys is omo.store_keys(): the plugin's keys in order.
+func (m *Manager) luaStoreKeys(plugin string) lua.LGFunction {
+	return func(L *lua.LState) int {
+		if m.o.DB == nil {
+			return fail(L, "storage is not available")
+		}
+		keys, err := db.PluginStoreKeys(m.o.DB, plugin)
+		if err != nil {
+			return fail(L, "storage failed")
+		}
+		t := L.CreateTable(len(keys), 0)
+		for _, k := range keys {
+			t.Append(lua.LString(k))
+		}
+		L.Push(t)
+		return 1
 	}
 }

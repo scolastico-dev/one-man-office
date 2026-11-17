@@ -1,0 +1,216 @@
+{
+  "install-absent": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "install",
+    "file": "$HOME/.claude.json",
+    "commands": [
+      [
+        "claude",
+        "mcp",
+        "add-json",
+        "-s",
+        "user",
+        "omo",
+        "{\"args\":[\"mcp\",\"stdio\"],\"command\":\"$OMO\",\"env\":{\"OMO_HOME\":\"$OMO_HOME\"},\"type\":\"stdio\"}"
+      ]
+    ],
+    "before": null,
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      },
+      "type": "stdio"
+    },
+    "message": "A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "install-foreign": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "install",
+    "file": "$HOME/.claude.json",
+    "commands": [
+      [
+        "claude",
+        "mcp",
+        "remove",
+        "-s",
+        "user",
+        "omo"
+      ],
+      [
+        "claude",
+        "mcp",
+        "add-json",
+        "-s",
+        "user",
+        "omo",
+        "{\"args\":[\"mcp\",\"stdio\"],\"command\":\"$OMO\",\"env\":{\"OMO_HOME\":\"$OMO_HOME\"},\"type\":\"stdio\"}"
+      ]
+    ],
+    "before": {
+      "headers": {
+        "Authorization": "Bearer ***"
+      },
+      "type": "http",
+      "url": "https://omo.example.invalid/mcp"
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      },
+      "type": "stdio"
+    },
+    "message": "The file has an entry named omo that is not omo's bridge; it is replaced. A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "install-installed": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "install",
+    "file": "$HOME/.claude.json",
+    "commands": [],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "message": "omo is already installed in $HOME/.claude.json.",
+    "hash": ""
+  },
+  "install-outdated": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "install",
+    "file": "$HOME/.claude.json",
+    "commands": [
+      [
+        "claude",
+        "mcp",
+        "remove",
+        "-s",
+        "user",
+        "omo"
+      ],
+      [
+        "claude",
+        "mcp",
+        "add-json",
+        "-s",
+        "user",
+        "omo",
+        "{\"args\":[\"mcp\",\"stdio\"],\"command\":\"$OMO\",\"env\":{\"OMO_HOME\":\"$OMO_HOME\"},\"type\":\"stdio\"}"
+      ]
+    ],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "/usr/local/bin/omo"
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      },
+      "type": "stdio"
+    },
+    "message": "The file has omo's bridge with another path or environment; it is replaced. A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "remove-absent": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "remove",
+    "file": "$HOME/.claude.json",
+    "commands": [],
+    "before": null,
+    "after": null,
+    "message": "omo is not installed in $HOME/.claude.json.",
+    "hash": ""
+  },
+  "remove-installed": {
+    "target": {
+      "id": "claude",
+      "cli": "claude",
+      "account": "",
+      "config_path": "$HOME/.claude.json"
+    },
+    "action": "remove",
+    "file": "$HOME/.claude.json",
+    "commands": [
+      [
+        "claude",
+        "mcp",
+        "remove",
+        "-s",
+        "user",
+        "omo"
+      ]
+    ],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "after": null,
+    "message": "A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  }
+}

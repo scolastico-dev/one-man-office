@@ -1,0 +1,32 @@
+{
+  "name": "discord",
+  "version": "1.0.0",
+  "description": "Discord messages through a channel webhook when a ticket needs your attention or an agent asks you a question",
+  "default_config": {
+    "webhook_url": "",
+    "events": ["ticket_needs_attention", "question_asked"],
+    "mention": "",
+    "username": "omo",
+    "max_per_hour": 20
+  },
+  "hooks": [
+    {
+      "event": "ticket_needs_attention",
+      "lua": "discord.lua",
+      "timeout": "45s"
+    },
+    {
+      "event": "question_asked",
+      "lua": "discord.lua",
+      "timeout": "45s"
+    },
+    {
+      "event": "manual",
+      "name": "test",
+      "description": "Send a test message",
+      "scope": "global",
+      "lua": "discord.lua",
+      "timeout": "45s"
+    }
+  ]
+}

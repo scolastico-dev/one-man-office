@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="5" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: Questions and bugs. -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: A speech bubble. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <path class="icon" d="M8 8 H56 V44 H30 L18 56 V44 H8 Z"/><text class="icon-fill bold" x="32" y="37" font-size="28" text-anchor="middle">?</text>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">Questions and bugs</text>
+  <text class="muted" x="198" y="142" font-size="22">ask, report and suggest on GitHub</text>
+</svg>

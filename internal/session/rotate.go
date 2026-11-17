@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
-// rotatingWriter caps a session transcript. A CEO lives as long as the office
-// does, so without a bound its log grows without limit. On reaching maxBytes
+// rotatingWriter caps a session transcript. A CEO session can run for days,
+// so without a bound its log grows without limit. On reaching maxBytes
 // the live file becomes <name>.1 and older files shift up. keep < 0 retains
 // every segment; otherwise it bounds segments for this one live session.
 type rotatingWriter struct {
@@ -20,7 +22,7 @@ type rotatingWriter struct {
 }
 
 func newRotatingWriter(path string, maxSizeKB, keep int) (*rotatingWriter, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := homefile.Append(path, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +84,7 @@ func (w *rotatingWriter) rotate() error {
 			return err
 		}
 	}
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := homefile.Append(w.path, 0o600)
 	if err != nil {
 		return err
 	}

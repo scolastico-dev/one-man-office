@@ -18,9 +18,9 @@
 
 <!-- Note known risks, deferred work, or write “None”. -->
 
-## Jobs
+## Tickets
 
-<!-- Link related omo job IDs, or write “n/a”. -->
+<!-- Link related omo ticket numbers, or write “n/a”. -->
 
 ### Checklist
 

@@ -1,0 +1,25 @@
+/*
+ * The frame every settings view stands in (the real settings, the page that
+ * stands in for them when their code cannot be loaded, the sample): the
+ * section list and the page beside it, as one block in the middle of the room
+ * next to the sidebar. The list and the page keep their widths; the room that
+ * is left over is shared equally by both sides. Where the room is short the
+ * block starts at the edge, as before. The frame reaches over the padding of
+ * the main area, so what scrolls inside it has its scrollbar at the window's
+ * edge; the padding is given back inside (--settings-edge).
+ */
+.settings-frame {
+  --settings-edge: calc(var(--omo-space) * 4);
+  --settings-list: calc(var(--omo-space) * 64);
+  --settings-gap: calc(var(--omo-space) * 4);
+  --settings-page-max: 880px;
+  --settings-block: calc(var(--settings-list) + var(--settings-gap) + var(--settings-page-max));
+  margin-inline: calc(var(--settings-edge) * -1);
+  /* A percentage here is of the main area's content, which is two edges narrower than the frame. */
+  padding-left: max(var(--settings-edge), calc((100% - var(--settings-block)) / 2 + var(--settings-edge)));
+}
+@media (max-width: 767.98px) {
+  .settings-frame {
+    --settings-edge: calc(var(--omo-space) * 3);
+  }
+}

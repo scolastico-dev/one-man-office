@@ -1,43 +1,67 @@
 package plugins
 
 import (
-	"io"
+	"strings"
 	"unicode/utf8"
 )
 
+// Bounds of what a hook's run leaves behind.
 const (
-	maxLogRunes = 16 * 1024
-	// Command output needs a byte bound while it is still being captured. Lua
-	// messages retain the equivalent rune bound below the process boundary.
-	maxLogBytes = maxLogRunes
-	// Mutable command hooks return replacement event JSON on stdout. Keep that
-	// protocol useful for normal payloads without allowing a misbehaving command
-	// to retain arbitrary output in the office process.
-	maxCommandOutputBytes = 64 * 1024
-	maxManualResultBytes  = 64 * 1024
+	// maxOutputBytes bounds what omo keeps of a program's standard output
+	// (a command hook, omo.exec).
+	maxOutputBytes = 1 << 20
+	// maxStderrBytes bounds what omo keeps of a command hook's standard
+	// error: the tail, where the reason of a failure usually is.
+	maxStderrBytes = 64 << 10
+	// maxLogLineRunes bounds one line of a plugin's log.
+	maxLogLineRunes = 500
+	// maxLogLinesPerRun bounds the lines one run adds to the log.
+	maxLogLinesPerRun = 50
+	// maxMessageRunes bounds the answer of a manual action shown to the
+	// user.
+	maxMessageRunes = 1000
+	// maxErrorRunes bounds an error text kept for a plugin.
+	maxErrorRunes = 300
 )
 
-func boundedRuneTail(value string, limit int) string {
-	end := len(value)
-	start := end
-	for count := 0; start > 0 && count < limit; count++ {
-		_, size := utf8.DecodeLastRuneInString(value[:start])
-		start -= size
+// cutRunes cuts s to at most n characters, marking a cut with "…".
+func cutRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
 	}
-	if start > 0 {
-		return "…" + value[start:end]
+	count := 0
+	for i := range s {
+		if count == n-1 {
+			return s[:i] + "…"
+		}
+		count++
 	}
-	return value
+	return s
 }
 
+// splitLines splits text into its non-empty lines: at most
+// maxLogLinesPerRun of them (the last ones).
+func splitLines(text string) []string {
+	var out []string
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	if len(out) > maxLogLinesPerRun {
+		out = out[len(out)-maxLogLinesPerRun:]
+	}
+	return out
+}
+
+// tailBuffer keeps the last limit bytes written to it.
 type tailBuffer struct {
 	limit int
 	data  []byte
 }
 
-func newTailBuffer(limit int) *tailBuffer {
-	return &tailBuffer{limit: limit, data: make([]byte, 0, limit)}
-}
+func newTailBuffer(limit int) *tailBuffer { return &tailBuffer{limit: limit} }
 
 func (b *tailBuffer) Write(p []byte) (int, error) {
 	written := len(p)
@@ -46,8 +70,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 		return written, nil
 	}
 	if excess := len(b.data) + len(p) - b.limit; excess > 0 {
-		copy(b.data, b.data[excess:])
-		b.data = b.data[:len(b.data)-excess]
+		b.data = append(b.data[:0], b.data[excess:]...)
 	}
 	b.data = append(b.data, p...)
 	return written, nil
@@ -55,45 +78,24 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 
 func (b *tailBuffer) String() string { return string(b.data) }
 
-// boundedBuffer retains a prefix up to limit and continues accepting writes so
-// the child process cannot block on a full pipe. Overflow is reported to the
-// caller, which must reject the partial value rather than parse it.
-type boundedBuffer struct {
+// headBuffer keeps the first limit bytes written to it and accepts (and
+// drops) the rest, so a program never blocks on a full pipe.
+type headBuffer struct {
 	limit    int
 	data     []byte
 	overflow bool
 }
 
-func newBoundedBuffer(limit int) *boundedBuffer {
-	return &boundedBuffer{limit: limit, data: make([]byte, 0, limit)}
-}
+func newHeadBuffer(limit int) *headBuffer { return &headBuffer{limit: limit} }
 
-func (b *boundedBuffer) Write(p []byte) (int, error) {
+func (b *headBuffer) Write(p []byte) (int, error) {
 	written := len(p)
-	remaining := b.limit - len(b.data)
-	if remaining <= 0 {
-		if len(p) > 0 {
-			b.overflow = true
-		}
-		return written, nil
-	}
-	if len(p) > remaining {
-		b.data = append(b.data, p[:remaining]...)
+	if room := b.limit - len(b.data); len(p) > room {
+		p = p[:max(room, 0)]
 		b.overflow = true
-		return written, nil
 	}
 	b.data = append(b.data, p...)
 	return written, nil
 }
 
-func (b *boundedBuffer) Bytes() []byte { return b.data }
-
-func (b *boundedBuffer) Overflowed() bool { return b.overflow }
-
-func commandStdoutWriter(mutable bool) (*boundedBuffer, io.Writer) {
-	if !mutable {
-		return nil, io.Discard
-	}
-	output := newBoundedBuffer(maxCommandOutputBytes)
-	return output, output
-}
+func (b *headBuffer) Bytes() []byte { return b.data }

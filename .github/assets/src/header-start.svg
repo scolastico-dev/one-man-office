@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="3" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: Start using it. -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: Three board columns. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <path class="icon" d="M8 8 H22 V56 H8 Z M25 8 H39 V42 H25 Z M42 8 H56 V28 H42 Z"/>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">Start using it</text>
+  <text class="muted" x="198" y="142" font-size="22"><tspan class="accent">$</tspan> omo  <tspan class="faint"># then open the address it prints</tspan></text>
+</svg>

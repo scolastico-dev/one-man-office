@@ -1,37 +1,33 @@
 {
   "name": "pushover",
-  "version": "1.0.0",
-  "description": "Optional Pushover notifications for stable unread office mail",
+  "version": "2.1.0",
+  "description": "Pushover notifications when a ticket needs your attention or an agent asks you a question",
   "default_config": {
     "user_key": "",
     "app_token": "",
     "api_url": "https://api.pushover.net/1/messages.json",
-    "check_interval": "1m",
-    "stable_window": "5m",
     "priority": 0,
-    "sound": ""
+    "sound": "",
+    "max_per_hour": 20
   },
   "hooks": [
     {
-      "event": "cron",
-      "interval": "1m",
-      "interval_config": "check_interval",
-      "lua": "cron.lua",
-      "timeout": "30s"
-    },
-    {
-      "event": "manual",
-      "name": "notify",
-      "description": "Send an immediate Pushover notification to the user",
-      "roles": ["user", "ceo"],
-      "manual_args": true,
+      "event": "ticket_needs_attention",
       "lua": "notify.lua",
       "timeout": "30s"
     },
     {
-      "event": "prompt_render",
-      "lua": "prompt.lua",
-      "timeout": "5s"
+      "event": "question_asked",
+      "lua": "notify.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "test",
+      "description": "Send a test notification",
+      "scope": "global",
+      "lua": "test.lua",
+      "timeout": "30s"
     }
   ]
 }

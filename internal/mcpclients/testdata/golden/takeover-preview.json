@@ -1,0 +1,1040 @@
+{
+  "candidates": [
+    {
+      "key": "k6f63e1f3adac3f13",
+      "name": "search-index",
+      "server": {
+        "name": "search-index",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "search-mcp",
+        "args": [
+          "--index",
+          "/srv/index"
+        ],
+        "env": {
+          "SEARCH_TOKEN": "***"
+        },
+        "cwd": "",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "Search Index"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k07fccbf3708c4d1b",
+      "name": "calendar",
+      "server": {
+        "name": "calendar",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://calendar.example.invalid/mcp",
+        "headers": null,
+        "headers_command": null,
+        "auth": "oauth",
+        "oauth": {
+          "client_id": "claude-calendar-client",
+          "client_secret": "",
+          "scopes": [
+            "calendar.read",
+            "calendar.write"
+          ],
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "calendar"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "needs login: click Connect in omo after the take-over; the program's own sign-in is not moved"
+      ],
+      "needs_login": true,
+      "conflict": ""
+    },
+    {
+      "key": "k0e2954d44d122ec1",
+      "name": "docs",
+      "server": {
+        "name": "docs",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://docs.example.invalid/mcp",
+        "headers": null,
+        "headers_command": null,
+        "auth": "oauth",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "docs"
+        }
+      ],
+      "notes": [
+        "the program's entry has no headers; omo assumes the server signs in with OAuth (set authorization to none if it needs no sign-in)",
+        "available without an omo session too (global), as it was in the program",
+        "needs login: click Connect in omo after the take-over; the program's own sign-in is not moved"
+      ],
+      "needs_login": true,
+      "conflict": ""
+    },
+    {
+      "key": "k54d7da8662b9c291",
+      "name": "events-claude",
+      "server": {
+        "name": "events-claude",
+        "enabled": true,
+        "description": "",
+        "transport": "sse",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://events.example.invalid/sse",
+        "headers": {
+          "Authorization": "Bearer ***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "events"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k7037dbc648b6a762",
+      "name": "filesystem",
+      "server": {
+        "name": "filesystem",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/srv/notes"
+        ],
+        "env": {
+          "LOG_LEVEL": "***"
+        },
+        "cwd": "",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude, codex, agy"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "filesystem"
+        },
+        {
+          "target": "codex",
+          "entry_name": "filesystem"
+        },
+        {
+          "target": "agy",
+          "entry_name": "filesystem"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k5030a5b15d0f2643",
+      "name": "future",
+      "server": {
+        "name": "future",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "future-mcp",
+        "args": [],
+        "env": null,
+        "cwd": "",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "future"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k6dd5368bdd90794b",
+      "name": "rotating",
+      "server": {
+        "name": "rotating",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://rotating.example.invalid/mcp",
+        "headers": null,
+        "headers_command": [
+          "sh",
+          "-c",
+          "/usr/local/bin/print-rotating-headers"
+        ],
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "rotating"
+        }
+      ],
+      "notes": [
+        "the headers helper runs through sh -c",
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "kc853c7c9f5489409",
+      "name": "tracker",
+      "server": {
+        "name": "tracker",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://tracker.example.invalid/mcp",
+        "headers": {
+          "Authorization": "Bearer ***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "tracker"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k1a41d285f76b0fd4",
+      "name": "wiki",
+      "server": {
+        "name": "wiki",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://wiki.example.invalid/mcp/?team=***",
+        "headers": {
+          "X-Api-Key": "${WIKI_API_KEY}"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "claude"
+      },
+      "sources": [
+        {
+          "target": "claude",
+          "entry_name": "wiki"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "WIKI_API_KEY is set in omo's environment"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k699523f8cf490c6a",
+      "name": "work-notes",
+      "server": {
+        "name": "work-notes",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "notes-mcp",
+        "args": null,
+        "env": null,
+        "cwd": "/srv/notes",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "Work_Notes"
+        }
+      ],
+      "notes": [
+        "codex treats it as required; omo has no such switch",
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": "omo already has this server as notes"
+    },
+    {
+      "key": "kb37a07711295a63f",
+      "name": "calendar-work",
+      "server": {
+        "name": "calendar-work",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://calendar.example.invalid/mcp",
+        "headers": null,
+        "headers_command": null,
+        "auth": "oauth",
+        "oauth": {
+          "client_id": "codex-calendar-client",
+          "client_secret": "***",
+          "scopes": [
+            "calendar.read"
+          ],
+          "resource": "https://calendar.example.invalid"
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "calendar_work"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "needs login: click Connect in omo after the take-over; the program's own sign-in is not moved",
+        "another program has the same server with other values; it is offered separately"
+      ],
+      "needs_login": true,
+      "conflict": ""
+    },
+    {
+      "key": "kf7fd624b1d369b81",
+      "name": "docs-codex",
+      "server": {
+        "name": "docs-codex",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://docs2.example.invalid/mcp",
+        "headers": {
+          "X-Docs": "***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "docs"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k9eec6ca19ee8b29a",
+      "name": "issues",
+      "server": {
+        "name": "issues",
+        "enabled": false,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://issues.example.invalid/mcp",
+        "headers": {
+          "X-Api-Key": "${ISSUES_API_KEY}",
+          "X-Team": "***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": [
+            "delete_issue"
+          ]
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "issues"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "ISSUES_API_KEY is not set in omo's environment; enter the value in the server's settings"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k4798a04bbc70fcd2",
+      "name": "search",
+      "server": {
+        "name": "search",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "search-mcp",
+        "args": [
+          "--index",
+          "/srv/index"
+        ],
+        "env": {
+          "SEARCH_REGION": "${SEARCH_REGION}",
+          "SEARCH_TOKEN": "***"
+        },
+        "cwd": "",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": [
+            "query",
+            "suggest"
+          ],
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "20s",
+          "call": "2m"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "search"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "SEARCH_REGION is not set in omo's environment; enter the value in the server's settings",
+        "another program has the same server with other values; it is offered separately"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k72fcd6df7b627712",
+      "name": "tracker-codex",
+      "server": {
+        "name": "tracker-codex",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://tracker.example.invalid/mcp/",
+        "headers": {
+          "Authorization": "Bearer ${TRACKER_TOKEN}"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex"
+      },
+      "sources": [
+        {
+          "target": "codex",
+          "entry_name": "tracker"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "TRACKER_TOKEN is not set in omo's environment; enter the value in the server's settings",
+        "another program has the same server with other values; it is offered separately"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k0698ec8d6a55da18",
+      "name": "legacy",
+      "server": {
+        "name": "legacy",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://legacy.example.invalid/mcp",
+        "headers": {
+          "Authorization": "Bearer ***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "codex@$HOME/accounts/old-codex"
+      },
+      "sources": [
+        {
+          "target": "codex-\u003chash of the account\u003e",
+          "entry_name": "legacy"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "ka0f01a03af1ccaca",
+      "name": "slowstart",
+      "server": {
+        "name": "slowstart",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "slow-mcp",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "45s",
+          "call": "0s"
+        },
+        "source": "codex@$HOME/accounts/old-codex"
+      },
+      "sources": [
+        {
+          "target": "codex-\u003chash of the account\u003e",
+          "entry_name": "slowstart"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k924682f509ef479b",
+      "name": "boards",
+      "server": {
+        "name": "boards",
+        "enabled": false,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://boards.example.invalid/mcp",
+        "headers": {
+          "Authorization": "Bearer ***"
+        },
+        "headers_command": null,
+        "auth": "headers",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": [
+            "list_boards"
+          ],
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "5m"
+        },
+        "source": "agy"
+      },
+      "sources": [
+        {
+          "target": "agy",
+          "entry_name": "boards"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k83f9383e0166822f",
+      "name": "local",
+      "server": {
+        "name": "local",
+        "enabled": true,
+        "description": "",
+        "transport": "stdio",
+        "command": "local-mcp",
+        "args": null,
+        "env": null,
+        "cwd": "/srv/local",
+        "instances": "per_session",
+        "url": "",
+        "headers": null,
+        "headers_command": null,
+        "auth": "",
+        "oauth": {
+          "client_id": "",
+          "client_secret": "",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": [
+            "wipe"
+          ]
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "agy"
+      },
+      "sources": [
+        {
+          "target": "agy",
+          "entry_name": "local"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program"
+      ],
+      "needs_login": false,
+      "conflict": ""
+    },
+    {
+      "key": "k864fdd869d5bdb42",
+      "name": "maps",
+      "server": {
+        "name": "maps",
+        "enabled": true,
+        "description": "",
+        "transport": "http",
+        "command": "",
+        "args": null,
+        "env": null,
+        "cwd": "",
+        "instances": "",
+        "url": "https://maps.example.invalid/mcp",
+        "headers": null,
+        "headers_command": null,
+        "auth": "oauth",
+        "oauth": {
+          "client_id": "agy-maps-client",
+          "client_secret": "***",
+          "scopes": null,
+          "resource": ""
+        },
+        "roles": null,
+        "global": true,
+        "tools": {
+          "allow": null,
+          "deny": null
+        },
+        "timeouts": {
+          "startup": "0s",
+          "call": "0s"
+        },
+        "source": "agy"
+      },
+      "sources": [
+        {
+          "target": "agy",
+          "entry_name": "maps"
+        }
+      ],
+      "notes": [
+        "available without an omo session too (global), as it was in the program",
+        "needs login: click Connect in omo after the take-over; the program's own sign-in is not moved"
+      ],
+      "needs_login": true,
+      "conflict": ""
+    }
+  ],
+  "stays": [
+    {
+      "target": "claude",
+      "entry_name": "chat",
+      "reason": "it uses the WebSocket transport, which omo does not relay"
+    },
+    {
+      "target": "claude",
+      "entry_name": "app-db",
+      "reason": "it belongs to the project /home/someone/src/app (Claude's local scope) and stays there; omo has no per-project servers"
+    },
+    {
+      "target": "codex",
+      "entry_name": "-x",
+      "reason": "the name starts with '-'; remove or rename it in the program by hand"
+    },
+    {
+      "target": "agy",
+      "entry_name": "drive",
+      "reason": "it signs in with Google credentials (authProviderType), which omo cannot take over"
+    }
+  ]
+}

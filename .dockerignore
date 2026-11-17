@@ -7,3 +7,8 @@ compose.yml
 docs
 examples
 *.md
+web/node_modules
+web/dist
+web/test-results
+web/playwright-report
+web/screenshots

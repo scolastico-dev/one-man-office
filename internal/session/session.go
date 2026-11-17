@@ -4,6 +4,7 @@
 package session
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/hinshun/vt10x"
+
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 type Options struct {
@@ -28,14 +31,26 @@ type Options struct {
 	NiceIncrement int
 
 	// LogMaxSizeKB caps the live transcript before it rotates (0 = never).
-	// LogKeep bounds live rotation segments; -1 retains all segments. Office
-	// inactive-session retention is applied separately by the supervisor.
+	// LogKeep bounds live rotation segments; -1 retains all segments.
 	LogMaxSizeKB int
 	LogKeep      int
 
 	// OnLogLine receives each deduplicated transcript line. It must return
 	// quickly; session output processing calls it synchronously.
 	OnLogLine func(string)
+
+	// OnOutput receives every raw chunk the process writes to its terminal,
+	// in order, before terminal queries are answered. The slice is reused
+	// after the call returns, so a consumer that keeps it must copy it. It
+	// is called synchronously from the output loop and must never block.
+	OnOutput func([]byte)
+
+	// Secret, when set, is replaced by RedactedPlaceholder in everything
+	// the session hands out or stores: OnOutput, the screen, the transcript
+	// and TailLog. Only the process's own terminal still shows it. Output
+	// that could be the start of the secret is held back until the next
+	// read shows otherwise.
+	Secret string
 }
 
 type Session struct {
@@ -49,7 +64,7 @@ type Session struct {
 	lastLog  time.Time
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
-	inputMu  sync.Mutex // keeps injected prompts, mail notices, and TUI input from interleaving
+	inputMu  sync.Mutex // keeps injected prompts and terminal input from interleaving
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error
@@ -88,18 +103,32 @@ func Start(o Options) (*Session, error) {
 	return s, nil
 }
 
+// show passes redacted output to OnOutput and the virtual screen.
+func (s *Session) show(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	if s.opts.OnOutput != nil {
+		s.opts.OnOutput(data)
+	}
+	s.mu.Lock()
+	s.term.Write(data)
+	s.mu.Unlock()
+}
+
 func (s *Session) pump() {
 	buf := make([]byte, 4096)
 	var carry []byte // trailing bytes of a query split across two reads
+	redact := newRedactor(s.opts.Secret)
 	for {
 		n, err := s.proc.Read(buf)
 		if n > 0 {
-			s.mu.Lock()
-			s.term.Write(buf[:n])
-			s.mu.Unlock()
+			s.show(redact.feed(buf[:n]))
 			if s.logSnapshotDue() {
 				s.writeLogSnapshot()
 			}
+			// Queries are answered from the raw output: the process must
+			// get the replies its own terminal would give.
 			carry = s.answerQueries(append(carry, buf[:n]...))
 			s.notify()
 		}
@@ -107,6 +136,7 @@ func (s *Session) pump() {
 			break
 		}
 	}
+	s.show(redact.flush())
 	s.writeLogSnapshot()
 	err := s.proc.Wait()
 	s.mu.Lock()
@@ -173,15 +203,6 @@ func (s *Session) SendSubmit() error {
 	return s.sendText("\r")
 }
 
-// SendTextAndKeys keeps typed text and following control keys in distinct PTY
-// writes. Full-screen CLIs can otherwise interpret the combined burst as a
-// paste and insert Enter instead of submitting the text.
-func (s *Session) SendTextAndKeys(text, keys string) error {
-	s.inputMu.Lock()
-	defer s.inputMu.Unlock()
-	return s.sendTextAndKeys(text, keys)
-}
-
 // SendTextAndKeysIf writes only when ready returns true after this session
 // owns the input stream. This closes the race between an external readiness
 // check and a competing terminal writer acquiring inputMu. The callback must
@@ -215,8 +236,6 @@ func (s *Session) sendText(text string) error {
 	return err
 }
 
-func (s *Session) SendLine(text string) error { return s.SendText(text + "\r") }
-
 // SubmitDelay separates typed text from its Enter. Full-screen CLIs (Claude
 // Code among them) treat a fast burst of bytes as a *paste*, in which a
 // trailing CR inserts a literal newline instead of submitting. Sending the
@@ -233,6 +252,34 @@ func (s *Session) SendPrompt(text string) error {
 	time.Sleep(SubmitDelay)
 	return s.sendText("\r")
 }
+
+// SendPromptShown types text and presses Enter once shown reports true or
+// maxWait passed, but never sooner than SubmitDelay after the text, all
+// while owning the input, so no other writer gets between the text and its
+// Enter. shown is polled every ShownPoll; it may read Screen but must not
+// call another input method. The result tells whether shown reported true.
+func (s *Session) SendPromptShown(text string, shown func() bool, maxWait time.Duration) (bool, error) {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if err := s.sendText(text); err != nil {
+		return false, err
+	}
+	time.Sleep(SubmitDelay)
+	deadline := time.Now().Add(max(maxWait-SubmitDelay, 0))
+	seen := shown()
+	for !seen && time.Now().Before(deadline) {
+		select {
+		case <-s.done:
+			return false, nil
+		case <-time.After(ShownPoll):
+		}
+		seen = shown()
+	}
+	return seen, s.sendText("\r")
+}
+
+// ShownPoll is how often SendPromptShown looks at the screen.
+const ShownPoll = 50 * time.Millisecond
 
 func (s *Session) Resize(rows, cols uint16) error {
 	if err := s.proc.Resize(rows, cols); err != nil {
@@ -265,6 +312,9 @@ func (s *Session) writeLogSnapshot() {
 	now := time.Now()
 	changed := s.screenLogDelta(screen, now)
 	if len(changed) > 0 {
+		for i, line := range changed {
+			changed[i] = redactString(line, s.opts.Secret)
+		}
 		_, _ = s.logOut.Write([]byte(strings.Join(changed, "\n") + "\n"))
 	}
 	s.lastLog = now
@@ -359,24 +409,88 @@ func normalizedLogKey(line string) string {
 	return line
 }
 
+// Done is closed once the terminal reached end of file and the output was
+// processed. A child that keeps the terminal open keeps Done open after the
+// main process exited; Kill ends such children.
 func (s *Session) Done() <-chan struct{} { return s.done }
 
+// Exited is closed once the main process has exited, whether or not
+// children it started still hold the terminal.
+func (s *Session) Exited() <-chan struct{} { return s.proc.Exited() }
+
+// Pid is the main process's id; on Unix it is also its process group id.
+func (s *Session) Pid() int { return s.proc.Pid() }
+
+// ExitErr is the main process's exit status (nil for exit 0) once Exited
+// is closed; before that it is nil.
 func (s *Session) ExitErr() error {
+	select {
+	case <-s.proc.Exited():
+		return s.proc.Wait()
+	default:
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.exitErr
 }
 
-// TailLog returns the last n lines of the readable session transcript.
+// TailLog returns the last n lines of the readable session transcript. Right
+// after a rotation the live file holds few lines; the rest come from the
+// newest rotated segment.
 func (s *Session) TailLog(n int) ([]string, error) {
 	// A quiet full-screen process may not produce another PTY read after its
 	// latest redraw. Capture its current screen before serving a live tail.
 	s.writeLogSnapshot()
-	raw, err := os.ReadFile(s.opts.LogPath)
+	if n <= 0 {
+		return nil, nil
+	}
+	lines, err := tailFileLines(s.opts.LogPath, n)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) < n {
+		older, err := tailFileLines(s.opts.LogPath+".1", n-len(lines))
+		if err == nil {
+			lines = append(older, lines...)
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	for i, line := range lines {
+		lines[i] = redactString(line, s.opts.Secret)
+	}
+	return lines, nil
+}
+
+// tailFileLines returns up to the last n lines of a file, reading it from
+// the end in blocks.
+func tailFileLines(path string, n int) ([]string, error) {
+	f, err := homefile.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	const block = 64 << 10
+	var data []byte
+	offset := info.Size()
+	for offset > 0 && bytes.Count(bytes.TrimRight(data, "\n"), []byte{'\n'}) < n {
+		size := min(int64(block), offset)
+		offset -= size
+		chunk := make([]byte, size)
+		if _, err := f.ReadAt(chunk, offset); err != nil {
+			return nil, err
+		}
+		data = append(chunk, data...)
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	lines := strings.Split(text, "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}

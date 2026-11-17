@@ -1,0 +1,1 @@
+This is timeout {{.Timeouts}} in a row. If you have handed in your work or given your verdict, nothing is wrong: wait again. Otherwise find out yourself why nothing happens: read your ticket and its comments again, look at the tickets yours depends on (omo ai ticket show N), and if you are blocked, ask your supervisor (omo ai ask {{.Ticket}} "...").

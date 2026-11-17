@@ -1,78 +1,50 @@
 # Pushover plugin
 
-This optional official Lua plugin, installed from Git, sends a Pushover notification when unread office mail
-has remained unchanged for the configured stability window. It is a reference
-for a scheduled Lua hook, a role-gated manual action, and a mutable
-`prompt_render` hook. It is not embedded or installed automatically.
+Sends a [Pushover](https://pushover.net/) notification to your phone when
 
-## Install
+- a ticket needs your attention (`ticket_needs_attention`), or
+- an agent asks you a question (`question_asked` with the question addressed
+  to the user; questions to other roles send nothing).
 
-Install it for the current office:
+It also has a global action, "Send a test notification".
 
-```bash
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release
-```
+It is an official plugin of omo's list: install it on the Plugins page under
+"Available plugins". It installs from the `release` branch of omo's
+repository, folder `plugins/pushover`; "Update" fetches that branch again.
 
-Or install it globally for all offices:
+## Configuration
 
-```bash
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release --global
-```
+| Key | Meaning |
+|---|---|
+| `user_key` | Your Pushover user key. Required. |
+| `app_token` | The token of a Pushover application you created. Required. |
+| `api_url` | Where messages go. Default `https://api.pushover.net/1/messages.json`. |
+| `priority` | Pushover priority, `-2` to `2`. Default `0`. |
+| `sound` | A Pushover sound name. Empty: your default sound. |
+| `max_per_hour` | At most this many notifications per hour. Default `20`. |
 
-Enable it with the required credentials:
+The configuration is stored as plain values in the plugin's settings file.
+omo removes configuration values from the plugin's log and error texts.
 
-```yaml
-plugins:
-  installed:
-    pushover:
-      enabled: true
-      config:
-        user_key: "your-pushover-user-key"
-        app_token: "your-pushover-application-token"
-```
+## What a notification says
 
-`user_key` and `app_token` are required. The plugin also supports its manifest
-defaults for `api_url`, `check_interval`, `stable_window`, `priority`, and
-`sound`; restart the office after changing plugin configuration.
+The title is "omo: a ticket needs your attention" or "omo: a question for
+you". The message is `#<number> <ticket title>: <attention text or question>`,
+cut to Pushover's limit of 1,024 characters, and the notification links to the
+ticket on the board. Titles and texts are sent as they were written; nothing in
+them is interpreted.
 
-The cron hook uses `interval_config: "check_interval"` with a `1m` fallback.
-The `notify` action accepts callers with the `user` or `ceo` role and requires
-one message argument plus an optional title:
+## Hourly cap
 
-```text
-omo plugin trigger pushover notify -- "The deployment needs a decision"
-omo plugin trigger pushover notify -- "The deployment needs a decision" "Deployment blocker"
-```
+At most `max_per_hour` notifications go out per hour, counted from the first
+one of the hour. The one after that is a notice, "further notifications are
+held back until <time>", and nothing else is sent until the hour is over. The
+first notification of the next hour writes to the plugin's log how many were
+held back. The test action is not counted.
 
-The action runs immediately. Its title starts with `omo user` or `omo CEO`,
-followed by the optional title. Messages are limited to 1024 UTF-8 characters
-and titles to 250 UTF-8 characters.
+## Failures
 
-## Inbox cycle
-
-Each cron tick snapshots the unread message IDs as a deterministic set. An
-empty inbox clears the cycle. The first nonempty snapshot starts the stability
-window without sending. Any ID change before notification restarts the full
-window. When the set stays unchanged through `stable_window`, one notification
-is attempted; the cycle is marked notified only after a 2xx response.
-
-After a successful notification, changes while the inbox remains nonempty do
-not produce more notifications. Only an empty inbox resets the cycle and
-allows the next nonempty set to notify.
-
-The body begins with the unread count and office path, followed by at most five
-`from <sender>: <subject>` lines. A failed request remains eligible for a later
-retry while the set stays stable. Non-2xx responses log only their status and a
-parsed response `errors` array, or `errors unavailable` when it cannot be
-safely parsed.
-
-## Secret hygiene
-
-Credentials are sent only as the Pushover form's `token` and `user` fields.
-They are never included in logs, durable event details, Lua errors, titles, or
-prompt text. Missing credentials produce one fixed cron notice per office
-startup; the manual action returns a fixed sanitized error.
-
-When the plugin is installed, the CEO prompt includes a note pointing to the
-manual trigger for blockers and decisions that need the user. Other roles do
-not receive that note.
+A request that fails (no connection, a timeout, an answer other than 2xx) is
+written to the plugin's log with the reason or the status code. The plugin
+does not retry and does not fail the event; the next event tries again. The
+test action shows the outcome as its answer.

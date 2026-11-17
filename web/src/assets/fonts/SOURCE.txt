@@ -1,0 +1,22 @@
+JetBrains Mono 2.304 (font version 2.19923)
+
+Files in this folder, unmodified from the official release:
+
+  JetBrainsMono-Regular.woff2  sha256 a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2
+  JetBrainsMono-Bold.woff2     sha256 c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2
+  JetBrainsMono-Italic.woff2   sha256 cb6a1b246318ed3885d7dffa14a2609297fe80e9b8e500bea33b52fa312a36a4
+  OFL.txt                      sha256 30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad
+
+Source: release asset JetBrainsMono-2.304.zip
+  https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+  sha256 6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf
+  paths in the archive: fonts/webfonts/JetBrainsMono-{Regular,Bold,Italic}.woff2, OFL.txt
+
+Cross-checked byte for byte against the same paths in the upstream
+repository at tag v2.304 (https://github.com/JetBrains/JetBrainsMono).
+
+The webfont files contain the full character set of the release (Latin,
+Latin Extended, Greek, Cyrillic).
+
+Licence: SIL Open Font License 1.1, see OFL.txt. The licence file is also
+copied into the build output next to the font files.

@@ -1,0 +1,200 @@
+{
+  "install-absent": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "install",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [
+      [
+        "agy",
+        "mcp",
+        "add",
+        "-e",
+        "OMO_HOME=$OMO_HOME",
+        "omo",
+        "$OMO",
+        "mcp",
+        "stdio"
+      ]
+    ],
+    "before": null,
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "message": "A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "install-foreign": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "install",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [
+      [
+        "agy",
+        "mcp",
+        "add",
+        "-e",
+        "OMO_HOME=$OMO_HOME",
+        "omo",
+        "$OMO",
+        "mcp",
+        "stdio"
+      ]
+    ],
+    "before": {
+      "headers": {
+        "Authorization": "Bearer ***"
+      },
+      "url": "https://omo.example.invalid/mcp"
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "message": "The file has an entry named omo that is not omo's bridge; it is replaced. A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "install-installed": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "install",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "message": "omo is already installed in $HOME/.gemini/config/mcp_config.json.",
+    "hash": ""
+  },
+  "install-outdated": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "install",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [
+      [
+        "agy",
+        "mcp",
+        "add",
+        "-e",
+        "OMO_HOME=$OMO_HOME",
+        "omo",
+        "$OMO",
+        "mcp",
+        "stdio"
+      ]
+    ],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "/usr/local/bin/omo"
+    },
+    "after": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "message": "The file has omo's bridge with another path or environment; it is replaced. A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  },
+  "remove-absent": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "remove",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [],
+    "before": null,
+    "after": null,
+    "message": "omo is not installed in $HOME/.gemini/config/mcp_config.json.",
+    "hash": ""
+  },
+  "remove-installed": {
+    "target": {
+      "id": "agy",
+      "cli": "agy",
+      "account": "",
+      "config_path": "$HOME/.gemini/config/mcp_config.json"
+    },
+    "action": "remove",
+    "file": "$HOME/.gemini/config/mcp_config.json",
+    "commands": [
+      [
+        "agy",
+        "mcp",
+        "remove",
+        "omo"
+      ]
+    ],
+    "before": {
+      "args": [
+        "mcp",
+        "stdio"
+      ],
+      "command": "$OMO",
+      "env": {
+        "OMO_HOME": "$OMO_HOME"
+      }
+    },
+    "after": null,
+    "message": "A copy of the file is saved in omo's backups first.",
+    "hash": ""
+  }
+}

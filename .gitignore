@@ -1,6 +1,11 @@
 bin/
-.omo/
 docs/superpowers/
-tmp-demo/
-tmp-demo-repo/
 docker-data/
+web/node_modules/
+web/dist/*
+web/third-party-notices.txt
+!web/dist/.gitkeep
+web/test-results/
+web/playwright-report/
+web/screenshots/
+web/e2e/.bin/

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -137,5 +138,100 @@ func TestPluginRuntimeStateTracksLastHook(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].State != "running" || rows[0].LastEvent != "cron" || !rows[0].LastRunAt.Equal(now) {
 		t.Fatalf("plugin runtime = %+v", rows)
+	}
+}
+
+func TestPluginLogTailIsTheNewestLines(t *testing.T) {
+	d := open(t)
+	if err := SyncPluginRuntimes(d, []PluginRuntime{{Name: "p", State: "ready"}, {Name: "q", State: "ready"}}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
+	for _, line := range []string{"one", "two", "three", "four"} {
+		if err := AppendPluginRuntimeLog(d, "p", line, at, 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := AppendPluginRuntimeLog(d, "q", "other", at, 10); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := PluginLogTail(d, "p", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].Message != "three" || logs[1].Message != "four" || !logs[0].CreatedAt.Equal(at) {
+		t.Fatalf("tail = %+v", logs)
+	}
+	if logs, err := PluginLogTail(d, "none", 5); err != nil || logs == nil || len(logs) != 0 {
+		t.Fatalf("tail of a plugin without log = %#v, %v", logs, err)
+	}
+}
+
+func TestPluginStoreIsPerPluginAndBounded(t *testing.T) {
+	d := open(t)
+	if err := PluginStoreSet(d, "a", "k", `"a"`, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := PluginStoreSet(d, "b", "k", `"b"`, 2); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := PluginStoreGet(d, "a", "k"); err != nil || !ok || v != `"a"` {
+		t.Fatalf("a/k = %q %v %v", v, ok, err)
+	}
+	if _, ok, err := PluginStoreGet(d, "a", "missing"); err != nil || ok {
+		t.Fatalf("a/missing = %v %v", ok, err)
+	}
+	if err := PluginStoreSet(d, "a", "k2", `1`, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := PluginStoreSet(d, "a", "k3", `1`, 2); !errors.Is(err, ErrPluginStoreFull) {
+		t.Fatalf("third key = %v", err)
+	}
+	if err := PluginStoreSet(d, "a", "k", `"changed"`, 2); err != nil {
+		t.Fatalf("overwriting at the limit = %v", err)
+	}
+	keys, err := PluginStoreKeys(d, "a")
+	if err != nil || !slices.Equal(keys, []string{"k", "k2"}) {
+		t.Fatalf("keys = %v %v", keys, err)
+	}
+	if err := PluginStoreDelete(d, "a", "k2"); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _ := PluginStoreKeys(d, "a"); !slices.Equal(keys, []string{"k"}) {
+		t.Fatalf("keys after delete = %v", keys)
+	}
+	if v, _, _ := PluginStoreGet(d, "b", "k"); v != `"b"` {
+		t.Fatalf("b/k = %q", v)
+	}
+}
+
+func TestDeletePluginData(t *testing.T) {
+	d := open(t)
+	if err := SyncPluginRuntimes(d, []PluginRuntime{{Name: "a", State: "ready"}, {Name: "b", State: "ready"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := AppendPluginRuntimeLog(d, name, "line", time.Now(), 10); err != nil {
+			t.Fatal(err)
+		}
+		if err := PluginStoreSet(d, name, "k", "1", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := DeletePluginData(d, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _ := PluginStoreKeys(d, "a"); len(keys) != 0 {
+		t.Fatalf("a keeps keys %v", keys)
+	}
+	if logs, _ := PluginLogs(d, "a"); len(logs) != 0 {
+		t.Fatalf("a keeps its log %v", logs)
+	}
+	rows, _ := PluginRuntimes(d)
+	if len(rows) != 1 || rows[0].Name != "b" {
+		t.Fatalf("runtimes = %+v", rows)
+	}
+	if keys, _ := PluginStoreKeys(d, "b"); len(keys) != 1 {
+		t.Fatalf("b lost its keys")
 	}
 }

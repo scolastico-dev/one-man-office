@@ -1,844 +1,654 @@
-// Package pluginmanager installs and refreshes Git-backed office plugins.
+// Package pluginmanager installs, updates and removes the plugins the user
+// chose, each from a git repository, and reads the plugin list omo provides
+// (catalog.go).
+//
+// A plugin's installed tree is Root/<name> (Root is <home>/plugins, next to
+// the settings files plugins/<name>.yaml). Install is also the update: it
+// builds the new tree in a staging folder, checks it, and only then puts it
+// in place of the old one, so a failed install or update leaves nothing
+// behind and never touches a working install.
+//
+// A plugin is code that runs as the user. This package never decides that
+// one is installed: its callers (the user's routes) do. What it guarantees
+// is that a source cannot turn the install itself into command execution or
+// into files outside the plugin's folder:
+//   - repositories are fetched only through gitops.FetchSource (no hooks,
+//     filters, submodules or links, bounded in size and time, credentials
+//     never in a message), into Root/.cache/<name>, which is removed after
+//     every install;
+//   - subpath selects a folder inside the checkout: relative, no "..", no
+//     ".git", every element a real folder (no link);
+//   - the copy takes folders and regular files only, read through homefile
+//     (no link is followed), skips .git and is bounded in files and bytes;
+//   - the manifest is read with the runtime's plugins.ReadManifest and every
+//     Lua file it names must be a regular file that parses, before anything
+//     is put in place.
+//
+// Nothing here runs at server start; nothing is fetched except by Install.
 package pluginmanager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
+	"io"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
-	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
+	"github.com/yuin/gopher-lua/parse"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
-const rootDir = ".omo/plugins"
-
-var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-type Result struct {
-	Name     string
-	Previous string
-	Revision string
-	Changed  bool
-	branch   string
+// Options are where plugins are installed and the git runner that fetches
+// them.
+type Options struct {
+	// Root is the plugins folder (<home>/plugins), an absolute path.
+	Root string
+	// Git fetches repository sources.
+	Git *gitops.Git
 }
 
-// Plan checks remote revisions without changing a checkout, active plugin, or
-// configuration. The result mirrors the change Sync would report at that moment.
-func Plan(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
-	if strings.HasPrefix(plugin.Source, "builtin:") {
-		if _, ok := bundledEnsure(name, plugin.Source); !ok {
-			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
-		}
-		info, err := os.Stat(filepath.Join(officeDir, rootDir, name))
-		if err == nil && !info.IsDir() {
-			return Result{}, fmt.Errorf("bundled plugin path is not a directory: %s", filepath.Join(officeDir, rootDir, name))
-		}
-		if err == nil {
-			return Result{Name: name, Previous: "bundled", Revision: "bundled"}, nil
-		}
-		if !os.IsNotExist(err) {
-			return Result{}, err
-		}
-		return Result{Name: name, Revision: "bundled", Changed: true}, nil
-	}
-	return planAt(ctx, filepath.Join(officeDir, rootDir), name, plugin)
+// Bounds of an installed tree.
+const (
+	// MaxFiles is the number of files a plugin may have.
+	MaxFiles = 10000
+	// MarkerFile is the record of what was installed, written into the
+	// installed tree last (a file of the same name in the source is
+	// replaced).
+	MarkerFile = ".omo-install.json"
+	// maxMarker bounds the marker when it is read back.
+	maxMarker = 8 << 10
+)
+
+// MaxTreeBytes bounds the bytes of all files of a plugin. It is a variable
+// so tests can lower it.
+var MaxTreeBytes int64 = 256 << 20
+
+var (
+	// ErrNameTaken is the error of an install whose name differs from an
+	// existing plugin only in letter case: on a file system that ignores
+	// case both would be one folder.
+	ErrNameTaken = errors.New("another plugin has this name in other letter case")
+	// ErrNotInstalled is the error of Installed for a plugin without an
+	// installed tree or without its record.
+	ErrNotInstalled = errors.New("the plugin is not installed")
+)
+
+// FieldError is a refusal of one field of the plugin settings ("name",
+// "source", "subpath", "ref"). Its message holds no value of the field.
+type FieldError struct {
+	Field   string
+	Message string
+	err     error
 }
 
-func PlanAll(ctx context.Context, officeDir string, settings config.Plugins) ([]Result, []error) {
-	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		return Plan(ctx, officeDir, name, plugin)
-	})
+func (e *FieldError) Error() string { return e.Message }
+func (e *FieldError) Unwrap() error { return e.err }
+
+func fieldErr(field, msg string, wrapped error) error {
+	return &FieldError{Field: field, Message: msg, err: wrapped}
 }
 
-// PlanAllAt is the read-only counterpart of SyncAllAt for a global plugin root.
-func PlanAllAt(ctx context.Context, root string, settings config.Plugins) ([]Result, []error) {
-	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		return planAt(ctx, root, name, plugin)
-	})
+// Installation is the record of an installed tree.
+type Installation struct {
+	Source  string `json:"source"`
+	Subpath string `json:"subpath,omitempty"`
+	Ref     string `json:"ref,omitempty"`
+	// Commit is the full commit id of the checkout the tree came from.
+	Commit      string    `json:"commit"`
+	InstalledAt time.Time `json:"installed_at"`
 }
 
-func planAt(ctx context.Context, root, name string, plugin config.Plugin) (Result, error) {
-	if err := ValidateName(name); err != nil {
-		return Result{}, err
+const nameRule = "a plugin name is 1 to 64 letters, digits, '.', '_' or '-', starting with a letter or digit"
+
+// Install installs or updates plugin s (name, source, subpath, ref) at
+// Root/<s.Name>: the repository s.Source is fetched at s.Ref through
+// gitops.FetchSource and the folder s.Subpath of it is copied. The tree is built in a staging folder, checked (manifest through
+// plugins.ReadManifest, every Lua file present and parsing) and then moved
+// in place of the old tree, which is kept until then. It returns s with the
+// manifest's default_config merged under s.Config (the user's keys win; top
+// level only) and the installed commit. On any error nothing is left behind and an existing install is
+// unchanged.
+//
+// Install writes no settings file, starts nothing and deletes no data.
+func Install(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSettings, string, error) {
+	out, commit, prev, err := InstallKeeping(ctx, o, s)
+	if err == nil {
+		prev.Discard()
 	}
-	if strings.HasPrefix(plugin.Source, "builtin:") {
-		if _, ok := bundledEnsureAt(root, name, plugin.Source); !ok {
-			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
-		}
-		target := filepath.Join(root, name)
-		info, err := os.Stat(target)
-		if err == nil && !info.IsDir() {
-			return Result{}, fmt.Errorf("bundled plugin path is not a directory: %s", target)
-		}
-		if err == nil {
-			return planBundledAt(root, name, plugin.Source)
-		}
-		if !os.IsNotExist(err) {
-			return Result{}, err
-		}
-		return Result{Name: name, Revision: "bundled", Changed: true}, nil
-	}
-	source, err := NormalizeSource(plugin.Source)
-	if err != nil {
-		return Result{}, err
-	}
-	if _, err := NormalizeSubpath(plugin.Subpath); err != nil {
-		return Result{}, err
-	}
-	branch, err := NormalizeBranch(plugin.Branch)
-	if err != nil {
-		return Result{}, err
-	}
-	cache := filepath.Join(root, ".repos", name)
-	before := ""
-	if info, err := os.Lstat(cache); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return Result{}, fmt.Errorf("managed checkout must not be a symbolic link: %s", cache)
-		}
-		if _, err := os.Stat(filepath.Join(cache, ".git")); err != nil {
-			return Result{}, fmt.Errorf("%s is not a managed Git checkout", cache)
-		}
-		before, err = revision(ctx, cache)
-		if err != nil {
-			return Result{}, err
-		}
-	} else if !os.IsNotExist(err) {
-		return Result{}, err
-	}
-	queryDir := root
-	for {
-		if _, err := os.Stat(queryDir); err == nil {
-			break
-		}
-		parent := filepath.Dir(queryDir)
-		if parent == queryDir {
-			return Result{}, fmt.Errorf("no existing directory available to query plugin source")
-		}
-		queryDir = parent
-	}
-	resolvedBranch, after, err := remoteTarget(ctx, queryDir, source, branch)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Name: name, Previous: before, Revision: after, Changed: before != after, branch: resolvedBranch}, nil
+	return out, commit, err
 }
 
-func planBundledAt(root, name, source string) (Result, error) {
-	digest, err := bundledplugins.PluginDigest(name)
-	if err != nil {
-		return Result{}, err
+// Check refuses the name, subpath, source or ref of s the way Install does,
+// before anything is fetched: a *FieldError naming the field.
+func Check(s api.PluginSettings) error {
+	if !plugins.ValidName(s.Name) {
+		return fieldErr("name", nameRule, nil)
 	}
-	marker, err := bundledplugins.ReadMarker(filepath.Join(root, name, bundledplugins.MarkerName))
-	if err == nil && marker.Source == source && marker.Digest != digest {
-		return Result{Name: name, Previous: "bundled", Revision: "bundled", Changed: true}, nil
+	if _, err := cleanSubpath(s.Subpath); err != nil {
+		return err
 	}
-	if err != nil && os.IsNotExist(err) {
-		return Result{Name: name, Previous: "bundled", Revision: "bundled", Changed: true}, nil
+	if err := gitops.ValidSourceURL(s.Source); err != nil {
+		return fieldErr("source", "source must be an https:// or ssh:// address, a host:path address or an absolute folder path", err)
 	}
-	return Result{Name: name, Previous: "bundled", Revision: "bundled"}, nil
-}
-
-func remoteTarget(ctx context.Context, queryDir, source, branch string) (string, string, error) {
-	if branch != "" {
-		ref := "refs/heads/" + branch
-		out, err := gitOutput(ctx, queryDir, "ls-remote", source, ref)
-		if err != nil {
-			return "", "", fmt.Errorf("check %s: %w", source, err)
-		}
-		fields := strings.Fields(out)
-		if len(fields) < 2 {
-			return "", "", fmt.Errorf("check %s: remote ref %s was not found", source, ref)
-		}
-		return branch, fields[0], nil
-	}
-	out, err := gitOutput(ctx, queryDir, "ls-remote", "--symref", source, "HEAD")
-	if err != nil {
-		return "", "", fmt.Errorf("check %s: %w", source, err)
-	}
-	var resolved, revision string
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
-			resolved = strings.TrimPrefix(fields[1], "refs/heads/")
-		}
-		if len(fields) == 2 && fields[1] == "HEAD" {
-			revision = fields[0]
-		}
-	}
-	if resolved == "" || revision == "" {
-		return "", "", fmt.Errorf("check %s: remote HEAD did not identify a branch and revision", source)
-	}
-	resolved, err = NormalizeBranch(resolved)
-	if err != nil {
-		return "", "", fmt.Errorf("check %s: %w", source, err)
-	}
-	return resolved, revision, nil
-}
-
-func NormalizeSource(source string) (string, error) {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return "", fmt.Errorf("plugin repository URL is required")
-	}
-	if strings.Contains(source, "://") {
-		parsed, err := url.Parse(source)
-		if err != nil || parsed.Scheme == "" {
-			return "", fmt.Errorf("invalid plugin repository URL %q", source)
-		}
-		switch parsed.Scheme {
-		case "https", "http", "ssh", "git", "file":
-		default:
-			return "", fmt.Errorf("unsupported plugin repository URL scheme %q", parsed.Scheme)
-		}
-		if parsed.Scheme != "file" && parsed.Host == "" {
-			return "", fmt.Errorf("plugin repository URL needs a host")
-		}
-		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-		if !strings.HasSuffix(parsed.Path, ".git") {
-			parsed.Path += ".git"
-		}
-		return parsed.String(), nil
-	}
-	if strings.Contains(source, "@") && strings.Contains(source, ":") {
-		source = strings.TrimSuffix(source, "/")
-		if !strings.HasSuffix(source, ".git") {
-			source += ".git"
-		}
-		return source, nil
-	}
-	return "", fmt.Errorf("plugin source must be an http(s), ssh, git, file, or scp-style repository URL")
-}
-
-func ValidateName(name string) error {
-	if !validName.MatchString(name) || name == ".repos" {
-		return fmt.Errorf("plugin name %q must use letters, digits, dots, dashes, or underscores", name)
+	if err := gitops.ValidRef(s.Ref); err != nil {
+		return fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
 	}
 	return nil
 }
 
-func NormalizeSubpath(subpath string) (string, error) {
-	if subpath == "" || subpath == "." {
-		return "", nil
-	}
-	clean := filepath.Clean(subpath)
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
-		return "", fmt.Errorf("plugin subpath must stay inside the repository")
-	}
-	return filepath.ToSlash(clean), nil
+// Previous is the tree an install by InstallKeeping replaced, kept aside
+// until Discard or Restore. Its zero value (no earlier tree) is usable.
+type Previous struct {
+	root, name string
+	// old is the kept tree; "" when there was none.
+	old string
 }
 
-// NormalizeBranch validates a literal Git branch name. It remains an argument
-// to Git commands and is never interpreted by a shell.
-func NormalizeBranch(branch string) (string, error) {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return "", nil
+// Discard deletes the kept tree.
+func (p *Previous) Discard() {
+	if p != nil && p.old != "" {
+		_ = os.RemoveAll(p.old)
+		p.old = ""
 	}
-	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "refs/") || branch == "HEAD" {
-		return "", fmt.Errorf("invalid plugin branch %q", branch)
-	}
-	cmd := exec.Command("git", "check-ref-format", "refs/heads/"+branch)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("invalid plugin branch %q: %s", branch, strings.TrimSpace(string(output)))
-	}
-	return branch, nil
 }
 
-func SuggestedName(source, subpath string) string {
-	candidate := subpath
-	if candidate == "" {
-		if parsed, err := url.Parse(source); err == nil {
-			candidate = parsed.Path
-		} else {
-			candidate = source
-		}
-	}
-	candidate = strings.TrimSuffix(strings.TrimSuffix(candidate, "/"), ".git")
-	return filepath.Base(filepath.FromSlash(candidate))
-}
-
-func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]Result, []error) {
-	return SyncAllWithPreview(ctx, officeDir, settings, nil)
-}
-
-// SyncAllWithPreview serializes a read-only revision plan with each subsequent
-// update and calls preview before changing that plugin's checkout or active copy.
-func SyncAllWithPreview(ctx context.Context, officeDir string, settings config.Plugins, preview func(Result)) ([]Result, []error) {
-	root := filepath.Join(officeDir, rootDir)
-	lock, err := pluginfiles.Lock(ctx, root)
-	if err != nil {
-		return nil, []error{fmt.Errorf("lock office plugins: %w", err)}
-	}
-	defer lock.Close()
-	plans, errs := syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		result, err := Plan(ctx, officeDir, name, plugin)
-		return result, wrapPreviewError(err)
-	})
-	if len(errs) > 0 {
-		return nil, errs
-	}
-	if errs = preflightPlans(ctx, root, filepath.Join(officeDir, ".omo", "omo.yaml"), settings, plans, false); len(errs) > 0 {
-		return nil, errs
-	}
-	emitChangedPlans(plans, preview)
-	planByName := indexPlans(plans)
-	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		if strings.HasPrefix(plugin.Source, "builtin:") {
-			return syncUnlocked(ctx, officeDir, name, plugin)
-		}
-		plan := planByName[name]
-		return syncAtRevision(ctx, root, filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin, &plan)
-	})
-}
-
-// SyncAllAt updates managed Git plugins at an explicit installation root.
-// Global homes have no office layout; global bundled plugins use this root
-// directly and remain independently managed from office-scoped bundles.
-func SyncAllAt(ctx context.Context, root, configPath string, settings config.Plugins) ([]Result, []error) {
-	return SyncAllAtWithPreview(ctx, root, configPath, settings, nil)
-}
-
-// SyncAt updates one managed plugin at an explicit installation root. It is
-// used by global plugin commands, whose config and cache do not live below an
-// office directory.
-func SyncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
-	lock, err := pluginfiles.Lock(ctx, root)
-	if err != nil {
-		return Result{}, fmt.Errorf("lock plugin root: %w", err)
-	}
-	defer lock.Close()
-	plan, err := planAt(ctx, root, name, plugin)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := preflightPlan(ctx, root, configPath, name, plugin, plan, true); err != nil {
-		return Result{}, err
-	}
-	if strings.HasPrefix(plugin.Source, "builtin:") {
-		return syncBundledAt(root, configPath, name, plugin, plan)
-	}
-	return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
-}
-
-// SyncAllAtWithPreview is SyncAllWithPreview for an explicit/global root.
-func SyncAllAtWithPreview(ctx context.Context, root, configPath string, settings config.Plugins, preview func(Result)) ([]Result, []error) {
-	lock, err := pluginfiles.Lock(ctx, root)
-	if err != nil {
-		return nil, []error{fmt.Errorf("lock global plugins: %w", err)}
-	}
-	defer lock.Close()
-	plans, errs := syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		result, err := planAt(ctx, root, name, plugin)
-		return result, wrapPreviewError(err)
-	})
-	if len(errs) > 0 {
-		return nil, errs
-	}
-	if errs = preflightPlans(ctx, root, configPath, settings, plans, true); len(errs) > 0 {
-		return nil, errs
-	}
-	emitChangedPlans(plans, preview)
-	planByName := indexPlans(plans)
-	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		plan := planByName[name]
-		if strings.HasPrefix(plugin.Source, "builtin:") {
-			return syncBundledAt(root, configPath, name, plugin, plan)
-		}
-		return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
-	})
-}
-
-func indexPlans(plans []Result) map[string]Result {
-	indexed := make(map[string]Result, len(plans))
-	for _, plan := range plans {
-		indexed[plan.Name] = plan
-	}
-	return indexed
-}
-
-func wrapPreviewError(err error) error {
-	if err == nil {
+// Restore puts the kept tree back in place of the new one (without an
+// earlier tree, the new one is removed). The caller makes sure no other
+// install of the plugin runs meanwhile.
+func (p *Previous) Restore() error {
+	if p == nil || p.name == "" {
 		return nil
 	}
-	return fmt.Errorf("preview: %w", err)
-}
-
-func emitChangedPlans(plans []Result, preview func(Result)) {
-	if preview == nil {
-		return
+	target := filepath.Join(p.root, p.name)
+	if _, err := os.Lstat(target); err == nil {
+		tmp, err := os.MkdirTemp(p.root, ".old-"+p.name+"-")
+		if err != nil || os.Remove(tmp) != nil || os.Rename(target, tmp) != nil {
+			return errors.New("the new plugin folder cannot be moved aside")
+		}
+		defer os.RemoveAll(tmp)
 	}
-	for _, plan := range plans {
-		if plan.Changed {
-			preview(plan)
-		}
+	if p.old == "" {
+		return nil
 	}
-}
-
-func preflightPlans(ctx context.Context, root, configPath string, settings config.Plugins, plans []Result, globalRoot bool) []error {
-	indexed := indexPlans(plans)
-	_, errs := syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
-		plan := indexed[name]
-		if err := preflightPlan(ctx, root, configPath, name, plugin, plan, globalRoot); err != nil {
-			return Result{}, fmt.Errorf("preflight: %w", err)
-		}
-		return plan, nil
-	})
-	return errs
-}
-
-func preflightPlan(ctx context.Context, root, configPath, name string, plugin config.Plugin, plan Result, globalRoot bool) error {
-	var sourceDir string
-	cleanup := func() {}
-	if strings.HasPrefix(plugin.Source, "builtin:") {
-		var ensure func(string) (bool, error)
-		var ok bool
-		if globalRoot {
-			ensure, ok = bundledEnsureAt(root, name, plugin.Source)
-		} else {
-			ensure, ok = bundledEnsure(name, plugin.Source)
-		}
-		if !ok {
-			return fmt.Errorf("unknown bundled plugin %q", plugin.Source)
-		}
-		sourceDir = filepath.Join(root, name)
-		if globalRoot && plan.Changed {
-			temp, err := os.MkdirTemp("", "omo-plugin-preflight-")
-			if err != nil {
-				return err
-			}
-			cleanup = func() { _ = os.RemoveAll(temp) }
-			if _, err := ensure(temp); err != nil {
-				cleanup()
-				return err
-			}
-			sourceDir = filepath.Join(temp, name)
-		} else if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
-			temp, err := os.MkdirTemp("", "omo-plugin-preflight-")
-			if err != nil {
-				return err
-			}
-			cleanup = func() { _ = os.RemoveAll(temp) }
-			if _, err := ensure(temp); err != nil {
-				cleanup()
-				return err
-			}
-			if globalRoot {
-				sourceDir = filepath.Join(temp, name)
-			} else {
-				sourceDir = filepath.Join(temp, rootDir, name)
-			}
-		} else if err != nil {
-			return err
-		}
-	} else {
-		temp, err := os.MkdirTemp("", "omo-plugin-preflight-")
-		if err != nil {
-			return err
-		}
-		cleanup = func() { _ = os.RemoveAll(temp) }
-		checkout := filepath.Join(temp, "checkout")
-		if err := os.Mkdir(checkout, 0o755); err != nil {
-			cleanup()
-			return err
-		}
-		source, err := NormalizeSource(plugin.Source)
-		if err != nil {
-			cleanup()
-			return err
-		}
-		if err := runGit(ctx, checkout, "init", "--quiet"); err != nil {
-			cleanup()
-			return err
-		}
-		if err := runGit(ctx, checkout, "remote", "add", "origin", source); err != nil {
-			cleanup()
-			return err
-		}
-		if err := fetchPlannedRevision(ctx, checkout, source, plan); err != nil {
-			cleanup()
-			return err
-		}
-		sourceDir = checkout
-		if subpath, err := NormalizeSubpath(plugin.Subpath); err != nil {
-			cleanup()
-			return err
-		} else if subpath != "" {
-			sourceDir = filepath.Join(checkout, filepath.FromSlash(subpath))
-		}
+	if err := os.Rename(p.old, target); err != nil {
+		return errors.New("the earlier plugin folder cannot be put back")
 	}
-	defer cleanup()
-	activation, err := os.MkdirTemp("", "omo-plugin-activation-preflight-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(activation)
-	if err := copyTree(sourceDir, activation); err != nil {
-		return fmt.Errorf("validate activation tree: %w", err)
-	}
-	sourceDir = activation
-	manifest, err := plugins.ReadManifest(sourceDir)
-	if err != nil {
-		return fmt.Errorf("plugin %q: %w", name, err)
-	}
-	_, err = prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
-	return err
-}
-
-func fetchPlannedRevision(ctx context.Context, cache, source string, plan Result) error {
-	if plan.Revision == "" || plan.branch == "" {
-		return fmt.Errorf("plugin %q has an incomplete update plan", plan.Name)
-	}
-	if err := runGit(ctx, cache, "fetch", "--quiet", "--depth", "1", "origin", plan.Revision); err != nil {
-		return fmt.Errorf("fetch planned revision %s from %s: %w", plan.Revision, source, err)
-	}
-	if err := runGit(ctx, cache, "checkout", "--quiet", "-B", plan.branch, "FETCH_HEAD"); err != nil {
-		return fmt.Errorf("checkout planned revision %s: %w", plan.Revision, err)
-	}
-	got, err := revision(ctx, cache)
-	if err != nil {
-		return err
-	}
-	if got != plan.Revision {
-		return fmt.Errorf("planned revision %s resolved to %s", plan.Revision, got)
-	}
+	p.old = ""
 	return nil
 }
 
-func syncAll(ctx context.Context, settings config.Plugins, syncPlugin func(string, config.Plugin) (Result, error)) ([]Result, []error) {
-	names := make([]string, 0, len(settings.Installed))
-	for name := range settings.Installed {
-		names = append(names, name)
+// InstallKeeping is Install that keeps the tree it replaced aside: the
+// caller calls Restore when what follows the install fails (its settings
+// cannot be written), else Discard. A kept tree that neither happens to
+// (omo ended) is removed by the next install of the plugin.
+func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSettings, string, *Previous, error) {
+	if err := Check(s); err != nil {
+		return s, "", nil, err
 	}
-	sort.Strings(names)
-	var results []Result
-	var errs []error
-	for _, name := range names {
-		result, err := syncPlugin(name, settings.Installed[name])
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-			continue
-		}
-		results = append(results, result)
+	subpath, _ := cleanSubpath(s.Subpath)
+	if o.Git == nil {
+		return s, "", nil, errors.New("plugin installs from git are not available")
 	}
-	return results, errs
-}
-
-// Sync clones or fast-forwards a managed repository and atomically refreshes
-// its active plugin directory and missing manifest config defaults. Disabled
-// plugins are still updated on disk. An office config file must already exist.
-func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
-	root := filepath.Join(officeDir, rootDir)
-	lock, err := pluginfiles.Lock(ctx, root)
+	root, err := rootOf(o)
 	if err != nil {
-		return Result{}, fmt.Errorf("lock office plugins: %w", err)
+		return s, "", nil, err
 	}
-	defer lock.Close()
-	return syncUnlocked(ctx, officeDir, name, plugin)
-}
-
-func syncUnlocked(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
-	if err := ValidateName(name); err != nil {
-		return Result{}, err
-	}
-	if strings.HasPrefix(plugin.Source, "builtin:") {
-		ensure, ok := bundledEnsure(name, plugin.Source)
-		if !ok {
-			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
-		}
-		created, err := ensure(officeDir)
-		if err != nil {
-			return Result{}, err
-		}
-		dir := filepath.Join(officeDir, rootDir, name)
-		manifest, err := plugins.ReadManifest(dir)
-		if err == nil {
-			var commit func() error
-			commit, err = prepareConfig(filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin, manifest.DefaultConfig)
-			if err == nil {
-				err = commit()
-			}
-		}
-		if err != nil && created {
-			err = errors.Join(err, os.RemoveAll(dir))
-		}
-		return Result{Name: name, Revision: "bundled", Changed: created}, err
-	}
-	return syncAt(ctx, filepath.Join(officeDir, rootDir), filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin)
-}
-
-func bundledEnsure(name, source string) (func(string) (bool, error), bool) {
-	definition, ok := bundledplugins.DefinitionFor(name)
-	if !ok || definition.Scope != bundledplugins.OfficeScope || source != "builtin:"+name {
-		return nil, false
-	}
-	switch name {
-	case bundledplugins.NudgeName:
-		return bundledplugins.EnsureNudge, true
-	case bundledplugins.ToolsName:
-		return bundledplugins.EnsureTools, true
-	default:
-		return nil, false
-	}
-}
-
-func bundledEnsureAt(root, name, source string) (func(string) (bool, error), bool) {
-	definition, ok := bundledplugins.DefinitionFor(name)
-	if !ok || definition.Scope != bundledplugins.GlobalScope || source != "builtin:"+name {
-		return nil, false
-	}
-	return func(installRoot string) (bool, error) {
-		if installRoot == "" {
-			installRoot = root
-		}
-		return bundledplugins.EnsureAt(installRoot, name)
-	}, true
-}
-
-func syncBundledAt(root, configPath, name string, plugin config.Plugin, plan Result) (Result, error) {
-	if _, ok := bundledEnsureAt(root, name, plugin.Source); !ok {
-		return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
-	}
-	dir := filepath.Join(root, name)
-	created, err := bundledplugins.EnsureAtWithCommit(root, name, true, func() error {
-		manifest, err := plugins.ReadManifest(dir)
-		if err != nil {
-			return err
-		}
-		commit, err := prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
-		if err != nil {
-			return err
-		}
-		return commit()
-	})
-	return Result{Name: name, Previous: plan.Previous, Revision: "bundled", Changed: created}, err
-}
-
-func syncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
-	return syncAtRevision(ctx, root, configPath, name, plugin, nil)
-}
-
-func syncAtRevision(ctx context.Context, root, configPath, name string, plugin config.Plugin, plan *Result) (Result, error) {
-	if err := ValidateName(name); err != nil {
-		return Result{}, err
-	}
-	source, err := NormalizeSource(plugin.Source)
+	unlock, err := lock(ctx, root, s.Name)
 	if err != nil {
-		return Result{}, err
+		return s, "", nil, err
 	}
-	subpath, err := NormalizeSubpath(plugin.Subpath)
-	if err != nil {
-		return Result{}, err
+	defer unlock()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return s, "", nil, errors.New("the plugins folder cannot be created")
 	}
-	branch, err := NormalizeBranch(plugin.Branch)
-	if err != nil {
-		return Result{}, err
+	if err := checkCase(root, s.Name); err != nil {
+		return s, "", nil, err
 	}
-	repos := filepath.Join(root, ".repos")
-	if err := os.MkdirAll(repos, 0o755); err != nil {
-		return Result{}, err
-	}
-	cache := filepath.Join(repos, name)
-	before, _ := revision(ctx, cache)
-	cacheInfo, cacheErr := os.Lstat(cache)
-	if os.IsNotExist(cacheErr) {
-		if plan == nil {
-			args := []string{"clone", "--quiet", "--depth", "1"}
-			if branch != "" {
-				args = append(args, "--branch", branch, "--single-branch")
-			}
-			args = append(args, source, cache)
-			if err := runGit(ctx, root, args...); err != nil {
-				return Result{}, fmt.Errorf("clone %s: %w", source, err)
-			}
-		} else {
-			if err := os.Mkdir(cache, 0o755); err != nil {
-				return Result{}, err
-			}
-			if err := runGit(ctx, cache, "init", "--quiet"); err != nil {
-				return Result{}, err
-			}
-			if err := runGit(ctx, cache, "remote", "add", "origin", source); err != nil {
-				return Result{}, err
-			}
-		}
-	} else if cacheErr != nil {
-		return Result{}, cacheErr
-	} else {
-		if cacheInfo.Mode()&os.ModeSymlink != 0 {
-			return Result{}, fmt.Errorf("managed checkout must not be a symbolic link: %s", cache)
-		}
-		if _, err := os.Stat(filepath.Join(cache, ".git")); err != nil {
-			return Result{}, fmt.Errorf("%s is not a managed Git checkout", cache)
-		}
-		if err := runGit(ctx, cache, "remote", "set-url", "origin", source); err != nil {
-			return Result{}, err
-		}
-		if plan == nil && branch == "" {
-			branch, err = remoteDefaultBranch(ctx, cache)
-			if err != nil {
-				return Result{}, fmt.Errorf("resolve default branch for %s: %w", source, err)
-			}
-		}
-		if plan == nil {
-			if err := checkoutRemoteBranch(ctx, cache, source, branch); err != nil {
-				return Result{}, err
-			}
-		}
-	}
-	if plan != nil {
-		if err := fetchPlannedRevision(ctx, cache, source, *plan); err != nil {
-			return Result{}, err
-		}
-	}
-	after, err := revision(ctx, cache)
-	if err != nil {
-		return Result{}, err
-	}
-	sourceDir := cache
-	if subpath != "" {
-		sourceDir = filepath.Join(cache, filepath.FromSlash(subpath))
-	}
-	manifest, err := plugins.ReadManifest(sourceDir)
-	if err != nil {
-		return Result{}, fmt.Errorf("plugin %q: %w", name, err)
-	}
-	commit, err := prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := installTree(root, name, sourceDir, commit); err != nil {
-		return Result{}, err
-	}
-	result := Result{Name: name, Revision: after, Changed: before == "" || before != after, branch: branch}
-	if plan != nil {
-		result.Previous = plan.Previous
-		result.Changed = plan.Changed
-		result.branch = plan.branch
-	}
-	return result, nil
-}
+	removeLeftovers(root, s.Name)
 
-func remoteDefaultBranch(ctx context.Context, cache string) (string, error) {
-	out, err := gitOutput(ctx, cache, "ls-remote", "--symref", "origin", "HEAD")
+	stage, err := os.MkdirTemp(root, ".stage-"+s.Name+"-")
 	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
-			branch := strings.TrimPrefix(fields[1], "refs/heads/")
-			if branch == fields[1] {
-				break
-			}
-			return NormalizeBranch(branch)
-		}
-	}
-	return "", fmt.Errorf("remote HEAD does not identify a branch")
-}
-
-func checkoutRemoteBranch(ctx context.Context, cache, source, branch string) error {
-	if err := runGit(ctx, cache, "fetch", "--quiet", "--depth", "1", "origin", "refs/heads/"+branch); err != nil {
-		return fmt.Errorf("fetch branch %s from %s: %w", branch, source, err)
-	}
-	if err := runGit(ctx, cache, "checkout", "--quiet", "-B", branch, "FETCH_HEAD"); err != nil {
-		return fmt.Errorf("checkout branch %s: %w", branch, err)
-	}
-	return nil
-}
-
-func revision(ctx context.Context, dir string) (string, error) {
-	out, err := gitOutput(ctx, dir, "rev-parse", "HEAD")
-	return strings.TrimSpace(out), err
-}
-
-func runGit(ctx context.Context, dir string, args ...string) error {
-	_, err := gitOutput(ctx, dir, args...)
-	return err
-}
-
-func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
-}
-
-func installTree(root, name, source string, commitConfig func() error) error {
-	info, err := os.Stat(filepath.Join(source, "plugin.json"))
-	if err != nil {
-		return fmt.Errorf("plugin %q: plugin.json: %w", name, err)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("plugin %q: plugin.json is not a regular file", name)
-	}
-	stage, err := os.MkdirTemp(root, ".stage-"+name+"-")
-	if err != nil {
-		return err
+		return s, "", nil, errors.New("the staging folder cannot be created")
 	}
 	defer os.RemoveAll(stage)
-	if err := copyTree(source, stage); err != nil {
-		return fmt.Errorf("stage plugin %q: %w", name, err)
+
+	inst := Installation{Source: s.Source, Subpath: subpath, Ref: s.Ref, InstalledAt: time.Now().UTC()}
+	cacheRoot := filepath.Join(root, ".cache")
+	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
+		return s, "", nil, errors.New("the plugin cache folder cannot be created")
 	}
-	target := filepath.Join(root, name)
-	backup, err := os.MkdirTemp(root, ".backup-"+name+"-")
+	cache := filepath.Join(cacheRoot, s.Name)
+	defer os.RemoveAll(cache)
+	commit, err := o.Git.FetchSource(ctx, s.Source, s.Ref, cache)
+	if err != nil {
+		return s, "", nil, err
+	}
+	from, err := folderIn(cache, subpath)
+	if err != nil {
+		return s, "", nil, err
+	}
+	if err := copyTree(from, stage); err != nil {
+		return s, "", nil, err
+	}
+	inst.Commit = commit
+
+	man, err := check(stage)
+	if err != nil {
+		return s, "", nil, fmt.Errorf("the plugin is not valid: %w", err)
+	}
+	marker, err := json.MarshalIndent(inst, "", "  ")
+	if err != nil {
+		return s, "", nil, err
+	}
+	if err := os.WriteFile(filepath.Join(stage, MarkerFile), append(marker, '\n'), 0o600); err != nil {
+		return s, "", nil, errors.New("the install record cannot be written")
+	}
+	old, err := activate(root, s.Name, stage)
+	if err != nil {
+		return s, "", nil, err
+	}
+	out := s
+	out.Subpath = subpath
+	out.Config = mergeConfig(man.DefaultConfig, s.Config)
+	return out, inst.Commit, &Previous{root: root, name: s.Name, old: old}, nil
+}
+
+// Remove deletes plugin name's installed tree (moved aside first, so no half
+// tree stays at Root/<name>), its fetch cache Root/.cache/<name> and its data
+// folder Root/.data/<name>. A part that does not exist is no error.
+//
+// The caller stops the plugin first (loads the runtime without it), and
+// deletes its settings file and its stored values and log
+// (db.DeletePluginData) itself.
+func Remove(o Options, name string) error {
+	if !plugins.ValidName(name) {
+		return fieldErr("name", nameRule, nil)
+	}
+	root, err := rootOf(o)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(backup); err != nil {
+	unlock, err := lock(context.Background(), root, name)
+	if err != nil {
 		return err
 	}
-	keepBackup := false
-	defer func() {
-		if !keepBackup {
-			_ = os.RemoveAll(backup)
-		}
-	}()
-	hadTarget := false
+	defer unlock()
+	var errs []error
+	target := filepath.Join(root, name)
 	if _, err := os.Lstat(target); err == nil {
-		hadTarget = true
-		if err := os.Rename(target, backup); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Rename(stage, target); err != nil {
-		if hadTarget {
-			restoreErr := os.Rename(backup, target)
-			if restoreErr != nil {
-				keepBackup = true
+		if old, err := os.MkdirTemp(root, ".old-"+name+"-"); err == nil {
+			_ = os.Remove(old)
+			if os.Rename(target, old) == nil {
+				target = old
 			}
-			return errors.Join(err, restoreErr)
 		}
-		return err
+		if err := os.RemoveAll(target); err != nil {
+			errs = append(errs, errors.New("the plugin's folder cannot be deleted"))
+		}
 	}
-	if err := commitConfig(); err != nil {
-		rollbackErr := os.RemoveAll(target)
-		if hadTarget && rollbackErr == nil {
-			rollbackErr = os.Rename(backup, target)
+	if err := os.RemoveAll(filepath.Join(root, ".cache", name)); err != nil {
+		errs = append(errs, errors.New("the plugin's fetch cache cannot be deleted"))
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".data", name)); err != nil {
+		errs = append(errs, errors.New("the plugin's data folder cannot be deleted"))
+	}
+	removeLeftovers(root, name)
+	return errors.Join(errs...)
+}
+
+// Installed reads the record Install wrote into Root/<name>. The record lies
+// in a folder agents can write to: its texts are for display only, and a
+// commit that is not a full commit id reads as "".
+func Installed(o Options, name string) (Installation, error) {
+	if !plugins.ValidName(name) {
+		return Installation{}, ErrNotInstalled
+	}
+	root, err := rootOf(o)
+	if err != nil {
+		return Installation{}, err
+	}
+	raw, err := homefile.Read(filepath.Join(root, name, MarkerFile), maxMarker)
+	if errors.Is(err, os.ErrNotExist) {
+		return Installation{}, ErrNotInstalled
+	}
+	if err != nil {
+		return Installation{}, errors.New("the install record cannot be read")
+	}
+	var inst Installation
+	if err := json.Unmarshal(raw, &inst); err != nil {
+		return Installation{}, errors.New("the install record is not valid")
+	}
+	if !commitID.MatchString(inst.Commit) {
+		inst.Commit = ""
+	}
+	return inst, nil
+}
+
+var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// rootOf is o.Root, cleaned; it must be an absolute path.
+func rootOf(o Options) (string, error) {
+	if o.Root == "" || !filepath.IsAbs(o.Root) {
+		return "", errors.New("the plugins folder is not an absolute path")
+	}
+	return filepath.Clean(o.Root), nil
+}
+
+// locks holds one lock per plugins folder and lower-case plugin name:
+// installs, updates and removals of one plugin (also of two names that
+// differ only in case) run one after the other.
+var locks sync.Map // string → chan struct{}
+
+func lock(ctx context.Context, root, name string) (func(), error) {
+	v, _ := locks.LoadOrStore(root+"\x00"+strings.ToLower(name), make(chan struct{}, 1))
+	ch := v.(chan struct{})
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
+}
+
+// checkCase refuses name when a folder or settings file in root has the
+// same name in other letter case.
+func checkCase(root, name string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return errors.New("the plugins folder cannot be read")
+	}
+	for _, e := range entries {
+		other := e.Name()
+		if strings.HasPrefix(other, ".") {
+			continue
 		}
-		if rollbackErr != nil {
-			keepBackup = true
+		if !e.IsDir() {
+			var ok bool
+			if other, ok = strings.CutSuffix(other, ".yaml"); !ok {
+				continue
+			}
 		}
-		return errors.Join(err, rollbackErr)
+		if other != name && strings.EqualFold(other, name) {
+			return fieldErr("name", "another plugin, "+quote(other)+", has this name in other letter case; on some file systems both would be one folder", ErrNameTaken)
+		}
 	}
 	return nil
 }
 
-func copyTree(source, target string) error {
-	return pluginfiles.CopyTree(source, target)
+// removeLeftovers deletes staging and old folders of name that an
+// interrupted install or removal left in root.
+func removeLeftovers(root, name string) {
+	for _, prefix := range []string{".stage-", ".old-"} {
+		matches, _ := filepath.Glob(filepath.Join(root, prefix+name+"-*"))
+		for _, m := range matches {
+			// A name may be a prefix of another ("a" of "a-1"): only the
+			// folders MkdirTemp made for this name (digits after
+			// "<prefix><name>-") are removed.
+			rest := strings.TrimPrefix(filepath.Base(m), prefix+name+"-")
+			if _, err := strconv.ParseUint(rest, 10, 64); err == nil {
+				_ = os.RemoveAll(m)
+			}
+		}
+	}
 }
+
+// cleanSubpath checks a subpath: "" (or ".") for the repository's top
+// folder, else a relative path with forward slashes, no "..", no ".git"
+// element. It returns the cleaned path.
+func cleanSubpath(sub string) (string, error) {
+	refuse := func() (string, error) {
+		return "", fieldErr("subpath", "subpath must be a folder inside the repository: a relative path with / between folder names, without .. or .git", nil)
+	}
+	if sub == "" || sub == "." {
+		return "", nil
+	}
+	if len(sub) > 512 || !utf8.ValidString(sub) || strings.ContainsAny(sub, "\\\x00:") || strings.HasPrefix(sub, "/") {
+		return refuse()
+	}
+	for _, part := range strings.Split(sub, "/") {
+		if part == ".." || strings.EqualFold(part, ".git") {
+			return refuse()
+		}
+		for _, r := range part {
+			if r < 0x20 || r == 0x7f {
+				return refuse()
+			}
+		}
+	}
+	clean := path.Clean(sub)
+	if clean == "." {
+		return "", nil
+	}
+	return clean, nil
+}
+
+// folderIn is the folder sub of checkout; every element of the way must be
+// a folder, not a link.
+func folderIn(checkout, sub string) (string, error) {
+	cur := checkout
+	if sub == "" {
+		return cur, nil
+	}
+	for _, part := range strings.Split(sub, "/") {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fieldErr("subpath", "the repository has no folder at subpath", err)
+		}
+		if err != nil || !info.IsDir() {
+			return "", fieldErr("subpath", "subpath must name a folder of the repository, not a file or link", nil)
+		}
+	}
+	return cur, nil
+}
+
+// copyTree copies the folders and regular files of src into the existing
+// folder dst, skipping every .git; a link or any other kind of file is an
+// error. Files keep an executable bit (mode 0700, else 0600); folders get
+// 0700. At most MaxFiles files and MaxTreeBytes bytes.
+func copyTree(src, dst string) error {
+	files := 0
+	var total int64
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return errors.New("the plugin's files cannot be read")
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if strings.EqualFold(d.Name(), ".git") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		shown := quote(filepath.ToSlash(rel))
+		target := filepath.Join(dst, rel)
+		switch {
+		case d.Type()&os.ModeSymlink != 0:
+			return fmt.Errorf("the plugin holds a link, %s; plugins hold folders and regular files only", shown)
+		case d.IsDir():
+			if err := os.Mkdir(target, 0o700); err != nil {
+				return errors.New("the staging folder cannot be written")
+			}
+			return nil
+		case !d.Type().IsRegular():
+			return fmt.Errorf("the plugin holds %s, which is not a regular file", shown)
+		}
+		files++
+		if files > MaxFiles {
+			return fmt.Errorf("the plugin has more than %d files", MaxFiles)
+		}
+		n, err := copyFile(p, target, MaxTreeBytes-total)
+		total += n
+		if errors.Is(err, errTreeTooLarge) {
+			return fmt.Errorf("the plugin's files are larger than %s", homefile.Size(MaxTreeBytes))
+		}
+		if err != nil {
+			return fmt.Errorf("copying %s: %w", shown, err)
+		}
+		return nil
+	})
+}
+
+var errTreeTooLarge = errors.New("too large")
+
+// copyFile copies the regular file src (no link followed) to the new file
+// dst, at most limit bytes.
+func copyFile(src, dst string, limit int64) (int64, error) {
+	in, err := homefile.Open(src)
+	if err != nil {
+		if text, ok := homefile.Refusal(err, limit); ok {
+			return 0, errors.New(text)
+		}
+		return 0, errors.New("the file cannot be read")
+	}
+	defer in.Close()
+	mode := os.FileMode(0o600)
+	if info, err := in.Stat(); err == nil && info.Mode().Perm()&0o111 != 0 {
+		mode = 0o700
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return 0, errors.New("the file cannot be written")
+	}
+	n, err := io.Copy(out, io.LimitReader(in, limit+1))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return n, errors.New("the file cannot be copied")
+	}
+	if n > limit {
+		return n, errTreeTooLarge
+	}
+	return n, nil
+}
+
+// check reads the manifest of the tree at dir with the runtime's reader and
+// checks that every Lua file it names is a regular file that parses, the
+// way the runtime loads it.
+func check(dir string) (plugins.Manifest, error) {
+	man, err := plugins.ReadManifest(dir)
+	if errors.Is(err, plugins.ErrNotInstalled) {
+		return man, errors.New("it has no plugin.json")
+	}
+	if err != nil {
+		return man, err
+	}
+	for i, h := range man.Hooks {
+		if h.Lua == "" {
+			continue
+		}
+		rel := path.Clean(strings.ReplaceAll(h.Lua, "\\", "/"))
+		src, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), plugins.MaxLuaBytes)
+		if err != nil {
+			if text, ok := homefile.Refusal(err, plugins.MaxLuaBytes); ok {
+				return man, fmt.Errorf("hook %d: %s: %s", i+1, quote(rel), text)
+			}
+			return man, fmt.Errorf("hook %d: the Lua file %s is missing", i+1, quote(rel))
+		}
+		if len(src) > 0 && src[0] == 0x1b {
+			return man, fmt.Errorf("hook %d: %s is precompiled Lua, which is not accepted", i+1, quote(rel))
+		}
+		// The runtime runs a hook's source as the body of one function.
+		if _, err := parse.Parse(strings.NewReader("function f(...) "+string(src)+"\nend"), rel); err != nil {
+			return man, fmt.Errorf("hook %d: %s does not parse: %s", i+1, quote(rel), quote(oneLine(err.Error())))
+		}
+	}
+	return man, nil
+}
+
+// activate puts the checked tree stage in place as root/name. An existing
+// tree is moved aside first and returned (the caller removes or restores
+// it); if stage cannot be moved, the old tree is moved back.
+func activate(root, name, stage string) (string, error) {
+	target := filepath.Join(root, name)
+	old := ""
+	if _, err := os.Lstat(target); err == nil {
+		tmp, err := os.MkdirTemp(root, ".old-"+name+"-")
+		if err != nil || os.Remove(tmp) != nil || os.Rename(target, tmp) != nil {
+			return "", errors.New("the old plugin folder cannot be moved aside")
+		}
+		old = tmp
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", errors.New("the plugin folder cannot be checked")
+	}
+	if err := os.Rename(stage, target); err != nil {
+		if old != "" {
+			_ = os.Rename(old, target)
+		}
+		return "", errors.New("the new plugin folder cannot be put in place")
+	}
+	return old, nil
+}
+
+// mergeConfig is defaults with user over it (top-level keys of user win).
+// Numbers of the manifest become int64 or float64, so the settings file
+// stores them as numbers.
+func mergeConfig(defaults plugins.DefaultConfig, user map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range defaults {
+		out[k] = plainJSON(v)
+	}
+	for k, v := range user {
+		out[k] = v
+	}
+	return out
+}
+
+// plainJSON replaces every json.Number in v by int64 or float64.
+func plainJSON(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		if i, err := t.Int64(); err == nil {
+			return i
+		}
+		if f, err := t.Float64(); err == nil {
+			return f
+		}
+		return t.String()
+	case map[string]any:
+		m := make(map[string]any, len(t))
+		for k, x := range t {
+			m[k] = plainJSON(x)
+		}
+		return m
+	case []any:
+		l := make([]any, len(t))
+		for i, x := range t {
+			l[i] = plainJSON(x)
+		}
+		return l
+	}
+	return v
+}
+
+// quote is text from a source (a file name, a parser message) as it may
+// appear in a message: cut, quoted, every character that is not printable
+// ASCII escaped.
+func quote(s string) string {
+	if utf8.RuneCountInString(s) > 200 {
+		s = string([]rune(s)[:200]) + "…"
+	}
+	return strconv.QuoteToASCII(s)
+}
+
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="2" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: Install and set up. -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: Download into a tray. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <path class="icon" d="M32 6 V40 M18 26 L32 40 L46 26 M8 40 V56 H56 V40"/>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">Install and set up</text>
+  <text class="muted" x="198" y="142" font-size="22"><tspan class="accent">$</tspan> curl -fsSL …/install.sh | sh</text>
+</svg>

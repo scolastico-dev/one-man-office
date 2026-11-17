@@ -9,6 +9,7 @@ readonly runtime_workspace="/workspace"
 readonly nvm_source="/usr/local/share/nvm"
 readonly claude_install_url="https://claude.ai/install.sh"
 readonly codex_install_url="https://chatgpt.com/codex/install.sh"
+readonly agy_install_url="https://antigravity.google/cli/install.sh"
 readonly gemini_registry_url="https://registry.npmjs.org/@google%2fgemini-cli"
 
 runtime_uid="${OMO_UID:-1000}"
@@ -179,6 +180,9 @@ install_agent_clis() {
             codex)
                 runtime_has codex || install_remote_script Codex "$codex_install_url"
                 ;;
+            agy)
+                runtime_has agy || install_remote_script Antigravity "$agy_install_url"
+                ;;
             gemini)
                 runtime_has gemini || install_gemini
                 ;;
@@ -208,6 +212,11 @@ main() {
     run_init_scripts
 
     cd "$runtime_workspace"
+    # omo itself explains a home it cannot use (one of omo 0.11 or older, for
+    # example) and, run with a terminal, asks what happens to it, so a
+    # refusal here does not end the container before omo can say so.
+    run_as_runtime_user omo config set host 0.0.0.0 >/dev/null ||
+        printf 'omo container: the listening address was not set to 0.0.0.0\n' >&2
     exec su-exec "$runtime_user" env \
         HOME="$runtime_home" \
         USER="$runtime_user" \
@@ -216,7 +225,7 @@ main() {
         NPM_CONFIG_PREFIX="$runtime_home/.local" \
         PNPM_HOME="$runtime_home/.local/share/pnpm" \
         PATH="$runtime_home/.local/bin:$runtime_home/.local/share/pnpm:$PATH" \
-        omo company --listen 0.0.0.0:8090 "$@"
+        omo "$@"
 }
 
 main "$@"

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="6" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: License. -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: A document. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <path class="icon" d="M14 6 H40 L52 18 V58 H14 Z M40 6 V18 H52 M22 30 H44 M22 40 H44 M22 50 H36"/>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">License</text>
+  <text class="muted" x="198" y="142" font-size="22">GNU Affero General Public License v3.0 or later</text>
+</svg>

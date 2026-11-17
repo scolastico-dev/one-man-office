@@ -1,182 +1,121 @@
 # one-man-office (omo)
 
-![one-man-office header](.github/assets/header.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.svg">
+  <img alt="one-man-office: a browser-first kanban board where AI agents work your tickets" src=".github/assets/hero-light.svg">
+</picture>
 
-Run a small company of AI CLI agents across one or more local Git repositories from a single terminal.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-what-dark.svg">
+  <img alt="What is this?" src=".github/assets/header-what-light.svg">
+</picture>
 
-You talk to the **CEO**. The CEO writes specs and delegates them to **product managers**, who split the work into **developer** jobs. Each developer works in its own worktree and branch, and a **reviewer** checks the result before it merges. In parallel, a **smoke alarm** watches for stuck or unhealthy agents and can raise an incident for a **firefighter** to resolve.
+omo is a kanban board in your browser on which AI coding agents do the work.
+You write tickets for your git repositories; omo starts Claude Code, Codex,
+Antigravity or Gemini CLI on each one in a worktree of its own, has other
+agents review the result, and merges it into your branch or opens a pull
+request once you approve. It is one program that runs on your machine, as
+you, for all your repositories at once.
 
-`omo` is a single self-contained Go binary. It owns every agent PTY itself, so there is no tmux, daemon, or attach workflow. Closing `omo` stops the office, while the persistent job queue makes restarts cheap.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-board-dark.png">
+  <img alt="The omo board of an invented invoicing product: tickets in the columns Planning, Ready For Dev, In Progress, Review and Done, with the sidebar listing the agents at work" src=".github/assets/screenshot-board-light.png">
+</picture>
 
-> [!NOTE]
-> `omo` is fully functional, but it is still an early-stage project. Until version 1.0.0, behavior, configuration, commands, and compatibility may change or break between releases.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-install-dark.svg">
+  <img alt="Install and set up" src=".github/assets/header-install-light.svg">
+</picture>
 
-> [!WARNING]
-> **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
-
-![Emergency stop controls](.github/assets/estop.jpg)
-
-## How the office works
-
-```text
-   o   o
-   │   │
-  [o m o] ◀─ the office binary, owns every agent PTY
-   │   │
-   │   └────────────────┐
-   │                    │
-┌─ you ─────────────────┴──────────────────────────────────┐
-│ omo TUI  -  peek/type into any agent, read notifications │
-└───────────────────────┬──────────────────────────────────┘
-                        │
-                      CEO ─────────────► freelancer   (one-off research/task)
-                        │
-                 product manager  (one per spec)
-                        │
-                    developer  (one per job, own worktree + branch)
-                        │
-                     reviewer  (clean context: goal + diff only) ──► merge
-
-         smoke alarm (every 5m, fresh) ──► incident ──► firefighter
-```
-
-**Use omo when** a substantial feature spans several components or repositories and benefits from parallel planning, implementation, review, and integration, or when you have a backlog of reasonably independent jobs that should keep moving with durable status, supervision, review cycles, and restart recovery.
-
-**Prefer a normal single-agent session when** the task is a small, focused fix or question, or when the work is highly exploratory and needs a tight conversation in one shared context.
-
-Read more in [Core concepts](wiki/concepts.md).
-
-## Install
-
-![Installation overview](.github/assets/installation.jpg)
-
-### Linux and macOS
+You need Linux, macOS, or Windows, git 2.38 or newer, and at least one agent program installed and
+signed in. While claude, codex, agy, and gemini work out of the box, any program is theoretically
+supported with minimal manual configuration.
 
 ```bash
+# Linux and macOS
 curl -fsSL https://raw.githubusercontent.com/scolastico-dev/one-man-office/main/install.sh | sh
 ```
 
-Or download and inspect the script before running it:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/scolastico-dev/one-man-office/main/install.sh
-sh install.sh
-```
-
-### Windows PowerShell
-
 ```powershell
+# Windows PowerShell
 irm https://raw.githubusercontent.com/scolastico-dev/one-man-office/main/install.ps1 | iex
 ```
 
-To inspect it first:
+The installer verifies the release checksum and puts `omo` into `~/.local/bin`
+(`%LOCALAPPDATA%\Programs\omo` on Windows). Building from source, Docker and
+updating: [Getting started](wiki/getting-started.md) and
+[Running omo](wiki/running.md).
 
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/scolastico-dev/one-man-office/main/install.ps1 -OutFile install.ps1
-.\install.ps1
-```
+> [!WARNING]
+> Agents run as your user, with their permission prompts switched off, and the
+> board can run commands as you. omo listens on localhost only and requires its
+> login token; keep it that way unless you control who can reach it. See
+> [Security](wiki/security.md).
 
-### What the installers do
-
-- Detect the operating system and CPU architecture.
-- Verify the latest release checksum.
-- Install `omo` into a user-owned directory and add it to `PATH`.
-- Keep the current release, or update it when a newer release is available, if you run the installer again.
-
-Set `OMO_INSTALL_DIR` to choose a different installation directory. The defaults are `~/.local/bin` on Linux/macOS and `%LOCALAPPDATA%\Programs\omo` on Windows. Open a new shell after the first install so `PATH` changes take effect.
-
-```bash
-OMO_INSTALL_DIR="$HOME/bin" sh install.sh
-```
-
-```powershell
-$env:OMO_INSTALL_DIR = "$HOME\bin"
-.\install.ps1
-```
-
-`omo` must be on the `PATH` of the agents themselves because they invoke it by name to send mail, queue jobs, and report completion.
-
-### Other ways to install
-
-- **From source**: `make install PREFIX=~/.local`. See [Development and testing](wiki/development.md).
-- **Docker**: multi-architecture images with a browser dashboard. See [Docker](wiki/docker.md).
-- **Later updates**: `omo self-update`, or accept the prompt at startup. See [Running an office](wiki/running.md#manual-self-update).
-
-## Quick start
-
-![Quick start workflow](.github/assets/quick_start.jpg)
-
-Install at least one supported agent CLI (Claude Code, Codex CLI, or Gemini CLI) and run it once yourself to complete its login. Then create an office.
-
-### Single repository
-
-The office lives inside the project:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-start-dark.svg">
+  <img alt="Start using it" src=".github/assets/header-start-light.svg">
+</picture>
 
 ```bash
-cd ~/workspace/acme/my-service
-omo setup          # finds this repo, writes .omo/
-omo --mock         # dry run on fake agents: no model calls
-omo                # for real
+omo -d      # start in the background; prints the address with the login token
+omo stop    # stop it
 ```
 
-### Microservice landscape
+Open the printed address (`http://omo.localhost:8090/#…`). At the first start
+omo finds your agent programs and sets them up. (If it finds the files of omo
+0.11 it asks what to do with them first: see
+[Upgrading from 0.11](wiki/upgrading-from-0.11.md).) The empty board then walks
+you through the first steps: add the folder that holds your repositories, check
+which models each role uses, and create a ticket. It waits in Planning: approve
+it by dragging it to Ready For Dev, and watch the agent in the ticket's Agents
+tab.
 
-The office is the parent directory containing multiple Git repositories:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-ticket-dark.png">
+  <img alt="A ticket in progress: the developer agent's terminal in the Agents tab, with the ticket's details on the right" src=".github/assets/screenshot-ticket-light.png">
+</picture>
 
-```text
-~/workspace/acme/          <- run omo here
-├── api/                   <- a git repo
-├── ui/                    <- a git repo
-└── worker/                <- a git repo
-```
+When the agents are done, the ticket waits in Review for you: read the Diff
+tab, then approve to merge. For bigger goals, write a story, or tell the CEO in
+the sidebar what you want and approve the tickets it writes.
 
-```bash
-cd ~/workspace/acme
-omo setup          # finds api, ui and worker
-omo --mock
-omo
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-ceo-dark.png">
+  <img alt="The CEO tab in the sidebar: a conversation in which the CEO has drafted tickets that wait in Planning, next to the board" src=".github/assets/screenshot-ceo-light.png">
+</picture>
 
-### What setup does
+The whole first ticket, step by step: [Getting started](wiki/getting-started.md).
 
-`omo setup` detects supported CLIs on `PATH` in Claude, Codex, Gemini order. On a terminal it opens a form where you pick model profiles and assignment methods for each role and choose plugins; see the [official plugin inventory](wiki/official-plugins.md) for shipped plugins and installation commands. `--agent-cli <provider>` overrides the detected primary, and `--non-interactive` accepts the defaults for scripts. Setup never overwrites an existing `.omo/omo.yaml`.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-docs-dark.svg">
+  <img alt="Learn more" src=".github/assets/header-docs-light.svg">
+</picture>
 
-Afterwards check `repos:` in `.omo/omo.yaml`. That list defines what the CEO is allowed to work on; `omo repo add`, `omo repo remove`, and `omo repo list` edit it. `.omo/` is excluded from Git through `.git/info/exclude`, so it never shows up in `git status` or in an agent's commit.
+The [wiki](wiki/README.md) is the manual:
 
-The first start asks you to trust the office location, because its configuration and plugins can run commands as you.
+- [Concepts](wiki/concepts.md): stories and tasks, roles, approval, reviews, limits
+- [The board](wiki/board.md) and [Terminals](wiki/terminals.md)
+- [Merging and export](wiki/merging-and-export.md): local merges and pull requests
+- [Agents](wiki/agents.md), [Settings](wiki/settings.md), [Skill sets](wiki/skills.md), [Plugins](wiki/plugins.md), [MCP](wiki/mcp.md)
+- [Running omo](wiki/running.md), [Command line](wiki/cli.md), [Backup](wiki/backup.md), [Troubleshooting](wiki/troubleshooting.md)
+- [Upgrading from 0.11](wiki/upgrading-from-0.11.md)
+- [Contributing](wiki/contributing.md)
 
-### Talk to the CEO
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-help-dark.svg">
+  <img alt="Questions and bugs" src=".github/assets/header-help-light.svg">
+</picture>
 
-`omo` opens on the CEO's screen. Describe what you want built. The CEO writes a spec, hands it to a product manager, and the work fans out into developer jobs. Each developer gets its own worktree, and every developer job is reviewed before it merges.
+Questions, bug reports and suggestions are welcome on the
+[issues page](https://github.com/scolastico-dev/one-man-office/issues).
 
-![The CEO's live terminal inside the omo TUI](.github/assets/chat.png)
-
-- `Ctrl+O` opens the overview with agents, jobs, mail, incidents, events, statistics, and plugins.
-- `Ctrl+C` is the emergency stop; `q` offers an orderly safe shutdown.
-- `omo --safe-mode` starts only the CEO, for changing rules before work begins.
-
-![Agents overview with usage bars and the spawn tree](.github/assets/agents.png)
-
-## Documentation
-
-The [wiki](wiki/README.md) holds the complete documentation:
-
-- [Core concepts](wiki/concepts.md): office layout, roles, jobs and merges, mail routing, restart recovery.
-- [Running an office](wiki/running.md): start modes, startup checks, self-update, safe shutdown, logs, manual agent input.
-- [The TUI](wiki/tui.md): peek, overview tabs, command console, keyboard controls.
-- [Configuration](wiki/configuration.md): the complete `omo.yaml` reference, model profiles, usage limits, recommended models.
-- [Global home and office trust](wiki/global-home.md): trusted offices, new-office templates, shared extensions and plugins.
-- [Official plugins](wiki/official-plugins.md): bundled and optional official plugins, installation, configuration, and manual actions.
-- [Complete CLI reference](wiki/cli.md): every command with its permissions.
-- [Git integration](wiki/git-integration.md): committing an office and exchanging job handoffs.
-- [Prompts, messages, and extensions](wiki/prompts.md): customizing what agents are told.
-- [Writing plugins](wiki/plugins.md): manifests, events, Lua and command hooks, manual actions.
-- [Company dashboard](wiki/company.md): the local dashboard for several offices.
-- [Docker](wiki/docker.md): container images and Compose.
-- [Development and testing](wiki/development.md): building from source and running the suite.
-
-## License
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-license-dark.svg">
+  <img alt="License" src=".github/assets/header-license-light.svg">
+</picture>
 
 Copyright (C) 2026 Joschua Becker EDV.
 
-Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
+Licensed under the [GNU Affero General Public License](LICENSE), version 3 or (at your option) any later version
+(SPDX `AGPL-3.0-or-later`); see [NOTICE](NOTICE).

@@ -1,135 +1,151 @@
-// Package prompts renders role prompts: embedded defaults, exported and
-// overridable per office via .omo/prompts/<role>.md.
+// Package prompts holds omo's default prompts and renders prompt text.
+//
+// Role prompts (ceo, pm, developer, reviewer, export) tell an agent what its
+// role is and how the board works. Each ends with a section for the user's
+// own instructions, which come from a separate prompt item
+// "<role>-instructions" so that new default mechanics never overwrite what
+// the user wrote. Message prompts (start, restart, handoff, wait-timeout,
+// wait-investigate, stalled, question-reminder) are the short texts omo
+// types to an agent or returns from a wait.
 package prompts
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"embed"
 	"fmt"
-	"os"
-	"path/filepath"
+	"regexp"
+	"strings"
 	"text/template"
 )
 
-//go:embed templates/*.md
-var templates embed.FS
+//go:embed defaults/*.md
+var defaultFiles embed.FS
 
-// Dir is the per-office role-prompt directory. Setup exports every embedded
-// prompt here so offices can tune organizational behavior without rebuilding.
-const Dir = ".omo/prompts"
-
-var Roles = []string{"ceo", "product_manager", "developer", "reviewer", "freelancer", "smokealarm", "firefighter"}
-
-// DefaultsDigest fingerprints every embedded role prompt plus common.md.
-func DefaultsDigest() (string, error) {
-	h := sha256.New()
-	for _, name := range append([]string{"common"}, Roles...) {
-		raw, err := templates.ReadFile("templates/" + name + ".md")
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(h, "%s\x00", name)
-		h.Write(raw)
-		h.Write([]byte{0})
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+// Names lists every prompt omo knows, in a stable order.
+var Names = []string{
+	"ceo", "pm", "developer", "reviewer", "export",
+	"ceo-instructions", "pm-instructions", "developer-instructions", "reviewer-instructions", "export-instructions",
+	"start", "restart", "handoff", "wait-timeout", "wait-investigate", "stalled", "question-reminder",
 }
 
+// Defaults returns a fresh map from every name in Names to its embedded
+// default text. The "-instructions" defaults are empty.
+func Defaults() map[string]string {
+	out := make(map[string]string, len(Names))
+	for _, name := range Names {
+		data, err := defaultFiles.ReadFile("defaults/" + name + ".md")
+		if err != nil {
+			panic(fmt.Sprintf("prompts: missing embedded default %s: %v", name, err))
+		}
+		out[name] = string(data)
+	}
+	return out
+}
+
+// Project is one project of the ticket an agent works on.
+type Project struct {
+	ID       string
+	Name     string
+	Folder   string // the user's own checkout
+	Worktree string // the agent's working folder
+	Branch   string // the branch checked out in Worktree
+	// Parent is the branch Branch was cut from; for a reviewer or an export
+	// job, the branch it is compared with or targets.
+	Parent string
+}
+
+// Data is what a prompt template can use.
 type Data struct {
-	Name    string
-	Role    string
-	Goal    string
-	Context string
-	JobID   int64
-	// PMOwned is set by the supervisor for a developer job whose parent is a PM.
-	PMOwned bool
-	// MergeTarget is the trusted effective policy for this job's repository.
-	MergeTarget    string
-	SuperpowersDir string
-	// StorageRetentionDays tells agents when shared storage files expire.
-	// Zero means automatic storage cleanup is disabled.
-	StorageRetentionDays int
-	// Extensions contains the selected role preset loaded from
-	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
-	Extensions string
-	Paths      []PathReference
+	Name         string // the agent's name
+	Role         string
+	Type         string // story or task
+	Title        string
+	StoryTitle   string
+	Supervisor   string // who supervises the ticket, in words
+	Verification string // targeted or full
+	TaskRelease  string // agents or user
+	WaitTimeout  string
+	Silent       string
+	Instructions string // the user's own instructions for the role
+	RestartNote  string // the rendered restart prompt on a fresh session of started work
+	Ticket       int
+	Story        int
+	ReviewRound  int
+	Timeouts     int
+	Question     int
+	Projects     []Project
+	MultiProject bool
+	// NoProject is set for a task without a project: its developer and
+	// reviewer work in Workdir, the working folder omo made for it, and
+	// Repositories lists the projects omo knows (ID, Name, Folder), which
+	// they may read but not change.
+	NoProject    bool
+	Workdir      string
+	Repositories []Project
+	CEOEnabled   bool
+	// CEOMayApprove is the setting that lets the CEO approve stories.
+	CEOMayApprove bool
+	// CEOTicketsNeedApproval is the setting that makes the tickets the CEO
+	// creates wait for the user's approval; for the CEO's prompt only.
+	CEOTicketsNeedApproval bool
+	// AgentReview is true when an agent reviews the story.
+	AgentReview bool
+	// Export is what an export job needs; empty for every other prompt.
+	Export ExportData
+	// StopReason is why the handoff prompt is sent: StopUsage when the
+	// agent's model reached its usage limit, "" when omo is stopping.
+	StopReason string
+	// Home is omo's home folder and ServerLog the log file omo writes when
+	// it runs in the background; both for the CEO's prompt only.
+	Home      string
+	ServerLog string
 }
 
-// PathReference is a labeled absolute path supplied to editable prompt
-// templates through .Paths.
-type PathReference struct {
-	Label       string
-	Path        string
-	Description string
+// StopUsage is the StopReason of a handoff asked because the agent's model
+// reached its usage limit.
+const StopUsage = "usage"
+
+// ExportData is what omo did and found for an export job: the commit it
+// pushed where, and the commands that open or update the pull request.
+type ExportData struct {
+	// Folder is the job's working folder: omo put material.md there, the
+	// job writes title.txt and body.md, and the commands read pr-title.txt
+	// and pr-body.md.
+	Folder    string
+	Remote    string // the name of the remote omo pushed to
+	Address   string // the remote's address, without user or password
+	RemoteWeb string // the repository's web address; "" for a remote on this machine
+	Repo      string // the repository's path on its forge
+	Forge     string // github, gitlab, gitea or ""
+	CLI       string // the forge's command line tool
+	Command   string // the command that opens the pull request; "" when there is none
+	// EditCommand sets the title and body of the pull request that already
+	// exists for the branch; for tea it names it by its number, written
+	// INDEX. "" when there is no Command.
+	EditCommand string
+	Problem     string // why there is no command
+	Commit      string // the commit omo pushed
+	Branch      string // the branch omo pushed it to
+	Base        string // the branch the pull request targets
 }
 
-func Render(officeDir, role string, d Data) (string, error) {
-	extensions, err := loadExtensions(officeDir, role)
+var manyNewlines = regexp.MustCompile(`\n{3,}`)
+
+// Render executes text as a template named name with d. An unknown field is
+// an error. Trailing whitespace is removed from every line and from the end,
+// and runs of three or more newlines become two.
+func Render(name, text string, d Data) (string, error) {
+	t, err := template.New(name).Option("missingkey=error").Parse(text)
 	if err != nil {
 		return "", err
 	}
-	d.Extensions = extensions
-	common, err := readTemplate(officeDir, "common")
-	if err != nil {
+	var b strings.Builder
+	if err := t.Execute(&b, d); err != nil {
 		return "", err
 	}
-	var body []byte
-	body, err = readTemplate(officeDir, role)
-	if err != nil {
-		return "", fmt.Errorf("unknown role %q: %w", role, err)
+	lines := strings.Split(b.String(), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t\r")
 	}
-	tmpl, err := template.New(role).Parse(string(common) + "\n" + string(body))
-	if err != nil {
-		return "", err
-	}
-	var out bytes.Buffer
-	if err := tmpl.Execute(&out, d); err != nil {
-		return "", err
-	}
-	return out.String(), nil
-}
-
-func readTemplate(officeDir, name string) ([]byte, error) {
-	override := filepath.Join(officeDir, Dir, name+".md")
-	if raw, err := os.ReadFile(override); err == nil {
-		return raw, nil
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	// Compatibility with the brief pre-export layout. New and re-run setups
-	// always use .omo/prompts.
-	legacy := filepath.Join(officeDir, "prompts", name+".md")
-	if raw, err := os.ReadFile(legacy); err == nil {
-		return raw, nil
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	return templates.ReadFile("templates/" + name + ".md")
-}
-
-// WriteDefaults exports common.md and every role prompt without overwriting
-// local edits. Deleting one file restores the embedded fallback on next run.
-func WriteDefaults(officeDir string) error {
-	dir := filepath.Join(officeDir, Dir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	names := append([]string{"common"}, Roles...)
-	for _, name := range names {
-		path := filepath.Join(dir, name+".md")
-		if _, err := os.Stat(path); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		raw, err := templates.ReadFile("templates/" + name + ".md")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, raw, 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
+	out := manyNewlines.ReplaceAllString(strings.Join(lines, "\n"), "\n\n")
+	return strings.TrimRight(out, " \t\r\n"), nil
 }

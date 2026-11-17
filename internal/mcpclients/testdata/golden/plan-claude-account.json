@@ -1,0 +1,35 @@
+{
+  "target": {
+    "id": "claude-\u003chash of the account\u003e",
+    "cli": "claude",
+    "account": "$HOME/accounts/work",
+    "config_path": "$HOME/accounts/work/.claude.json"
+  },
+  "action": "install",
+  "file": "$HOME/accounts/work/.claude.json",
+  "commands": [
+    [
+      "claude",
+      "mcp",
+      "add-json",
+      "-s",
+      "user",
+      "omo",
+      "{\"args\":[\"mcp\",\"stdio\"],\"command\":\"$OMO\",\"env\":{\"OMO_HOME\":\"$OMO_HOME\"},\"type\":\"stdio\"}"
+    ]
+  ],
+  "before": null,
+  "after": {
+    "args": [
+      "mcp",
+      "stdio"
+    ],
+    "command": "$OMO",
+    "env": {
+      "OMO_HOME": "$OMO_HOME"
+    },
+    "type": "stdio"
+  },
+  "message": "The commands run with CLAUDE_CONFIG_DIR=$HOME/accounts/work. A copy of the file is saved in omo's backups first.",
+  "hash": ""
+}

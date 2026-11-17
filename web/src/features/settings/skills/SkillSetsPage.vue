@@ -1,0 +1,200 @@
+<script setup lang="ts">
+// The Skill sets section of the settings: the git repositories of skills omo
+// keeps one read-only copy of, each with its state, and one open form at a
+// time. The list and the states are read again when a skill set file or a
+// checkout changes, after a snapshot and when the event stream is live again;
+// reads are numbered so an older answer never replaces a newer one. The open
+// set is part of this page's state, not of the address.
+import { computed, ref, useId } from 'vue'
+import { getSkillSets } from '../../../api/endpoints'
+import type { ApiEvent, FileError, SettingsChangedData, SettingsInvalidData, SkillSet, SkillSetState } from '../../../api/types'
+import Callout from '../../../components/ui/Callout.vue'
+import FormSection from '../../../components/ui/FormSection.vue'
+import UiButton from '../../../components/ui/UiButton.vue'
+import { visibleText } from '../../../components/ui/visibleText'
+import { useSession } from '../../../session'
+import { useBoard } from '../../../store'
+import FileErrors from '../FileErrors.vue'
+import { liveRead } from '../../../store/liveRead'
+import NameDialog from '../NameDialog.vue'
+import SettingsPage from '../SettingsPage.vue'
+import { sectionDef } from '../settingsSections'
+import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
+import SkillSetEditor from './SkillSetEditor.vue'
+import SkillSetList from './SkillSetList.vue'
+import SkillSearch from './SkillSearch.vue'
+import { draftFromSearch, originOf, type SkillOrigin } from './skillSearch'
+import type { SkillSearchResolved, SkillSearchResult } from '../../../api/types'
+import { blankSkillSet, fileOfSkillSet, presetOf, RECOMMENDATIONS, type Recommendation, type SkillDraft } from './skillForms'
+
+const def = sectionDef('skills')
+const session = useSession()
+const store = useBoard()
+
+const sets = ref<SkillSet[]>([])
+const states = ref<SkillSetState[]>([])
+const errors = ref<FileError[]>([])
+const loaded = ref(false)
+const loadError = ref('')
+
+function concernsSkillSets(ev: ApiEvent): boolean {
+  if (ev.kind === 'skillset.changed') return true
+  if (ev.kind === 'settings.changed') return (ev.data as Partial<SettingsChangedData> | null)?.section === 'skillsets'
+  if (ev.kind === 'settings.invalid') {
+    const f = (ev.data as Partial<SettingsInvalidData> | null)?.file
+    return typeof f === 'string' && fileOfSkillSet(f) !== null
+  }
+  return false
+}
+const list = liveRead({
+  store,
+  read: () => getSkillSets(session.client),
+  apply({ data }) {
+    sets.value = data.skill_sets
+    states.value = data.states
+    errors.value = data.errors
+    loadError.value = ''
+    loaded.value = true
+  },
+  failed(e) {
+    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The skill sets could not be read.'
+    loaded.value = true
+  },
+  watches: concernsSkillSets,
+})
+const reload = () => list.reload()
+
+/** A state the server answered with (Update now): newer than every read under way. */
+function takeState(st: SkillSetState) {
+  list.newer()
+  states.value = [...states.value.filter((s) => s.name !== st.name), st]
+}
+
+/** The open set, and for one not stored yet where its form starts. */
+const selected = ref<string | null>(null)
+const initial = ref<SkillDraft | null>(null)
+/** For a set from a search that is not stored yet: where it came from. */
+const origin = ref<SkillOrigin | null>(null)
+const editor = useOpenEditor(() => `the skill set ${visibleText(selected.value ?? '')}`)
+const formId = useId()
+
+const names = computed(() => sets.value.map((s) => s.name))
+/** Broken files of sets whose form is not open (the open form shows its own). */
+const listErrors = computed(() => errors.value.filter((e) => fileOfSkillSet(e.file) !== selected.value))
+/** The recommended sets no stored set gives yet. */
+const offers = computed(() => (loaded.value ? RECOMMENDATIONS.filter((r) => !r.present(sets.value)) : []))
+
+async function toggle(name: string) {
+  if (!(await editor.leave())) return
+  selected.value = selected.value === name ? null : name
+  initial.value = null
+  origin.value = null
+}
+async function openNew(name: string, start: SkillDraft, from: SkillOrigin | null = null): Promise<boolean> {
+  if (!(await editor.leave())) return false
+  selected.value = name
+  initial.value = start
+  origin.value = from
+  return true
+}
+/** A search result was chosen: its set opens unsaved, with where it came from. */
+function openFound(result: SkillSearchResult, resolved: SkillSearchResolved) {
+  const start = draftFromSearch(result, resolved, names.value)
+  void openNew(start.name, start, originOf(result, resolved))
+}
+function openRecommended(rec: Recommendation) {
+  const start = presetOf(rec, names.value)
+  void openNew(start.name, start)
+}
+const newButton = ref<InstanceType<typeof UiButton>>()
+/** Focus after the form of `name` went away: its row, else Add skill set…. */
+const focusAfter = (name: string) =>
+  focusAfterClose(
+    () => rowButton('data-skillset', name, 'data-skillset-toggle'),
+    () => newButton.value?.$el as HTMLElement | undefined,
+  )
+async function closeNew() {
+  if (!(await editor.leave())) return
+  const name = selected.value
+  selected.value = null
+  initial.value = null
+  origin.value = null
+  if (name !== null && selected.value === null) await focusAfter(name)
+}
+async function deleted() {
+  const name = selected.value
+  editor.reset()
+  selected.value = null
+  initial.value = null
+  origin.value = null
+  await reload()
+  if (name !== null && selected.value === null) await focusAfter(name)
+}
+
+const naming = ref(false)
+const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.value) ?? null)
+</script>
+
+<template>
+  <SettingsPage :title="def.label" :description="def.description">
+    <FormSection legend="Skill sets" description="Git repositories of skills. omo keeps one read-only copy of each and tells the agents of each role where it is.">
+      <FileErrors :errors="listErrors" />
+      <Callout v-if="loadError" tone="danger" live="assertive" data-skillsets-error>
+        <p>{{ loadError }}</p>
+        <template #actions><UiButton size="sm" @click="reload()">Try again</UiButton></template>
+      </Callout>
+      <p v-if="!loaded" class="skills__note">Reading the skill sets…</p>
+      <p v-else-if="sets.length === 0 && !loadError" class="skills__note" data-no-skillsets>No skill set yet.</p>
+      <SkillSetList v-else :sets="sets" :states="states" :selected="selected" :controls="formId" @select="toggle" />
+      <div class="skills__buttons">
+        <UiButton ref="newButton" data-new-skillset @click="naming = true">Add skill set…</UiButton>
+        <UiButton v-for="rec in offers" :key="rec.id" :data-add-recommended="rec.id" @click="openRecommended(rec)">Add {{ rec.label }}</UiButton>
+      </div>
+
+      <Callout v-if="editor.busyNote.value" tone="warn" data-editor-busy>
+        <p>{{ editor.busyNote.value }}</p>
+      </Callout>
+      <SkillSetEditor
+        v-if="selected !== null"
+        :key="selected"
+        :name="selected"
+        :initial="initial"
+        :origin="origin"
+        :state="stateOfOpen"
+        :form-id="formId"
+        @dirty="(d) => (editor.dirty.value = d)"
+        @busy="(b) => (editor.busy.value = b)"
+        @deleted="deleted"
+        @close="closeNew"
+        @state="takeState"
+      />
+    </FormSection>
+
+    <SkillSearch @choose="openFound" />
+
+    <NameDialog
+      :open="naming"
+      :taken="names"
+      title="Add skill set"
+      eyebrow="skill sets"
+      thing="skill set"
+      confirm="Add"
+      @close="naming = false"
+      @create="(n) => openNew(n, blankSkillSet(n))"
+    />
+  </SettingsPage>
+</template>
+
+<style scoped>
+.skills__note {
+  margin: 0;
+  color: var(--omo-muted);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+}
+.skills__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--omo-space) * 2);
+}
+</style>

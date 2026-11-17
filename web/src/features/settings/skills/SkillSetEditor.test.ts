@@ -1,0 +1,255 @@
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { afterEach, expect, test } from 'vitest'
+import type { SkillSet, SkillSetState, SkillSetsResponse } from '../../../api/types'
+import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
+import { announcements } from '../../../components/ui/useAnnouncer'
+import SkillSetEditor from './SkillSetEditor.vue'
+import { superpowersPreset } from './skillForms'
+
+let mounted: VueWrapper | null = null
+afterEach(() => {
+  mounted?.unmount()
+  mounted = null
+})
+
+const set = (o: Partial<SkillSet> = {}): SkillSet => ({
+  name: 'sp',
+  repository: 'https://example.invalid/sp.git',
+  ref: 'main',
+  update: 'at_start',
+  enabled: true,
+  paths: [],
+  roles: [],
+  instructions: { developer: 'Use TDD.' },
+  revision: 'rev1',
+  ...o,
+})
+const state = (o: Partial<SkillSetState> = {}): SkillSetState => ({ name: 'sp', state: 'ok', commit: 'a41c9e0123456', path: '/home/x/skills/sp', updated_at: '2026-11-15T10:00:00Z', message: '', missing_paths: [], ...o })
+
+async function open(sets: SkillSet[], props: Record<string, unknown> = {}): Promise<{ w: VueWrapper; h: Harness; read: { value: SkillSetsResponse } }> {
+  const h = await harness()
+  const read = { value: { skill_sets: sets, states: [], errors: [] } as SkillSetsResponse }
+  const client = h.session.client
+  const baseGet = client.get.bind(client)
+  client.get = ((path: string, q?: never) => (path === '/api/skillsets' ? Promise.resolve(ok(read.value)) : baseGet(path, q))) as typeof client.get
+  h.respond.write = ({ body }) => ok({ ...(body as object), revision: 'rev2' })
+  const w = await mountWith(h, SkillSetEditor, { name: 'sp', ...props })
+  mounted = w
+  await flushPromises()
+  return { w, h, read }
+}
+
+const bar = (w: VueWrapper) => w.get('[role="region"]')
+const save = async (w: VueWrapper) => {
+  await bar(w).findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
+  await flushPromises()
+}
+
+test('save sends If-Match with the revision the form was read with, and only roles with a text', async () => {
+  const { w, h } = await open([set()])
+  await w.get('[data-skillset-text="reviewer"]').setValue('Check the diff.')
+  await save(w)
+  expect(h.sent).toEqual([
+    {
+      method: 'PUT',
+      path: '/api/skillsets/sp',
+      body: {
+        name: 'sp',
+        repository: 'https://example.invalid/sp.git',
+        ref: 'main',
+        update: 'at_start',
+        enabled: true,
+        paths: [],
+        roles: [],
+        instructions: { developer: 'Use TDD.', reviewer: 'Check the diff.' },
+      },
+      ifMatch: 'rev1',
+    },
+  ])
+  expect(w.text()).toContain('Saved')
+})
+
+test('a set not stored yet starts unsaved and is created with If-Match "0"', async () => {
+  const { w, h } = await open([], { initial: superpowersPreset('sp') })
+  expect(w.text()).toContain('(not saved yet)')
+  expect(bar(w).text()).toContain('Unsaved changes')
+  expect(w.find('[data-skillset-delete]').exists()).toBe(false)
+  expect(w.find('[data-skillset-update]').exists()).toBe(false)
+  await save(w)
+  expect(h.sent[0]?.ifMatch).toBe('0')
+  expect((h.sent[0]?.body as SkillSet).repository).toBe('https://github.com/obra/superpowers.git')
+})
+
+test('a refused repository shows the server message under it; one naming a key the form lacks is shown at the top', async () => {
+  const { w, h } = await open([set()])
+  h.respond.write = () => refuse('validation', 'repository must be an https:// or ssh:// address', { field: 'repository' })
+  await w.get('[data-skillset-repository]').setValue('ext::sh -c boom')
+  await save(w)
+  const field = w.get('[data-skillset-repository]').element.closest('.omo-field')!
+  expect(field.textContent).toContain('repository must be an https:// or ssh:// address')
+  expect(w.get('[data-skillset-repository]').attributes('aria-invalid')).toBe('true')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+
+  h.respond.write = () => refuse('validation', 'instructions.developer must be at most 16 KiB', { field: 'instructions.developer' })
+  await save(w)
+  expect(w.get('[data-skillset-text="developer"]').attributes('aria-invalid')).toBe('true')
+  expect(w.text()).toContain('instructions.developer must be at most 16 KiB')
+
+  h.respond.write = () => refuse('validation', 'the skill set name must match ^[a-z0-9]$', { field: 'name' })
+  await save(w)
+  expect(w.get('[data-form-errors] .callout__body').text()).toBe('the skill set name must match ^[a-z0-9]$')
+})
+
+test('update now shows updating, then the result; a failure shows the cleaned message as text', async () => {
+  const states: SkillSetState[] = []
+  const { w, h } = await open([set()], { state: state(), onState: (s: SkillSetState) => states.push(s) })
+  let release!: (s: SkillSetState) => void
+  h.respond.write = () => new Promise((res) => (release = (s) => res(ok(s))))
+  await w.get('[data-skillset-update]').trigger('click')
+  const btn = w.get('[data-skillset-update]')
+  expect(btn.text()).toBe('Updating…')
+  expect(btn.attributes('disabled')).toBeDefined()
+  expect(h.sent.at(-1)).toMatchObject({ method: 'POST', path: '/api/skillsets/sp/update' })
+  release(state({ commit: 'bbbbbbb999' }))
+  await flushPromises()
+  expect(w.get('[data-skillset-result]').text()).toBe('Updated; now at bbbbbbb.')
+  // Said once: by the announcer, not by the line as well.
+  expect(w.get('[data-skillset-result]').attributes('role')).toBeUndefined()
+  expect(announcements.polite.value).toBe('Updated; now at bbbbbbb.')
+  expect(w.get('[data-skillset-update]').text()).toBe('Update now')
+  expect(states[0]).toEqual(state({ commit: 'bbbbbbb999' }))
+
+  h.respond.write = () => ok(state({ state: 'failed', message: 'fatal: <b>no</b>‮' }))
+  await w.get('[data-skillset-update]').trigger('click')
+  await flushPromises()
+  const r = w.get('[data-skillset-result]')
+  expect(r.text()).toBe('The update failed: fatal: <b>no</b>\\u{202E}')
+  expect(r.find('b').exists()).toBe(false)
+})
+
+test('a refused update shows the refusal', async () => {
+  const { w, h } = await open([set()], { state: state() })
+  h.respond.write = () => refuse('not_found', 'no skill set "sp"', undefined, 404)
+  await w.get('[data-skillset-update]').trigger('click')
+  await flushPromises()
+  // A refusal of a one-shot action is a callout in place, like every refusal of these pages.
+  expect(w.get('[data-skillset-update-error] .callout__body').text()).toBe('no skill set "sp"')
+  expect(w.find('[data-skillset-result]').exists()).toBe(false)
+})
+
+test('the checkout is shown as it is: commit and path, or the failure with the kept commit', async () => {
+  const { w } = await open([set()], { state: state({ state: 'failed', message: 'boom', commit: 'a41c9e0123456' }) })
+  const text = w.get('[data-skillset-checkout]').text()
+  expect(text).toContain('The last update failed (still at a41c9e0): boom')
+  await w.setProps({ state: state() })
+  expect(w.get('[data-skillset-checkout]').text()).toContain('Checked out at a41c9e0')
+  expect(w.get('[data-skillset-checkout]').text()).toContain('/home/x/skills/sp')
+})
+
+test('delete asks first, then deletes with the revision', async () => {
+  let deleted = 0
+  const { w, h } = await open([set()], { onDeleted: () => deleted++ })
+  window.confirm = () => true
+  await w.get('[data-skillset-delete]').trigger('click')
+  await flushPromises()
+  expect(h.sent).toEqual([{ method: 'DELETE', path: '/api/skillsets/sp', body: undefined, ifMatch: 'rev1' }])
+  expect(deleted).toBe(1)
+})
+
+test('the repository is shown as stored, in a field, never as markup', async () => {
+  const { w } = await open([set({ repository: 'https://user:token@example.invalid/<b>x</b>.git' })])
+  expect((w.get('[data-skillset-repository]').element as HTMLInputElement).value).toBe('https://user:token@example.invalid/<b>x</b>.git')
+  expect(w.find('b').exists()).toBe(false)
+})
+
+test('the form says it is busy while Update now runs, so the page keeps it open', async () => {
+  const busy: boolean[] = []
+  const { w, h } = await open([set()], { state: state(), onBusy: (b: boolean) => busy.push(b) })
+  let release!: (s: SkillSetState) => void
+  h.respond.write = () => new Promise((res) => (release = (s) => res(ok(s))))
+  await w.get('[data-skillset-update]').trigger('click')
+  await flushPromises()
+  expect(busy).toEqual([true])
+  release(state())
+  await flushPromises()
+  expect(busy).toEqual([true, false])
+})
+
+test('roles are chips that switch on and off; only roles that get the set have a text field', async () => {
+  const { w, h } = await open([set()])
+  const chip = (id: string) => w.get(`[data-skillset-role="${id}"]`)
+  expect(w.get('[data-skillset-roles]').attributes('role')).toBe('group')
+  for (const id of ['ceo', 'pm', 'developer', 'reviewer', 'export']) expect(chip(id).attributes('aria-pressed')).toBe('false')
+  expect(w.get('[data-skillset-roles-hint]').text()).toBe('None chosen: every role gets this set.')
+  expect(w.findAll('[data-skillset-text]')).toHaveLength(5)
+
+  await chip('ceo').trigger('click')
+  await chip('developer').trigger('click')
+  expect(chip('ceo').attributes('aria-pressed')).toBe('true')
+  expect(w.get('[data-skillset-roles-hint]').text()).toBe('Only the chosen roles get this set.')
+  expect(w.findAll('[data-skillset-text]').map((t) => t.attributes('data-skillset-text'))).toEqual(['ceo', 'developer'])
+  await chip('developer').trigger('click')
+  await save(w)
+  // The developer's text goes with the developer.
+  expect(h.sent[0]?.body).toMatchObject({ roles: ['ceo'], instructions: {} })
+})
+
+test('paths are a list; a refused path shows under its row, a refused role under the chips', async () => {
+  const { w, h } = await open([set({ paths: ['skills/tdd'] })])
+  const list = w.get('[data-skillset-paths]')
+  expect((list.get('[data-row="0"] input').element as HTMLInputElement).value).toBe('skills/tdd')
+  await list.get('[data-part="add"]').trigger('click')
+  await list.get('[data-row="1"] input').setValue('../outside')
+  h.respond.write = () => refuse('validation', 'paths.1 must stay inside the repository (no .. part)', { field: 'paths.1' })
+  await save(w)
+  expect(h.sent[0]?.body).toMatchObject({ paths: ['skills/tdd', '../outside'] })
+  expect(list.get('[data-row="1"]').text()).toContain('paths.1 must stay inside the repository (no .. part)')
+  expect(list.get('[data-row="1"] input').attributes('aria-invalid')).toBe('true')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+
+  h.respond.write = () => refuse('validation', 'roles.0 must be one of ceo, pm', { field: 'roles.0' })
+  await save(w)
+  expect(w.get('[data-skillset-roles]').element.closest('.omo-field')!.textContent).toContain('roles.0 must be one of ceo, pm')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+})
+
+test('paths the checkout does not have are named while the form still has them', async () => {
+  const { w } = await open([set({ paths: ['skills/tdd', 'skills/gone'] })], { state: state({ missing_paths: ['skills/gone'] }) })
+  expect(w.get('[data-skillset-missing]').text()).toContain('Not in the checkout: skills/gone.')
+  await w.get('[data-skillset-paths] [data-row="1"] [data-part="remove"]').trigger('click')
+  expect(w.find('[data-skillset-missing]').exists()).toBe(false)
+})
+
+const fromSearch = { name: '<b>grill-me</b>', source: 'mattpocock/skills', url: 'https://skills.sh/mattpocock/skills/grill-me', folder: 'skills/productivity/grill-me' }
+
+test('a set from a search warns that nobody reviewed it and asks before its first save', async () => {
+  const draft = { ...superpowersPreset('grill-me'), repository: 'https://github.com/mattpocock/skills.git', paths: ['skills/productivity/grill-me'], roles: [] }
+  const { w, h } = await open([], { name: 'grill-me', initial: draft, origin: fromSearch })
+  const warning = w.get('[data-skillset-found]')
+  expect(warning.text()).toContain('Nobody reviewed this skill')
+  expect(warning.text()).toContain('A skill is instructions your agents follow.')
+  // Someone else's text stays text.
+  expect(warning.text()).toContain('<b>grill-me</b>')
+  expect(warning.find('b').exists()).toBe(false)
+  expect(w.get('[data-skillset-found-link]').attributes('href')).toBe('https://skills.sh/mattpocock/skills/grill-me')
+  expect(w.get('[data-skillset-found-folder]').text()).toContain('skills/productivity/grill-me')
+
+  const asked: string[] = []
+  const confirm = window.confirm
+  try {
+    window.confirm = (text?: string) => (asked.push(text ?? ''), false)
+    await save(w)
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toContain('Nobody reviewed this skill')
+    expect(h.sent).toEqual([])
+
+    window.confirm = () => true
+    await save(w)
+    expect(h.sent).toHaveLength(1)
+    expect(h.sent[0]).toMatchObject({ method: 'PUT', path: '/api/skillsets/grill-me', ifMatch: '0' })
+  } finally {
+    window.confirm = confirm
+  }
+  // Once stored, the warning is gone and saving asks nothing.
+  expect(w.find('[data-skillset-found]').exists()).toBe(false)
+})

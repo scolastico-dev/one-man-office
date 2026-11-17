@@ -1,0 +1,295 @@
+@import 'tailwindcss';
+@import './fonts.css';
+@import './tokens.css';
+@import './markdown.css';
+
+/*
+ * Tailwind sees only the tokens: its default palette, font stacks, text
+ * sizes and radii are removed, so bg-surface, text-muted, border-line,
+ * text-sm, p-3 and friends are the whole vocabulary.
+ */
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--omo-bg);
+  --color-surface: var(--omo-surface);
+  --color-raised: var(--omo-raised);
+  --color-line: var(--omo-line);
+  --color-line-strong: var(--omo-line-strong);
+  --color-fg: var(--omo-fg);
+  --color-muted: var(--omo-muted);
+  --color-accent: var(--omo-accent);
+  --color-accent-hover: var(--omo-accent-hover);
+  --color-accent-fg: var(--omo-accent-fg);
+  --color-accent-soft: var(--omo-accent-soft);
+  --color-select: var(--omo-select);
+  --color-select-line: var(--omo-select-line);
+  --color-ok: var(--omo-ok);
+  --color-warn: var(--omo-warn);
+  --color-danger: var(--omo-danger);
+  --color-danger-soft: var(--omo-danger-soft);
+  --color-backdrop: var(--omo-backdrop);
+  --color-diff-add: var(--omo-diff-add);
+  --color-diff-del: var(--omo-diff-del);
+  --color-diff-hunk: var(--omo-diff-hunk);
+  --color-mention: var(--omo-mention);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --font-*: initial;
+  --font-mono: var(--omo-font);
+  --default-font-family: var(--omo-font);
+  --default-mono-font-family: var(--omo-font);
+
+  --text-*: initial;
+  --text-xs: var(--omo-text-xs);
+  --text-xs--line-height: var(--omo-text-xs-lh);
+  --text-sm: var(--omo-text-sm);
+  --text-sm--line-height: var(--omo-text-sm-lh);
+  --text-base: var(--omo-text-base);
+  --text-base--line-height: var(--omo-text-base-lh);
+  --text-lg: var(--omo-text-lg);
+  --text-lg--line-height: var(--omo-text-lg-lh);
+  --text-xl: var(--omo-text-xl);
+  --text-xl--line-height: var(--omo-text-xl-lh);
+  --text-2xl: var(--omo-text-2xl);
+  --text-2xl--line-height: var(--omo-text-2xl-lh);
+
+  --radius-*: initial;
+  --spacing: var(--omo-space);
+  --default-transition-duration: var(--omo-duration);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--omo-bg);
+    color: var(--omo-fg);
+    font-family: var(--omo-font);
+    font-size: var(--omo-text-base);
+    line-height: var(--omo-text-base-lh);
+    font-variant-ligatures: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 700;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  ::selection {
+    background: var(--omo-select);
+    color: var(--omo-fg);
+  }
+
+  :focus-visible {
+    outline: var(--omo-focus-width) solid var(--omo-accent);
+    outline-offset: var(--omo-focus-offset);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--omo-line-strong) transparent;
+  }
+}
+
+/* Shared looks of the base components in components/ui. */
+@layer components {
+  /*
+   * Text a program wrote (a log, a test's output): lines kept, long ones broken
+   * wherever they must be, so a path, a URL or a JSON blob never widens its box.
+   */
+  .omo-logtext {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .omo-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--omo-space) * 2);
+    /* The control height and no padding above and below: a button is exactly as tall as the fields beside it. */
+    min-height: var(--omo-control-h);
+    padding: 0 calc(var(--omo-space) * 3);
+    border: var(--omo-border) solid var(--omo-line-strong);
+    background: var(--omo-raised);
+    color: var(--omo-fg);
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      border-color var(--omo-duration) ease,
+      background-color var(--omo-duration) ease,
+      color var(--omo-duration) ease;
+  }
+  .omo-btn--sm {
+    --omo-control-h: var(--omo-control-h-sm);
+    padding: 0 calc(var(--omo-space) * 2);
+    font-size: var(--omo-text-xs);
+    line-height: var(--omo-text-xs-lh);
+  }
+  .omo-btn--icon {
+    width: var(--omo-control-h);
+    padding: 0;
+  }
+  /*
+   * A compact row: every control inside takes the small height, text sizes
+   * stay as they are (the top bar, and the sidebar's head on its line).
+   */
+  .omo-compact {
+    --omo-control-h: var(--omo-control-h-sm);
+  }
+  .omo-btn--primary {
+    border-color: var(--omo-accent);
+    background: var(--omo-accent);
+    color: var(--omo-accent-fg);
+  }
+  .omo-btn--danger {
+    color: var(--omo-danger);
+  }
+  .omo-btn--ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--omo-muted);
+  }
+  .omo-btn[aria-pressed='true'],
+  .omo-btn[aria-expanded='true'] {
+    border-color: var(--omo-accent);
+    background: var(--omo-select);
+    color: var(--omo-fg);
+  }
+  .omo-btn:disabled,
+  .omo-btn[aria-disabled='true'] {
+    border-color: var(--omo-line);
+    background: transparent;
+    color: var(--omo-muted);
+    cursor: not-allowed;
+  }
+  @media (hover: hover) {
+    .omo-btn:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-accent);
+      background: var(--omo-accent-soft);
+      color: var(--omo-fg);
+    }
+    .omo-btn--primary:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-accent-hover);
+      background: var(--omo-accent-hover);
+      color: var(--omo-accent-fg);
+    }
+    .omo-btn--danger:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-danger);
+      background: var(--omo-danger-soft);
+      color: var(--omo-danger);
+    }
+  }
+
+  .omo-field {
+    display: grid;
+    /* Stretched by a taller neighbour in a row, the field keeps its parts together instead of growing its input. */
+    align-content: start;
+    gap: calc(var(--omo-space) * 1.5);
+    min-width: 0;
+  }
+  .omo-field__label {
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
+    color: var(--omo-fg);
+  }
+  .omo-field__hint,
+  .omo-field__error {
+    margin: 0;
+    font-size: var(--omo-text-xs);
+    line-height: var(--omo-text-xs-lh);
+    color: var(--omo-muted);
+    overflow-wrap: anywhere;
+  }
+  .omo-field__error {
+    color: var(--omo-danger);
+  }
+  .omo-input {
+    /* The inner distance at the sides; a select's arrow keeps it on the right. */
+    --omo-input-pad-x: calc(var(--omo-space) * 2.5);
+    width: 100%;
+    min-width: 0;
+    padding: calc(var(--omo-space) * 2) var(--omo-input-pad-x);
+    border: var(--omo-border) solid var(--omo-line-strong);
+    background: var(--omo-bg);
+    color: var(--omo-fg);
+    font-size: var(--omo-text-base);
+    line-height: var(--omo-text-base-lh);
+    transition: border-color var(--omo-duration) ease;
+  }
+  /*
+   * A one-line field is exactly the control height; the browser centres its
+   * text. (A text area keeps its padding and grows.)
+   */
+  select.omo-input,
+  input.omo-input {
+    height: var(--omo-control-h);
+    padding-block: 0;
+  }
+  /* The compact field, for a compact row: small height, small text, a smaller inner distance. */
+  .omo-input--sm {
+    --omo-control-h: var(--omo-control-h-sm);
+    --omo-input-pad-x: calc(var(--omo-space) * 2);
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
+  }
+  /*
+   * A select draws its own arrow, a small chevron in the text colour, as far
+   * from the right edge as the text is from the left edge (the browser's own
+   * arrow sits wherever the browser puts it). The text stops before it.
+   */
+  select.omo-input {
+    --omo-select-arrow: calc(var(--omo-space) * 1.25);
+    appearance: none;
+    padding-right: calc(var(--omo-input-pad-x) * 2 + var(--omo-select-arrow) * 2);
+    background-image:
+      linear-gradient(45deg, transparent 38%, currentColor 38%, currentColor 62%, transparent 62%),
+      linear-gradient(-45deg, transparent 38%, currentColor 38%, currentColor 62%, transparent 62%);
+    background-position:
+      right calc(var(--omo-input-pad-x) + var(--omo-select-arrow)) center,
+      right var(--omo-input-pad-x) center;
+    background-size: var(--omo-select-arrow) var(--omo-select-arrow);
+    background-repeat: no-repeat;
+    cursor: pointer;
+  }
+  select.omo-input:disabled {
+    cursor: not-allowed;
+  }
+  .omo-input::placeholder {
+    color: var(--omo-muted);
+    opacity: 1;
+  }
+  .omo-input[aria-invalid='true'] {
+    border-color: var(--omo-danger);
+  }
+  .omo-input:disabled {
+    border-color: var(--omo-line);
+    color: var(--omo-muted);
+    cursor: not-allowed;
+  }
+  @media (hover: hover) {
+    .omo-input:hover:not(:disabled, :focus-visible, [aria-invalid='true']) {
+      border-color: var(--omo-accent);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

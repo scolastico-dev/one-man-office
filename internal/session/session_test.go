@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -22,6 +23,8 @@ func (p *recordingProcess) Resize(uint16, uint16) error { return nil }
 func (p *recordingProcess) Kill() error                 { return nil }
 func (p *recordingProcess) Wait() error                 { return nil }
 func (p *recordingProcess) Close() error                { return nil }
+func (p *recordingProcess) Exited() <-chan struct{}     { return nil }
+func (p *recordingProcess) Pid() int                    { return 0 }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -183,3 +186,44 @@ func TestEnvInjected(t *testing.T) {
 		t.Fatalf("env not injected:\n%s", s.Screen())
 	}
 }
+
+func TestOnOutputReceivesRawBytes(t *testing.T) {
+	var mu sync.Mutex
+	var got []byte
+	s, err := Start(Options{
+		Cmd:     "sh",
+		Args:    []string{"-c", `printf 'a\033[1mb'`},
+		LogPath: filepath.Join(t.TempDir(), "raw.log"),
+		OnOutput: func(chunk []byte) {
+			mu.Lock()
+			got = append(got, chunk...)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(10 * time.Second):
+		_ = s.Kill()
+		t.Fatal("session did not end")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if string(got) != "a\x1b[1mb" {
+		t.Fatalf("OnOutput bytes = %q, want %q", got, "a\x1b[1mb")
+	}
+}
+
+// SendTextAndKeys keeps typed text and following control keys in distinct PTY
+// writes. Full-screen CLIs can otherwise interpret the combined burst as a
+// paste and insert Enter instead of submitting the text.
+func (s *Session) SendTextAndKeys(text, keys string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	return s.sendTextAndKeys(text, keys)
+}
+
+// SendLine types text and a carriage return.
+func (s *Session) SendLine(text string) error { return s.SendText(text + "\r") }

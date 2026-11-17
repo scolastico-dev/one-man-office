@@ -1,1 +1,0 @@
-agent {{.Name}} ({{.Role}}) failed to start after {{.Attempts}} attempts

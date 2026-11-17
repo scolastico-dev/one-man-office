@@ -1,0 +1,86 @@
+# Security
+
+omo runs AI agents that execute commands on your computer. This page says in
+plain words what that means and what omo does and does not protect.
+
+## Agents run as you
+
+Every agent is a program running as your operating system user, with your
+files, your SSH keys, your git credentials and your network. The profiles omo
+writes start the agent programs with their permission prompts switched off
+(`--dangerously-skip-permissions`, `--yolo` and the like), so an agent runs
+commands without asking. Anything an agent can do, you could have done.
+
+omo's own rules (which agent may move or change which ticket, which settings an
+agent may read) keep a well-behaved agent on track. They are not a wall: an
+agent can talk to omo's socket without saying who it is, which makes it act as
+you, and it can edit the files in the omo home. Do not run an agent you do not
+trust, and do not let agents work on something you cannot afford to lose
+without a backup.
+
+What omo does keep apart:
+
+- omo writes nothing into your projects and changes your project folders only
+  with `git merge --ff-only`; agents work in their own worktrees.
+- omo pushes only the reviewed commit of an exported ticket, never with force,
+  only to the ticket's own branch.
+- Text from agents and other people is shown with hidden and control
+  characters written out; text pasted into terminals is cleaned first.
+- Uploaded images are checked by their content, SVG is refused, and image
+  addresses never carry the login token.
+
+To limit what agents can reach, run omo itself somewhere limited: as a separate
+user, in a virtual machine, or in the [Docker image](running.md#docker).
+
+## What the login token protects
+
+Whoever can use the board can run commands as you: open a shell, type into an
+agent, change a profile's command. The login token (or Basic sign-in) is what
+keeps other people and other web pages out.
+
+- By default omo listens on `127.0.0.1` only and requires the token.
+- The token is in the address after `#`, which browsers do not send to
+  servers; the board keeps it in that browser. Treat the address like a
+  password. `omo config rotate-token` replaces it.
+- omo answers only to the host names it knows and refuses requests from other
+  sites, so a web page you visit cannot reach it through your browser.
+- Over plain HTTP on a network, anyone who can read your traffic can read the
+  token. Use an SSH port forward or a reverse proxy with https (see
+  [Running omo](running.md#reaching-omo-from-another-machine)).
+- `auth: none` removes all of this; use it only when something in front of omo
+  decides who gets in.
+
+The local socket that `omo ai` uses is reachable by processes of your user
+only, without a token.
+
+## Plugins, scripts and relayed servers
+
+All of these are code that runs as you:
+
+- **Plugins**: a command hook is any program; a Lua hook runs in a sandbox but
+  can start programs with `omo.exec` and reach the network with `omo.http`.
+  A plugin that calls `omo ai` acts as you. Install only plugins you trust;
+  the tags on the Plugins page say who looked at a plugin, not that it is
+  safe.
+- **Usage scripts** read your accounts' credentials and can send what they
+  read to any https host.
+- **Relayed MCP servers** run as you (programs) or receive what agents send
+  them (addresses), with the credentials you gave omo. A server marked "Also
+  available without an omo session" is reachable by everyone who has a
+  personal token or OAuth grant for omo's MCP endpoint.
+- **Skill sets** and **prompts** are instructions to agents: whoever can change
+  them steers what your agents do.
+- **Environment** values with backticks run commands when an agent starts.
+
+## Secrets
+
+- Profiles, the agent environment, plugin configurations and relayed MCP
+  servers store their values as you entered them, in plain files in the omo
+  home, which only your user can read. Agents can read them too. Use a
+  backtick command (`` `pass show …` ``) in the agent environment to keep a key
+  in your password manager instead.
+- A settings export contains these values: keep the zip private.
+- omo replaces configuration values of plugins and secrets of usage scripts by
+  `[redacted]` in logs and error texts. It never stores, logs or shows the
+  tokens a usage script reads.
+- Personal MCP tokens are stored as hashes only; the secret is shown once.

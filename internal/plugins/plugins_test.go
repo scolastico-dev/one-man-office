@@ -2,1216 +2,641 @@ package plugins
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
-func TestPluginEnvironmentOmitsLegacyPlatformVariables(t *testing.T) {
-	env := (&Manager{OfficeDir: t.TempDir()}).pluginEnvironment(loadedHook{plugin: "test"}, EventJobCreate)
-	for _, entry := range env {
-		if strings.HasPrefix(entry, "OMO_OS=") || strings.HasPrefix(entry, "OMO_ARCH=") {
-			t.Fatalf("legacy platform environment variable present: %q", entry)
-		}
+// TestMain doubles as the helper program of command hooks: the test binary
+// run as "<binary> plugin-helper <mode> …".
+func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "plugin-helper" {
+		os.Exit(helper(os.Args[2], os.Args[3:]))
 	}
+	os.Exit(m.Run())
 }
 
-func TestPromptRenderHooksRunInLexicalOrderAndCarryMutableText(t *testing.T) {
-	office, database := newPluginOffice(t)
-	luaDir := filepath.Join(office, ".omo", "plugins", "a-lua")
-	writePlugin(t, luaDir, Manifest{Name: "a-lua", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
-		`event.data.text = event.data.text .. "-lua"`)
-
-	commandDir := filepath.Join(office, ".omo", "plugins", "b-command")
-	writePlugin(t, commandDir, Manifest{Name: "b-command", Hooks: []Hook{{
-		Event:   EventPromptRender,
-		Command: []string{os.Args[0], "-test.run=^TestPromptRenderCommandChildProcess$"},
-	}}}, "")
-	t.Setenv("OMO_TEST_PROMPT_RENDER_SUFFIX", "-command")
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventPromptRender, Mutable: true,
-		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": "base"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Data["text"] != "base-lua-command" {
-		t.Fatalf("prompt text = %v, want lexical carry-forward", result.Data["text"])
-	}
-	if result.Data["role"] != "developer" || result.Data["agent"] != "developer-ada" || result.Data["job_id"] != float64(7) && result.Data["job_id"] != int64(7) {
-		t.Fatalf("prompt boundary data was not carried through: %#v", result.Data)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, runtime := range runtimes {
-		if runtime.LastEvent != EventPromptRender {
-			t.Fatalf("runtime metadata = %+v", runtime)
+func helper(mode string, args []string) int {
+	switch mode {
+	case "record": // record <file> …: argv, environment and standard input as JSON
+		stdin, _ := io.ReadAll(os.Stdin)
+		raw, _ := json.Marshal(map[string]any{"args": os.Args[1:], "env": os.Environ(), "stdin": string(stdin)})
+		if err := os.WriteFile(args[0], raw, 0o600); err != nil {
+			return 2
 		}
-	}
-}
-
-func TestPromptRenderHookGrowthIsCappedPerPluginAndRetainsLastValidText(t *testing.T) {
-	office, database := newPluginOffice(t)
-	validDir := filepath.Join(office, ".omo", "plugins", "a-valid")
-	writePlugin(t, validDir, Manifest{Name: "a-valid", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
-		`event.data.text = event.data.text .. string.rep("v", 2048)`)
-	offenderDir := filepath.Join(office, ".omo", "plugins", "b-offender")
-	writePlugin(t, offenderDir, Manifest{Name: "b-offender", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
-		`event.data.text = event.data.text .. string.rep("x", 2049)`)
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const prompt = "prompt-body-must-not-leak"
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventPromptRender, Mutable: true,
-		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": prompt},
-	})
-	if err == nil || !strings.Contains(err.Error(), "2048") {
-		t.Fatalf("cap error = %v, want per-plugin growth error", err)
-	}
-	if result.Data["text"] != prompt+strings.Repeat("v", 2048) {
-		t.Fatalf("prompt text after offending hook = %q, want last valid mutation", result.Data["text"])
-	}
-	events, err := db.AllEvents(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range events {
-		if strings.Contains(event.Detail, prompt) {
-			t.Fatalf("prompt body leaked into event detail: %+v", event)
-		}
-	}
-	for _, plugin := range []string{"a-valid", "b-offender"} {
-		logs, err := db.PluginLogs(database, plugin)
+	case "append": // append <file>: standard input as one line
+		stdin, _ := io.ReadAll(os.Stdin)
+		f, err := os.OpenFile(args[0], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
-			t.Fatal(err)
+			return 2
 		}
-		for _, log := range logs {
-			if strings.Contains(log.Message, prompt) {
-				t.Fatalf("prompt body leaked into %s log: %+v", plugin, log)
+		defer f.Close()
+		_, _ = f.Write(append(bytes.TrimSpace(stdin), '\n'))
+	case "wait": // wait <file>: until the file exists
+		for i := 0; i < 6000; i++ {
+			if _, err := os.Stat(args[0]); err == nil {
+				return 0
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
+		return 4
+	case "print": // print <text>: the text on standard output
+		fmt.Print(args[0])
+	case "fail": // fail <text>: the text on standard error, status 3
+		fmt.Fprintln(os.Stderr, args[0])
+		return 3
+	case "config-to-stderr": // the plugin's configuration on standard error, status 3
+		fmt.Fprintln(os.Stderr, "config was "+os.Getenv("OMO_PLUGIN_CONFIG"))
+		return 3
+	case "sleep":
+		time.Sleep(time.Minute)
+	case "spawn": // spawn <pidfile>: start a sleeping child, write its pid, sleep
+		exe, _ := os.Executable()
+		child := newHelperCommand(exe, "sleep")
+		if err := child.Start(); err != nil {
+			return 2
+		}
+		_ = os.WriteFile(args[0], []byte(fmt.Sprint(child.Process.Pid)), 0o600)
+		time.Sleep(time.Minute)
 	}
+	return 0
 }
 
-func TestPromptRenderGrowthIsCappedAcrossHooksInOnePlugin(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "multi-hook")
-	writePlugin(t, dir, Manifest{Name: "multi-hook", Hooks: []Hook{
-		{Event: EventPromptRender, Lua: "first.lua"},
-		{Event: EventPromptRender, Lua: "second.lua"},
-	}}, "")
-	if err := os.WriteFile(filepath.Join(dir, "first.lua"), []byte(`event.data.text = event.data.text .. string.rep("a", 1500)`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "second.lua"), []byte(`event.data.text = event.data.text .. string.rep("b", 600)`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// newHelperCommand runs the helper in mode with args.
+func newHelperCommand(exe string, args ...string) *exec.Cmd {
+	return exec.Command(exe, append([]string{"plugin-helper"}, args...)...)
+}
 
-	manager, err := Load(office, database)
+// helperArgs is the command of a hook that runs the helper in mode.
+func helperArgs(t *testing.T, mode string, args ...string) []string {
+	t.Helper()
+	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const prompt = "prompt-body"
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventPromptRender, Mutable: true,
-		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": prompt},
+	return append([]string{exe, "plugin-helper", mode}, args...)
+}
+
+// env is a plugin root, a database and a manager over them.
+type env struct {
+	t    *testing.T
+	root string
+	db   interface{ Close() error }
+	m    *Manager
+
+	mu      sync.Mutex
+	changes []api.PluginInfo
+}
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "plugins")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d, err := db.Open(filepath.Join(t.TempDir(), "omo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &env{t: t, root: root, db: d}
+	e.m = New(Options{Root: root, DB: d, Socket: func() string { return "/run/omo-test.sock" }, Changed: func(i api.PluginInfo) {
+		e.mu.Lock()
+		e.changes = append(e.changes, i)
+		e.mu.Unlock()
+	}})
+	t.Cleanup(func() {
+		e.m.Close()
+		_ = d.Close()
 	})
-	if err == nil || !strings.Contains(err.Error(), "2048") {
-		t.Fatalf("cumulative cap error = %v, want per-plugin growth error", err)
-	}
-	if result.Data["text"] != prompt+strings.Repeat("a", 1500) {
-		t.Fatalf("prompt text after cumulative cap = %q, want first hook mutation", result.Data["text"])
-	}
+	return e
 }
 
-func TestPromptRenderHookMustReturnStringText(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "bad-text")
-	writePlugin(t, dir, Manifest{Name: "bad-text", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
-		`event.data.text = 42`)
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
+// plugin writes a plugin folder with manifest and files.
+func (e *env) plugin(name string, manifest any, files map[string]string) {
+	e.t.Helper()
+	dir := filepath.Join(e.root, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		e.t.Fatal(err)
 	}
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventPromptRender, Mutable: true,
-		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": "prompt-body"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "must return a string") {
-		t.Fatalf("invalid text error = %v", err)
-	}
-	if result.Data["text"] != "prompt-body" {
-		t.Fatalf("invalid text replaced prior prompt: %#v", result.Data["text"])
-	}
-}
-
-func TestPromptRenderCommandChildProcess(t *testing.T) {
-	if os.Getenv("OMO_TEST_PROMPT_RENDER_SUFFIX") == "" {
-		return
-	}
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		os.Exit(1)
-	}
-	var event Event
-	if err := json.Unmarshal(raw, &event); err != nil {
-		os.Exit(1)
-	}
-	text, ok := event.Data["text"].(string)
+	raw, ok := manifest.(string)
 	if !ok {
-		os.Exit(1)
-	}
-	event.Data["text"] = text + os.Getenv("OMO_TEST_PROMPT_RENDER_SUFFIX")
-	if err := json.NewEncoder(os.Stdout).Encode(event.Data); err != nil {
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "decorate")
-	writePlugin(t, dir, Manifest{Name: "decorate", Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}},
-		"local runs = omo.local_get(\"runs\") or 0\n"+
-			"omo.local_set(\"runs\", runs + 1)\n"+
-			"omo.global_set(\"last_plugin\", \"decorate\")\n"+
-			"event.data.title = \"decorated \" .. event.data.title\n"+
-			"event.data.goal = event.data.goal .. \" [plugin]\"\n")
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventJobCreate, Mutable: true,
-		Data: map[string]any{"title": "task", "goal": "ship it"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Data["title"] != "decorated task" || result.Data["goal"] != "ship it [plugin]" {
-		t.Fatalf("unexpected mutation: %#v", result.Data)
-	}
-	assertStored(t, manager, "local", "decorate", "runs", "1")
-	assertStored(t, manager, "global", "", "last_plugin", "\"decorate\"")
-}
-
-func TestLuaHookCanReadAndWriteOfficeStorageAndUseOS(t *testing.T) {
-	office, database := newPluginOffice(t)
-	storage := filepath.Join(office, ".omo", "storage")
-	if err := os.MkdirAll(storage, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(office, ".omo", "plugins", "file-access")
-	writePlugin(t, dir, Manifest{Name: "file-access", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		`local out = assert(io.open(event.data.path, "w"))
-assert(out:write("plugin file access"))
-assert(out:close())
-local input = assert(io.open(event.data.path, "r"))
-event.data.contents = assert(input:read("*a"))
-assert(input:close())
-event.data.os_available = type(os.getenv) == "function"`)
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(storage, "hook-output.txt")
-	result, err := manager.Emit(context.Background(), Event{
-		Name: EventAgentStart, Mutable: true,
-		Data: map[string]any{"path": path},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Data["contents"] != "plugin file access" {
-		t.Fatalf("Lua file read-back = %v, want plugin file access", result.Data["contents"])
-	}
-	if result.Data["os_available"] != true {
-		t.Fatalf("Lua os availability = %v, want true", result.Data["os_available"])
-	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "plugin file access" {
-		t.Fatalf("Lua file write = %q, err %v", got, err)
-	}
-}
-
-func TestBundledPluginVersionsStayAtOnePointZero(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	manifests, err := filepath.Glob(filepath.Join(filepath.Dir(filename), "..", "..", "plugins", "*", "plugin.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(manifests) == 0 {
-		t.Fatal("no bundled plugin manifests found")
-	}
-	for _, path := range manifests {
-		manifest, err := ReadManifest(filepath.Dir(path))
+		b, err := json.Marshal(manifest)
 		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+			e.t.Fatal(err)
 		}
-		if manifest.Version != "1.0.0" {
-			t.Errorf("%s version = %q, want 1.0.0", path, manifest.Version)
-		}
+		raw = string(b)
 	}
-}
-
-func TestLuaPluginCanLogAndRuntimeReturnsToReady(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "logger")
-	writePlugin(t, dir, Manifest{Name: "logger", Version: "1.2.3", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		`omo.log("observed " .. event.data.agent)`)
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte(raw), 0o600); err != nil {
+		e.t.Fatal(err)
 	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{"agent": "developer-ada"}}); err != nil {
-		t.Fatal(err)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || runtimes[0].Name != "logger" || runtimes[0].State != "ready" || runtimes[0].LastEvent != EventAgentStart {
-		t.Fatalf("plugin runtime = %+v", runtimes)
-	}
-	if runtimes[0].LastLog != "observed developer-ada" || runtimes[0].LastLogAt.IsZero() {
-		t.Fatalf("plugin log = %+v", runtimes[0])
-	}
-}
-
-func TestPluginLogHistoryUsesConfiguredLineLimit(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "logger")
-	writePlugin(t, dir, Manifest{Name: "logger", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		`omo.log("one\ntwo\nthree")`)
-
-	manager, err := LoadConfiguredWithOptions(office, database, nil, Options{LogLines: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
-		t.Fatal(err)
-	}
-	logs, err := db.PluginLogs(database, "logger")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(logs) != 2 || logs[0].Message != "two" || logs[1].Message != "three" {
-		t.Fatalf("plugin log history = %+v", logs)
-	}
-}
-
-func TestLoadingPluginsAppliesReducedLogLineLimit(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "logger")
-	writePlugin(t, dir, Manifest{Name: "logger", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}}, "-- no-op")
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, message := range []string{"one", "two", "three", "four"} {
-		manager.log("logger", message)
-	}
-	if _, err := LoadConfiguredWithOptions(office, database, nil, Options{LogLines: 2}); err != nil {
-		t.Fatal(err)
-	}
-	logs, err := db.PluginLogs(database, "logger")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(logs) != 2 || logs[0].Message != "three" || logs[1].Message != "four" {
-		t.Fatalf("plugin logs after reduced limit = %+v", logs)
-	}
-}
-
-func TestTailBufferRetainsBoundedSuffix(t *testing.T) {
-	buffer := newTailBuffer(5)
-	for _, chunk := range []string{"abc", "defg", "hijkl"} {
-		written, err := buffer.Write([]byte(chunk))
-		if err != nil || written != len(chunk) {
-			t.Fatalf("write %q = %d, %v", chunk, written, err)
+	for rel, text := range files {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(text), 0o600); err != nil {
+			e.t.Fatal(err)
 		}
 	}
-	if got := buffer.String(); got != "hijkl" {
-		t.Fatalf("bounded tail = %q, want hijkl", got)
-	}
 }
 
-func TestBoundedBufferStopsRetainingAfterLimit(t *testing.T) {
-	buffer := newBoundedBuffer(5)
-	for _, chunk := range []string{"abc", "defgh", "ijkl"} {
-		written, err := buffer.Write([]byte(chunk))
-		if err != nil || written != len(chunk) {
-			t.Fatalf("write %q = %d, %v", chunk, written, err)
+// load loads settings and fails on any error of the names in ok.
+func (e *env) load(settings ...api.PluginSettings) map[string]error {
+	e.t.Helper()
+	return e.m.Load(settings)
+}
+
+func enabled(name string, config map[string]any) api.PluginSettings {
+	return api.PluginSettings{Name: name, Source: "/src/" + name, Enabled: true, Config: config}
+}
+
+func luaHook(event, file string) map[string]any {
+	return map[string]any{"event": event, "lua": file}
+}
+
+func manifestOf(hooks ...map[string]any) map[string]any {
+	list := make([]any, len(hooks))
+	for i, h := range hooks {
+		list[i] = h
+	}
+	return map[string]any{"name": "p", "version": "1.0.0", "hooks": list}
+}
+
+// info is the info of plugin name.
+func (e *env) info(name string) api.PluginInfo {
+	e.t.Helper()
+	for _, i := range e.m.Infos() {
+		if i.Name == name {
+			return i
 		}
 	}
-	if got := string(buffer.Bytes()); got != "abcde" {
-		t.Fatalf("bounded output = %q, want abcde", got)
-	}
-	if !buffer.Overflowed() {
-		t.Fatal("bounded buffer did not report overflow")
-	}
+	e.t.Fatalf("no info for %s", name)
+	return api.PluginInfo{}
 }
 
-func TestCommandStdoutWriterDiscardsImmutableOutput(t *testing.T) {
-	captured, writer := commandStdoutWriter(false)
-	if captured != nil {
-		t.Fatal("immutable command hook allocated stdout capture")
+// logText is the plugin's whole log as one text.
+func (e *env) logText(name string) string {
+	var b strings.Builder
+	for _, l := range e.m.LogLines(name, LogLines) {
+		b.WriteString(l.Message)
+		b.WriteString("\n")
 	}
-	noisy := bytes.Repeat([]byte("x"), maxCommandOutputBytes+1)
-	if written, err := writer.Write(noisy); err != nil || written != len(noisy) {
-		t.Fatalf("discarded stdout write = %d, %v", written, err)
-	}
+	return b.String()
 }
 
-func TestFailedPluginHookRecordsErrorStateAndLog(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "broken")
-	writePlugin(t, dir, Manifest{Name: "broken", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		`error("something broke")`)
-
-	manager, err := Load(office, database)
+// stored is the JSON text a plugin stored under key, "" when none.
+func (e *env) stored(plugin, key string) string {
+	e.t.Helper()
+	v, _, err := db.PluginStoreGet(e.m.o.DB, plugin, key)
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err == nil {
-		t.Fatal("failed hook returned no error")
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || runtimes[0].State != "error" || runtimes[0].LastEvent != EventAgentStart || runtimes[0].LastLog == "" {
-		t.Fatalf("failed plugin runtime = %+v", runtimes)
-	}
-	logs, err := db.PluginLogs(database, "broken")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var history strings.Builder
-	for _, log := range logs {
-		history.WriteString(log.Message)
-		history.WriteByte('\n')
-	}
-	if !strings.Contains(history.String(), "something broke") {
-		t.Fatalf("failed plugin log history = %q", history.String())
-	}
+	return v
 }
 
-func TestCommandPluginStderrBecomesLastLog(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "command-logger")
-	writePlugin(t, dir, Manifest{Name: "command-logger", Hooks: []Hook{{
-		Event: EventAgentStart, Command: []string{"sh", "-c", "cat >/dev/null; printf 'command observed agent' >&2"},
-	}}}, "")
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
-		t.Fatal(err)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || runtimes[0].LastLog != "command observed agent" {
-		t.Fatalf("command plugin runtime = %+v", runtimes)
-	}
-}
-
-func TestCommandPluginUsesStdoutForMutableJSONAndStderrForLogs(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "command-streams")
-	writePlugin(t, dir, Manifest{Name: "command-streams", Hooks: []Hook{{
-		Event:   EventJobCreate,
-		Command: []string{"sh", "-c", "cat >/dev/null; printf '%s' '{\"title\":\"from stdout\",\"goal\":\"ship it\"}'; printf '%s' 'diagnostic from stderr' >&2"},
-	}}}, "")
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := manager.Emit(context.Background(), Event{
-		Name:    EventJobCreate,
-		Mutable: true,
-		Data:    map[string]any{"title": "before", "goal": "before"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Data["title"] != "from stdout" || result.Data["goal"] != "ship it" {
-		t.Fatalf("mutable command result = %#v", result.Data)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || runtimes[0].LastLog != "diagnostic from stderr" {
-		t.Fatalf("command plugin runtime = %+v", runtimes)
-	}
-}
-
-func TestCommandPluginBoundsStderrWhileRunning(t *testing.T) {
-	if os.Getenv("OMO_TEST_NOISY_PLUGIN") == "1" {
-		_, _ = os.Stderr.Write(bytes.Repeat([]byte("x"), maxLogRunes+1024))
-		return
-	}
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "noisy")
-	writePlugin(t, dir, Manifest{Name: "noisy", Hooks: []Hook{{
-		Event: EventAgentStart, Command: []string{os.Args[0], "-test.run=^TestCommandPluginBoundsStderrWhileRunning$"},
-	}}}, "")
-	t.Setenv("OMO_TEST_NOISY_PLUGIN", "1")
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
-		t.Fatal(err)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || len(runtimes[0].LastLog) != maxLogRunes {
-		t.Fatalf("captured command log size = %d, want bounded tail of %d bytes", len(runtimes[0].LastLog), maxLogRunes)
-	}
-}
-
-func TestCommandPluginRejectsOversizedMutableStdout(t *testing.T) {
-	if os.Getenv("OMO_TEST_OVERSIZED_MUTABLE_STDOUT") == "1" {
-		_, _ = os.Stderr.WriteString("diagnostic survives overflow\n")
-		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), maxCommandOutputBytes+1))
-		return
-	}
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "noisy-mutable")
-	writePlugin(t, dir, Manifest{Name: "noisy-mutable", Hooks: []Hook{{
-		Event: EventJobCreate, Command: []string{os.Args[0], "-test.run=^TestCommandPluginRejectsOversizedMutableStdout$"},
-	}}}, "")
-	t.Setenv("OMO_TEST_OVERSIZED_MUTABLE_STDOUT", "1")
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true})
-	if err == nil || !strings.Contains(err.Error(), "mutable command stdout exceeds") {
-		t.Fatalf("oversized mutable command error = %v, want explicit stdout limit", err)
-	}
-	logs, err := db.PluginLogs(database, "noisy-mutable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, entry := range logs {
-		found = found || entry.Message == "diagnostic survives overflow"
-	}
-	if !found {
-		t.Fatalf("stderr diagnostic missing after stdout overflow: %+v", logs)
-	}
-}
-
-func TestBoundedRuneTailPreservesUnicodeSuffix(t *testing.T) {
-	if got := boundedRuneTail("zero αβγ", 3); got != "…αβγ" {
-		t.Fatalf("bounded rune tail = %q", got)
-	}
-	if got := boundedRuneTail("αβ", 3); got != "αβ" {
-		t.Fatalf("short rune tail = %q", got)
-	}
-}
-
-func TestLuaStorageKeysAreSortedFilterableAndDeletable(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "storage")
-	writePlugin(t, dir, Manifest{Name: "storage", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		"omo.local_set(\"activity:z\", 1)\n"+
-			"omo.local_set(\"other\", 2)\n"+
-			"omo.local_set(\"activity:a\", 3)\n"+
-			"local local_keys = omo.local_keys(\"activity:\")\n"+
-			"omo.local_set(\"listed\", table.concat(local_keys, \",\"))\n"+
-			"omo.local_delete(local_keys[1])\n"+
-			"omo.global_set(\"shared:z\", true)\n"+
-			"omo.global_set(\"shared:a\", true)\n"+
-			"omo.local_set(\"global_listed\", table.concat(omo.global_keys(\"shared:\"), \",\"))\n")
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
-		t.Fatal(err)
-	}
-	assertStored(t, manager, "local", "storage", "listed", "\"activity:a,activity:z\"")
-	assertStored(t, manager, "local", "storage", "global_listed", "\"shared:a,shared:z\"")
-	var deleted int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope='local' AND plugin='storage' AND key='activity:a'`).Scan(&deleted); err != nil {
-		t.Fatal(err)
-	}
-	if deleted != 0 {
-		t.Fatal("local_delete did not remove the enumerated key")
-	}
-}
-
-func TestLuaExecAndCommandHook(t *testing.T) {
-	office, database := newPluginOffice(t)
-	luaDir := filepath.Join(office, ".omo", "plugins", "exec")
-	writePlugin(t, luaDir, Manifest{Name: "exec", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		"local output, err = omo.exec(\"go\", \"version\")\n"+
-			"if err ~= \"\" then error(err) end\n"+
-			"omo.local_set(\"version\", output)\n")
-	commandDir := filepath.Join(office, ".omo", "plugins", "command")
-	writePlugin(t, commandDir, Manifest{Name: "command", Hooks: []Hook{{
-		Event:   EventJobCreate,
-		Command: []string{"sh", "-c", "cat >/dev/null; printf '{\"title\":\"from command\",\"goal\":\"kept\"}'"},
-	}}}, "")
-
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{}}); err != nil {
-		t.Fatal(err)
-	}
-	var raw string
-	if err := database.QueryRow("SELECT value FROM plugin_storage WHERE scope='local' AND plugin='exec' AND key='version'").Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(raw, "go version") {
-		t.Fatalf("exec output not stored: %s", raw)
-	}
-	result, err := manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true, Data: map[string]any{"title": "old"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Data["title"] != "from command" {
-		t.Fatalf("command mutation not applied: %#v", result.Data)
-	}
-}
-
-func TestPluginEnvironmentClearsInheritedAgentIdentity(t *testing.T) {
-	t.Setenv("OMO_AGENT_ID", "developer-ada")
-	t.Setenv("OMO_SOCKET", "/tmp/agent.sock")
-	m := &Manager{OfficeDir: t.TempDir()}
-	hook := loadedHook{plugin: "nudge", configJSON: "{}"}
-
-	values := map[string]string{}
-	for _, entry := range m.pluginEnvironment(hook, EventCron) {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	if values["OMO_AGENT_ID"] != "" || values["OMO_SOCKET"] != "" {
-		t.Fatalf("plugin inherited agent credentials: id=%q socket=%q", values["OMO_AGENT_ID"], values["OMO_SOCKET"])
-	}
-}
-
-func TestCronHookRuns(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "clock")
-	writePlugin(t, dir, Manifest{Name: "clock", Hooks: []Hook{{Event: EventCron, Interval: "10ms", Lua: "hook.lua"}}},
-		"omo.local_set(\"ticked\", true)")
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go manager.Run(ctx)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		var raw string
-		if database.QueryRow("SELECT value FROM plugin_storage WHERE scope='local' AND plugin='clock' AND key='ticked'").Scan(&raw) == nil {
-			if raw != "true" {
-				t.Fatalf("unexpected cron value: %s", raw)
-			}
-			return
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("cron hook did not run")
 }
 
-func TestLoadRejectsEscapingLuaPath(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "bad")
-	writePlugin(t, dir, Manifest{Name: "bad", Hooks: []Hook{{Event: EventAgentStart, Lua: "../outside.lua"}}}, "")
-	if _, err := Load(office, database); err == nil || !strings.Contains(err.Error(), "must stay inside") {
-		t.Fatalf("expected contained-path error, got %v", err)
-	}
+func ticketEvent(n int, title string) Event {
+	return Event{Name: EventTicketCreated, Data: map[string]any{"ticket": TicketPayload(api.TicketSummary{Number: n, Title: title, Type: "task", Column: "ready"}, "http://127.0.0.1:1")}}
 }
 
-func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
-	office, database := newPluginOffice(t)
-	dir := filepath.Join(office, ".omo", "plugins", "disabled")
-	writePlugin(t, dir, Manifest{Name: "disabled", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
-		"omo.local_set(\"ran\", true)")
-	manager, err := LoadConfigured(office, database, map[string]Settings{"disabled": {Enabled: false}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{}}); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := database.QueryRow("SELECT COUNT(*) FROM plugin_storage WHERE plugin='disabled'").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("disabled plugin hook ran")
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || runtimes[0].Name != "disabled" || runtimes[0].State != "disabled" {
-		t.Fatalf("disabled plugin runtime = %+v", runtimes)
-	}
-}
-
-func TestConfiguredPluginExposesConfigToLuaAndCommandHooks(t *testing.T) {
-	office, database := newPluginOffice(t)
-	luaDir := filepath.Join(office, ".omo", "plugins", "lua-config")
-	writePlugin(t, luaDir, Manifest{Name: "lua-config", Hooks: []Hook{{
-		Event: EventCron, Interval: "1m", IntervalConfig: "check_interval", Lua: "hook.lua",
-	}}}, "omo.local_set(\"mode\", config.nested.mode)\n"+
-		"omo.local_set(\"delay\", omo.duration(config.delay))")
-
-	record := filepath.Join(office, "command-config.json")
-	t.Setenv("OMO_TEST_RECORD", record)
-	commandDir := filepath.Join(office, ".omo", "plugins", "command-config")
-	writePlugin(t, commandDir, Manifest{Name: "command-config", Hooks: []Hook{{
-		Event:   EventAgentStart,
-		Command: []string{"sh", "-c", "cat >/dev/null; printf '%s' \"$OMO_PLUGIN_CONFIG\" > \"$OMO_TEST_RECORD\""},
-	}}}, "")
-
-	settings := map[string]Settings{
-		"lua-config": {Enabled: true, Config: map[string]any{
-			"check_interval": "7s", "delay": "1500ms", "nested": map[string]any{"mode": "careful"},
-		}},
-		"command-config": {Enabled: true, Config: map[string]any{
-			"threshold": 42, "nested": map[string]any{"mode": "careful"},
-		}},
-	}
-	manager, err := LoadConfigured(office, database, settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var configuredInterval time.Duration
-	for _, hook := range manager.hooks {
-		if hook.plugin == "lua-config" {
-			configuredInterval = hook.interval
+func TestManifestRefusesOldEvents(t *testing.T) {
+	for _, ev := range []string{"prompt_render", "company_load", "agent_log_line", "job_create", "startup", "load", "cron", "chron", "unload", "shutdown", "company_startup", "company_shutdown", "agent_start"} {
+		_, err := ParseManifest([]byte(`{"hooks":[{"event":"` + ev + `","lua":"x.lua"}]}`))
+		if err == nil || !strings.Contains(err.Error(), `"`+ev+`" is no longer available`) {
+			t.Errorf("event %s: %v", ev, err)
 		}
 	}
-	if configuredInterval != 7*time.Second {
-		t.Fatalf("configured cron interval = %s, want 7s", configuredInterval)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron}); err != nil {
-		t.Fatal(err)
-	}
-	assertStored(t, manager, "local", "lua-config", "mode", `"careful"`)
-	assertStored(t, manager, "local", "lua-config", "delay", "1.5")
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var commandConfig map[string]any
-	if err := json.Unmarshal(raw, &commandConfig); err != nil {
-		t.Fatalf("command config is not JSON: %v\n%s", err, raw)
-	}
-	if commandConfig["threshold"] != float64(42) || commandConfig["nested"].(map[string]any)["mode"] != "careful" {
-		t.Fatalf("command config = %#v", commandConfig)
-	}
-}
-
-func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
-	office, database := newPluginOffice(t)
-	record := filepath.Join(office, "nudge-record")
-	stub := buildRecordingOMO(t)
-	t.Setenv("OMO_TEST_RECORD", record)
-	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
-		"agent": "developer-ada", "at_unix": int64(100),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(1001),
-		"agents": []any{map[string]any{
-			"name": "developer-ada", "role": "developer", "state": "working",
-			"job_id": int64(7), "job_state": "working", "unread_messages": 0,
-			"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	invocation := string(raw)
-	for _, want := range []string{office, "type", "developer-ada", "--key", "enter", "omo step", "omo done"} {
-		if !strings.Contains(invocation, want) {
-			t.Errorf("recorded omo invocation missing %q:\n%s", want, invocation)
-		}
-	}
-	if strings.Contains(invocation, "\nsend\n") {
-		t.Fatalf("nudge created durable mail instead of typing into the session:\n%s", invocation)
-	}
-	runtimes, err := db.PluginRuntimes(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runtimes) != 1 || !strings.Contains(runtimes[0].LastLog, "typed stale_work reminder to developer-ada") {
-		t.Fatalf("nudge did not log its reminder: %+v", runtimes)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(5000),
-		"agents": []any{map[string]any{
-			"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0),
-			"job_state": "", "unread_messages": 0, "created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != invocation {
-		t.Fatalf("CEO received an invalid wait/done nudge:\n%s", after)
-	}
-}
-
-func TestBundledNudgePluginFinishesResolvedFirefighters(t *testing.T) {
-	office, database := newPluginOffice(t)
-	record := filepath.Join(office, "nudge-record")
-	stub := buildRecordingOMO(t)
-	t.Setenv("OMO_TEST_RECORD", record)
-	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := LoadConfigured(office, database, map[string]Settings{
-		"nudge": {Enabled: true, Config: map[string]any{
-			"reminders": map[string]any{
-				"firefighter_done": map[string]any{"after": "3m", "repeat": "10m"},
-				"no_job_wait":      map[string]any{"after": "1s", "repeat": "1s"},
-				"stale_work":       map[string]any{"after": "1s", "repeat": "1s"},
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	emit := func(at int64, open any, name, state string, activity int64) {
-		t.Helper()
-		data := map[string]any{
-			"at_unix": at,
-			"agents": []any{map[string]any{
-				"name": name, "role": "firefighter", "state": state,
-				"job_id": int64(0), "job_state": "", "unread_messages": 0,
-				"created_at_unix": int64(1), "step_updated_at_unix": activity,
-			}},
-		}
-		if open != nil {
-			data["open_incidents"] = open
-		}
-		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: data}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// A trustworthy zero resolves a waiting firefighter immediately.
-	emit(100, int64(0), "firefighter-ada", "waiting", 0)
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	invocation := string(raw)
-	for _, want := range []string{"\ntype\nfirefighter-ada\n", "incident is resolved", "never parks", "omo done", "\n--key\nenter"} {
-		if !strings.Contains(invocation, want) {
-			t.Errorf("resolved firefighter reminder missing %q:\n%s", want, invocation)
-		}
-	}
-
-	// Missing open_incidents is not a trustworthy zero.
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emit(101, nil, "firefighter-ada", "waiting", 0)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("firefighter reminder fired without open_incidents: %v", err)
-	}
-
-	// Working firefighters wait until the configured threshold, then repeat
-	// only after the normal cooldown.
-	emit(200, int64(0), "firefighter-bea", "working", 200)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("working firefighter reminder fired before idle threshold: %v", err)
-	}
-	emit(380, int64(0), "firefighter-bea", "working", 200)
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("working firefighter reminder did not fire at threshold: %v", err)
-	}
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emit(500, int64(0), "firefighter-bea", "working", 200)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("firefighter reminder ignored repeat cooldown: %v", err)
-	}
-	emit(981, int64(0), "firefighter-bea", "working", 200)
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("firefighter reminder did not repeat after cooldown: %v", err)
-	}
-
-	// Open incidents never route firefighters into generic wait/stale advice.
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emit(2000, int64(1), "firefighter-cora", "working", 1)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("open-incident firefighter received a generic reminder: %v", err)
-	}
-}
-
-func TestBundledNudgePluginOnlyTypesInboxRemindersToCEO(t *testing.T) {
-	office, database := newPluginOffice(t)
-	record := filepath.Join(office, "nudge-record")
-	stub := buildRecordingOMO(t)
-	t.Setenv("OMO_TEST_RECORD", record)
-	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
-		"agent": "ceo-ada", "at_unix": int64(100),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	emitCEO := func(at int64, unread int, jobState string) {
-		t.Helper()
-		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-			"at_unix": at,
-			"agents": []any{map[string]any{
-				"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0),
-				"job_state": jobState, "unread_messages": unread,
-				"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-			}},
-		}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	emitCEO(1001, 1, "")
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"\ntype\nceo-ada\n", "\n--key\nenter", "unread office mail"} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("CEO inbox reminder missing %q:\n%s", want, raw)
-		}
-	}
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emitCEO(2001, 0, "done")
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("CEO received a non-mail workflow reminder: %v", err)
-	}
-}
-
-func TestBundledNudgePluginRemindsCEOAboutWaitingFreelancer(t *testing.T) {
-	office, database := newPluginOffice(t)
-	record := filepath.Join(office, "nudge-record")
-	stub := buildRecordingOMO(t)
-	t.Setenv("OMO_TEST_RECORD", record)
-	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	emitCron := func(at int64, freelancerState string) {
-		t.Helper()
-		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-			"at_unix": at,
-			"agents": []any{
-				map[string]any{"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0), "job_state": "", "unread_messages": 0, "created_at_unix": int64(1), "step_updated_at_unix": int64(0)},
-				map[string]any{"name": "freelancer-bea", "role": "freelancer", "state": freelancerState, "job_id": int64(7), "job_state": "done", "unread_messages": 0, "created_at_unix": int64(1), "step_updated_at_unix": int64(0)},
-			},
-		}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	emitCron(100, "waiting")
-	emitCron(399, "waiting")
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("CEO nudged before freelancer waited five minutes: %v", err)
-	}
-	emitCron(400, "waiting")
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"\ntype\nceo-ada\n", "freelancer-bea", "omo agent kill freelancer-bea", "waiting indefinitely", "\n--key\nenter"} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("CEO freelancer reminder missing %q:\n%s", want, raw)
-		}
-	}
-
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emitCron(401, "waiting")
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("CEO reminder ignored repeat cooldown: %v", err)
-	}
-
-	// Leaving waiting resets both the timer and cooldown. A later wait must get
-	// its own reminder after five minutes, even during the old repeat window.
-	emitCron(450, "working")
-	emitCron(500, "waiting")
-	emitCron(800, "waiting")
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("second waiting period did not produce a fresh reminder: %v", err)
-	}
-}
-
-func TestBundledNudgePluginUsesConfiguredTimings(t *testing.T) {
-	office, database := newPluginOffice(t)
-	record := filepath.Join(office, "nudge-record")
-	stub := buildRecordingOMO(t)
-	t.Setenv("OMO_TEST_RECORD", record)
-	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := LoadConfigured(office, database, map[string]Settings{
-		"nudge": {Enabled: true, Config: map[string]any{
-			"check_interval": "7s",
-			"reminders": map[string]any{
-				"stale_work": map[string]any{"after": "30m", "repeat": "45m"},
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manager.hooks[2].interval != 7*time.Second {
-		t.Fatalf("nudge check interval = %s, want 7s", manager.hooks[2].interval)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
-		"agent": "developer-ada", "at_unix": int64(100),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	emitCron := func(at int64) {
-		t.Helper()
-		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-			"at_unix": at,
-			"agents": []any{map[string]any{
-				"name": "developer-ada", "role": "developer", "state": "working",
-				"job_id": int64(7), "job_state": "working", "unread_messages": 0,
-				"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-			}},
-		}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	emitCron(1001)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("nudge fired before configured threshold: %v", err)
-	}
-	emitCron(2001)
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("nudge did not fire after configured threshold: %v", err)
-	}
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	emitCron(3001)
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("nudge repeated before configured cooldown: %v", err)
-	}
-	emitCron(4802)
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("nudge did not repeat after configured cooldown: %v", err)
-	}
-}
-
-func TestBundledNudgePluginCleansStorageForDeadAgents(t *testing.T) {
-	office, database := newPluginOffice(t)
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{
-		"activity:dead-ada", "last_nudge:dead-ada:inbox",
-		"waiting_since:dead-ada",
-		"activity:developer-bea", "last_nudge:developer-bea:inbox", "waiting_since:developer-bea", "custom",
+	for _, c := range []struct{ field, raw string }{
+		{"requires", `{"requires":[{"name":"x","source":"https://example.invalid/x.git"}],"hooks":[]}`},
+		{"roles", `{"hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua","roles":["pm"]}]}`},
+		{"manual_args", `{"hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua","manual_args":true}]}`},
+		{"javascript", `{"hooks":[{"event":"timer","interval":"1m","lua":"x.lua","javascript":"a.js"}]}`},
+		{"files", `{"hooks":[{"event":"timer","interval":"1m","lua":"x.lua","files":["a.js"]}]}`},
 	} {
-		if _, err := database.Exec(`INSERT INTO plugin_storage(scope,plugin,key,value) VALUES('local','nudge',?, '1')`, key); err != nil {
-			t.Fatal(err)
+		_, err := ParseManifest([]byte(c.raw))
+		if err == nil || !strings.Contains(err.Error(), `"`+c.field+`" is no longer available`) {
+			t.Errorf("field %s: %v", c.field, err)
 		}
 	}
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(999), "snapshot_error": "database busy", "agents": []any{},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	var before int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope='local' AND plugin='nudge'`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	if before != 7 {
-		t.Fatalf("snapshot failure changed nudge storage: count=%d, want 7", before)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(1000),
-		"agents": []any{map[string]any{
-			"name": "developer-bea", "role": "developer", "state": "waiting",
-			"job_id": int64(7), "job_state": "working", "unread_messages": 0,
-			"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := database.Query(`SELECT key FROM plugin_storage WHERE scope='local' AND plugin='nudge' ORDER BY key`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var keys []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			t.Fatal(err)
+	for _, c := range []struct{ name, raw, want string }{
+		{"unknown event", "{\"hooks\":[{\"event\":\"ticket_\u202edeleted\",\"lua\":\"x.lua\"}]}", "unknown event \"ticket_\\u202edeleted\""},
+		{"unknown field", `{"hooks":[],"bogus":1}`, `unknown field "bogus"`},
+		{"both", `{"hooks":[{"event":"ticket_moved","lua":"x.lua","command":["x"]}]}`, "exactly one of lua and command"},
+		{"neither", `{"hooks":[{"event":"ticket_moved"}]}`, "exactly one of lua and command"},
+		{"escape", `{"hooks":[{"event":"ticket_moved","lua":"../x.lua"}]}`, "inside the plugin"},
+		{"absolute", `{"hooks":[{"event":"ticket_moved","lua":"/etc/x.lua"}]}`, "inside the plugin"},
+		{"manual without description", `{"hooks":[{"event":"manual","name":"a","lua":"x.lua"}]}`, "description"},
+		{"bad scope", `{"hooks":[{"event":"manual","name":"a","description":"d","scope":"office","lua":"x.lua"}]}`, "scope is ticket or global"},
+		{"duplicate action", `{"hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua"},{"event":"manual","name":"a","description":"d","lua":"y.lua"}]}`, "another manual hook"},
+		{"name on event hook", `{"hooks":[{"event":"ticket_moved","name":"a","lua":"x.lua"}]}`, "manual hooks only"},
+		{"interval on event hook", `{"hooks":[{"event":"ticket_moved","interval":"1m","lua":"x.lua"}]}`, "timer hooks only"},
+		{"timeout too long", `{"hooks":[{"event":"ticket_moved","timeout":"6m","lua":"x.lua"}]}`, "timeout"},
+		{"bad version", `{"version":"v1","hooks":[]}`, "semantic version"},
+		{"bad default_config", `{"default_config":[1],"hooks":[]}`, "default_config must be a JSON object"},
+		{"not an object", `[1]`, "not a JSON object"},
+		{"trailing data", `{"hooks":[]} {}`, "data after"},
+	} {
+		_, err := ParseManifest([]byte(c.raw))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.name, err, c.want)
 		}
-		keys = append(keys, key)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"activity:developer-bea", "custom", "last_nudge:developer-bea:inbox", "waiting_since:developer-bea"}
-	if strings.Join(keys, ",") != strings.Join(want, ",") {
-		t.Fatalf("remaining nudge keys = %v, want %v", keys, want)
+	m, err := ParseManifest([]byte(`{"name":"ok","hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua"}]}`))
+	if err != nil || m.Hooks[0].Scope != ScopeGlobal {
+		t.Fatalf("a manual hook without scope: %+v, %v", m, err)
 	}
 }
 
-func buildRecordingOMO(t *testing.T) string {
-	t.Helper()
+func TestOldPluginFailsToLoadWithFixedMessage(t *testing.T) {
+	e := newEnv(t)
+	e.plugin("old", `{"name":"old","requires":[{"name":"x","source":"https://example.invalid/x.git"}],"hooks":[{"event":"prompt_render","lua":"x.lua"}]}`, map[string]string{"x.lua": ""})
+	errs := e.load(enabled("old", nil))
+	want := `"requires" is no longer available: plugins have no dependencies any more; install each plugin by itself`
+	if errs["old"] == nil || errs["old"].Error() != want {
+		t.Fatalf("load error = %v", errs["old"])
+	}
+	if i := e.info("old"); i.State != StateInvalid || i.Message != want {
+		t.Fatalf("info = %+v", i)
+	}
+}
+
+func TestReadManifestBounds(t *testing.T) {
 	dir := t.TempDir()
-	source := filepath.Join(dir, "main.go")
-	program := `package main
-import (
-	"os"
-	"strings"
-)
-func main() {
-	record := os.Getenv("OMO_TEST_RECORD")
-	data := os.Getenv("OMO_OFFICE_DIR") + "\n" + strings.Join(os.Args[1:], "\n")
-	if err := os.WriteFile(record, []byte(data), 0644); err != nil { panic(err) }
-}
-`
-	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+	if _, err := ReadManifest(dir); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("missing manifest: %v", err)
+	}
+	big := `{"description":"` + strings.Repeat("x", MaxManifestBytes) + `","hooks":[]}`
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte(big), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	name := "omo"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	if _, err := ReadManifest(dir); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("large manifest: %v", err)
 	}
-	binary := filepath.Join(dir, name)
-	if out, err := exec.Command("go", "build", "-o", binary, source).CombinedOutput(); err != nil {
-		t.Fatalf("build recording omo: %v\n%s", err, out)
-	}
-	return binary
-}
-
-func newPluginOffice(t *testing.T) (string, *sql.DB) {
-	t.Helper()
-	office := t.TempDir()
-	database, err := db.Open(filepath.Join(office, "omo.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
-	return office, database
-}
-
-func writePlugin(t *testing.T, dir string, manifest Manifest, script string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if script != "" {
-		if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(script), 0o644); err != nil {
+	if runtime.GOOS != "windows" {
+		real := filepath.Join(t.TempDir(), "real.json")
+		if err := os.WriteFile(real, []byte(`{"hooks":[]}`), 0o600); err != nil {
 			t.Fatal(err)
+		}
+		linked := t.TempDir()
+		if err := os.Symlink(real, filepath.Join(linked, ManifestFile)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadManifest(linked); err == nil || !strings.Contains(err.Error(), "link") {
+			t.Fatalf("linked manifest: %v", err)
 		}
 	}
 }
 
-func assertStored(t *testing.T, manager *Manager, scope, plugin, key, want string) {
-	t.Helper()
-	var got string
-	if err := manager.DB.QueryRow("SELECT value FROM plugin_storage WHERE scope=? AND plugin=? AND key=?", scope, plugin, key).Scan(&got); err != nil {
+func TestLoadReportsEachPlugin(t *testing.T) {
+	e := newEnv(t)
+	e.plugin("good", manifestOf(luaHook(EventTicketMoved, "h.lua"), map[string]any{"event": "manual", "name": "hi", "description": "Say hi", "scope": "ticket", "lua": "h.lua"}), map[string]string{"h.lua": "return 'hi'"})
+	e.plugin("broken", `{"hooks":[{"event":"ticket_moved","lua":"missing.lua"}]}`, nil)
+	e.plugin("off", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": ""})
+	errs := e.load(enabled("good", nil), enabled("broken", nil), enabled("absent", nil),
+		api.PluginSettings{Name: "off", Source: "/plugins/off.git"}, enabled("../escape", nil))
+	if errs["good"] != nil || errs["off"] != nil {
+		t.Fatalf("errors of loadable plugins: %v", errs)
+	}
+	if !errors.Is(errs["absent"], ErrNotInstalled) || errs["broken"] == nil || errs["../escape"] == nil {
+		t.Fatalf("errors = %v", errs)
+	}
+	states := map[string]string{}
+	for _, i := range e.m.Infos() {
+		states[i.Name] = i.State
+	}
+	want := map[string]string{"good": StateReady, "broken": StateInvalid, "absent": StateNotInstalled, "off": StateDisabled, "../escape": StateInvalid}
+	for name, s := range want {
+		if states[name] != s {
+			t.Errorf("state of %s = %q, want %q", name, states[name], s)
+		}
+	}
+	good := e.info("good")
+	if good.Version != "1.0.0" || len(good.Hooks) != 2 || good.Hooks[1].Scope != ScopeTicket || good.Hooks[1].Name != "hi" {
+		t.Fatalf("info of good = %+v", good)
+	}
+	if off := e.info("off"); off.Commit != "" {
+		t.Fatalf("commit of a plugin the runtime did not install = %q", off.Commit)
+	}
+}
+
+func TestDispatchOrderedAndBounded(t *testing.T) {
+	e := newEnv(t)
+	release := filepath.Join(t.TempDir(), "release")
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
-		t.Fatalf("stored %s/%s/%s = %s, want %s", scope, plugin, key, got, want)
+	e.plugin("slow", manifestOf(luaHook(EventTicketCreated, "h.lua")), map[string]string{"h.lua": `
+if event.data.ticket.number == 1 then
+  local _, err = omo.exec(config.helper, "plugin-helper", "wait", config.release)
+  if err ~= "" then error(err) end
+end
+local seen = omo.store_get("seen") or {}
+seen[#seen + 1] = event.data.ticket.number
+assert(omo.store_set("seen", seen))
+`})
+	e.plugin("fast", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": `
+omo.store_set("moved", event.data.n)
+`})
+	// Far above what this test sends: it is about the queue, not the rate.
+	e.m.perMinute = 10000
+	if errs := e.load(enabled("slow", map[string]any{"helper": exe, "release": release}), enabled("fast", nil)); len(errs) != 0 {
+		t.Fatal(errs)
 	}
+	// Event 1 runs and blocks; 2 to 257 wait in the queue; 258 to 300 are
+	// dropped.
+	e.m.Dispatch(ticketEvent(1, "t"))
+	eventually(t, "the first event to run", func() bool { return e.info("slow").State == StateRunning })
+	start := time.Now()
+	for n := 2; n <= 300; n++ {
+		e.m.Dispatch(ticketEvent(n, "t"))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("Dispatch held the caller for %v", d)
+	}
+	// Another plugin is not held by the blocked one.
+	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{"n": 1}})
+	eventually(t, "the other plugin", func() bool { return e.stored("fast", "moved") == "1" })
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the slow plugin", func() bool { return strings.Count(e.stored("slow", "seen"), ",") == 256 })
+	var seen []int
+	if err := json.Unmarshal([]byte(e.stored("slow", "seen")), &seen); err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range seen {
+		if n != i+1 {
+			t.Fatalf("event %d delivered as %d: order not kept", i+1, n)
+		}
+	}
+	if !strings.Contains(e.logText("slow"), "43 events dropped: the plugin's queue of 256 was full") {
+		t.Fatalf("log = %s", e.logText("slow"))
+	}
+}
+
+// fakeClock replaces the manager's timer source.
+type fakeClock struct {
+	mu    sync.Mutex
+	waits []chan time.Time
+	asked []time.Duration
+}
+
+func (c *fakeClock) after(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	c.waits = append(c.waits, ch)
+	c.asked = append(c.asked, d)
+	return ch
+}
+
+// fire fires every pending wait and returns how many there were.
+func (c *fakeClock) fire(at time.Time) int {
+	c.mu.Lock()
+	waits := c.waits
+	c.waits = nil
+	c.mu.Unlock()
+	for _, ch := range waits {
+		ch <- at
+	}
+	return len(waits)
+}
+
+func (c *fakeClock) pending() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.waits)
+}
+
+func TestTimerHooks(t *testing.T) {
+	if _, err := ParseManifest([]byte(`{"hooks":[{"event":"timer","interval":"30s","lua":"x.lua"}]}`)); err == nil || !strings.Contains(err.Error(), "at least 1m") {
+		t.Fatalf("interval of 30s: %v", err)
+	}
+	if _, err := ParseManifest([]byte(`{"hooks":[{"event":"timer","lua":"x.lua"}]}`)); err == nil {
+		t.Fatal("a timer without interval loaded")
+	}
+	e := newEnv(t)
+	clock := &fakeClock{}
+	e.m.after = clock.after
+	e.plugin("tick", manifestOf(
+		map[string]any{"event": "timer", "interval": "2m", "lua": "h.lua"},
+		map[string]any{"event": "timer", "interval_config": "every", "lua": "h2.lua"},
+	), map[string]string{
+		"h.lua":  `omo.store_set("at", event.data.at); omo.store_set("n", (omo.store_get("n") or 0) + 1)`,
+		"h2.lua": `omo.store_set("n2", (omo.store_get("n2") or 0) + 1)`,
+	})
+	e.plugin("short", manifestOf(map[string]any{"event": "timer", "interval_config": "every", "lua": "h.lua"}), map[string]string{"h.lua": ""})
+	errs := e.load(enabled("tick", map[string]any{"every": "5m"}), enabled("short", map[string]any{"every": 10}))
+	if errs["tick"] != nil {
+		t.Fatal(errs["tick"])
+	}
+	if errs["short"] == nil || !strings.Contains(errs["short"].Error(), `value of "every" is not a duration of at least 1m`) {
+		t.Fatalf("short interval_config: %v", errs["short"])
+	}
+	eventually(t, "two timers", func() bool { return clock.pending() == 2 })
+	clock.mu.Lock()
+	asked := append([]time.Duration(nil), clock.asked...)
+	clock.mu.Unlock()
+	if !(asked[0] == 2*time.Minute && asked[1] == 5*time.Minute) && !(asked[0] == 5*time.Minute && asked[1] == 2*time.Minute) {
+		t.Fatalf("intervals = %v", asked)
+	}
+	at := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	clock.fire(at)
+	eventually(t, "the timer hooks", func() bool { return e.stored("tick", "n") == "1" && e.stored("tick", "n2") == "1" })
+	if e.stored("tick", "at") != `"2026-11-15T12:00:00Z"` {
+		t.Fatalf("at = %s", e.stored("tick", "at"))
+	}
+	if i := e.info("tick"); i.Hooks[1].Interval != "5m0s" {
+		t.Fatalf("interval from the configuration = %q", i.Hooks[1].Interval)
+	}
+}
+
+func TestReloadStopsOldTimers(t *testing.T) {
+	e := newEnv(t)
+	clock := &fakeClock{}
+	e.m.after = clock.after
+	e.plugin("tick", manifestOf(map[string]any{"event": "timer", "interval": "1m", "lua": "h.lua"}), map[string]string{
+		"h.lua": `omo.store_set("n", (omo.store_get("n") or 0) + 1)`,
+	})
+	e.load(enabled("tick", nil))
+	eventually(t, "the timer", func() bool { return clock.pending() == 1 })
+	clock.fire(time.Now())
+	eventually(t, "the first tick", func() bool { return e.stored("tick", "n") == "1" })
+	eventually(t, "the next wait", func() bool { return clock.pending() == 1 })
+
+	disabled := enabled("tick", nil)
+	disabled.Enabled = false
+	e.load(disabled)
+	// The old timer's goroutine is gone: firing its wait runs nothing and
+	// asks for no new wait.
+	clock.fire(time.Now())
+	time.Sleep(100 * time.Millisecond)
+	if n := e.stored("tick", "n"); n != "1" {
+		t.Fatalf("an old timer ran after the reload: n = %s", n)
+	}
+	if p := clock.pending(); p != 0 {
+		t.Fatalf("an old timer still waits: %d", p)
+	}
+	e.load(enabled("tick", nil))
+	eventually(t, "the new timer", func() bool { return clock.pending() == 1 })
+}
+
+func TestCloseStopsEverything(t *testing.T) {
+	before := runtime.NumGoroutine()
+	e := newEnv(t)
+	e.plugin("block", manifestOf(map[string]any{"event": EventTicketCreated, "command": helperArgs(t, "sleep")}), nil)
+	e.load(enabled("block", nil))
+	e.m.Dispatch(ticketEvent(1, "x"))
+	eventually(t, "the hook to run", func() bool { return e.info("block").State == StateRunning })
+	done := make(chan struct{})
+	go func() {
+		e.m.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	e.m.Dispatch(ticketEvent(2, "x"))
+	if _, err := e.m.Trigger(t.Context(), "block", "x", nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Trigger after Close = %v", err)
+	}
+	if errs := e.m.Load([]api.PluginSettings{enabled("block", nil)}); !errors.Is(errs["block"], ErrClosed) {
+		t.Fatalf("Load after Close = %v", errs)
+	}
+	// A run cut short by Close is not an error of the plugin.
+	if i := e.info("block"); i.State == StateError {
+		t.Fatalf("state after Close = %+v", i)
+	}
+	eventually(t, "the goroutines to end", func() bool { return runtime.NumGoroutine() <= before+2 })
+}
+
+func TestHookTimeout(t *testing.T) {
+	e := newEnv(t)
+	e.plugin("cmd", manifestOf(map[string]any{"event": EventTicketCreated, "command": helperArgs(t, "sleep"), "timeout": "1s"}), nil)
+	e.plugin("lua", manifestOf(map[string]any{"event": EventTicketCreated, "lua": "h.lua", "timeout": "1s"}), map[string]string{"h.lua": "while true do end"})
+	e.plugin("other", manifestOf(luaHook(EventTicketCreated, "h.lua")), map[string]string{"h.lua": `omo.store_set("n", event.data.ticket.number)`})
+	e.load(enabled("cmd", nil), enabled("lua", nil), enabled("other", nil))
+	e.m.Dispatch(ticketEvent(1, "x"))
+	e.m.Dispatch(ticketEvent(2, "x"))
+	eventually(t, "the other plugin", func() bool { return e.stored("other", "n") == "2" })
+	for _, name := range []string{"cmd", "lua"} {
+		eventually(t, name+" to time out", func() bool {
+			i := e.info(name)
+			return i.State == StateError && i.Message == "time limit reached"
+		})
+		eventually(t, name+"'s log", func() bool {
+			return strings.Contains(e.logText(name), "error in the ticket_created hook: time limit reached")
+		})
+	}
+}
+
+func TestPluginStorageIsPerPlugin(t *testing.T) {
+	e := newEnv(t)
+	for _, name := range []string{"a", "b"} {
+		e.plugin(name, manifestOf(luaHook(EventTicketCreated, "h.lua")), map[string]string{"h.lua": `
+local before = omo.store_get("k")
+assert(omo.store_set("k", {who = config.who, before = before}))
+local ok, err = omo.store_set("big", string.rep("x", 70000))
+assert(ok == nil and err == "the value exceeds 65536 bytes", err)
+assert(omo.store_set("gone", 1)); assert(omo.store_delete("gone"))
+local keys = omo.store_keys()
+assert(#keys == 1 and keys[1] == "k")
+assert(not pcall(omo.store_set, "", 1))
+`})
+	}
+	e.load(enabled("a", map[string]any{"who": "plugin a"}), enabled("b", map[string]any{"who": "plugin b"}))
+	e.m.Dispatch(ticketEvent(1, "x"))
+	eventually(t, "both plugins", func() bool { return e.stored("a", "k") != "" && e.stored("b", "k") != "" })
+	if a, b := e.stored("a", "k"), e.stored("b", "k"); a != `{"who":"plugin a"}` || b != `{"who":"plugin b"}` {
+		t.Fatalf("stored a = %s, b = %s", a, b)
+	}
+	if i := e.info("a"); i.State != StateReady {
+		t.Fatalf("a = %+v, log %s", i, e.logText("a"))
+	}
+}
+
+func TestChangedReportsStates(t *testing.T) {
+	e := newEnv(t)
+	e.plugin("p", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": `error("boom")`})
+	e.load(enabled("p", nil))
+	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{}})
+	eventually(t, "the error", func() bool { return e.info("p").State == StateError })
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var states []string
+	for _, c := range e.changes {
+		states = append(states, c.State)
+	}
+	got := strings.Join(states, ",")
+	if !strings.Contains(got, "ready,running") || !strings.HasSuffix(got, "error") {
+		t.Fatalf("changes = %s", got)
+	}
+	if last := e.changes[len(e.changes)-1]; last.Message != "line 1: boom" || last.LastEvent != EventTicketMoved || last.LastRunAt == nil {
+		t.Fatalf("last change = %+v", last)
+	}
+}
+
+// A plugin whose hook causes the event it reacts to (a comment_written
+// hook that writes a comment) cannot spin: each kind of event runs a
+// plugin's hooks at most perMinute times a minute; the rest is dropped
+// with one log line per minute.
+func TestHookRunsPerMinuteBounded(t *testing.T) {
+	e := newEnv(t)
+	var offset atomic.Int64
+	e.m.now = func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
+	if e.m.perMinute != DefaultHookRunsPerMinute || DefaultHookRunsPerMinute != 60 {
+		t.Fatalf("limit %d, default %d", e.m.perMinute, DefaultHookRunsPerMinute)
+	}
+	e.m.perMinute = 5
+	e.plugin("loop", manifestOf(luaHook(EventCommentWritten, "h.lua"), luaHook(EventTicketCreated, "h.lua")), map[string]string{"h.lua": `
+local key = event.event
+omo.store_set(key, (omo.store_get(key) or 0) + 1)
+`})
+	if errs := e.load(enabled("loop", nil)); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	comment := Event{Name: EventCommentWritten, Data: map[string]any{}}
+	for range 12 {
+		e.m.Dispatch(comment)
+	}
+	// Another kind of event has its own count.
+	e.m.Dispatch(ticketEvent(1, "t"))
+	eventually(t, "the other kind", func() bool { return e.stored("loop", EventTicketCreated) == "1" })
+	eventually(t, "the drop to be logged", func() bool {
+		return strings.Contains(e.logText("loop"), "comment_written events are dropped")
+	})
+	eventually(t, "the queue to drain", func() bool { return e.info("loop").State != StateRunning })
+	if got := e.stored("loop", EventCommentWritten); got != "5" {
+		t.Fatalf("comment_written ran %s times, want 5", got)
+	}
+	if n := strings.Count(e.logText("loop"), "events are dropped"); n != 1 {
+		t.Fatalf("%d drop lines, want 1:\n%s", n, e.logText("loop"))
+	}
+
+	// A minute later the hooks run again.
+	offset.Store(int64(61 * time.Second))
+	e.m.Dispatch(comment)
+	eventually(t, "the next minute", func() bool { return e.stored("loop", EventCommentWritten) == "6" })
 }

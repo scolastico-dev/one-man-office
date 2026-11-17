@@ -12,47 +12,89 @@ LDFLAGS     := -s -w -X main.version=$(VERSION)
 export CGO_ENABLED := 0
 
 .DEFAULT_GOAL := build
-.PHONY: build cross cross-linux cross-darwin cross-windows test install uninstall clean run fmt vet lint tidy check help
 
-## build: compile the omo binary into ./bin
-build:
+# NO_WEB=1 builds the Go binary without the browser app (no Node.js needed).
+WEB_DEPS := $(if $(NO_WEB),,web)
+.PHONY: build notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
+
+## web: build the browser app into web/dist (needs Node.js 24 and npm)
+web:
+	@command -v npm >/dev/null 2>&1 || { echo "Node.js 24 and npm are needed to build the board; use NO_WEB=1 to build without it"; exit 1; }
+	@if [ ! -f web/node_modules/.package-lock.json ] || [ web/package-lock.json -nt web/node_modules/.package-lock.json ]; then npm --prefix web ci; fi
+	npm --prefix web run build
+
+## web-check: type-check and unit-test the browser app
+web-check:
+	npm --prefix web run typecheck
+	npm --prefix web run test
+
+## e2e: build omo and run the browser end-to-end tests
+e2e: build
+	npm --prefix web run e2e
+
+## readme-art: render the README graphics in .github/assets/src to SVG (needs Playwright's Chromium and pdftocairo)
+readme-art:
+	@if [ ! -f web/node_modules/.package-lock.json ] || [ web/package-lock.json -nt web/node_modules/.package-lock.json ]; then npm --prefix web ci; fi
+	npm --prefix web run readme-art
+
+## readme-shots: build omo and take the README screenshots (.github/assets/screenshot-*.png) on a temporary home with scripted agents (needs Playwright's Chromium)
+readme-shots: build
+	npm --prefix web run readme-shots
+
+## build: compile the omo binary into ./bin (NO_WEB=1 skips the browser app)
+build: $(WEB_DEPS)
 	@mkdir -p $(BUILD_DIR)
 	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe) $(PKG)
 	@echo "built $(BUILD_DIR)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe) ($(GOOS)/$(GOARCH), $(VERSION))"
 
-## cross: build Linux, macOS and Windows for amd64 and arm64
-cross: cross-linux cross-darwin cross-windows
+## notices: write bin/THIRD_PARTY_NOTICES, the licences of the Go modules and the bundled npm packages (NO_WEB=1 leaves the web app out)
+notices: $(WEB_DEPS)
+	@mkdir -p $(BUILD_DIR)
+	go run ./tools/notices -o $(BUILD_DIR)/THIRD_PARTY_NOTICES $(if $(NO_WEB),-web '')
 
-cross-linux:
+## cross: build Linux, macOS and Windows for amd64 and arm64 (NO_WEB=1 skips the browser app)
+cross: cross-guard cross-linux cross-darwin cross-windows
+
+cross-guard: $(WEB_DEPS)
+	@if [ -z "$(NO_WEB)" ] && [ ! -f web/dist/index.html ]; then echo "web/dist/index.html is missing: build the board with 'make web' or use NO_WEB=1"; exit 1; fi
+
+
+cross-linux: cross-guard
 	@mkdir -p $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-linux-amd64 $(PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-linux-arm64 $(PKG)
 
-cross-darwin:
+cross-darwin: cross-guard
 	@mkdir -p $(BUILD_DIR)
 	GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 $(PKG)
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 $(PKG)
 
-cross-windows:
+cross-windows: cross-guard
 	@mkdir -p $(BUILD_DIR)
 	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe $(PKG)
 	GOOS=windows GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe $(PKG)
 
-## test: run the full suite (integration tests spawn real PTYs)
+## test: run the full suite (the smoke test builds omo and starts a real server)
 test:
 	go test ./... -timeout 900s
 
 ## check: everything CI should gate on
-check: fmt vet test
+check: fmt vet lint test
 
 ## fmt: report unformatted files (does not rewrite)
 fmt:
-	@out=$$(gofmt -l . ); \
+	@out=$$(find . -path ./web/node_modules -prune -o -name '*.go' -print | xargs gofmt -l); \
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
 
-## vet: run go vet
+## vet: run go vet for this OS and type-check the Windows and macOS builds, tests included
 vet:
 	go vet ./...
+	GOOS=windows go vet ./...
+	GOOS=darwin go vet ./...
+
+## lint: report unused code with staticcheck when it is installed (skipped otherwise)
+lint:
+	@if command -v staticcheck >/dev/null 2>&1; then staticcheck -checks U1000 ./...; else echo "staticcheck is not installed: unused-code check skipped"; fi
 
 ## tidy: sync go.mod/go.sum
 tidy:
@@ -69,19 +111,6 @@ install: build
 ## uninstall: remove the installed binary
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(BINARY)
-
-## run: start an office in the current directory (needs .omo/omo.yaml here)
-run: build
-	./$(BUILD_DIR)/$(BINARY)
-
-## demo: scaffold and run a throwaway mock office in ./tmp-demo
-demo: build
-	@rm -rf tmp-demo tmp-demo-repo
-	@mkdir -p tmp-demo-repo && git -C tmp-demo-repo init -q -b main && \
-		git -C tmp-demo-repo commit -q --allow-empty -m init
-	./$(BUILD_DIR)/$(BINARY) setup tmp-demo >/dev/null
-	@sed -i 's|^repos: {}|repos:\n  demo: $(CURDIR)/tmp-demo-repo|' tmp-demo/.omo/omo.yaml
-	cd tmp-demo && ../$(BUILD_DIR)/$(BINARY) --mock
 
 ## clean: remove build output
 clean:

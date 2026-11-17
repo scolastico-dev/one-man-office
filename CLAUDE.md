@@ -1,727 +1,252 @@
 # one-man-office agent guide
 
-This is the fast technical orientation for agents modifying `one-man-office` (`omo`). Read [README.md](./README.md) for the introduction and quick start and the [wiki](./wiki/README.md) for the complete user-facing behavior and CLI reference; this document focuses on how the repository works and how to change it safely.
+Fast technical orientation for agents modifying `one-man-office` (`omo`). Read [README.md](./README.md) for what the product is and how to start it.
 
-## What this project is
+## What exists today
 
-`omo` is a self-contained Go terminal application that runs a small hierarchy of AI CLI agents across one or more local Git repositories. The user talks to a CEO agent, which delegates specs to product managers. Product managers create developer jobs, each developer works in an isolated Git worktree, and clean-context reviewers approve or reject the result. Smoke-alarm and firefighter agents monitor and recover unhealthy work.
+`omo` is one global server per user (per `OMO_HOME`). It keeps tickets in SQLite, enforces the board's data rules, and serves one HTTP API with an event stream, on a TCP port for the browser and on a local Unix socket (Windows named pipe) for `omo ai`. The server runs the agent engine (`internal/engine`) and serves the board, a Vue app built from `web/` and embedded in the binary.
 
-Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional company dashboard can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
+The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. The settings are edited in the browser (see Settings below). Usage scripts with smart assignment, skill sets, plugins and export are part of the server (see Extensions below), and so is an MCP endpoint (`/mcp`, packages `mcpserver`, `mcprelay`, `mcpauth`, `mcpbridge`, `mcpclients`). The user manual is the `wiki/` folder; `README.md` is a short overview that links into it.
 
-The supported host and release targets are Linux, macOS, and Windows on amd64 and arm64. The module currently declares Go 1.26.2 in `go.mod`; treat `go.mod` as authoritative if documentation differs. Builds are pure Go with `CGO_ENABLED=0`.
+The supported targets are Linux, macOS and Windows on amd64 and arm64. `go.mod` is authoritative for the Go version. Builds are pure Go with `CGO_ENABLED=0`.
 
 ## Start here
 
 ```bash
-make build                    # bin/omo
-make check                    # formatting check, go vet, full test suite
-make test                     # tests only
-make cross                    # all supported OS/architecture binaries
-./bin/omo setup /tmp/demo     # scaffold an office
-./bin/omo --mock              # full orchestration without model calls
+make build         # bin/omo
+make check         # gofmt check, go vet, unused code (staticcheck, when installed), full test suite
+make test          # tests only
+make cross         # all supported OS/architecture binaries
+make web-check     # type-check and unit-test the board app
+make e2e           # build omo and run the browser tests
+make notices       # bin/THIRD_PARTY_NOTICES: licences of the Go modules and the bundled npm packages
 ```
 
-Useful focused commands:
+`make build` and `make cross` build the board first and need Node.js 24 and npm; `make build NO_WEB=1` builds without it (the binary then serves a notice page). `go build ./...` and `go test ./...` never need Node.
 
-```bash
-go test ./internal/supervisor -run '^TestFullReviewMergeFlow$' -count=1
-go test ./internal/gitops -run Worktree -count=1
-go test ./internal/office -count=1
-go test ./internal/cli -count=1
-```
+Focused runs: `go test ./internal/board -count=1`. The smoke test in `cmd/omo` builds the binary and runs a real server (`go test ./cmd/omo -count=1`); it is skipped with `-short`.
 
-Supervisor integration tests start real subprocesses and PTYs. For stress runs, prefer repeated fresh `go test ... -count=1` processes instead of a large `-count=N` in one process; package-level timing overrides and process cleanup are designed around a normal single suite run.
-
-`TestLiveAgentCLIHandshake` is deliberately opt-in via `OMO_LIVE_AGENT_CLI=codex|gemini`. It spends one minimal model request with spawn retries disabled; never add it to the default test suite or run it in a loop.
-
-## Runtime architecture
+## Architecture
 
 ```text
 cmd/omo
-  -> internal/cli (Cobra commands and startup checks)
-  -> internal/office (assemble config, DB, transport, supervisor, TUI)
-       -> internal/supervisor (kernel and lifecycle loops)
-            -> internal/session (PTY/ConPTY agent processes and logs)
-            -> internal/queue + internal/db (durable jobs/events/incidents)
-            -> internal/bus (durable mail and enforced routing)
-            -> internal/gitops (worktrees, branches, serialized merges)
-       -> internal/sockd (server) <- internal/sockc (agent CLI verbs)
-       -> internal/tui (live terminal peek and office overview)
+  -> internal/cli         Cobra commands: omo, -d, stop, config, autostart, update, ai, mcp
+       -> internal/service     run lock, detached start, authenticated stop, login autostart
+       -> internal/server      HTTP API, auth, socket, event stream, the embedded board (web/)
+            -> internal/engine      starts and supervises agents, merges, exports, cleans up
+            -> internal/board       all ticket rules and persistence
+            -> internal/settings    settings folders (YAML) and their change notifications
+            -> internal/db          SQLite, migrations, event log
+       -> internal/apiclient   socket client used by `omo ai`
 ```
 
-Startup follows this path:
+Package map (`internal/`):
 
-1. `internal/cli` locates and canonicalizes an office, requires saved or explicit user trust, then performs optional release, template, managed-plugin update, and provider checks. Unknown locations require terminal approval or `--trust-office`; mock/headless/skip-checks do not bypass this boundary. Read-only observation and non-launch commands do not prompt.
-2. `internal/office.Open` loads `.omo/omo.yaml`, messages, SQLite, and the platform transport endpoint.
-3. Recovery marks old agents dead and requeues every non-terminal job with a restart note.
-4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO. With `--safe-mode`, the CEO is the only role allowed to spawn until the user or CEO resumes spawning.
-5. Agent-facing `omo` commands use `OMO_AGENT_ID` and `OMO_SOCKET` to call the running supervisor.
-
-`omo --read-only` deliberately bypasses that lifecycle. It uses
-`config.LoadReadOnly`, `db.OpenReadOnly`, and `office.OpenReadOnly`, claims no
-lock or transport, runs no recovery or loops, and renders only query-backed TUI
-tabs. SQLite `mode=ro` plus `query_only` is a second safety boundary beneath the
-UI guards.
-
-Every socket verb is authenticated against the live agent record. State-changing handlers persist changes before acknowledging the request. Preserve that durability rule.
-
-## Repository map
-
-| Path | Responsibility |
+| Package | Role |
 |---|---|
-| `cmd/omo/main.go` | Small executable entry point; build-time version injection. |
-| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, and trust adaptation. |
-| `internal/cli/` | Cobra tree, office startup, setup/repo commands, agent verbs, job/mail/power commands, hidden fake-agent command. |
-| `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
-| `internal/supervisor/` | Core orchestration: spawning, dispatch, PM integration worktrees, merge-policy completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
-| `internal/session/` | PTY on Unix, ConPTY on Windows, virtual terminal screen, input, readable transcript generation, and log rotation. |
-| `internal/queue/` | Persistent job model and validated state machine. |
-| `internal/db/` | SQLite schema, additive migrations, agents, events, incidents, and retention. |
-| `internal/bus/` | Stored office mail, directory lookup, and server-enforced role routing. |
-| `internal/gitops/` | `.git/info/exclude`, worktree creation/removal, branch deletion, and per-repository merge locks. |
-| `internal/proto/` | JSON request/response types and arguments for every socket verb. |
-| `internal/sockc/` | Agent-side Unix-socket/Windows-pipe client. |
-| `internal/sockd/` | Office-side authenticated verb server. |
-| `internal/transport/` | Short Unix socket endpoint/symlink and Windows named-pipe endpoint selection. |
-| `internal/tui/` | Bubble Tea UI: agent peek, overview tabs, messages, jobs, incidents, events, and statistics. |
-| `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
-| `internal/plugins/` | Strict manifests, event dispatch, trusted Lua hooks with io/os, command hooks, and durable plugin storage. |
-| `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
-| `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
-| `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
-| `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
-| `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
-| `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
-| `plugins/` | Embedded bundled `nudge` and `tools`, global bundled `filebrowser`, and optional official Git-installed `pushover`, `autoshutdown`, `pullrequest`, and `bugreport` plugins. |
-| `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
-| `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
-| `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
-| `internal/superpowercache/` | Shared Superpowers checkout inside the global omo home and startup fast-forward updates. |
-| `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
-| `internal/codexauth/` | Bounded Codex CLI PTY run that lets Codex refresh an expired OAuth token before a usage retry. |
-| `internal/names/` | Stable human-readable role-based agent names. |
-| `internal/verbs/` | Shared socket handlers that do not require full supervisor ownership. |
-| `install.sh`, `install.ps1` | Release installers and PATH setup. |
-| `.github/workflows/` | Dedicated pull-request, nightly/main, and release workflows. |
-| `Makefile` | Canonical local and CI build/test commands. |
+| `api` | wire types, error codes and event kinds shared by server and clients |
+| `board` | tickets, transitions, ranks, review stages, dependencies, comments (bodies up to `MaxCommentBody`, 64 KiB), the ticket thread (`thread.go`), mentions and the seen marker, read scope, agent sessions; the engine-facing methods (`BeginWork`, `CompleteMerge`, `MergeConflict`, `FinishExport`, `SetProjectExport`, `ExportFailed`, `SetBranch`, `SetAttention`) are pure data transitions; `CompleteExport` serves the board tests and the browser tests' seed tool |
+| `db` | `Open` applies migrations by `PRAGMA user_version`; one connection only; `AppendEvent` works inside a transaction |
+| `globalhome` | the `OMO_HOME` layout, layout marker, refusal of an older omo's folder, atomic private file writes |
+| `images` | uploaded images: `Sniff` (PNG, JPEG, GIF, WebP by content, at most `MaxSide` pixels a side; SVG refused), `NewID`/`ValidID` (UUIDs; the only file names), `CleanName`, `Markdown` (`![name](omo-image:<id>)`), `Store` (the `images` folder: atomic 0600 writes, reads through `homefile`, `Present`, `Remove`, `Stray`), `Refs`, `Annotate` (the local path after each reference, for what agents read) and `ForExport`; limits `MaxBytes` 10 MiB, `MaxPerTicket` 100, `MaxTotalBytes` 2 GiB of stored images |
+| `homefile` | the only way to read or append to a file in the omo home (`Open`, `Read`, `Append`): no link at the last element, regular files only, no wait on a named pipe, a size limit per kind of file (`Max*`); `guard_test.go` fails on another read, or an `os.OpenFile` with `O_APPEND`, in the packages that use home files |
+| `homezip` | settings export and import as a zip: `Exported` (the allowlist of home files, one comment each) and `NotExported` (everything else at the top of the home, with the reason); `TestAllowlistMatchesSettingsStore`, `TestLayoutClassified` and the server's `TestUsedHomeIsClassified` fail on a home file in neither list. `Home.Export` (manifest, files, a `VACUUM INTO` snapshot of the database on request), `Stage` (checks a zip completely into `run/import/<id>`: paths, links, sizes, manifest not newer, each file through `settings.Store.CheckFiles`, `server.yaml` through `serverconfig.Load`, the database), `Apply` (temporary names, copies of replaced files in `backups/<time>-import/`, renames under `settings.Store.Replace`, rollback on failure; the database waits as `omo.db.import`), `SwapPendingDatabase` (at the server's start, before `db.Open`). Routes (userOnly, `server/backup.go`): `GET /api/settings/export[?database=true]`, `POST /api/settings/import` (raw zip), `POST /api/settings/import/apply`. CLI `omo config export\|import` |
+| `buildinfo` | the repository address and the commit or release page of a version string (`GET /api/server` `version_url`) |
+| `serverconfig` | start options (`server.yaml`) and the persistent login token |
+| `settings` | `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`; strict YAML, last valid content stays on a broken hand edit; a revision per file and guarded writes (`...If` methods, `UpdateGeneral`); a 2 s poll picks up hand edits and reports them with their source |
+| `branchname` | the branch name template (`branches.template`): `Check`, `Expand`, `Valid`, `Slug`, `Machine` (host and user name), `Example` (the ticket of the settings preview); pure |
+| `discover` | the walk that finds Git repositories under a workspace folder: breadth first, bounded in depth, folders visited, time per folder and overall; ignore patterns; never follows a link |
+| `agentsetup` | the catalog of the agent programs omo knows (Claude Code `fable`/`opus`/`sonnet`/`haiku`, Codex `astra`/`sol`/`luna`, Antigravity `opus`/`sonnet`/`flash-high`/`flash-low`/`gpt-oss` (two quota groups: each model lists its group's weekly window), Gemini `carbon`/`argon`/`hydrogen`/`flash`; the strongest of each is not selectable and goes to the CEO), `Detect`, which plans profiles and role assignments from the programs found on `PATH` (it skips a program that has a profile and never changes profiles on disk), and `AddMissingModels` ("Add missing models": the catalog models a profile lacks, by name); it never runs a program |
+| `folderlist` | the folder listing behind the folder picker: folder names only, bounded, links marked, names with hidden characters escaped |
+| `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker. Settings routes are registered through one table (`access.go`, `registerRoutes`) whose rows carry the access rule. Beyond tickets: `diff.go` (`/api/tickets/{n}/diff`, `/diff/file`; `/diff/file?context=<0..1048576|all>` reads one file of git's own list again with that much context, never cut: a patch over 1 MiB is refused with 422, so the web shows hidden lines through the same parser and rendering path (`features/diff/expand.ts`, `useDiff` `expand`/`expansionOf`, kept per file while its patch is unchanged); each project says how far its local base branch is behind and ahead of its remote-tracking branch, and `?base=remote` compares with that branch, never fetching; the Diff tab says when the base is behind and offers that comparison per ticket and project for the browser session, `features/diff/useDiff.ts`), `thread.go` (`/api/tickets/{n}/thread`, `/api/notifications`, `/api/sessions/{id}/log`), `images.go` (`POST /api/tickets/{n}/images` takes the raw bytes as `application/octet-stream` with the percent-encoded name in `Omo-Image-Name`, from the user and from agents that may comment on the ticket (route rule `agentWrite`), checked before the body is read; `GET /api/tickets/{n}/images`, `GET /api/images/{id}` and `/content` follow the read scope of the image's own ticket; `DELETE /api/images/{id}` is the user's; `POST /api/terminal-images` (userOnly, raw upload like the ticket upload, same sniffing and 10 MiB limit, 2 GiB for the folder) stores an image dropped or pasted into a terminal in `images/terminal/` with no record and answers `api.TerminalImage` `{path, name, content_type, size}`, the absolute path the browser pastes; the bytes go out with their sniffed type, `nosniff`, an inline made-up file name, their own CSP and private immutable caching; `sweepImages` expires images hourly, and deletes terminal images `keep_days_after_done` days after their upload by file time, `images.Store.RemoveOlder`), `terminals.go` (`/api/terminals` and its websocket; `POST` takes a project or ticket, or `{home: true}` for a shell in the OS home folder, titled "Home", with no project or ticket, 422 when combined with either). The terminal, notification and log routes are for the user only; an agent session gets 403 |
+| `transport` | socket / named pipe endpoints and dialers |
+| `service` | lifecycle of the one server process |
+| `apiclient`, `cli` | `omo ai` and the human commands; `apiclient.NewWithTransport` with `HandlerTransport` serves a client's requests in process through a handler (the socket handler) |
+| `aicmd` | the one definition of every `omo ai` command (path, help, input struct with `arg`/`flag`/`text` tags for the command line and `json`/`jsonschema` tags for MCP, which agent sessions see it as an MCP tool or that it is the command line's only, `Run` over an `apiclient.Client` answering text and the route's JSON); `cli` builds `omo ai` from it. Guards: `TestCobraTreeMatchesCommands` (cli), `TestEveryCommandIsAToolOrCommandLineOnly`, `TestInputsAreValid` (aicmd), `TestRoleFilterMatchesRoutes` (server) |
+| `engine` | runs inside the server: a pure planner (`plan`) turns one `board.EngineSnapshot` into actions (end sessions, start agents, merge, clean up) on every board change, process exit and 30-second health tick; starts, failure counting (three failures of one agent slot flag the ticket), notifications, `omo ai ready`/`wait`, merges, export, cleanup, hand-in guard, health checks, graceful stop and recovery at start; new work waits for `limits.tasks` / `limits.stories`, counted from the board on every pass (a ticket holds its slot from In Progress until Done, whatever its agents do; `omo ai wait` frees nothing; the CEO never counts) |
+| `agents` | agent processes in terminals (`PTYRunner`), their environment, start-prompt delivery, notifications, the registry; ends leftovers of a crashed run |
+| `prompts` | the default role and message prompts (`defaults/*.md`, text/template), rendered with `Render`; `Check`, `Preview` and `RenderBounded` (limits on template size, output size and time) are used for prompts a user edits |
+| `gitops` | git without touching the user's checkout: merge commits built with `merge-tree`/`commit-tree`, branches advanced by `merge --ff-only` or a checked `update-ref`, worktree helpers, bounded diffs (`diff.go`; `BranchDiff` takes the base as a full ref, `BranchRef(name)` or `RemoteBase.Ref`). omo hands git a branch as its full ref (`refs/heads/<name>`), never as a bare name, which git would resolve to `$GIT_DIR/<name>`, `refs/<name>` or a tag first; the one exception is `git worktree add <dir> <name>`, which checks `refs/heads/<name>` first. `RevParse` and every commit lookup refuse a `refs/heads/<name>` revision whose name carries revision syntax (`main~3`), so a stored name never resolves to another commit; a base branch a user or agent sets must be a local branch of the project's repository (`board.Environment.BranchExists`). `BranchFileContext`/`WorktreeFileContext` give a single file with more context (`ErrTooLarge` past `MaxSingleFilePatch`). Git runs in an agent's worktree only through `resolve.go` (`inWorktree`), which takes the git directory from the project repository's records and sets `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CEILING_DIRECTORIES`, because the worktree's own `.git` file is writable by the agent. `(*Git).command` is the only place that starts git (`guard_test.go` fails otherwise) and refuses a command that could find a repository inside the worktrees folder. `gitfile.go` checks that a worktree's `.git` is the file git wrote (`ErrForeignGitFile`) |
+| `fakeagent` | scripted stand-in for an agent CLI, run as the test binary (`OMO_FAKEAGENT=1`); used by the engine, server and end-to-end tests |
+| `e2e` | end-to-end tests only: a real server and engine, the fake agent as real processes, real repositories |
+| `webterm` | web terminal core; the engine serves agent terminals and user shells through it |
+| `userterm` | the user's shells in the board: a manager that opens a shell in a project folder or a ticket's worktree (16 running at most), keeps its output for replay, and holds the ticket's worktree until the last shell in it ends. The environment of a shell has no `OMO_AGENT_ID`. A ticket shell is refused unless the folder is the worktree omo made and its `.git` is the gitfile git wrote |
+| `session` | terminal processes, transcripts, environment merging |
+| `childenv` | the base environment of every program omo starts (agents, CEO, export jobs, git, plugin programs, usage helpers, user shells): omo's own without the variables that tie a program to the IDE or terminal session omo was started from (`TERM_PROGRAM`, `VSCODE_*`, `CLAUDE_CODE_SSE_PORT`, `TMUX`, ...); the agent and profile environments are laid over it. `guard_test.go` fails on `os.Environ` elsewhere and on a started program without its own `Env` |
+| `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation (`agentcli.Supported`: claude, codex, agy, gemini; Codex and Antigravity trust the worktree through launch arguments, Gemini through a variable), folder trust for Claude, agent names, file locks; guard tests fail when a supported program lacks a catalog entry, a start adapter, settings validation or a choice in the web's profile form |
+| `textsafe` | the characters omo never shows or prints as they are (controls, bidirectional and invisible characters); `web/src/components/ui/visibleText.ts` escapes the same set, both tested against `internal/textsafe/testdata/hidden.json` |
+| `luabox` | the only way omo runs Lua (`archtest` fails on a Lua state anywhere else): a sandbox without shell, file or loader functions, with limits on time, memory, output and array size, a bounded HTTP helper (https anywhere, http to localhost only, same-host redirects, 8 calls) and a redactor that replaces secrets by `[redacted]` and escapes hidden characters |
+| `usage` | usage scripts: `Run` (a fresh `luabox` per run with the helpers `read_file` (through `homefile`), `env`, `keychain`, `codex_refresh`, `agy_usage` (runs the profile's `agy -p /usage --output-format json` with what `env` sees; `RunOptions.AgyUsage` replaces it in tests), `rate_limited`), `Check`, the shipped `claude`, `codex` and `agy` scripts (`defaults/`), the pure `Evaluate` (a model is `ok`, `soft`, `hard`, `unmetered` or `unknown`; `ModelUsage.note` is set only when none of a model's listed windows was reported (a missing window of a partly reported list is ignored)) and the `Tracker` that runs each account's script on a timer and keeps `run/usage.json` |
+| `skillsets` | one shared read-only checkout per skill set in `<home>/skills/<name>`, fetched only through `gitops.FetchSource`; `Text` is the one filter (`ForRole`, the set's `paths` through `Find`) that gives skill sets to every role's prompt |
+| `forge` | reads a project's remote (`Parse`), builds the `gh`, `glab` or `tea` command line for an export job (every value single-quoted; omo never runs these tools) and checks a reported pull request address against the pushed remote (`CheckAddress`) |
+| `plugins` | the plugin runtime: one global scope, one queue and goroutine per plugin, command and Lua hooks on `luabox`, manual actions, log, per-plugin store (`internal/db`); `omo.agents`/`omo.send_to_agent` reach the running agents through `Options.Agents` (the server's `pluginAgents`, by terminal id, delivering with `Engine.Notify`, the engine's own notification path) |
+| `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure; `Check` refuses a bad name, source, subpath or ref before anything is fetched); `catalog.go` reads omo's plugin list (`FetchCatalog`, `ParseCatalog`, `TagOf`, `Acknowledged`, `CatalogFromEnv`) |
+| `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
+| `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
+| `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
+| `mcpserver` | omo's MCP endpoint (`/mcp`): the `omo ai` commands as board tools for agent sessions and the tools of the relayed servers, for the identity bound to each request |
+| `mcprelay` | the relayed upstream MCP servers: stdio processes (per agent session or shared), HTTP and SSE connections, sign-in (headers, a header command, OAuth), tools under omo's names (`<server>__<tool>`), calls with timeouts, cancellation and progress, a result over 4 MiB refused; logs in `logs/mcp/` through `homefile.Append`; `fakemcp` is the scripted server of the tests |
+| `mcpauth` | clients of `/mcp` that are not agent sessions: personal access tokens and omo's OAuth 2.1 server (metadata, registration, consent through the web app, PKCE, rotating refresh tokens); omo's own sign-ins at upstream servers; inbound secrets stored as SHA-256 hashes |
+| `mcpclients` | omo's entry in the agent programs' user-level MCP configuration (claude, codex, agy) and the take-over of their servers, only through the programs' own `mcp add`/`mcp remove`, after a copy in `backups/` |
+| `mcpbridge` | `omo mcp stdio`: forwards MCP over standard input and output to `/mcp` on the socket, with the session of `OMO_AGENT_ID` |
+| `secreturl` | addresses that may carry secrets (a key in the query, a password): `Display` is the only form omo shows or logs; `Forms`/`Values` feed the redactors |
+| `oldhome` | the upgrade from omo 0.11 and older: `Find` lists the old home, offices and worktrees, `Remove` deletes exactly that, `DisableUpdateCheck`; used only by `cli` |
+| `gittest`, `testpath` | test support: `gittest.Isolate` keeps tests away from the developer's git configuration; `testpath.Without` hands a started omo a `PATH` without the real agent programs |
 
-Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
+## Frontend (`web/`)
 
-## Company dashboard
-
-The CLI wraps browser serving in `companyservice.Run`, holding one OS-backed
-lock per `OMO_HOME` through child cleanup. `--detached`/`-d` re-executes the same
-binary, waits for authenticated readiness, and prints the startup log/access URL.
-`company stop` uses a separate authenticated loopback endpoint, waits for the
-lifecycle lock, and never signals a stored PID. Unix SIGTERM uses normal cleanup, including cancellation of startup hooks.
-`company autostart register` snapshots literal dashboard arguments (including
-defaults), executable location, cwd, PATH, and OMO_HOME for user login. Unregister
-removes only that registration. Linux uses XDG autostart, macOS a RunAtLoad
-LaunchAgent without KeepAlive, and Windows a per-user Run entry plus hidden
-re-exec. Native entries point at private JSON settings to avoid shell expansion
-and putting authentication values into desktop/plist/registry commands.
-`OMO_HOME/company/` contains the lifecycle locks, `runtime.json` (stop token
-and dashboard URL, removed after cleanup), `company.log` (replaced at each
-background start), and optional `autostart.json` (including any Basic auth).
-Unix restricts the directory/files to the user; Windows protects their inherited
-ACL for the user and SYSTEM. Tests must isolate OMO_HOME and native autostart
-locations; never register the developer's actual login environment.
-
-The authenticated `untrust` project action removes available or stale trust
-entries without deleting files and returns HTTP 409 while a company-owned
-instance for that path is running.
-
-The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
-stack, and purple hover/focus accents. CSS respects reduced motion and stacks
-navigation above the terminal on narrow screens. The top-left brand and empty
-state use the transparent white-artwork variant, `assets/logo-transparent.png`,
-derived from `.github/assets/logo.jpg`; the favicon uses the normal `logo.jpg`
-artwork with baked rounded corners. List rendering reuses buttons and rows to
-preserve keyboard focus across polling refreshes. Offices have an in-memory Edit
-mode with ordered up/down controls and confirmation-protected Remove actions;
-the stored order is persistent. Live terminal rows form office/agent trees: the
-selected office is current in overview, a visible peeked agent is current in
-peek, and the office is the fallback when the tree is collapsed or the agent is
-missing. The offices panel starts expanded and has a focus-preserving accessible
-collapse toggle that hides Edit and exits active Edit mode; already persisted
-reorder/removal changes remain. Heartbeat agent entries include `parent` and
-`depth`, appear in TUI depth-first order, are bounded to 256 entries and
-UTF-8-safe 256-byte strings, clamp depth to 0–32, and clear invalid parents.
-The dashboard renders the same hierarchy with matching indentation and tree
-markers. Triggers
-open by click or keyboard only, close on outside click, Escape, disable, or
-selection change, and retain keyboard focus behavior. On desktop the separator
-between sidebar and main resizes the sidebar from 220px through
-`min(600px, 60vw)` with 16px ArrowLeft/ArrowRight steps; `omo.sidebarWidth` is
-clamped and safely ignored when storage is malformed or unavailable. The
-separator is hidden and resizing disabled at 650px and below. Keep the stable
-plugin DOM IDs and xterm fit/resize behavior intact when changing these assets.
-
-Only a confirmed, successful desktop office start collapses the offices panel;
-cancelled or failed starts, shell and setup launches, ordinary selection, and
-starts at 650px or below do not collapse it. If the focused Start control becomes
-hidden, focus moves to the offices toggle. The offices and live-terminal toggles
-use centered 12px SVG chevrons inside 28px controls and rotate only the icon.
-`omo.selectedInstanceId()` is a frozen browser API function that reads the live
-selected instance ID, or `''` when nothing is selected, including when a plugin
-captures its scoped API during loading. On every ordinary Files open, filebrowser
-resolves that ID against a fresh `/api/state` response. A matching `omo` instance
-with a normalized path takes precedence, even when stopped; otherwise Files
-starts at Home, including after refresh failure. Project Browse starts at a
-valid normalized project path first.
-
-`omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
-and a separate ephemeral private loopback HTTP listener. The public surface
-requires the per-run browser capability and validates Host/Origin; the URL
-fragment is removed from browser history and retained only in page memory.
-The explicit `--unsafe` escape hatch disables only that public capability
-check and prints a prominent warning. `--basic-auth USER:PASSWORD` replaces
-the capability with browser-native Basic authentication for trusted networks.
-Host/Origin validation remains enabled unless `--no-origin-check` explicitly
-drops only the Origin comparison for a trusted reverse proxy.
-Project launches resolve canonical paths against global trust. Create and clone
-use interactive setup terminals and literal argv; create accepts an existing
-directory when it has no `.omo/omo.yaml`, while clone accepts only an absent or
-empty destination. Both require a clean absolute destination with an existing
-parent, and clone sources prohibit executable Git transports. Setup success
-trusts the canonical destination; a nonzero exit retains the terminal output and
-does not trust it. Before setup, cloned `.omo` trees reject symlinks and special
-files so scaffolding cannot write outside the reserved destination; unrelated
-project symlinks remain supported.
-
-Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
-environment settings. The private server derives identity and usage-profile
-allowlists from registration, never request-supplied profile definitions.
-Running children publish an in-memory live heartbeat containing `agents`, `tui`,
-and `actions`; the snapshot is bounded to 256 agents, 128 actions, and
-UTF-8-safe 256-byte strings. Agent lifecycle changes and local TUI state changes
-wake the heartbeat, and the company state API normally reflects them within
-about one second. Shells, setup terminals, and stopped offices expose empty
-agent/action arrays and an empty TUI state. The dashboard renders offices with
-nested agent rows, starts narrow trees collapsed, and preserves focus while
-polling.
-The company forwards `POST /api/instances/{id}/tui` `{agent}` to the owned
-office's authenticated socket `tui.show`; an agent selects peek and an empty
-agent returns overview. Local and remote TUI navigation both update the
-heartbeat, so the dashboard's active peek mirrors the terminal. Manual actions
-in the snapshot are filtered to those whose roles include `user`; the
-accessible Triggers menu splits quoted/backslash-escaped prompt arguments and
-forwards `{plugin,action,args}` through `plugin.trigger`, returning its durable
-request ID. Shells, stopped offices, unavailable sockets, and non-running
-command targets remain rejected rather than exposing controls.
-Launched offices retain the normal interactive startup checks; release,
-embedded-asset, and plugin update prompts appear in the browser terminal.
-`office.Open` uses the remote fetcher for usage preflight and runtime checks;
-the control ping keeps `startup.check_timeout` (5 seconds by default), while
-each usage scope has a 65-second overall budget. Codex usage requests each
-have 5 seconds around a single 45-second credential refresh; the dashboard
-allows 70 seconds for a private `/usage` reply and 75 seconds for its HTTP
-write. Provider usage errors and timeouts leave the child's heartbeat/control
-client usable; a rejected profile authorization remains fatal. Office or
-dashboard shutdown cancels active refreshes.
-Only product managers, developers, and freelancers acquire global leases. A
-failed parent usage fetch answers HTTP 502 with the provider error text, and
-the child includes that reason in its preflight or runtime usage error.
-CEOs, reviewers, smoke alarms, firefighters, and branch namers remain
-controlled and supervised with the same control credentials and heartbeat, but
-do not acquire leases. A leased slot is released after the process exits and
-before management-agent respawn; unregistering a dead child releases all its
-leases. The parent cache coalesces both ordinary fetches and child refresh
-timers by credential scope. Profile allowlists are frozen until the child is
-restarted.
-Relative file-credential roots resolve against the child office directory.
-Darwin Claude registration rejects relative non-empty config/secure-storage
-roots because absolutizing their raw values would change the Keychain namespace;
-absolute spelling and explicit empty secure-storage overrides are preserved.
-
-Aggregate capacity denial leaves queued jobs queued without job-state churn.
-Each denied job retries with bounded exponential backoff (default 5s to 60s),
-and local or cross-office lease releases wake dispatch promptly. Pending counted
-work roles retry before the dispatcher pause gate; missing reviewers retry ahead
-of queued jobs, and AI branch naming keeps its job queued. Reviewers run
-alongside their retained developers without a capacity handoff. Supervised
-config reload can remove unused profiles while the company retains their
-registered names and identities. New names or changed provider/credential
-scopes are rejected before preflight or apply; a removed profile can be
-restored with its original identity.
-
-Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
-managed children never fall back to independent usage requests or spawn limits.
-The hidden shell wrapper uses a nested PTY and the same heartbeat lifecycle,
-stripping control credentials before invoking `sh`/`cmd.exe`. The session package
-also strips these credentials from agent environments. Standalone offices keep
-their existing lifecycle. Capacity is per company process (`--max-agents`,
-default 12) and counts only product managers, developers, and freelancers.
-Coordination, safety, and naming roles are supervised but exempt; interactive
-shells do not consume agent capacity.
-
-Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
-64 retained instances, 16 websocket connections, and bounded input queues.
-Every PTY output chunk updates server-side DEC private-mode state. A running
-reconnect receives a small synthesized binary mode prefix before a retained
-tail whose first byte is safe for both escape-sequence and UTF-8 replay; the
-prefix is excluded from the 256 KiB retained-tail bound. Alternate-screen
-snapshots repaint through a real serialized resize wiggle after the browser
-reports its fitted size. Plain shells and stopped terminals receive no mode
-prefix or repaint, and no input is replayed after disconnect.
-The tail cut uses the first byte offset after which the x/ansi parser is in
-ground state with no pending UTF-8 collection; a C0 executed inside an
-in-progress private CSI follows x/ansi callback semantics and does not update
-the mode tracker.
-Browser input uses `assets/terminal-input.js`: at most one 16 KiB frame is in
-flight per connection, with a 4 MiB/1,024-event pending limit. The server sends
-an `input-ack` JSON text frame only after the PTY write completes; terminal
-output remains binary and client text frames remain resize requests. Keep
-partial-write handling, output/resize responsiveness, and final-output draining
-intact. Ctrl+Shift+V/native context-menu paste stays with xterm; Ctrl+V remains
-a control key. Do not replay queued input after disconnect. Browser queue
-regressions run through `go test` when Node.js is installed, or directly with
-`node --test internal/company/terminal_input.test.cjs` (Node.js 18+).
-The company also loads enabled global plugin `company_startup` hooks
-and serves declared `company_load` files from immutable runtime snapshots
-under `/plugins/<manifest-name>/`. Injected scripts receive `omo.execute`, a
-company-load listener shortcut, the in-memory capability token, a DOM ID
-shortcut, and stable page ID constants. Commands are rooted only in the user's
-home or a trusted office, capped at eight concurrent runs, and use Unix
-process groups or Windows Job Objects so request cancellation and completion
-reap descendants. Global manual hooks can run without an office through
-`omo plugin trigger --global`, with storage and audit data in
-`OMO_HOME/plugins.db`.
-The browser `execute` API also accepts `{stdin: string|Uint8Array|Blob|File}`;
-stdin requests use ordered multipart parts and always close the child stdin
-stream at EOF. The bundled filebrowser is installed in the global plugin root,
-receives its frozen `company_load` configuration, and serves downloads through
-authenticated overlay links without buffering file contents in the page. It
-adds Files to the dashboard toolbar and Browse to project setup, with the
-browser in an overlay rather than a sidebar panel. It browses and transfers on
-POSIX and Windows; one probe selects the POSIX argv adapter or the PowerShell
-adapter, and disables its actions only when command support cannot be loaded.
-Start/estop probes never delete office locks; empty startup locks retain their
-grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
-Estop uses the existing office socket; forced kill freezes and snapshots Unix
-descendants or terminates a Windows Job Object. Unix daemonized/reparented
-commands are outside the process-tree snapshot; this is not a sandbox. Closing
-the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
-and licenses live under `internal/company/assets`, with acquisition and
-checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
-autostart files contain the credentials described above. Child offices keep
-their normal transcript behavior. Reload sends the synthesized DEC-mode prefix
-before the bounded retained terminal tail, preserving the latest tracked
-alternate-screen, mouse, focus, paste, cursor, and autowrap state. The tail is
-cut only at complete escape/UTF-8 boundaries. Alternate-screen reconnects
-trigger one real PTY repaint resize after the fitted browser size; plain shells
-and stopped terminals do not. Queued input is never replayed. The browser
-regression covers mode restoration, wheel forwarding, bounded replay, stable
-normal-buffer scrollback, and clickable current/stale plugin controls.
-
-## Office data layout
-
-`internal/globalhome` resolves `~/.local/omo` on Unix and `%APPDATA%/omo` on
-Windows; an absolute `OMO_HOME` overrides both. Setup and writable startup
-create independent strict `config.yaml` with `trusted_offices: []` and
-`plugins: {update_on_start: true, installed: {}}`, plus empty `plugins/`,
-`extensions/`, and `template/` directories. `config.lock` serializes initialization
-and trust updates across processes; trust writes preserve comments/settings and
-atomically replace the YAML using platform-specific file operations. No global
-messages or prompts are loaded. Superpowers downloads to `superpowers/` here.
-
-Fresh setup overlays every regular file in global `template/` onto the office
-root after embedded assets, except `template/.omo/omo.yaml`, which is a strict
-partial YAML override merged with the generated current-schema config. It may
-not replace discovered `repos`; `setup --sync` reapplies only that override to
-an existing office. Repeated setup and `setup --update` ignore the overlay.
-Preflight rejects symlinks and
-special files, including destination symlinks, and captures source bytes before
-fresh setup mutates the office. Failed setup removes the config initialization
-marker so correcting a copy failure and rerunning completes the overlay.
-The CLI owns interactive trust;
-programmatic `office.Open` callers must enforce their own approval policy.
-
-`omo setup` creates an office-local `.omo/` directory:
+The board is a Vue 3 + TypeScript single-page app (Vite, Tailwind CSS v4, vue-router, markdown-it). `web/` is also the Go package `web`, which embeds `web/dist`; `internal/server/spa.go` serves `/assets/*` with immutable caching and `index.html` for every other non-API path. Packages are pinned exactly; install with `npm --prefix web ci`.
 
 ```text
-.omo/
-  omo.yaml            configuration
-  omo.db              SQLite jobs, agents, mail, events, incidents (WAL)
-  messages/           editable supervisor message templates
-  prompts/            editable common and role prompts
-  extensions/         optional <role>.md or lexically ordered <role>/*.md prompt additions
-  plugins/            office-local event plugins with plugin.json manifests
-  storage/            shared workspace for CEO, PM, smoke-alarm, and firefighter sessions
-  worktrees/          <repo>-<job-id>/ developer worktrees
-  logs/               readable per-agent session transcripts
-  omo.sock            Unix display symlink; absent on Windows
-  omo.lock            live instance's socket or named-pipe endpoint
-  templates.sha256    installed prompt/message generation marker
+web/src/api/        wire types (types.test.ts compares them with internal/api), client, event stream reader
+web/src/auth/       login token: taken from the address fragment, kept in localStorage
+web/src/store/      the board store: snapshot, then the event stream only; optimistic moves
+web/src/board/      move rules, ordering, badges, filters (pure logic)
+web/src/features/   board, ticket panel and its tabs, comments, diff, sidebar, terminal, notifications, top bar, create, projects, onboarding, settings
+web/src/locations.ts  ticketLocation, ticketPageLocation, ticketHere, boardLocation, settingsLocation and terminalWindowLocation: the only way to build a ticket, board, settings or terminal-window address
+web/src/components/ui/  shared components; web/src/styles/tokens.css holds every colour and size
+web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is the seeding tool
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained catalog additions live in the strict global `known_plugins.json`; new homes start with an empty user catalog, and same-name entries are ignored with a warning rather than overriding embedded official entries. Official entries are embedded in omo and follow the installed version; the omo-owned `known_plugins.example.json` is regenerated to match them. `official: true` remains accepted as metadata for user additions.
+- `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
+- `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
+- Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` is proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
+- Which columns accept a drag is computed in the browser (`web/src/board/moveRules.ts`) and checked against `internal/board/testdata/user_drag_targets.json`, which the Go test `TestUserDragTargetsGolden` generates from the real board. A change to the transition rules regenerates it in the same commit: `go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1`.
+- The seeding tool (`web/e2e/seed`, built by the e2e global setup) writes states the API cannot reach (tickets in progress or review) into a fresh temporary home before omo starts. They are board records only: seeded branches do not exist in the repository, and omo ends seeded agent sessions when it starts.
+- Terminals use xterm.js (`web/src/features/terminal/`). `LazyTerminal.ts` loads it as its own chunk, so the entry chunk holds no xterm code; every consumer imports `LazyTerminal`. A websocket offers the subprotocols `omo` and `omo-token.<token>`; the token is never in an address. Pasted and dropped text is cleaned first (`terminalPaste.ts`: control characters and escape sequences are removed, so `ESC[201~` cannot end bracketed paste early). Dropped files, and pasted files without text, are images for the program: `TerminalView` uploads them (`uploadTerminalImage`) and pastes the paths (`terminalImages.ts`: `isImageFile`, `shellQuote`, `pastedPaths`); other files get a note. The clipboard (`terminalClipboard.ts`): OSC 52 is only ever a set (`parseOsc52`: base64, UTF-8, 1 MiB; a `?` query is never answered), taken within 5 s of the user's key or pointer press in that view and never while history replays; `writeClipboard` tries `execCommand('copy')` (any address, needs a gesture) then `navigator.clipboard` (secure contexts); a refused copy waits as "Copy selection" in the screen's corner and goes on the next key or pointer press. `clipboardKey` maps Ctrl+C with a selection (copy, then clear), Ctrl+Shift+C, Ctrl+Insert (copy) and Ctrl+V, Ctrl+Shift+V, Shift+Insert (the browser's paste); not on a Mac. Only `TerminalView.vue` makes an emulator (`TerminalView.test.ts` fails otherwise), so every view behaves the same. A terminal link whose text is not its address asks for confirmation before it opens.
+- The ticket has two views over the same parts. The panel (`TicketPanel.vue`, over the board, `/<n>`) and the page (`features/ticket/page/TicketPage.vue`, `/ticket/<n>`, route `ticket-page`, lazy, shown in the board's place with the top bar's "Back to board") share `useTicketView.ts`, `TicketHeader`, `TicketDescription`, `TicketTabs` (`overview` mode for the page: tabs at the top with a first tab Overview, content filling the height) and the tab components. A tab that lays itself out differently reads `useTicketLayout()` from `ticketLayout.ts` (the page provides `'page'`): the Diff tab shows `DiffBrowser` (folder tree at the left, one file at a time; `useDiff`, `DiffFrame` and `DiffFileView` are shared with the panel's stacked `DiffView`) and the Agents tab gives its terminal `fill`. Keys `p` (panel and page, one for the other) and `b` (page to board) live in `viewKeys.ts` and stay out of fields, searches and terminals (`typing`). `ticketHere(n, here, keys)` is the one place that picks the view a ticket link opens (a page from a page, otherwise the panel); every `TicketLink` carries the page address as its `href`. The page's details column state is in local storage under `omo.ticketPage`. `locations.guard.test.ts` also fails on a hand-written `/ticket/…`. The setting `ui.open_tickets_as_page` (general settings, off by default, `UISettings`) decides which view a plain click opens from outside a ticket view: the one rule is `ticketHere(n, here, keys, asPage)` in `locations.ts` (from a page: a page; from a panel: a panel; elsewhere the panel, or the page with the setting), and every click handler pushes `openTicketLocation(store, …)` (`features/ticket/openTicket.ts`, reads the board store's general settings); `locations.guard.test.ts` refuses a push of a location function or a call of `ticketHere` outside them.
+- A terminal can open in a window of its own: route `/terminal/:kind(agent|user)/:id` (`TerminalWindow.vue`, lazy, shown by `App.vue` in place of the board; the CEO uses its agent terminal id). `TerminalView` has the pop-out button (props `popout`, `windowKind`, `autofocus`, slots `lead`, `trail`; hidden for an ended terminal, in the window itself and below 768 px). `popout.ts` keeps the windows apart: one BroadcastChannel `omo.terminal-windows` ("here" on load and every 2 s, "gone" on `pagehide`; a window silent for 6 s counts as gone) and `window.open` with a fixed name per terminal; while a window holds a terminal, `LazyTerminal` shows `TerminalOut` (the placeholder with "Bring it back") and the main window holds no socket. The login token never goes in the address: a window reads it like any tab, or with blocked storage asks its opener over `postMessage` (`windowToken.ts`). Its size is remembered under `omo.terminalWindow.size.<kind>`.
+- Searched choices: `components/ui/SearchPicker.vue` (a button opening a combobox over a list, `searchPick.ts` for the matching) is used for the board's project filter and the Terminals tab's "New terminal" (with "Home folder" first); `features/create/ProjectPicker.vue` gets a filter field above about 8 projects.
+- The sidebar (`features/sidebar/`) has the CEO, Agents and Terminals tabs; below 768 px it is a sheet opened from the top bar. It never starts a CEO unless the user activates the CEO tab or its Start button. The tab stops the CEO (`POST /api/ceo/stop`, `engine.StopCEO`): the newest CEO session ending with `ceoStopReason` is the stopped state (`engine.CEOStopped`, `GET /api/ceo` → `{stopped}`), so it holds across restarts; while stopped, a choice of the tab and agents' mentions (`apply`, `startDeferredCEO`) start nothing, and only the user starts it (Start, new session, the user's own `@ceo`). Its model picker (`CeoModel.vue`, `ceoModel.ts`) writes the CEO role's model list (`PUT /api/roles/ceo` with the one chosen model, assignment kept) and offers "Restart now" while the running CEO uses another model. A ticket panel (`TicketPanel.vue`) on a wide window covers only the board's area (it lives in the shell's `main`, which is positioned) and is not modal: the sidebar and the top bar stay usable, the focus is not trapped, Escape closes it only with the focus inside, and only the columns under it are `inert` (`LiveBoard`); below 768 px it is a modal full-screen dialog as before. Within a window one view of a terminal is live, the one opened last (`terminal/viewers.ts`); another view of the same terminal shows `TerminalOut` with "This terminal is shown in …" and "Show it here", and gets it back when the live view goes.
+- Notifications (`features/notifications/`): the bell lists what waits for the user and mentions. Desktop notifications are off until the user switches them on in that browser.
+- Ticket, ticket-page, board, settings and terminal-window addresses are built only with the functions of `web/src/locations.ts` (`ticketLocation`, `ticketPageLocation`, `boardLocation`, `settingsLocation`, `terminalWindowLocation`). All keep the board's filters; `tab` and `comment` belong to one ticket, so only the ticket functions carry them (the keys given), never the board, settings or another ticket; `locations.guard.test.ts` fails on a hand-built one.
+- Parts that are fetched when first shown (the settings view and its pages, the terminal, some sidebar tabs, the folder picker) go through `lazyComponent` or `lazyRoute` in `components/ui/chunkFailure.ts`, so a failed fetch (omo updated while the tab stayed open) shows a message with Reload; `lazy.guard.test.ts` fails on a dynamic import outside them. The entry chunk holds no settings page code.
+- The document never scrolls in the board's frame or a terminal's window; panes inside scroll. Every rule with `height: 100dvh` (outside modal dialogs) is `position: relative` and `overflow: clip`, so nothing inside, not even an absolutely placed screen-reader label in a scrolled list, can make the page taller than the window; rows are brought into view with `revealInBox` (`components/ui/scrollBox.ts`), which scrolls only the nearest scroll box, never with `scrollIntoView`. `scroll.guard.test.ts` checks both; `e2e/page-scroll.spec.ts` walks the full-height views.
+- On a 401 the app shows the lock screen over the board, which stays mounted (hidden and inert), so unsaved settings edits survive an unlock. Terminals unmount while it is locked.
+- Text from agents and other people (comments, diffs, file and branch names, terminal output) is shown through Vue interpolation and `visibleText`; only `features/ticket/markdown.ts` produces HTML.
+- Images (`features/images/`): `markdown.ts` lets `omo-image:<uuid>` through as an image target only and renders what its `images` lookup says (a `blob:` object URL, or the alt text with a note). `inlineImages.ts` (`useInlineImages(text)`) reads each referenced image's record, then its bytes with the API client (`getBlob`; the token stays in the header), makes the object URL and revokes it when the text drops the image, on `image.deleted`/`image.expired` and with the view; `DescriptionView` and `CommentItem` use it, and a click opens `ImageLightbox` (`UiDialog`). `imageUploads.ts` and `ImageAttach.vue` ("Add image…", paste, drop) upload through `ApiClient.upload` into the comment composer and the description editor. The page's CSP allows `img-src 'self' blob:`. `visibleText` and `internal/textsafe` use the same set of hidden characters.
+- Browser tests can run real agents: `test.use({ omoOptions: { agents: { developer: script('ready', 'print|hi', 'hang') } } })` gives each role a script for the fake agent, built by the e2e global setup into `web/e2e/.bin/fakeagent`. `web/e2e/support/agents.ts` and `terminal.ts` have the helpers; end such a test with `expectNoAgentProcesses(omo)`.
+- Browser tests can relay a real MCP server: the scripted fake MCP server (`internal/mcprelay/fakemcp`) is built by the e2e global setup into `web/e2e/.bin/fakemcp` (`FAKE_MCP_BINARY`); it runs only with `FAKEMCP_SERVER=1` in the server's `env`. `web/e2e/mcp-relay.spec.ts` shows how to store one and call `/mcp` with a personal token.
+- Every modal dialog is opened and closed through `components/ui/modalLayer.ts` (`showModal`, `closeDialog`; `modalLayer.test.ts` fails on a dialog opened or closed another way), which knows the topmost one: the `Toaster` renders inside it while one is open, because a modal dialog makes everything outside it inert, so a toast's action stays reachable.
+- Dialogs that a ticket action opens (Start anyway, a plugin's answer, Open terminal) go through `components/ui/mountDialog.ts` and the `DialogOutlet` in `TicketActions`, so they close with the ticket panel and step aside under the lock screen; `dialogs.guard.test.ts` fails on a separate `createApp`. Usage state comes from `features/usage/usageVerdict.ts`, which mirrors the server's `Evaluate` for one window.
+- Controls that share a row are equally tall: `tokens.css` has `--omo-control-h` (40 px: `.omo-btn`, icon buttons, `input.omo-input`, `select.omo-input`, `Toggle`) and `--omo-control-h-sm` (32 px: `.omo-btn--sm`, `.omo-input--sm`, `Toggle` with `size`), and `.omo-compact` (top bar, sidebar head) puts every control inside on the small height. Take a row's or heading's minimum height from these tokens, never from a spacing multiple. `controlHeights.guard.test.ts` fails on a control rule that sets its own height, and `e2e/control-heights.spec.ts` (with `support/rows.ts`) walks the views, their editors, dialogs, image rows and lightbox at 1440 and 390 px and fails on two controls of one row that differ by more than 1 px; a place where it is meant takes `data-height-free="<why>"`.
+- Only `web/src/api/log.ts` may call `console`; tests fail on literal colours, text below 12 px and border radii outside the tokens.
 
-In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
+## Settings
 
-On Unix the real socket lives under the system temp directory to avoid socket path-length limits; `.omo/omo.sock` points to it. Windows uses an office-specific named pipe.
+Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
 
-## Roles and lifecycle
+Routes, all in `registerRoutes` tables (`internal/server/settings.go`, `setup.go`, `discovery.go`): `/api/settings` (GET, PUT whole, PATCH by key; `POST /api/settings/branch-preview`), `/api/profiles` (+ `/{name}/catalog-models`, which adds the catalog models a profile lacks), `/api/roles`, `/api/prompts` (+ `/preview`), `/api/projects` (+ `/scan`, `/rescan`, and `POST /batch` with `{ids, action: remove|disable|enable}`, answered per id: `{results: [{id, done, error?}]}`; 422 for a bad action, no or more than 1000 ids or a repeated id), `/api/folders`, `/api/agent-setup/detect`, `/api/settings/agent-env/check`. Who may call: only the user may call all of them, except `GET /api/projects` and `GET /api/models`, which agents may call (models: only the selectable ones). Every other settings route answers an agent session 403, because prompts, environments, profile commands and arguments are code that runs as the user. A route cannot be added without a rule (`userOnly`, `agentRead` for GET, `agentWrite` for a write agents may make within the board's rules: the image upload and the removal of a project from a ticket): `registerRoutes` panics on a row without one, and `TestNoGuardedRouteOutsideTable`, `TestSettingsRouteTableAccess` (which walks every row, the image rows with paths inside each role's scope), `TestImageRoutesInTable` and `TestAgentReadsNoCodeExecutionSettings` pin it.
 
-The seven roles are `ceo`, `product_manager`, `developer`, `reviewer`, `freelancer`, `smokealarm`, and `firefighter`. `config.AllRoles` is the code source of truth.
+Branch names: the general setting `branches.template` (default `omo/{slug}`; Settings, General, "Branch name template") names a new ticket branch. `internal/branchname` owns the rules (and `Fold`, `Same`, `Below`, `In`: every decision whether a branch name is taken, protected, recorded, checked out or a ticket's own compares names case-folded on every system, because macOS and Windows keep `Fix` and `fix` in one file; `internal/gitops/branchcompare_guard_test.go` fails on an exact comparison in `gitops` and `engine` not marked `exact:`): placeholders `{slug}` (the title slug, `ticket` when empty), `{number}`, `{type}`, `{project}`, `{host}`, `{user}` (all slugged), anything else literal; `Check` (used by settings validation on load and on PUT/PATCH, field `branches.template`) refuses an empty template, an unknown placeholder (named), one without `{slug}` or `{number}`, and literal text that breaks git's ref rules, is not printable ASCII, starts with `refs/`, gives `head` or a name ending in `_head` (any case) or can exceed `MaxName` (200); `Expand` checks the final name again. `POST /api/settings/branch-preview` (`{template}` → `{branch, error}`, userOnly) answers the name for an example ticket by those rules; the General page shows it while the user types. `engine.BranchName(tmpl, vars, exists)` adds `-2`... to a taken name; `starter.cut` picks the name and creates the branch inside `gitops.Git.AddWorktreeNewBranch`, under the repository lock. Taken: a local or remote-tracking branch of that name or below it (`name/...`), a branch recorded on any ticket of any project in the same repository (same common git directory, `gitops.SameRepository`; a project omo cannot resolve counts; `Board.RecordedBranches`, `engine.recordedBranches`), the base branch, the checkout's branch, main, master and each remote's default branch (`gitops.ProtectedBranches`); a branch that is a folder of the name (`a` for `a/b`) stops the start with a message (`gitops.PathConflictError`). `AddWorktreeNewBranch` checks the name again (`git check-ref-format`, not existing) before git runs, creates the branch with a create-only `git update-ref refs/heads/<name> <base> ""` (a branch someone made meanwhile makes it fail and is left alone) and then checks it out with `worktree add <dir> <name>`; `NewBranchError.Created` is true only when that ref update succeeded, and only then is the branch removed (compare-and-swap at the base). Nothing parses a branch name, and no rule depends on its shape: `engine.checkOwnBranch` is the one check before omo pushes (export) or deletes (cleanup, cancel) a ticket's branch: it must be the branch recorded for that ticket and project alone across the projects of the repository, not its base and not a protected branch; `gitops.PushCommit` also refuses main and master, the remote's default branch, and a remote branch of that name at a commit omo did not push there (`ErrForeignBranch`). A recorded branch is never renamed.
 
-Normal developer job states are:
+Merge modes: `merge` or `squash` (the engine knows no others). `merge_defaults: {story, task, story_task}` in `settings.yaml` (all `merge`; field errors `merge_defaults.<kind>`) and a project's `merge: {story, task, story_task}` (`""` is "use the global default"; field errors `merge.<kind>`). The project answer carries `merge` and `effective_merge`. The engine reads `settings.MergeModeFor(project, type, inStory)`; a squashed ticket gets the title "<title>" (a merge commit "Merge: <title>"; no commit message or pull request text holds a ticket number) and its squash commit is recorded in `run/engine-pins.json` under `squashed`.
+
+Recorded diffs. When a ticket goes from Review to Done by a merge or an export, each project with a branch records the two commits its diff runs between (`ticket_projects.start_commit`, `end_commit`, `range_round`, schema version 6; `board.RecordCommits`): the merge base of the reviewed commit with the branch it goes into as that branch is then (the base the Diff tab compared with: the base branch, or the story's branch for a task of a story) and the reviewed commit. The merge records them per target while it builds the merge (`merger.record`; a retry keeps the start of a target that already holds the work), the export when it pushes a project (`prepareExport`) or leaves it out (`settleExport`). `board.setColumn`, the only writer of a ticket's column (`TestOnlySetColumnWritesTheColumn`), refuses Done as completed or exported (409) while a project with a branch lacks them for the current review round (`checkRecorded`), so no way to Done can skip them; a cancelled ticket and a task without a project record none. The commits are kept alive by refs of omo's own, `refs/omo/tickets/<n>/<commit id>` (`gitops.KeepCommits`, created once the target holds the work or the push went out, synced when a project is removed from the ticket; tickets are never deleted): outside `refs/heads`, `refs/tags` and `refs/remotes`, so branch listings, name and ownership checks and the unreferenced-commit check ignore them, and never pushed (an export pushes one refspec). They survive a squash, the branch's deletion and `git gc --prune=now`. `api.TicketProject.start_commit`/`end_commit` answer them for a done ticket (not cancelled), `omo ai ticket show` prints `diff commits (<project>): <start>..<end>`, the Branch field shows them shortened and says "Deleted after the merge" for the branch omo forgot. The diff routes serve a done ticket from them (`gitops.RangeDiff`, `RangeFileDiff`, `RangeFileContext`; `api.ProjectDiff.recorded`, no uncommitted changes, no remote base); commits the repository lacks give the state `commits_gone`, a missing project `project_unavailable`; a done ticket without them (done before omo recorded them) says so in its message or `branch_gone` state.
+
+Profiles: `DELETE /api/profiles/{name}` answers 409 `in_use` with `details.roles` while roles list its models; `?detach=true` takes them out of those roles first and answers `{detached: [{role, models}]}` (the Agents page asks a second time naming the roles). Open tickets on one of its models refuse both, without `details.roles`.
+
+Revisions: `GET` answers carry a `revision` (16 hex characters of the file's SHA-256; `"0"` when the file does not exist). A write from the browser sends it as `If-Match: "<revision>"`; the store re-reads the file under its locks and answers 409 `stale_settings` when it changed on disk, also inside the poll interval. `If-Match: "0"` on a profile means create only. No header means no check (the CLI and API clients). A hand edit found while writing is loaded and announced with `source: "disk"` in `settings.changed`; the pages show "Changed on disk" for it.
+
+Reading files: every read of a file in the home goes through `internal/homefile` (see the package map), with a limit per kind of file (settings and project files 1 MiB, prompts 256 KiB, `server.yaml` 64 KiB, the token 4 KiB). A link, a named pipe, a device or a file over its limit is refused, so a bad file in the home cannot hang the poll or fill memory.
+
+Workspace folders (`workspace_roots` in `settings.yaml`: `path`, `max_depth` 1 to 16 with default 4, `ignore`) are searched by one scanner goroutine in `internal/server/discovery.go`: at start, every `rescan_interval`, when the roots change and on "Rescan". A folder that contains a `.git` directory is a repository and becomes a project (named after its path below the root, enabled); folders inside a repository are not searched. Skipped: links, folders that match an ignore pattern (default `node_modules` and `.*`), the omo home and its `worktrees` folder, and folders beyond the depth or the visit, time and per-folder limits (the report says what was cut). A found project can be switched off but not removed while its folder lies under a root; an ignore pattern is the way out. `POST /api/projects/rescan` answers the report; `projects.scanned` is its event.
+
+First start: when `settings.yaml` does not exist and `profiles/` holds no file, the real `omo` (not tests) looks for `claude`, `codex`, `agy` and `gemini` on `PATH` (`detectAgentsAtFirstStart` in `internal/cli/server.go`, pinned by `TestFirstStartDetectionSwitch`) and writes one profile for each program found, plus role assignments for roles with no models. The profiles start the program with its flag that skips permission prompts (`--dangerously-skip-permissions` for Claude Code, `--dangerously-bypass-approvals-and-sandbox` for Codex, `--dangerously-skip-permissions` for Antigravity, `--yolo` for Gemini; Google now recommends its Antigravity CLI `agy` in place of Gemini CLI, and omo supports both); only the bare command name is stored and `PATH` is searched at each agent start. The Agents page has "Detect agent programs" for the same on a later day, and says what it wrote. A model with `selectable: false` (Claude `fable`, for the CEO) is only kept out of what agents may choose for tickets; a role can use it. The browser test harness writes a comment-only `settings.yaml` after the first start of its temporary home, so a CLI on the test machine never becomes a profile.
+
+Review defaults. `review_defaults` and `when_approved_defaults` have three keys: `story`, `task` (tasks without a story) and `story_task` (tasks in a story; `when_approved_defaults.story_task` must be `merge`). A fresh home: `agent_then_human`, `agent_then_human`, `agent`. The browser picks the entry with `defaultKind` (`features/ticket/fieldRules.ts`); `src/defaults.guard.test.ts` fails on any other index.
+
+Removing a project from a ticket that has a branch there (never its last one: a ticket with a branch does not become one without a project): `POST /api/tickets/{n}/remove-project` (`{project, discard}`; route rule `agentWrite`, in the route table) → `engine.RemoveProject`: `board.ClaimProjectRemoval` checks who (the user; the CEO on tickets it created or supervises), when (Planning, Ready For Dev, or Review at stage human), that the ticket keeps a project, that no task of a story that is not done uses it and that no agent of the ticket is starting or running in that project or its worktree, and claims the ticket (`busy`); the engine then ends the agents that wait there, removes the worktree (clean, or forced with `discard`; a user terminal's hold refuses) and deletes the branch only through `checkOwnBranch` at the commit it is at (a branch it does not own is kept and the comment says why). Commits the base lacks or uncommitted changes refuse the removal with `conflict` and `api.ProjectWork` details unless `discard`. A missing project's record goes and its folders stay. `board.RemoveProject` drops the row, its review verdicts and its part of an export-failure attention flag, ends the claim and comments who removed what; `pinStore.forgetProject` (and `prune`, for any project no longer on its ticket) drops its pins. `omo ai ticket remove-project N PROJECT [--discard]`; the web offers "Remove from ticket" under Branches (`features/ticket/removeProject.ts`, `RemoveProjectDialog.vue`). Removing a project in the settings stays refused (`in_use`) while open tickets use it, and the refusal says how to take it off them.
+
+Tasks without a project. A task has one project or none (`board.checkCreate`, `update.projects`); a story still needs one outside Planning. The review of a task without a project is keyed by `board.NoProjectKey` (`""`): `EngineTicket.ReviewKeys()` (and `reviewKeysOf` inside the board) lists the projects or that one key, and the verdict storage, `loadRound`, `endRound`, the planner's `needs`/`allowed`/`keptAgent` and the starter's `wanted` go through it, so one reviewer per round judges the ticket itself and no code path special-cases the empty list. `board.passReview` is the one place an approval moves on: to merging or exporting, or, for a task without a project, straight to Done/completed with the move's own action (`hand_in` with review skipped, `verdict`, `approve`); `when_approved` (create and PATCH, also an own value left when the project goes), `base_branches` and an approval with `export` or `merge` are refused for it with a message. Its working folder is `engine.WorkdirDir(Layout.Workdirs, n)` (`OMO_HOME/workdirs/<n>`), made by `starter.workdir` at the developer's first start and recorded in `tickets.workdir` (schema version 5, `board.SetWorkdir`; `api.TicketSummary.workdir`); it is made again (empty) when gone, a folder there that omo did not record fails the start, and the reviewer works in it too. A recorded folder locks projects and story like a branch. It stays after Done and cancel; `POST /api/tickets/{n}/remove-workdir` (userOnly, `engine.RemoveWorkdir`, `board.CheckWorkdirRemoval`/`ForgetWorkdir`; `omo ai ticket remove-workdir N`) removes it once the ticket is done, refused while a user shell holds it or an agent of the ticket still ends. A ticket shell of such a task opens in the folder, also when done (`workdirShell` in `server/terminals.go`), without the git checks of a worktree. `gitops.SetAgentFolders` gets the worktrees and the working folders. Prompts: `prompts.Data.NoProject`, `Workdir`, `Repositories` (every enabled project present on disk; templates may `range` over `.Repositories` as over `.Projects`); the default developer, reviewer and restart prompts have a variant, the PM and CEO prompts say when to create such a task. Web: `withoutProject(t)` in `features/ticket/fieldRules.ts`; `ProjectPicker` `none-option`/`v-model:none` (an explicit "No project", never an empty pick); `WorkdirField`, `RemoveWorkdirDialog`; no Diff tab; the board filter's `NO_PROJECT` (`project=-`, never a project id). The planner simulation generates such tasks, and `user_drag_targets.json` has their drags.
+
+Review rounds (`internal/board/review.go`, `internal/engine/carry.go`). Approvals are kept per ticket and project with the commit pinned at hand-in (pins key `approved`); in a later round a project whose pinned commit is still the approved one, and a story's project whose branch is contained in its base, get an approving verdict without a reviewer (`board.CarryVerdicts`, one system comment per round); a rejection deletes the record. A round ends only when every project has a verdict; one system comment then lists approvals and quotes each rejection. Agent lifetime (`planner.allowed`, `keptAgent` in `internal/engine/plan.go`): the working agent (developer of a task, pm of a story) lives from In Progress until Done, parked during the review; a reviewer stays parked after its verdict and ends when the next round's reviewer of its project starts (`endEarlierReviewers`, reason "a new review round of #N began") or a newer-round reviewer of its project is live, or the ticket is done. A kept agent's crash is not counted, its timed-out waits never carry the investigate line, it is not restarted after a restart of omo, and parked sessions never count against the slot limit (the random-world simulation checks all of this). `@reviewer` reaches the newest live reviewer of each project, `@reviewer:<project id>` (`board.ReviewerTargets`) one project's; a question cannot be addressed to the developer or reviewer (`comments.question_to` CHECK). A reviewer parked without a verdict and without an open question is reminded once after `health.silent_after` and fails step `agent` after the same time again. The comment box (`web/src/features/comments/mentions.ts` `mentionOptions`) offers `@reviewer:<project id>` for each project of a ticket with more than one project, besides `@reviewer` (named with no agent then; the entries carry the project's name and the live reviewer of that project); `markdown.ts` renders `@reviewer:<id>` (the board's id characters, a final `.` ends the sentence) as one mention with `data-project`, naming the agent only after the first project mentioned; `e2e/reviewer-mention.spec.ts` runs it on a two-project story.
+
+Images. `images` table (schema version 4, the current schema is 7; `board/images.go`): id (the file's UUID), ticket, author role and session, original name, sniffed type, size, created, expired. Who may add an image is who may comment (`canComment`); who may read one is who may read its own ticket, whichever ticket references it; only the user deletes (file first, then the record). Events `image.added`, `image.deleted`, `image.expired` carry ticket, id, name and size only. `images.keep_days_after_done` (general settings, default 60, 0 keeps for ever, 0–3650) is applied by the server's hourly sweep: a ticket done (or cancelled) and an upload both older than that lose the file and the record is marked expired; files in `images/` without a record are counted in the log and left alone. `omo ai image add N FILE` uploads; `omo ai ticket show` and `omo ai comments` follow each reference with `(local file: <path>)`, `(image expired)` or `(image missing)` through `aicmd`'s `imageNotes` (not in the `--json` answer). The export's material and pull request text name images "[image: <name>, not exported]". The fake agent's `image|TICKET|NAME[|TEXT]` op uploads a generated PNG and comments its reference.
+
+Long text on the CLI: `omo ai comment`, `ask` and `done` read standard input for a lone `-` in place of the words (and `--body-file -`, `--comment-file -`, `--failed -`); a text that is empty or only `-` is refused (`checkText`).
+
+Environment values are plain values: the settings and profile answers return them as stored, and the pages show and edit them. `agent_env` (settings) expands variable references and backtick commands when an agent starts, and "Check" on the Environment page runs those commands (10 s each, 30 s overall) and reports `set`, `empty` or `failed` without the value; profile and model `env` are literal. Values never appear in an error message, an event or the log (`TestNoValueInAnyRefusal`, `TestValuesNotInEventsOrLog`).
+
+## Extensions
+
+Usage, skill sets and plugins have routes in the same `registerRoutes` tables (`internal/server/usage.go`, `skillsets.go`, `plugins.go`), all `userOnly`, and `/api/usage`, `/api/skillsets` and `/api/plugins` are in `guardedPrefixes`. `TestExtensionRoutesRefuseAgents` and `TestExtensionRoutesAllRegistered` (`extensions_access_test.go`) list every row. Export has no route of its own: it is `POST /api/tickets/{n}/approve` with `{"export": true}` (a project's or the ticket's "when approved" setting can also choose it).
+
+| Route | Does |
+|---|---|
+| `GET /api/usage`, `POST /api/usage/refresh` | the readings and the state of every model; run every script now |
+| `GET /api/usage/scripts`, `GET\|PUT\|DELETE /api/usage/scripts/{name}`, `POST .../test` | script files (`usage/<name>.lua`, `If-Match` required, `"0"` creates); a delete restores the shipped default or removes the script (409 `in_use` while a profile names it); `test` runs a draft as a chosen profile and saves nothing |
+| `POST /api/tickets/{n}/start-anyway` | starts a ticket that waits for usage on its own model |
+| `GET /api/skillsets`, `PUT\|DELETE /api/skillsets/{name}`, `POST .../update` | skill set files (`skillsets/<name>.yaml`) and the checkouts |
+| `GET\|POST /api/plugins`, `PUT\|DELETE /api/plugins/{name}`, `POST .../update`, `GET .../log`, `POST .../actions/{action}` | plugin settings (`plugins/<name>.yaml`), install, update, remove, log and manual actions |
+| `GET /api/plugins/catalog` | omo's plugin list and the additional lists of `plugin_lists` (`api.PluginCatalog`; `?refresh=true` reads them now) |
+
+Usage. `settings.Store` holds the scripts and `General.Usage` (soft 90, hard 98, refresh 5 m, per-window overrides); a profile write is refused when its `usage_script` does not exist. The tracker (`internal/usage`) is started by the server through `s.background`; `usage.changed` events carry the state and wake the engine. The engine reads one small interface (`engine.UsageView`): `pick` skips models that are `soft` or `hard`, a ticket's own model over the soft limit waits (`start_blocked = usage`, cleared by `StartAnyway`), and `usagestop.go` gives a working agent on a `hard` model the handoff prompt (`prompts.Data.StopReason`) and ends it with the reason "usage limit reached", which is no crash. Usage runs never run a command of the agent environment: `omo.env` takes literal entries only; only `codex_refresh` expands the full agent environment. After a failed run the windows of the last successful run keep counting for `MaxStaleAfterFailure` (30 minutes from the end of the first failed run, `UsageReading.stale_since`), then the account's models are `unknown`; the browser's `features/usage/usageVerdict.ts` mirrors `Evaluate` for the meters and shows such readings as old. A run that ends in `omo.rate_limited(retry_after)` (`RateLimitError`; the shipped scripts call it on HTTP 429) waits Retry-After (1 minute to 1 hour), else 2, 4, 8 … minutes up to the refresh interval. A model with an empty `usage_windows` list counts every window except `extra_usage`, which counts only when listed. The Usage page's helper list (`usageForms.ts` `HELPERS`) is checked against the helpers Go registers (`usageHelpers.guard.test.ts`). A window may carry a `label` (`usage.Window.Label`, `api.UsageWindow.label`, "" for none): `cleanLabel` (`internal/usage/label.go`) makes it one line (characters `textsafe.IsHidden` names become spaces) of at most `MaxLabel` 60 characters, a label holding a secret of the run is refused like a name, and `cleanWindows`/`keptWindows` clean it again. `TestWindowFieldsReachTheWire` keeps `usage.Window` and `api.UsageWindow` in step. Names stay the keys of `usage_windows` and the per-window limits; the web reads labels through `features/usage/windowLabel.ts` (`windowTitle` for the sidebar meter, with the name as tooltip; `windowWithName` "label (name)" in the Usage page's test result, `labelsOf`/`nameWithLabel` in its limits table, `reportedWords` in the model editor's hint). The shipped `claude` script reads the answer's `limits` list (`session`, `weekly_all`, `weekly_scoped` with `scope.model.display_name` → `<model>_weekly`, a surface-only scope → `surface_<surface>_weekly`, unknown kinds skipped with a log line) and falls back to `five_hour`/`seven_day`/`seven_day_<model>` without it; `extra_usage` is the paid credit budget, labelled with its amounts. Recorded answers: `testdata/claude-usage.json` (older shape) and `testdata/claude-usage-limits.json` (with `limits`); `TestClaudeLimitsCountForTheCatalogModels` checks that only `claude/fable` counts `fable_weekly`. `api.ModelUsage.window_label` is the label of the window `Evaluate` chose ("" for none; the Go list in `api_test.go` and the TypeScript type keep the fields in step); `usageStopText` (`internal/engine/usagestop.go`) writes the label, else the name, and the web's `modelWindowWords` (`windowLabel.ts`: "Weekly, Fable at 99 %", empty without a label) is used by the sidebar's kept-off lines (name in `data-usage-window-name`) and `usageWait.ts`. The shipped `codex` script classifies each window of a rate limit by `limit_window_seconds` (`kind`: 1 to 12 h `session`, 604800 s ±10 % `weekly`, else `window_<hours>h`; no length: primary `session`, secondary `weekly`), reports the windows of additional limits as `<limit>_<name>` (`limit_name(name, suffix)` cuts the name so the key stays within 40 characters), reads `reset_at` as Unix seconds or an RFC 3339 string (anything else is logged, not an error) and fails only when no window is usable; fixtures `testdata/codex-usage-other-windows.json` and `codex-usage-reset-times.json`. The shipped `agy` script reads `command.data.groups[].buckets[]` of `agy -p /usage --output-format json` (through `omo.agy_usage`, no model turn): one window per bucket named by its `id` (`gemini-weekly`, `3p-weekly`), labelled "<group>, <period>", used = (1 − `remaining_fraction`) × 100, `reset_time` as given; the group's member list (display names only) goes to the log, so the catalog's agy models name their group's window in `usage_windows`; a 429 or `RESOURCE_EXHAUSTED` answer ends in `omo.rate_limited`; fixture `testdata/agy-usage.json` (a recorded answer); `TestAgyWindowsCountForTheirGroups`. Per-window limits (`General.Usage.Windows`) are keyed by a window name (every script) or `<script>/<window>` (`validateUsage` in `internal/settings/general.go`; field errors keep the key as written); `usage.Thresholds(script, window, th)` takes each value from the scoped key, then the bare name, then the general value, and `Evaluate` passes the reading's script; `usageVerdict.ts` `windowThresholds(window, usage, script)` mirrors it. The limits table picks the key from a select (`windowChoices`, `overrideKeyWords`, `OTHER_WINDOW` in `usageForms.ts`) fed by the live readings and the models' `usage_windows`.
+
+Plugin list. `plugins/index.yaml` (top level of the repository) lists plugins with `name`, `tag` (`official`, `recommended`, `community`), a one-line `description` and their place: an official plugin only `path` (its folder in the list's own repository, installed from the repository and branch the list was read from), any other `source`, optional `ref` and `path`. The release workflow copies the `plugins` folder to the `release` branch; omo reads the list from there (`pluginmanager.DefaultCatalog`: `buildinfo.Repository` + `.git`, branch `release`), or from `OMO_PLUGIN_CATALOG=<source>[#<ref>]`, which `server.Run` reads (`Options.PluginCatalog`; tests set it directly, the zero value is no list). The server fetches it through `gitops.FetchSource` into `<home>/plugins/.catalog` (removed after the read) when `GET /api/plugins/catalog` asks, keeps it 10 minutes (a failure 1 minute) and answers `available: false` with the reason when it cannot be read. `ParseCatalog` is strict: 64 KiB, one YAML document, known keys only, at most 200 plugins, names by the plugin-name rule and unique in any case, addresses through `gitops.ValidSourceURL`, folders through the install's subpath rule, descriptions one line of at most 200 characters without hidden characters; one bad entry refuses the list. Tags are decided by the server (`checkPluginSource`): the tag of the listed plugin with exactly that source, folder and ref, else (also while the list cannot be read) community; `POST /api/plugins`, a `PUT` that changes source, folder or ref, and an update whose settings differ from the install record (`.omo-install.json`) need `acknowledge` covering the tag (`api.PluginInstall`, `api.PluginUpdate`; community covers recommended), else 422 with `details` `api.PluginConfirmation{field: "acknowledge", tag}`. The web (`features/settings/plugins/PluginCatalog.vue`, `pluginTrust.ts`, `confirmInstall.ts`, `TrustDialog.vue`) asks first through the page's `mountDialog` scope (`PLUGIN_DIALOGS`), and asks again with the server's tag when it is stronger. `TestShippedCatalog` checks the repository's list and its official plugins; browser tests read a stand-in list from `pluginListPath(home)` (`makePluginList`), never the network. Additional lists: `settings.yaml` `plugin_lists` (http/https addresses of list files, checked by `validatePluginLists`: at most 16, a host, no user info or fragment, no repeats); `pluginmanager.FetchList` fetches one with `net/http` (15 s, 64 KiB, 5 redirects to http/https only, User-Agent `omo-plugin-list`; errors never repeat the address or the answer) and `ParseList` reads it in the same format with a source required per entry, bad entries left out with a note; `GET /api/plugins/catalog` fetches them beside omo's own list (`readLists`, same 10 min / 1 min caching, `?refresh=true` for all) and answers omo's plugins then the lists' (`pluginmanager.Combine`: a name or source/folder/ref omo's list or an earlier list has is dropped with a note) with `CatalogPlugin.list`/`origin` and `PluginCatalog.lists` (`api.PluginListState` per list: `available`, `message`, `notes`). `pluginmanager.TrustTag` is the one place that decides a listed plugin's tag (community for every entry of an additional list) and `Catalog.TagOf` uses it, so the install routes never take a tag from an additional list; the web mirrors it in `trustTagOf` (`pluginTrust.ts`, `pluginTrust.guard.test.ts` fails on another read of a listed plugin's tag); `TestAdditionalListNeverGrantsTrust` guards the server. The page: `PluginCatalog.vue` (rows in `CatalogRow.vue`, each additional list under its address with its error, Retry and notes) and `PluginLists.vue` (the `plugin_lists` editor with its own Save bar); `e2e/plugin-lists.spec.ts` serves its lists from a local http server.
+
+Skill sets and plugins. A skill set's block (the role's text and the list of skills its `paths` select) is appended to the role's instructions as a template value, never parsed, only for the roles in its `roles` (empty: every role); export jobs use the role key `export`. Every agent program gets the same prompt; omo installs nothing into the programs' own skill folders. `TestSkillSetsReachAgentsOnlyThroughText` fails when skill sets are read for agents outside `skillsets.Text`. The plugin manager and the skill set manager fetch only through `gitops.FetchSource` and `gitops.ValidSourceURL` (https, ssh, scp-like or an absolute path; no `file://`, `git://`, `http://` or `x::` transports); read files of a checkout only with `homefile.Read`. Plugin events come from the event log (`db.EventsSince` from a start point taken at server start), so a plugin never blocks the board and never sees events from before a restart. Plugin programs reach the socket without a session, so they act as the user.
+
+Export. An export goes project by project (`internal/engine/export.go`): a project whose branch is contained in its base branch is left out (pins key `left_out`, one comment), every other one is pushed and gets its job; a failed push, a job's `done --failed` or three crashes fail that project only (pins key `export_failed`). The per-project state is on the wire as `TicketProject.export_state` (`""`, `exporting`, `exported`, `failed`, `left_out`) and `export_error` (with `failed`: one line, 200 characters, credentials removed); stored in `ticket_projects.export_state` and `.export_error` (schema version 3, migrated when a new binary first opens the database). `exported` derives from `export_url` and `exporting` from the stage. The engine writes pins and board together (`keepExportFailure`, `keepLeftOut`, `board.SetProjectExport`; `exportstate_guard_test.go`). A retry clears `failed` and keeps `left_out`; any column move clears both except the closing move to Done/exported; a rejection clears everything. The web reads them in `features/ticket/exportState.ts`. Once no project is pending: all others exported, Done/exported (`board.FinishExport`; every project left out: Done/completed, "Nothing to export"); some failed, Review at stage human with attention "Export of <project> failed: <reason>" joined by "; ", the exported projects keep `export_url`, exporting again handles only projects without one and "Merge locally instead" merges only those. `internal/engine/exportjob.go` pushes before the job starts: `gitops.RemoteFor` names the remote, `gitops.PushCommit` pushes the commit pinned at hand-in (`run/engine-pins.json` keeps the pin and a record of what was pushed) from a private empty bare repository that borrows the project's objects, so nothing else of the project's configuration applies. The export agent runs in `run/export/<n>-<project>/` and writes the pull request's text for this repository (`internal/engine/exporttext.go`): omo puts `material.md` there (ticket title and description, a story's task titles, `gitops.Summarize` of the pushed commit against the base: first-parent commits and changed files with line counts, bounded; the other projects with their `export_url` if any, left-out ones marked; the folders it may read) and its own text in `pr-title.txt`/`pr-body.md` (`forge.TitleFile`/`BodyFile`: the ticket title; the description, plus this project's commit subjects without omo numbers and "Part of a change that also touches: …" when there are siblings or no description), with `pr-source.json` saying whose text it is. The agent writes `title.txt` and `body.md` and runs `omo ai export-text` (`POST /api/ai/export-text`, export jobs only, `engine.ExportText`, answers `api.ExportText`): each file that is present, non-empty, within the limits (title one line, 200 characters; body 60 KiB), and names no omo ticket of the ticket, its story or its tasks (`namedNumber`) replaces omo's text; otherwise omo's stays and the reasons are answered. The forge commands (`forge.For`: `Line` creates, `Edit` updates the pull request that exists for the branch, `INDEX` for tea's number) read only those two files (`--body-file`, or `"$(cat file)"` as one argument), never text put on the command line by omo. The engine never runs them. When the job reports its address, `announceExport` (in `CheckHandIn`) comments the link, the title sent and whose text it is. A reported address passes `forge.CheckAddress` against the recorded remote (https, same host, no user info, a path inside the repository; a folder remote accepts none). The prompt values of an export job are `.Export` (`prompts.ExportData`, with `EditCommand`). End-to-end tests put fake `gh`, `glab` and `tea` first on PATH (`internal/e2e/main_test.go`); the fake agent has `export-text`, `sh-block|N` (runs the prompt's Nth shell block), `append` and the placeholders `$OUTPUT` and `$OTHERS`.
+
+Limit of the model: the socket and the files in `OMO_HOME` are not a security boundary against agents. An agent runs as the same user, can leave out its session header on the socket and can write the settings files directly, and omo gives terminals anyway. The route rule above keeps an agent that goes through the API honest; it does not stop one that does not.
+
+## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
 ```text
-queued -> assigned -> working -> review -> merging -> done
-                                  |          |
-                                  +-> rework+
+layout.json  server.yaml  token  settings.yaml  omo.db
+projects/<id>.yaml  profiles/<name>.yaml  roles/<role>.yaml  prompts/<name>.md
+run/            run.lock, runtime.json, omo.log, omo.sock, autostart.json (0700)
+worktrees/<project>/<ticket>   agent worktrees      ceo/   the CEO agent's folder
+workdirs/<ticket>   working folders of tasks without a project (kept after Done until the user removes them)
+logs/           agent transcripts (<ticket>-<name>-<random>.log)
+images/<uuid>.<ext>   uploaded images (the record and the original name are in omo.db)
+images/terminal/<uuid>.<ext>   images dropped into terminals (no record; deleted keep_days_after_done days after upload)
+usage/<name>.lua  skillsets/<name>.yaml  plugins/<name>.yaml (+ plugins/<name>/ the installed plugin)
+skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/export/
+mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  files an import or an MCP registration replaced
 ```
 
-`failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
+`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
 
-A firefighter agent durably records its incident ID before launch. It may park
-only while that incident remains open; resolution does not end the process, so
-it must immediately call `omo done` or it will continue suspending smoke rounds.
+Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
-Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts. Repository entries use a structured `path` plus an optional `merge_target`; `branches.merge_target` defaults to `automerge`, and the only accepted policies are `automerge` and `asis`.
+## Invariants
 
-Important merge ordering:
-
-1. Transition the job to `merging`.
-2. For a top-level job, apply its effective policy; PM children merge into the PM integration worktree, while PM completion merges each integration branch into its checkout. `asis` leaves the checkout unchanged and retains branches.
-3. Transition the job to `done` and publish result/notifications.
-4. Stop the developer, remove its worktree, and remove temporary worktrees; `automerge` deletes completed branches while `asis` retains them.
-5. Emit the durable `job_merged` event after cleanup.
-
-As-is completion results use one line per repository: `<repo>: <url>
-(created|updated|existing)` or `<repo>: no changes on <branch>; nothing to
-open`. An exact no-change line suppresses the pull-request-required notice
-only for its matching repository and integration branch; it does not add a
-`_omo_pull_requests` entry or durable `job_pull_requests` row. Structured URL
-results, including `existing`, are recorded. Legacy unlabeled URLs remain
-single-repository-only. Supplied pullrequest titles use Conventional Commits
-subjects. In the optional `## Jobs` description section, omo jobs use
-`job 123` or `123` rather than `#123`; issue and PR references remain valid
-outside that section.
-
-`done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary. PM integration worktrees are lazy, durable per repository, and re-registered during restart recovery; unmanaged paths are rejected.
-
-Durable pull-request records survive restart and suppress completion notices only
-for the matching job and final integration repository. Missing repositories may
-still use the completion result text as a fallback and continue to receive a
-notice when neither source matches.
-
-A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context. For PM-owned developer jobs, reviewers run focused changed-package/direct-dependent tests and fast static checks unless the goal requires broader verification; top-level developer jobs receive a full repository-wide suite including end-to-end. The PM owns one passing full suite on each repository's integrated result before final reporting and `omo done`.
-
-## Configuration and templates
-
-`internal/config/config.go` defines the strict YAML schema and defaults. Decoding uses known-field checking, so misspelled keys must fail. Older valid configs are extended with missing defaults while preserving existing values and comments. When adding configuration:
-
-1. Add the typed field and YAML tag.
-2. Add a useful default.
-3. Add it to the human-authored missing-default YAML.
-4. Validate it and update config tests.
-5. Update the configuration example in `wiki/configuration.md` and this guide if architectural.
-
-Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
-
-Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
-fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
-to templates as `.Extensions`. Setup/update create but never replace this
-user-owned directory. Global `extensions/` uses the same forms and validation;
-its content is appended before office extensions, with lexical ordering within
-each fragment directory.
-
-Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
-`omo_dir`, `storage`, `workspace`, and every configured `repo:<key>`. Agent
-rows persist the actual launch workdir so the workspace reference remains
-truthful for worktrees and non-repository roles.
-
-Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, a Codex HTTP 401 triggers one `internal/codexauth` refresh (the profile command alone in a private PTY, stopped once `auth.json` changes) followed by a single retry, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
-
-`agents.env` supplies environment defaults to every agent PTY and to the
-internal Git client used for worktrees, diffs, merges, and cleanup. Profile
-`env` values override those shared defaults only for the profile's CLI, while
-supervisor-owned `OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative. The
-default Git identity uses fallback expressions and backtick command
-interpolation expanded by `internal/session`; commands execute through the
-platform shell with parent control credentials removed. Profile environments
-remain literal. Commit signing is disabled only for agent and internal Git
-processes. Repository entries may be absolute or relative
-to the office root; configuration loading resolves them to absolute runtime
-paths without rewriting the portable YAML spelling.
-
-## Persistence and concurrency invariants
-
-- SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
-- Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
-- Successful usage checks upsert one `model_usage_snapshots` row per credential scope; profiles sharing that scope reuse a process-wide, coalescing cache refreshed by `usage.refresh_interval`. Optional `usage.claude_config_dirs` and `usage.codex_homes` constrain account roots; multiple roots require each profile to select one through its environment. The TUI distinguishes account scopes while retaining Claude weekly/session and Codex weekly values.
-- A role with no eligible metered profile is reported as blocked, but safe shutdown starts only when every configured Claude/Codex credential scope is capped.
-- Usage-triggered shutdown stores a user-facing reason; the CLI prints it to stdout only after the TUI has returned and restored the terminal.
-- Job transitions update state and append a `job_state` event in one transaction.
-- Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`. Smoke alarms have no mail channel, including the CEO emergency route; they report findings only with `omo incident create`, then `omo done`.
-- Direct PTY input through `omo type` is server-authorized for only the user, CEO, firefighter, and trusted plugins running under the reserved system identity. A sanitized request event is persisted before queuing or writing, and a delivery event follows the actual PTY write; both record the target and input size/key count, never the input payload. Input targeting the agent under recent human editing in a writable TUI peek waits for the configured debounce or for that view to become non-writable, preserving FIFO text/key boundaries. The final readiness check happens while the session owns its input stream, and config reload invalidates old debounce timers. An explicit `input_debounce: 0s` consistently disables this protection. The TUI pending-input marker covers both queued direct input and mail notices.
-- The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
-- TUI renders share one per-view data cache. Keep the live peek at its faster
-  refresh cadence, avoid repeated database reads from footer/control helpers,
-  and use bounded history-page queries rather than loading an unbounded event
-  table during every repaint.
-- Interactive cells are registered in a terminal-cell hit-map during each
-  render; the map resets for every `View()`, and click dispatch reuses the
-  equivalent keyboard behavior.
-- Plugin hooks run in dependency-first order, preserving lexical
-  installation-directory order for independent plugins and manifest order
-  within each plugin. Job-create
-  authorization precedes mutable hooks; modified data flows through hooks in
-  that order and then passes normal server-side validation. Manual manifests
-  default `roles` to `["user"]`, accept `user` plus every `config.AllRoles`
-  role, and are authorized against the authenticated server-side caller. Manual
-  events expose `caller` and `caller_role`; audit details include action and
-  argument count but never argument contents. Plugin config is passed as a Lua
-  table or JSON command environment variable. Lua values are stored in SQLite;
-  plugin code is trusted because Lua io/os, command hooks, and `omo.exec` run
-  with the user's permissions.
-- `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
-  ready prompts are durably stored or returned. It exposes trusted `role`,
-  `agent`, `job_id`, `text`, effective `merge_target`, and known `repo`,
-  `branch`, and `base_branch` fields, runs in dependency-first order while
-  preserving lexical order for independent plugins, supports Lua and command
-  hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
-- Cron plugin snapshots expose body-free `user_inbox`, latest CEO
-  `ceo_activity_at_unix`, canonical `office_path`, current-session
-  `office_started_at_unix`, boolean `shutdown_in_progress`, and integer
-  `open_incidents` (the count of incidents whose state is `open`). A successful
-  snapshot always supplies the field; fail-soft snapshots retain zero plus
-  `snapshot_error`, so plugins never infer a trustworthy zero from a failed
-  database read. `omo.http`
-  permits HTTP(S) requests with mutually exclusive body modes, a 10-second
-  default timeout, a 1 MiB response cap, same-host redirects, Go TLS defaults,
-  and sanitized errors.
-- Managed plugin repositories live under `.omo/plugins/.repos`. Activation
-  copies a repository root or configured subpath atomically into
-  `.omo/plugins/<name>`; disabled entries remain installed but are excluded
-  when the runtime is loaded. An optional `branch` pins clone, startup update,
-  and explicit update operations to one validated remote branch; switching the
-  configured branch replaces the managed checkout branch on the next sync.
-- Embedded-asset and managed-plugin update flows preview changes before their
-  first write. `office.PlanTemplateUpdate` lists the complete replacement set,
-  including files that disappear with an old directory.
-  `pluginmanager.SyncAllWithPreview` and `SyncAllAtWithPreview` hold the plugin
-  root lock across remote revision planning and sync, and invoke the output
-  callback before changing a checkout or active copy. Existing checkouts query
-  the configured branch (or the checkout's tracked branch when unpinned)
-  rather than a possibly different remote HEAD.
-- Plugin manifests may declare a `default_config` JSON object. Managed sync
-  strictly decodes the manifest before activation and adds missing defaults
-  to `plugins.installed.<name>.config`, including during startup or disabled
-  plugin updates. Existing YAML values, comments, styles, and permissions are
-  preserved; arrays, nulls, and type conflicts are never replaced. YAML
-  aliases/merge keys receive additions locally without changing shared anchors.
-  Sync owns the initial config entry as well as updates: do not separately
-  upsert the entry after it. A config-write failure rolls activation back;
-  failed rollback retains the previous directory backup for recovery. The Git
-  cache can advance even when activation fails. Bundled sync uses the existing
-  local manifest and preserves local plugin files.
-- Plugin manifests may declare `requires` entries containing a plugin name,
-  Git source, optional subpath, validated branch, and optional SemVer version
-  constraint. Constraints support exact `1.2.3`, caret, tilde,
-  space-separated comparison chains, and `1.x`/`1.2.x`; concrete versions
-  use SemVer precedence, including prereleases, while build metadata is
-  ignored. Enabled global or local plugins satisfy a requirement by
-  installation or manifest name. The runtime returns typed, deterministic
-  missing-dependency, version-mismatch, and cycle errors. Dependency order is
-  exposed through `Manager.Ordered()`, and company extensions use it. Missing
-  dependency metadata retains branch pins, and interactive startup can
-  explicitly install or enable each office-local dependency and retry
-  `office.Open`. Headless startup and declined prompts fail with actionable
-  install/update commands.
-  Dependencies remain enforced when startup update checks are skipped, and
-  conflicting installation sources for one missing name fail closed.
-- Global plugins live under the global home's `plugins/`, with managed Git
-  checkouts in `plugins/.repos` and settings in its independent `config.yaml`.
-  `plugins.LoadSources` selects by installation name: office directories or
-  configuration entries override global ones, including disabled local entries.
-  The effective set runs in dependency-first order, preserving lexical order
-  for independent plugins and using each selected scope's configuration;
-  manifest aliases colliding across installation names remain errors. Runtime
-  state/storage remains office-local. `pluginmanager.SyncAllAt` takes an
-  explicit plugin root; global startup updates obey their own switch, and both
-  scopes honor `--skip-startup-checks`. Plugin management commands default to
-  the office-local scope; `--global` selects the global scope.
-- Bundled plugin ownership is scoped: nudge and tools are office-owned, while
-  filebrowser is global-owned and is never copied into office `.omo/plugins`.
-  Omo-owned global filebrowser copies carry a `.omo-bundled` source and
-  embedded-content digest marker. Current owned copies no-op; stale owned
-  copies refresh atomically and report `Changed: true` with `Revision: bundled`
-  in preview/sync output. A configured `builtin:filebrowser` record also
-  authorizes one refresh and marker adoption for a markerless existing copy;
-  disabled builtin entries refresh too. Unconfigured, non-builtin, malformed or
-  foreign-marker directories remain user-owned. Office-local nudge/tools are
-  installed only when missing and are not changed by global bundle refreshes.
-  The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
-  for both transfer directions; global `plugins.installed.filebrowser.config`
-  overrides them. Disabling retains the config entry and directory, while
-  removing only the entry while retaining the directory prevents automatic
-  bundled reclaim. Filebrowser uses only plugin-owned dialogs, validates one
-  basename component for uploads, confirms overwrites independently, uses
-  portable `wc`/`dd` argv on POSIX, PowerShell adapters on Windows,
-  and refreshes after successful writes.
-- Shared plugin roots use `plugins/.update.lock` across updating/loading
-  processes. `Source.Shared` makes the loader select and copy global plugin
-  files under that lock into private runtime snapshots before parsing manifests.
-  Hooks use the snapshot for the manager lifetime, so another office's update
-  cannot change its code/resources or expose an activation gap. `Manager.Close`
-  waits for active hooks, runs reverse unload hooks, and removes snapshots only
-  after unload; `office.Open` failure and normal close both release them. Cron
-  workers are joined before `Manager.Run` returns. Immutable `load`, `startup`,
-  `unload`, `shutdown`, and `company_shutdown` hooks use a 10-second default;
-  load/startup run forward, shutdown/unload/company_shutdown reverse, and hook
-  failures are logged while later lifecycle hooks continue. Office startup emits
-  startup after CEO spawn is requested; shutdown is emitted once before agents
-  stop, and company shutdown runs before owned instances stop.
-  `LoadSourcesContext` lets callers bound waits for a shared-root lock. Snapshot
-  temporary directories can remain after forced process termination.
-- Plugin runtime state and its latest log line are stored durably per plugin.
-  A separate per-line history is pruned synchronously to `plugins.log_lines`,
-  and command stderr uses a bounded in-memory tail before persistence. Immutable
-  command-hook stdout is discarded; mutable JSON stdout is capped at 64 KiB.
-  Lua hooks log through `omo.log(message)`; command hook stderr is the
-  equivalent log channel.
-- Manual plugin hooks subscribe to `manual`; each requires a unique action
-  `name` and non-empty `description`, with hook-local `manual_args` controlling
-  optional string arguments. `omo plugin actions [plugin]` discovers loaded
-  actions and their descriptions. `omo plugin trigger <plugin> <action>
-  [-- <args>...]` connects from the office directory. The Plugins detail lists
-  actions; `r` selects one and runs asynchronously with argument entry only
-  when enabled for that action.
-  Both enter the shared `Supervisor.TriggerPlugin` authorization boundary. The runtime
-  targets one named hook in the loaded manifest, excludes disabled plugins,
-  rejects manual broadcasts, and records a durable request before execution.
-  Completion/failure audits identify the action and request without storing
-  argument contents. A per-plugin admission guard rejects overlapping manual
-  runs. `Manager.Close` closes admission, cancels active manual hooks, and waits
-  through outcome persistence; office shutdown calls it before closing SQLite,
-  and runtime cancellation also closes the manager. TUI busy/result state is
-  per plugin. Requests interrupted by a crash are not replayed after restart.
-  Command hooks and Lua `omo.exec` bound ordinary inherited output-pipe draining
-  with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
-  retain bounded stderr diagnostics, while canceled hooks close their stderr
-  readers so descendant-held descriptors cannot extend their timeout.
-  Manual hooks may return one optional JSON-compatible result capped at 64 KiB;
-  it reaches the synchronous socket/CLI caller without entering audit data.
-  The legacy `event.data.result` form remains supported for pullrequest-style
-  hooks and is limited to a string of 4 KiB or less. Asynchronous triggers
-  return their durable request ID before hook completion.
-- The bundled nudge plugin is installed only when missing; ordinary setup and
-  startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
-  bundled replacement remains governed by the existing ownership/generation
-  update flow.
-- Until the omo 1.0.0 release, every repository plugin manifest stays at
-  version 1.0.0; do not increment plugin versions.
-  Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
-  use the authorized `omo type` path to submit reminders without creating mail.
-  It tracks freelancer waiting periods in plugin-local storage and reminds the
-  CEO that finished retained freelancers require an explicit agent kill.
-  Resolved firefighters receive the `firefighter_done` reminder and are
-  excluded from generic reminders that recommend `omo wait`.
-- Core mail delivery wakes parked agents or inserts one debounced inbox notice;
-  repeated unread-mail and workflow reminders belong exclusively to the nudge
-  plugin. Plugins can enumerate durable storage keys by prefix and should
-  remove per-agent local state after agents leave the live snapshot.
-- Common prompt path references emit each filesystem path once, combining
-  semantic labels when the workspace, storage, office, or repository coincide.
-- Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
-- Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
-- Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover, autoshutdown, pullrequest, and bugreport are optional official
-  plugins installed from the `release` branch of the OMO repository; they are
-  not embedded or auto-installed. Bugreport reports omo-only behavior through
-  anonymized GitHub or local fallback reports. Pullrequest handles `asis`
-  branches, provider detection, required authored body files, idempotent
-  open-request body/title updates, and URL notifications. Safe-shutdown
-  requests accept a reason, retain the first reason during idempotent
-  in-progress requests, and
-  display that reason after the TUI restores the terminal.
-- Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
-- Read-only observation is the sole exception to single-owner startup: it ignores ownership state, never changes lifecycle rows or unread mail, and may display stale durable agent state when no owner is running.
-- Each agent row stores the exact prompt returned by its latest `omo ready` handshake so a read-only TUI peek can display what that agent received.
-- Agent identity comes from injected environment, not CLI arguments supplied by the model.
-- Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.
-- CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior. Storage files are ephemeral by default: each file expires after 60 distinct event-bearing office days since its last modification, and shutdown gaps do not count.
-- The cleanup scheduler also caps historical SQLite rows per table. It must preserve live orchestration state and the event-day anchors used by storage retention even when that means temporarily exceeding a configured cap.
-- Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
-- Agent sessions own process-tree cleanup: Windows uses kill-on-close Job Objects, Linux supplements process-group termination with an inherited per-session marker so reparented background commands are swept, and other Unix systems snapshot descendants before killing their groups.
-- Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
-- Superpowers is installed once in the global home's `superpowers` directory and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state. Old executable-adjacent caches are left untouched and unused.
-- `omo` must not modify user Git signing settings or commit office state.
+- A change is committed to SQLite before it is acknowledged, and every committed change appends an `events` row. The event stream tails that table, so clients get every event once, or an explicit `resync`.
+- The board owns every rule. Routes only map requests onto board calls and add no rules of their own. User and agent actions record intent (for example approving sets `review_stage = merging`); only the engine performs git work and then calls the engine-facing methods.
+- Inside `board` a transaction callback queries only through its `tx`, never `b.db` (single connection, would deadlock). Never hold a board transaction across slow work.
+- Nothing omo-related is written into a project folder, `.git/info/exclude` is never written, and omo never edits the user's git config. Worktrees live in `OMO_HOME/worktrees`. The only git command omo runs in a user's folder that changes it is `git merge --ff-only`, after a read-only check that nothing is in the way (an export reads the remote settings there and pushes from a private repository that borrows the objects); omo never runs `merge --abort`, `reset` or `checkout` there. omo itself pushes only the reviewed commit of an exported ticket (`gitops.PushCommit`, never onto a commit it does not descend from, only to the ticket's own recorded branch and never onto a remote branch omo did not push there; the push carries `--force-with-lease` with what `ls-remote` saw, so a remote branch created or moved in between makes it fail); the export agent opens the pull request and does not push.
+- No board transaction spans a git operation, a process start or a wait: the engine calls the board between git steps. Agents never see session ids; the engine acts as `board.System`.
+- Producers return empty slices and objects, never nil, so clients see `[]` and `{}`.
+- Every non-GET `/api` request needs `Content-Type: application/json`; JSON bodies are decoded strictly (unknown keys are errors). The one exception is the image upload, which needs `application/octet-stream` (`rawUpload` in `server/errors.go`); like JSON, no cross-site form can send it without a preflight.
+- Unix-only process or socket code needs its Windows counterpart in a `_windows.go` file.
 
 ## Tests
 
-`make check` is the required local gate and matches CI:
+`make check` is the required local gate and matches CI: `gofmt -l` must report nothing, `go vet ./...` must pass, `staticcheck -checks U1000 ./...` must report nothing where staticcheck is installed (CI skips it), `go test ./... -timeout 900s` must pass.
 
-1. `gofmt -l` must report nothing.
-2. `go vet ./...` must pass.
-3. `go test ./... -timeout 900s` must pass.
+Engine and end-to-end tests run agents as the scripted fake agent (`internal/fakeagent`): the test binary's `TestMain` calls `fakeagent.Main()` when `fakeagent.Enabled()`, and a profile with CLI `custom` runs `fakeagent.Command()` with `fakeagent.Env(script)`. `internal/e2e` builds the server from its parts (`server.New` with a runner, `ListenSocket`, the handlers served, `StartEngine`) and asserts on the board and the repositories; it is skipped on Windows. No test calls a real model.
 
-The integration suite builds `cmd/omo`, uses the scenario-driven fake agent, and launches real PTYs/ConPTYs. Tests may take tens of seconds. Use `t.TempDir`, isolated Git repositories, and the helpers in each package. Never depend on the developer's global Git configuration.
+Test helper processes that run the test binary again (such as the helpers in `internal/agents`) must not block with a bare `select {}`: built with `CGO_ENABLED=0` (as `make` does) the runtime ends such a process as a deadlock. Use a sleep loop.
 
-CLI, office, supervisor, and prompt test suites isolate `OMO_HOME` in temporary
-directories so user templates/plugins/trust never affect tests. Feature tests
-may override that location with `t.Setenv`.
-
-Fake-agent scenario lines include commands such as `ready`, `shell|...`, `done|...`, `verdict|...`, `wait`, and `sleep|...`. Prefer them over mocking away the socket/session boundary when testing orchestration.
-
-For asynchronous assertions, wait for a durable state or event rather than sleeping a fixed duration. In particular, use `job_merged` for post-merge filesystem assertions and `review_started` to distinguish successive review cycles.
-
-Load-sensitive browser and supervisor regressions poll observable conditions; supervisor condition deadlines derive from the package-level `ReadyTimeout` test override, so the shortened suite timing scales their maximum wait without delaying successful runs.
+Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
 ## CI and releases
 
-Workflows are intentionally separated so only relevant jobs appear:
+- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests.
+- `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
+- `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.
+- `.github/workflows/publish-container.yml`: container image publishing.
 
-- `.github/workflows/pull-request.yml`: test and cross-build on `pull_request`; it does not retain build artifacts.
-- `.github/workflows/nightly.yml`: a scheduled run checks `main` for commits from the preceding 24 hours before test, cross-build, and seven-day artifact work; `workflow_dispatch` always runs that work.
-- `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release, then syncs the tag's `plugins/` tree to the stable `release` branch. `release` is stable; `main` is the latest development branch.
+Release assets must keep these names, because the installers and `omo update` depend on them: `omo-{linux,darwin}-{amd64,arm64}.tar.gz`, `omo-windows-{amd64,arm64}.zip`, `SHA256SUMS`. Each archive holds the binary with `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES`; the image has them in `/usr/share/doc/omo/`. `THIRD_PARTY_NOTICES` comes from `make notices` (`tools/notices`): the Go standard library and every module linked on any release platform, from the module cache, then the npm packages whose code is in the bundle, which the web build writes to `web/third-party-notices.txt` (`vite.config.ts` `thirdPartyNotices`); a module or package without a licence file fails it. The bundle keeps the dependencies' licence comments. The Makefile injects the version with `-ldflags`; do not add a second version source.
 
-Keep action versions and build commands aligned across workflows. Preserve existing job display names if branch protection may reference them.
-
-Release assets must retain these names because installers and self-update depend on them:
-
-```text
-omo-linux-amd64.tar.gz
-omo-linux-arm64.tar.gz
-omo-darwin-amd64.tar.gz
-omo-darwin-arm64.tar.gz
-omo-windows-amd64.zip
-omo-windows-arm64.zip
-SHA256SUMS
-```
-
-`Makefile` injects the version with `-ldflags`; do not add a second runtime version source. `install.sh`, `install.ps1`, and `internal/selfupdate` all verify SHA-256 checksums before replacement.
+The container entrypoint (`docker/entrypoint.sh`) runs `omo config set host 0.0.0.0` and then `omo`; the image exposes port 8090.
 
 ## Change checklist
 
-Before editing:
-
-1. Read the owning package and its tests.
-2. Check `git status` and preserve unrelated work.
-3. Identify whether the behavior is durable state, an asynchronous observation, or platform-specific.
-
-Before handing off:
-
-1. Add or update the narrowest useful test.
-2. Run the focused package/test.
-3. Run `make check`.
-4. Run `git diff --check` and inspect the final diff.
-5. If workflows changed, validate their syntax and inspect the resulting Actions run after push.
-6. If user-visible behavior, configuration, CLI, layout, or release assets changed, update the matching `wiki/` page (and `README.md` when install or quick start change) and this guide.
-7. Document only current behavior. This project is prerelease: do not record replaced behavior, deprecation language, or migration notes in the wiki, README, or this guide. Git history is the record of old behavior.
-
-## Common mistakes
-
-- Treating `done` as proof that worktree cleanup has completed; wait for `job_merged`.
-- Writing directly to queue state instead of using `queue.Store.Transition`.
-- Relying on prompt compliance for a permission that belongs in server-side auth/routing.
-- Adding `.omo` to a repository `.gitignore`; setup deliberately uses `.git/info/exclude`.
-- Putting Unix-only process/socket code in a shared file or forgetting the Windows counterpart.
-- Calling external agent CLIs directly from orchestration code instead of going through `session` profiles.
-- Changing release filenames without updating both installers and self-update logic.
-- Using fixed sleeps for lifecycle tests when a stored event or state is available.
-- Assuming README or wiki requirements override `go.mod`, workflow definitions, or executable behavior.
-- Describing replaced behavior in documentation instead of replacing it with the current behavior.
+1. Read the owning package and its tests; check `git status` and preserve unrelated work.
+2. Add or update the narrowest useful test, run it, then run `make check`.
+3. Run `git diff --check` and inspect the final diff.
+4. Update the `wiki/` pages (and `README.md` when its short overview changes) and this guide when user-visible behavior, commands, the home layout or release assets change.
+5. Document only current behavior; git history is the record of old behavior.

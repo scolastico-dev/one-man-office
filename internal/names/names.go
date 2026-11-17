@@ -1,5 +1,5 @@
 // Package names assigns human-friendly agent names: role prefix plus a
-// random first name from an embedded list, collision-checked per office.
+// random first name from an embedded list, collision-checked by the caller.
 package names
 
 import (
@@ -12,15 +12,12 @@ import (
 //go:embed firstnames.txt
 var firstnamesFile string
 
+// Prefix maps each agent role to the prefix of its names.
 var Prefix = map[string]string{
-	"ceo":             "ceo",
-	"product_manager": "pm",
-	"developer":       "developer",
-	"reviewer":        "reviewer",
-	"freelancer":      "freelancer",
-	"smokealarm":      "smokealarm",
-	"firefighter":     "firefighter",
-	"branch_namer":    "branch-namer",
+	"ceo":       "ceo",
+	"pm":        "pm",
+	"developer": "developer",
+	"reviewer":  "reviewer",
 }
 
 func firstnames() []string {

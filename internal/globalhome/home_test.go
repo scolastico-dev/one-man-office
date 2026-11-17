@@ -1,739 +1,140 @@
 package globalhome
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
-	"slices"
+	"runtime"
 	"strings"
-	"sync"
 	"testing"
-	"time"
-
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
-func TestOpenCreatesIndependentHome(t *testing.T) {
+func TestOpenCreatesLayoutAndMarker(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "omo")
 	t.Setenv("OMO_HOME", root)
-	h, err := Open()
+	l, err := Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.Dir != root || !h.Config.Plugins.UpdateOnStart || len(h.Config.TrustedOffices) != 0 || h.Config.Template.Enabled || h.Config.Template.AutoSync {
-		t.Fatalf("home = %+v", h)
+	if l.Root != root || l.Settings != filepath.Join(root, "settings.yaml") || l.DB != filepath.Join(root, "omo.db") ||
+		l.ServerConfig != filepath.Join(root, "server.yaml") || l.Token != filepath.Join(root, "token") ||
+		l.Skills != filepath.Join(root, "skills") {
+		t.Fatalf("layout = %+v", l)
 	}
-	for _, name := range []string{"plugins", "extensions", "template"} {
-		entries, err := os.ReadDir(filepath.Join(root, name))
-		if err != nil {
-			t.Fatalf("%s = %v, %v", name, entries, err)
+	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Run, l.Worktrees, l.CEO, l.Logs, l.Images} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("%s: %v %v", dir, info, err)
 		}
-		if name == "plugins" {
-			visible := make([]string, 0, len(entries))
-			for _, entry := range entries {
-				if !strings.HasPrefix(entry.Name(), ".") {
-					visible = append(visible, entry.Name())
-				}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "layout.json"))
+	if err != nil || strings.TrimSpace(string(raw)) != `{"layout":2}` {
+		t.Fatalf("layout.json = %q, %v", raw, err)
+	}
+	if runtime.GOOS != "windows" {
+		for _, dir := range []string{l.Root, l.Run} {
+			if info, _ := os.Stat(dir); info.Mode().Perm() != 0700 {
+				t.Fatalf("%s mode = %v", dir, info.Mode().Perm())
 			}
-			if len(visible) != 1 || visible[0] != "filebrowser" {
-				t.Fatalf("%s visible entries = %v", name, visible)
-			}
-		} else if len(entries) != 0 {
-			t.Fatalf("%s = %v, want empty", name, entries)
 		}
-	}
-	known, err := os.ReadFile(filepath.Join(root, "known_plugins.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(known), "[]\n"; got != want {
-		t.Fatalf("new user plugin catalog = %q, want %q", got, want)
-	}
-	example, err := os.ReadFile(filepath.Join(root, "known_plugins.example.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertOfficialPluginCatalog(t, example)
-	for _, name := range []string{"messages", "prompts", "omo.yaml"} {
-		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
-			t.Fatalf("unexpected %s: %v", name, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nunknown: true\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err == nil {
-		t.Fatal("unknown global field accepted")
-	}
-}
-
-func TestOpenPreservesPreExistingKnownPluginCatalog(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	custom := []byte("[\n  {\"name\":\"custom\",\"description\":\"Custom plugin\",\"source\":\"https://example.com/custom.git\"}\n]\n")
-	path := filepath.Join(root, "known_plugins.json")
-	if err := os.WriteFile(path, custom, 0o600); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, custom) {
-		t.Fatalf("pre-existing known plugin catalog changed: got %q, want %q", got, custom)
+		t.Fatalf("second Open: %v", err)
 	}
 }
 
-func TestOpenRefreshesStaleOfficialPluginExample(t *testing.T) {
+func TestOpenRefusesOldInstallation(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("OMO_HOME", root)
-	custom := []byte("[\n  {\"name\":\"custom\",\"description\":\"Custom plugin\",\"source\":\"https://example.com/custom.git\"}\n]\n")
-	knownPath := filepath.Join(root, "known_plugins.json")
-	examplePath := filepath.Join(root, "known_plugins.example.json")
-	if err := os.WriteFile(knownPath, custom, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("x: 1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(examplePath, []byte("stale example\n"), 0o600); err != nil {
-		t.Fatal(err)
+	_, err := Open()
+	if !errors.Is(err, ErrOldInstallation) || !strings.Contains(err.Error(), "Start omo in a terminal to choose") {
+		t.Fatalf("err = %v", err)
 	}
-
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	gotExample, err := os.ReadFile(examplePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(gotExample, []byte(knownPluginsExample)) {
-		t.Fatalf("official plugin example = %q, want %q", gotExample, knownPluginsExample)
-	}
-	gotKnown, err := os.ReadFile(knownPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(gotKnown, custom) {
-		t.Fatalf("custom plugin catalog changed: got %q, want %q", gotKnown, custom)
+	if _, statErr := os.Stat(filepath.Join(root, "layout.json")); statErr == nil {
+		t.Fatal("marker written into an old installation")
 	}
 }
 
-func TestOpenLeavesIdenticalOfficialPluginExampleUnchanged(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	examplePath := filepath.Join(root, "known_plugins.example.json")
-	if err := os.WriteFile(examplePath, []byte(knownPluginsExample), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	wantModTime := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
-	if err := os.Chtimes(examplePath, wantModTime, wantModTime); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.Stat(examplePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(examplePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !info.ModTime().Equal(before.ModTime()) {
-		t.Fatalf("official plugin example modtime = %s, want unchanged %s", info.ModTime(), before.ModTime())
-	}
-}
-
-func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
-	t.Helper()
-	type entry struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Version     string `json:"version"`
-		Official    bool   `json:"official"`
-		Source      string `json:"source"`
-		Subpath     string `json:"subpath"`
-		Branch      string `json:"branch"`
-	}
-	var got []entry
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("decode generated plugin catalog: %v", err)
-	}
-	if len(got) == 0 {
-		t.Fatalf("generated plugin catalog is empty: %s", raw)
-	}
-	foundBugreport := false
-	for _, plugin := range got {
-		if plugin.Name == "" || plugin.Version == "" || !plugin.Official || plugin.Source == "" || plugin.Subpath == "" || plugin.Branch == "" {
-			t.Fatalf("generated plugin catalog entry lacks official metadata: %#v", plugin)
-		}
-		if plugin.Name == "bugreport" {
-			foundBugreport = true
-			want := entry{
-				Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Version: "1.0.0", Official: true,
-				Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
-			}
-			if plugin != want {
-				t.Fatalf("bugreport catalog entry = %#v, want %#v", plugin, want)
-			}
-		}
-	}
-	if !foundBugreport {
-		t.Fatal("generated plugin catalog omitted bugreport")
-	}
-}
-
-func TestOpenInstallsGlobalFilebrowserAndConfiguresDefaults(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, ok := h.Config.Plugins.Installed["filebrowser"]
-	if !ok || entry.Source != "builtin:filebrowser" || !entry.Enabled {
-		t.Fatalf("filebrowser config = %+v, present=%v", entry, ok)
-	}
-	for key, want := range map[string]any{
-		"download_warn_bytes": 52428800,
-		"upload_warn_bytes":   52428800,
-		"upload_max_bytes":    1073741824,
+func TestOpenRecoversInterruptedFirstStart(t *testing.T) {
+	for name, setup := range map[string]func(root string) error{
+		"root only": func(string) error { return nil },
+		"marker temp file only": func(root string) error {
+			return os.WriteFile(filepath.Join(root, ".omo-write-123"), []byte("{"), 0600)
+		},
 	} {
-		if got := entry.Config[key]; got != want {
-			t.Fatalf("filebrowser config[%q] = %#v, want %#v", key, got, want)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(h.Dir, "plugins", "filebrowser", "plugin.json")); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"nudge", "tools"} {
-		if _, err := os.Stat(filepath.Join(h.Dir, "plugins", name)); !os.IsNotExist(err) {
-			t.Fatalf("unexpected global %s plugin: %v", name, err)
-		}
-	}
-}
-
-func TestOpenGlobalFilebrowserInitializationIsNoOpOnSecondOpen(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(h.Dir, "config.yaml")
-	before, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedPath := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
-	seedBefore, err := os.ReadFile(seedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedAfter, err := os.ReadFile(seedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) || !bytes.Equal(seedBefore, seedAfter) {
-		t.Fatalf("second open changed initialized home: config changed=%v seed changed=%v", !bytes.Equal(before, after), !bytes.Equal(seedBefore, seedAfter))
-	}
-}
-
-func TestOpenPreservesCustomizedOwnedGlobalFilebrowserFiles(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
-	custom := []byte("// user customization\n")
-	if err := os.WriteFile(path, custom, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(got, custom) {
-		t.Fatalf("customized main.js = %q, err=%v", got, err)
-	}
-}
-
-func TestOpenRefreshesStaleOwnedGlobalFilebrowser(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(h.Dir, "plugins", "filebrowser")
-	if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("stale\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, bundledplugins.MarkerName), []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "stale.txt")); !os.IsNotExist(err) {
-		t.Fatalf("stale file remains: %v", err)
-	}
-	marker, err := bundledplugins.ReadMarker(filepath.Join(dir, bundledplugins.MarkerName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest, err := bundledplugins.PluginDigest(bundledplugins.FilebrowserName)
-	if err != nil || marker.Digest != digest {
-		t.Fatalf("marker digest = %q, want %q, err=%v", marker.Digest, digest, err)
-	}
-}
-
-func TestOpenAdoptsConfiguredMarkerlessGlobalFilebrowser(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	dir := filepath.Join(root, "plugins", "filebrowser")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "sentinel.txt"), []byte("legacy\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: true\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "sentinel.txt")); !os.IsNotExist(err) {
-		t.Fatalf("legacy sentinel remains: %v", err)
-	}
-	marker, err := bundledplugins.ReadMarker(filepath.Join(dir, bundledplugins.MarkerName))
-	if err != nil || marker.Source != "builtin:filebrowser" {
-		t.Fatalf("marker = %+v, %v", marker, err)
-	}
-}
-
-func TestOpenRefreshesDisabledConfiguredGlobalFilebrowser(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	dir := filepath.Join(root, "plugins", "filebrowser")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "sentinel.txt"), []byte("legacy\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {custom: value}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h.Config.Plugins.Installed["filebrowser"].Enabled {
-		t.Fatal("disabled filebrowser became enabled")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "sentinel.txt")); !os.IsNotExist(err) {
-		t.Fatalf("disabled legacy sentinel remains: %v", err)
-	}
-}
-
-func TestOpenPreservesConfiguredNonBuiltinGlobalFilebrowser(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	dir := filepath.Join(root, "plugins", "filebrowser")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sentinel := filepath.Join(dir, "sentinel.txt")
-	if err := os.WriteFile(sentinel, []byte("user fork\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  installed:\n    filebrowser:\n      source: https://example.test/filebrowser.git\n      enabled: true\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	if got := string(mustReadHome(t, sentinel)); got != "user fork\n" {
-		t.Fatalf("configured fork = %q", got)
-	}
-}
-
-func TestOpenRespectsDisabledGlobalFilebrowserConfig(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {download_warn_bytes: 123}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := h.Config.Plugins.Installed["filebrowser"]
-	if entry.Enabled || entry.Config["download_warn_bytes"] != 123 {
-		t.Fatalf("disabled filebrowser config changed: %+v", entry)
-	}
-	if _, err := os.Stat(filepath.Join(root, "plugins", "filebrowser", "plugin.json")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestOpenDoesNotRecreateDeletedGlobalFilebrowserConfigEntry(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	pluginDir := filepath.Join(root, "plugins", "filebrowser")
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	custom := []byte("custom plugin\n")
-	if err := os.WriteFile(filepath.Join(pluginDir, "browser.js"), custom, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := h.Config.Plugins.Installed["filebrowser"]; ok {
-		t.Fatal("retained unconfigured filebrowser was claimed")
-	}
-	got, err := os.ReadFile(filepath.Join(pluginDir, "browser.js"))
-	if err != nil || !bytes.Equal(got, custom) {
-		t.Fatalf("retained filebrowser changed: %q, %v", got, err)
-	}
-}
-
-func TestOpenRestoresMissingGlobalFilebrowserWithDisabledEntry(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	raw := []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {custom: value}\n")
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), raw, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := h.Config.Plugins.Installed["filebrowser"]
-	if entry.Enabled || entry.Config["custom"] != "value" {
-		t.Fatalf("disabled retained config changed: %+v", entry)
-	}
-	if _, err := os.Stat(filepath.Join(root, "plugins", "filebrowser", "plugin.json")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestOpenGlobalFilebrowserPreservesConfigCommentsAndPermissions(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	path := filepath.Join(root, "config.yaml")
-	raw := []byte("# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.test/plugin.git\n      enabled: true\n")
-	if err := os.WriteFile(path, raw, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "# keep this global comment") || !strings.Contains(string(got), "example.test/plugin.git") {
-		t.Fatalf("global config content was not preserved:\n%s", got)
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o640 {
-		t.Fatalf("global config mode = %v, %v", info, err)
-	}
-}
-
-func TestOpenDoesNotClaimUnrelatedGlobalFilebrowserDirectory(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	pluginDir := filepath.Join(root, "plugins", "filebrowser")
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte("not bundled\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := h.Config.Plugins.Installed["filebrowser"]; ok {
-		t.Fatal("unrelated filebrowser was claimed")
-	}
-	got, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json"))
-	if err != nil || string(got) != "not bundled\n" {
-		t.Fatalf("unrelated filebrowser changed: %q, %v", got, err)
-	}
-}
-
-func TestOpenRejectsMalformedGlobalDocuments(t *testing.T) {
-	for _, raw := range []string{"null\n", "[]\n", "\n", "trusted_offices: []\n---\nplugins: {}\n", "plugins: {typo: true}\n", "trusted_offices: [relative]\n"} {
-		t.Run(raw, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OMO_HOME", dir)
-			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(raw), 0600); err != nil {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "omo")
+			t.Setenv("OMO_HOME", root)
+			if err := os.MkdirAll(root, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Open(); err == nil {
-				t.Fatal("invalid global configuration accepted")
+			if err := setup(root); err != nil {
+				t.Fatal(err)
 			}
-			after, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
-			if err != nil || string(after) != raw {
-				t.Fatalf("invalid user config was overwritten: %q %v", after, err)
+			if _, err := Open(); err != nil {
+				t.Fatalf("Open: %v", err)
 			}
-		})
-	}
-}
-
-func mustReadHome(t *testing.T, path string) []byte {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
-func TestTrustPreservesSettingsAndConcurrentApprovals(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := "# global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.com/plugin.git\n      enabled: true\n      config: {message: hello}\n"
-	if err := os.WriteFile(filepath.Join(h.Dir, "config.yaml"), []byte(raw), 0600); err != nil {
-		t.Fatal(err)
-	}
-	dirs := []string{t.TempDir(), t.TempDir(), t.TempDir()}
-	var wg sync.WaitGroup
-	for _, dir := range dirs {
-		wg.Go(func() {
-			other, err := Open()
-			if err == nil {
-				err = other.Trust(dir)
-			}
-			if err != nil {
-				t.Error(err)
+			if _, err := os.Stat(filepath.Join(root, "layout.json")); err != nil {
+				t.Fatalf("marker: %v", err)
 			}
 		})
 	}
-	wg.Wait()
-	h, err = Open()
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestOpenConcurrentFirstStart(t *testing.T) {
+	t.Setenv("OMO_HOME", filepath.Join(t.TempDir(), "omo"))
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := Open()
+			errs <- err
+		}()
 	}
-	for _, dir := range dirs {
-		canonical, err := CanonicalOffice(dir)
-		if err != nil || !h.IsTrusted(canonical) {
-			t.Fatalf("missing trust %s: %v", dir, err)
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent Open: %v", err)
 		}
 	}
-	if h.Config.Plugins.UpdateOnStart || h.Config.Plugins.Installed["example"].Config["message"] != "hello" {
-		t.Fatalf("settings lost: %+v", h.Config)
-	}
-	data, err := os.ReadFile(filepath.Join(h.Dir, "config.yaml"))
-	if err != nil || !strings.Contains(string(data), "# global comment") {
-		t.Fatalf("comment lost: %s, %v", data, err)
-	}
-	if err := h.Trust(dirs[0]); err != nil {
-		t.Fatal(err)
-	}
-	if len(h.Config.TrustedOffices) != 3 {
-		t.Fatalf("duplicate trust: %v", h.Config.TrustedOffices)
-	}
 }
 
-func TestUntrustRemovesExistingAndStaleOfficesPreservingConfig(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("OMO_HOME", root)
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := "# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.com/plugin.git\n      enabled: true\n"
-	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(raw), 0600); err != nil {
-		t.Fatal(err)
-	}
-	office := filepath.Join(t.TempDir(), "office")
-	if err := os.Mkdir(office, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Trust(office); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Untrust(office); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(h.Config.TrustedOffices, office) {
-		t.Fatalf("office remained trusted: %v", h.Config.TrustedOffices)
-	}
-	reopened, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(reopened.Config.TrustedOffices, office) {
-		t.Fatalf("office remained trusted after reopen: %v", reopened.Config.TrustedOffices)
-	}
-	data, err := os.ReadFile(filepath.Join(root, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "# keep this global comment") || !strings.Contains(string(data), "example.com/plugin.git") || strings.Contains(string(data), office) {
-		t.Fatalf("config was not preserved while removing office:\n%s", data)
-	}
-
-	stale := filepath.Join(t.TempDir(), "stale-office")
-	if err := os.Mkdir(stale, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := reopened.Trust(stale); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(stale); err != nil {
-		t.Fatal(err)
-	}
-	if err := reopened.Untrust(stale); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(reopened.Config.TrustedOffices, stale) {
-		t.Fatalf("stale office remained trusted: %v", reopened.Config.TrustedOffices)
-	}
-}
-
-func TestUntrustUnknownIsNoOp(t *testing.T) {
+func TestOpenAcceptsEmptyExistingDir(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
+	if _, err := Open(); err != nil {
 		t.Fatal(err)
-	}
-	path := filepath.Join(h.Dir, "config.yaml")
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown := filepath.Join(t.TempDir(), "unknown-office")
-	if err := h.Untrust(unknown); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) {
-		t.Fatalf("unknown untrust rewrote config: before %q after %q", before, after)
 	}
 }
 
-func TestUntrustSerializesWithTrust(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := "# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.com/plugin.git\n      enabled: true\n"
-	if err := os.WriteFile(filepath.Join(h.Dir, "config.yaml"), []byte(raw), 0600); err != nil {
-		t.Fatal(err)
-	}
-	a := t.TempDir()
-	b := t.TempDir()
-	if err := h.Trust(a); err != nil {
-		t.Fatal(err)
-	}
-	untrustHome, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustHome, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		if err := untrustHome.Untrust(a); err != nil {
-			t.Error(err)
+func TestWriteFileAtomicReplacesContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	for _, content := range []string{"one", "two"} {
+		if err := WriteFileAtomic(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		if err := trustHome.Trust(b); err != nil {
-			t.Error(err)
-		}
-	}()
-	wg.Wait()
-
-	final, err := Open()
-	if err != nil {
-		t.Fatal(err)
 	}
-	if final.IsTrusted(a) || !final.IsTrusted(b) {
-		t.Fatalf("concurrent trust state = %v", final.Config.TrustedOffices)
+	if raw, _ := os.ReadFile(path); string(raw) != "two" {
+		t.Fatalf("content = %q", raw)
 	}
-	data, err := os.ReadFile(filepath.Join(h.Dir, "config.yaml"))
-	if err != nil || !strings.Contains(string(data), "# keep this global comment") || !strings.Contains(string(data), "example.com/plugin.git") {
-		t.Fatalf("concurrent mutation damaged config: %s, %v", data, err)
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	if len(entries) != 1 {
+		t.Fatalf("leftover temp files: %v", entries)
 	}
 }
 
-func TestCanonicalTrustResolvesSymlink(t *testing.T) {
-	t.Setenv("OMO_HOME", t.TempDir())
-	target := t.TempDir()
-	link := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(target, link); err != nil {
-		t.Skip(err)
-	}
-	h, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Trust(link); err != nil {
-		t.Fatal(err)
-	}
-	canonical, err := CanonicalOffice(target)
-	if err != nil || !h.IsTrusted(canonical) {
-		t.Fatalf("alias trust failed: %v", err)
-	}
-	if _, err := CanonicalOffice(filepath.Join(target, "missing")); err == nil {
-		t.Fatal("missing location accepted")
-	}
-}
-
-func TestResolvePlatformPaths(t *testing.T) {
+// DefaultDir is the home Dir resolves without OMO_HOME.
+func TestDefaultDirIsDirWithoutOverride(t *testing.T) {
 	user := t.TempDir()
-	app := filepath.Join(user, "roaming")
-	custom := filepath.Join(user, "custom")
-	for _, tt := range []struct {
-		platform, user, app, override, want string
-		bad                                 bool
-	}{
-		{platform: "linux", user: user, want: filepath.Join(user, ".local", "omo")},
-		{platform: "darwin", user: user, want: filepath.Join(user, ".local", "omo")},
-		{platform: "windows", app: app, want: filepath.Join(app, "omo")},
-		{platform: "windows", bad: true},
-		{platform: "linux", override: "relative", bad: true},
-		{platform: "linux", override: custom, want: custom},
-	} {
-		got, err := resolveDir(tt.platform, tt.user, tt.app, tt.override)
-		if (err != nil) != tt.bad || got != filepath.FromSlash(tt.want) {
-			t.Errorf("%+v: %q, %v", tt, got, err)
-		}
+	t.Setenv("HOME", user)
+	t.Setenv("OMO_HOME", "")
+	want, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_HOME", filepath.Join(t.TempDir(), "other"))
+	got, err := DefaultDir(user)
+	if err != nil || got != want {
+		t.Fatalf("DefaultDir = %q, %v; want %q", got, err, want)
 	}
 }

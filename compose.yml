@@ -20,15 +20,15 @@ services:
 
   omo:
     image: ghcr.io/scolastico-dev/one-man-office:latest
-    # Disables dashboard token auth. Only uncomment behind trusted access control.
-    # command: --unsafe
+    # To turn off the login token, run `omo config set auth none` in the container.
+    # Only do that behind trusted access control.
     depends_on:
       docker:
         condition: service_healthy
     environment:
       OMO_UID: ${OMO_UID:-1000}
       OMO_GID: ${OMO_GID:-1000}
-      OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
+      OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,agy,gemini}
       # Host shell: export OMO_UID="$(id -u)"
       # export OMO_SSH_KEY="$HOME/.ssh/id_ed25519" (must be owner-readable, ideally 0600).
       # Then uncomment this setting and the read-only bind below.
@@ -51,7 +51,7 @@ services:
       # but can be sometimes needed, direct docker access: (remove dind above)
       # - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      # The company grants command execution. Keep it on host loopback.
+      # The web interface grants command execution. Keep it on host loopback.
       - 127.0.0.1:${OMO_PORT:-8090}:8090
     restart: unless-stopped
 
