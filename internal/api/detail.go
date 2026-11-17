@@ -27,7 +27,14 @@ type ProjectDiff struct {
 	// BaseCommit is the merge base of Base and Branch.
 	BaseCommit string `json:"base_commit"`
 	HeadCommit string `json:"head_commit"`
-	// State is ok, not_started, branch_gone, project_unavailable or failed.
+	// Recorded says the diff runs between the commits recorded when the
+	// ticket was done (BaseCommit and HeadCommit are those); it does not
+	// depend on the branch, the worktree or the base as they are now, and
+	// has no uncommitted changes.
+	Recorded bool `json:"recorded"`
+	// State is ok, not_started, branch_gone, commits_gone (the recorded
+	// commits are no longer in the repository), project_unavailable or
+	// failed.
 	State                string     `json:"state"`
 	Message              string     `json:"message"`
 	Files                []DiffFile `json:"files"`

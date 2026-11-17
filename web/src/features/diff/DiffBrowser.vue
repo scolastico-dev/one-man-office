@@ -157,7 +157,9 @@ const fmt = (n: number) => n.toLocaleString('en')
               />
             </ul>
           </template>
-          <p v-else-if="project && project.state === 'ok'" class="dbrowse__note">No commits of its own yet.</p>
+          <p v-else-if="project && project.state === 'ok'" class="dbrowse__note">
+            {{ project.recorded ? 'No changes were recorded.' : 'No commits of its own yet.' }}
+          </p>
         </section>
       </div>
     </DiffFrame>

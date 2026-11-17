@@ -2,6 +2,7 @@
 // The branch of each project of the ticket, and beside it where its export
 // stands: the pull request's link, being exported, failed with the reason,
 // left out (nothing to export) or no pull request after a failed export.
+// A done ticket names the two commits its diff was recorded with.
 // A project omo made a branch or worktree for can be taken off the ticket
 // from here ("Remove from ticket"), after a confirmation.
 import { computed, ref } from 'vue'
@@ -13,6 +14,7 @@ import FieldRow from '../FieldRow.vue'
 import RemoveProjectDialog from '../RemoveProjectDialog.vue'
 import { linkOf, projectExport, projectExportWords } from '../exportState'
 import { canRemoveProject } from '../removeProject'
+import { shortCommit } from '../../diff/shortCommit'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 const store = useBoard()
@@ -30,7 +32,13 @@ const removingProject = computed<TicketProject | null>(() => props.ticket.projec
       <span v-for="p in ticket.projects" :key="p.project" class="branch__line" :data-branch="p.project">
         <span v-if="ticket.projects.length > 1" class="branch__project">{{ nameOf(p.project) }}</span>
         <code v-if="p.branch !== ''" class="branch__name">{{ p.branch }}</code>
+        <span v-else-if="ticket.column === 'done'">{{ p.end_commit ? 'Deleted after the merge' : 'None' }}</span>
         <span v-else>Not created yet</span>
+        <span v-if="p.end_commit" class="branch__commits" :data-commits="p.project"
+          >Diff recorded when done: <code :title="p.start_commit">{{ shortCommit(p.start_commit ?? '') }}</code>..<code :title="p.end_commit">{{
+            shortCommit(p.end_commit)
+          }}</code></span
+        >
         <a v-if="linkOf(p.export_url)" :href="linkOf(p.export_url)" class="branch__pr" target="_blank" rel="noreferrer noopener" :data-export-state="'pull_request'"
           >Pull request{{ ticket.projects.length > 1 ? ` for ${nameOf(p.project)}` : '' }}</a
         >
@@ -67,6 +75,14 @@ const removingProject = computed<TicketProject | null>(() => props.ticket.projec
 .branch__name {
   font: inherit;
   overflow-wrap: anywhere;
+}
+.branch__commits {
+  color: var(--omo-muted);
+  overflow-wrap: anywhere;
+}
+.branch__commits code {
+  font: inherit;
+  color: var(--omo-fg);
 }
 .branch__pr {
   color: var(--omo-accent);

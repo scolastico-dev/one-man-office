@@ -493,6 +493,26 @@ test('dates show local time with the exact time as a tooltip; the branch and pul
   expect(row(w, 'branch').get('a').attributes('href')).toBe('https://example.com/pr/1')
 })
 
+test('a done ticket names the commits its diff was recorded with, per project', async () => {
+  const start = 'a'.repeat(40)
+  const end = 'b'.repeat(40)
+  const t = ticket({
+    number: 1,
+    column: 'done',
+    resolution: 'completed',
+    projects: [
+      { ...demo, branch: 'omo/1', start_commit: start, end_commit: end },
+      { ...other, branch: 'omo/1' },
+    ],
+  })
+  const hn = await panelHarness(seeded(t))
+  const { w } = await open(hn, 1)
+  const commits = row(w, 'branch').get('[data-commits="demo"]')
+  expect(commits.text()).toBe(`Diff recorded when done: ${'a'.repeat(12)}..${'b'.repeat(12)}`)
+  expect(commits.findAll('code').map((c) => c.attributes('title'))).toEqual([start, end])
+  expect(row(w, 'branch').find('[data-commits="other"]').exists()).toBe(false)
+})
+
 test('a working agent is named once at the top of the fields', async () => {
   const hn = await panelHarness(seeded(ticket({ number: 1, projects: [demo], column: 'in_progress', agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] })))
   const { w } = await open(hn, 1)

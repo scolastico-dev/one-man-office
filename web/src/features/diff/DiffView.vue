@@ -135,7 +135,9 @@ function selectProject(id: string) {
           <p v-if="s.truncated" class="sdiff__note" data-diff-truncated>
             More files changed than can be listed here; only the first {{ files(s.entries.length) }} are shown.
           </p>
-          <p v-if="s.entries.length === 0 && s.id === 'committed'" class="sdiff__note">No commits of its own yet.</p>
+          <p v-if="s.entries.length === 0 && s.id === 'committed'" class="sdiff__note">
+            {{ d.current.value?.recorded ? 'No changes were recorded.' : 'No commits of its own yet.' }}
+          </p>
           <DiffFileList v-if="s.entries.length >= LIST_FROM" :entries="s.entries" :label="`${s.title}: files`" @jump="jump($event, s.entries)" />
           <ul v-if="s.entries.length > 0" class="sdiff__list">
             <DiffFileView

@@ -83,7 +83,31 @@ func (s *Server) registerDiff(mux *http.ServeMux) {
 type diffTarget struct {
 	project api.TicketProject
 	base    string
+	// closed is set for a ticket done as completed or exported: its diff
+	// is the one recorded then (project.StartCommit, EndCommit).
+	closed bool
 }
+
+// recorded reports whether the diff of tg runs between recorded commits.
+func (tg diffTarget) recorded() bool { return tg.project.EndCommit != "" }
+
+// errCommitsGone is the message of a recorded diff whose commits the
+// repository lacks.
+func errCommitsGone(p api.TicketProject) string {
+	return fmt.Sprintf("The commits recorded for this diff when the ticket was done (%s..%s) are no longer in the project's repository.",
+		shortID(p.StartCommit), shortID(p.EndCommit))
+}
+
+// shortID abbreviates a commit id for a message.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// notRecorded is said for a done ticket whose diff has no recorded commits.
+const notRecorded = "omo recorded no commits for this diff when the ticket was done (it was done before omo recorded them)"
 
 // diffTargets reads the ticket as the caller (so the caller's read scope
 // decides) and returns its projects in order.
@@ -104,13 +128,14 @@ func (s *Server) diffTargets(r *http.Request, n int64) ([]diffTarget, error) {
 			storyBranch[p.Project] = p.Branch
 		}
 	}
+	closed := t.Column == api.ColumnDone && t.Resolution != api.ResolutionCancelled
 	out := make([]diffTarget, 0, len(t.Projects))
 	for _, p := range t.Projects {
 		base := p.BaseBranch
 		if storyBranch != nil {
 			base = storyBranch[p.Project]
 		}
-		out = append(out, diffTarget{project: p, base: base})
+		out = append(out, diffTarget{project: p, base: base, closed: closed})
 	}
 	return out, nil
 }
@@ -193,6 +218,12 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget, remote bool) ap
 	case proj.Missing:
 		pd.State, pd.Message = "project_unavailable", "The project's folder is missing."
 		return pd
+	case tg.recorded():
+		return s.recordedDiff(ctx, proj.Path, tg, pd)
+	case tg.project.Branch == "" && tg.closed:
+		// omo forgets a branch it deleted after the merge.
+		pd.State, pd.Message = "branch_gone", "The branch of this ticket was deleted and "+notRecorded+", so the diff cannot be shown."
+		return pd
 	case tg.project.Branch == "":
 		pd.State, pd.Message = "not_started", "Work on this ticket has not started in this project."
 		return pd
@@ -226,8 +257,15 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget, remote bool) ap
 	case err == nil:
 		pd.BaseCommit, pd.HeadCommit = res.MergeBase, res.Head
 		pd.Files, pd.FilesTruncated = diffFiles(res.Files), res.MoreFiles
+		if tg.closed {
+			pd.Message = "This compares the branch as it is now: " + notRecorded + "."
+		}
 	case ctx.Err() != nil:
 		return pd // the client left; nobody reads this
+	case errors.Is(err, gitops.ErrNoBranch) && goneBranch && tg.closed:
+		pd.State = "branch_gone"
+		pd.Message = fmt.Sprintf("The branch %s no longer exists and %s, so the diff cannot be shown.", escapeDiffPath(tg.project.Branch), notRecorded)
+		return pd
 	case errors.Is(err, gitops.ErrNoBranch) && goneBranch:
 		pd.State = "branch_gone"
 		pd.Message = fmt.Sprintf("The branch %s no longer exists; it was removed after the merge.", escapeDiffPath(tg.project.Branch))
@@ -252,6 +290,30 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget, remote bool) ap
 		case ctx.Err() == nil && pd.State == "ok":
 			pd.Message = "The uncommitted changes could not be read: " + oneLine(err.Error())
 		}
+	}
+	return pd
+}
+
+// recordedDiff is projectDiff for a done ticket's recorded commits, read
+// from the project's repository at repo: the branch, the worktree and the
+// base branch as they are now play no part.
+func (s *Server) recordedDiff(ctx context.Context, repo string, tg diffTarget, pd api.ProjectDiff) api.ProjectDiff {
+	pd.Recorded = true
+	pd.BaseCommit, pd.HeadCommit = tg.project.StartCommit, tg.project.EndCommit
+	var res gitops.DiffResult
+	err := s.inDiffSlot(ctx, func(ctx context.Context) error {
+		var err error
+		res, err = s.git.RangeDiff(ctx, repo, tg.project.StartCommit, tg.project.EndCommit, gitops.DefaultDiffLimits)
+		return err
+	})
+	switch {
+	case err == nil:
+		pd.Files, pd.FilesTruncated = diffFiles(res.Files), res.MoreFiles
+	case ctx.Err() != nil:
+	case errors.Is(err, gitops.ErrNoCommit):
+		pd.State, pd.Message = "commits_gone", errCommitsGone(tg.project)
+	default:
+		pd.State, pd.Message = "failed", oneLine(err.Error())
 	}
 	return pd
 }
@@ -310,8 +372,12 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	proj, ok := s.settings.Project(tg.project.Project)
-	if !ok || proj.Missing || tg.project.Branch == "" || tg.base == "" {
+	if !ok || proj.Missing || (!tg.recorded() && (tg.project.Branch == "" || tg.base == "")) {
 		writeError(w, r, api.Errorf(api.CodeNotFound, "there is no diff for this project"))
+		return
+	}
+	if uncommitted && tg.recorded() {
+		writeError(w, r, api.Errorf(api.CodeNotFound, "the recorded diff of a done ticket has no uncommitted changes"))
 		return
 	}
 	if uncommitted && !worktreeExists(tg.project.Worktree) {
@@ -329,6 +395,16 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 				fc, err = s.git.WorktreeFileContext(ctx, proj.Path, tg.project.Worktree, raw, lines)
 			} else {
 				fc, err = s.git.WorktreeFileDiff(ctx, proj.Path, tg.project.Worktree, raw)
+			}
+			return err
+		}
+		if tg.recorded() {
+			// What the list showed: the recorded commits, whatever base
+			// was asked for.
+			if withContext {
+				fc, err = s.git.RangeFileContext(ctx, proj.Path, tg.project.StartCommit, tg.project.EndCommit, raw, lines)
+			} else {
+				fc, err = s.git.RangeFileDiff(ctx, proj.Path, tg.project.StartCommit, tg.project.EndCommit, raw)
 			}
 			return err
 		}
@@ -364,6 +440,8 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, errTooLargeToExpand)
 	case errors.Is(err, gitops.ErrNoBranch):
 		writeError(w, r, api.Errorf(api.CodeNotFound, "a branch of this diff no longer exists"))
+	case errors.Is(err, gitops.ErrNoCommit):
+		writeError(w, r, api.Errorf(api.CodeNotFound, "%s", errCommitsGone(tg.project)))
 	default:
 		writeError(w, r, api.Errorf(api.CodeUnavailable, "the diff could not be read: %s", oneLine(err.Error())))
 	}

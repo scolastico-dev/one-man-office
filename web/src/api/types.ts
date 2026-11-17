@@ -37,6 +37,12 @@ export interface TicketProject {
   export_state: ExportState
   /** Why the export of this project failed; set with export_state "failed" only. */
   export_error: string
+  /**
+   * The commits the project's diff ran between when the ticket went from Review to Done (the merge base, the
+   * reviewed commit), full ids. Empty for a ticket that is not done, was cancelled or was done before omo recorded them.
+   */
+  start_commit?: string
+  end_commit?: string
 }
 
 /** Where the export of one project of a ticket stands; "" says nothing. */
@@ -856,7 +862,7 @@ export interface DiffFile {
 }
 
 export type DiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type_changed' | 'untracked'
-export type DiffState = 'ok' | 'not_started' | 'branch_gone' | 'project_unavailable' | 'failed'
+export type DiffState = 'ok' | 'not_started' | 'branch_gone' | 'commits_gone' | 'project_unavailable' | 'failed'
 
 export interface ProjectDiff {
   project: string
@@ -866,6 +872,8 @@ export interface ProjectDiff {
   /** The merge base. */
   base_commit: string
   head_commit: string
+  /** The diff runs between the commits recorded when the ticket was done (`base_commit`, `head_commit`), whatever the branch is now. */
+  recorded?: boolean
   state: DiffState
   message: string
   files: DiffFile[]
