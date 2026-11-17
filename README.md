@@ -58,8 +58,10 @@ updating: [Getting started](wiki/getting-started.md) and
 </picture>
 
 ```bash
-omo -d      # start in the background; prints the address with the login token
-omo stop    # stop it
+omo -d                   # start in the background; prints the address with the login token
+omo stop                 # stop it
+omo autostart register   # enable user login autostart with the current server options
+omo autostart unregister # disable user login autostart without stopping the running server
 ```
 
 Open the printed address (`http://omo.localhost:8090/#…`). At the first start
