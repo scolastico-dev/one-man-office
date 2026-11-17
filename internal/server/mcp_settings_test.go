@@ -222,7 +222,8 @@ func TestMCPServerActions(t *testing.T) {
 	empty := map[string]any{}
 	draft := api.MCPServer{Transport: api.MCPTransportStdio, Command: "srv"}
 
-	// Without the relay: the settings work, the actions answer 503.
+	// Without a relay: the settings work, the actions answer 503.
+	s.mcpConf.relay = nil
 	if list := body[api.MCPServersResponse](t, asUser(b, s, "GET", "/api/mcp/servers", nil)); len(list.Servers) != 2 || list.States == nil || len(list.States) != 0 {
 		t.Fatalf("list = %+v", list)
 	}

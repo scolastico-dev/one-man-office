@@ -273,6 +273,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		s.detectAtFirstStart()
 	}
 	s.mux = s.routes()
+	s.startMCPRelay()
 	s.background(s.settings.Run)
 	s.background(s.runEvents)
 	// The board exists: scan the workspace roots once now, then on the
@@ -319,6 +320,7 @@ func (s *Server) Close() error {
 		s.stopPlugins()
 		s.stopSkillSets()
 		s.stopUsage()
+		s.stopMCPRelay()
 		if s.db != nil {
 			s.closeErr = s.db.Close()
 		}

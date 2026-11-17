@@ -105,6 +105,7 @@ func (s *Server) mcpEmit(kind string, data any) {
 // changed. A file that could not be loaded changes nothing: its last valid
 // content stays in effect.
 func (s *Server) mcpSettingsChanged(c settings.Change) {
+	s.mcpGeneralChanged(c)
 	if c.Section != settings.SectionMCPServers || c.Err != nil || s.mcpConf.relay == nil {
 		return
 	}
@@ -325,7 +326,7 @@ func (s *Server) connectMCPServer(w http.ResponseWriter, r *http.Request) {
 	if relay == nil {
 		return
 	}
-	u, err := relay.Connect(r.Context(), m.Name)
+	u, err := relay.Connect(s.withMCPCallbackBase(r), m.Name)
 	if err != nil {
 		mcpRelayFailed(w, r, "sign-in", m.Name, err)
 		return

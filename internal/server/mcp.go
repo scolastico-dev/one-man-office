@@ -8,11 +8,13 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
+	"github.com/scolastico-dev/one-man-office/internal/mcprelay"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
@@ -39,6 +41,12 @@ type mcpEndpoint struct {
 	handler http.Handler
 	// relay offers the relayed servers; nil offers none.
 	relay mcpserver.Relay
+	// pool is the relay omo runs (mcp_relay.go); on is the general switch
+	// it last took into use; wake asks for the processes of ended sessions
+	// to be stopped.
+	pool *mcprelay.Pool
+	on   atomic.Bool
+	wake chan struct{}
 	// verify checks personal and OAuth tokens (the token store's Verify,
 	// set by registerMCPAuth); nil accepts none.
 	verify mcpTokenVerifier
@@ -186,8 +194,8 @@ func (s *Server) mcpSeen(session string) {
 	s.mcp.seen[session] = true
 }
 
-// addMCPMarks marks the sessions that used the endpoint and forgets the
-// ended ones.
+// addMCPMarks marks the live sessions that used the endpoint. The ended
+// ones are forgotten by endMCPSessions, which stops their processes.
 func (s *Server) addMCPMarks(ss []api.AgentSession) {
 	s.mcp.mu.Lock()
 	defer s.mcp.mu.Unlock()
@@ -196,7 +204,6 @@ func (s *Server) addMCPMarks(ss []api.AgentSession) {
 			continue
 		}
 		if ss[i].State == api.SessionEnded {
-			delete(s.mcp.seen, ss[i].ID)
 			continue
 		}
 		ss[i].MCP = api.MCPAgentConnected

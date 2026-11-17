@@ -18,6 +18,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -43,6 +44,12 @@ type wireServer struct {
 
 func newWireServer(t *testing.T, mode string, mutate ...func(*serverconfig.Config)) *wireServer {
 	t.Helper()
+	return newWireServerAt(t, testHome(t), mode, mutate...)
+}
+
+// newWireServerAt is newWireServer on the home l, to start a server again.
+func newWireServerAt(t *testing.T, l globalhome.Layout, mode string, mutate ...func(*serverconfig.Config)) *wireServer {
+	t.Helper()
 	var logBuf bytes.Buffer
 	cfg := testConfig(append([]func(*serverconfig.Config){func(c *serverconfig.Config) {
 		c.Auth = mode
@@ -50,7 +57,7 @@ func newWireServer(t *testing.T, mode string, mutate ...func(*serverconfig.Confi
 			c.BasicAuth = "owner:" + wireBasicPassword
 		}
 	}}, mutate...)...)
-	s, err := newServer(Options{Layout: testHome(t), Config: cfg, Version: "test"}, &syncWriter{w: &logBuf})
+	s, err := newServer(Options{Layout: l, Config: cfg, Version: "test"}, &syncWriter{w: &logBuf})
 	if err != nil {
 		t.Fatal(err)
 	}
