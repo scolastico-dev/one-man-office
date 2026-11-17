@@ -445,3 +445,33 @@ func TestEndedSessionsLeaveNoProcess(t *testing.T) {
 		t.Fatal("the process of an ended session still runs")
 	}
 }
+
+// A flood of change notices without a change lists the tools again a few
+// times at most and announces nothing.
+func TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	f.call(id, "fake__echo", nil)
+	f.pool.mu.Lock()
+	inst := f.pool.instances[instanceKey{"fake", "s"}]
+	f.pool.mu.Unlock()
+	changed, toolsChanged := f.events.count(api.KindMCPChanged), f.events.count(api.KindMCPToolsChanged)
+	gen := f.pool.Generation()
+	for range 50 {
+		inst.toolListChanged()
+	}
+	eventually(t, "the re-listing to end", func() bool {
+		inst.mu.Lock()
+		defer inst.mu.Unlock()
+		return !inst.relistQueued && inst.relists > 0
+	})
+	inst.mu.Lock()
+	relists := inst.relists
+	inst.mu.Unlock()
+	if relists > 2 {
+		t.Fatalf("listed the tools %d times for one burst of notices", relists)
+	}
+	if f.events.count(api.KindMCPChanged) != changed || f.events.count(api.KindMCPToolsChanged) != toolsChanged || f.pool.Generation() != gen {
+		t.Fatalf("an unchanged list was announced:\n%s", f.events.all())
+	}
+}

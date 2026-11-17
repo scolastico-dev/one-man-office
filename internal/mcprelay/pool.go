@@ -104,6 +104,9 @@ type tunables struct {
 	connectWait   time.Duration
 	loginWait     time.Duration
 	stopWait      time.Duration
+	// relistGap is the least time between two re-listings of an
+	// instance's tools after change notices.
+	relistGap time.Duration
 }
 
 func defaultTunables() tunables {
@@ -122,6 +125,7 @@ func defaultTunables() tunables {
 		connectWait:   30 * time.Second,
 		loginWait:     10 * time.Minute,
 		stopWait:      2 * time.Second,
+		relistGap:     2 * time.Second,
 	}
 }
 

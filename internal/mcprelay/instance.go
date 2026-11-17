@@ -60,6 +60,11 @@ type instance struct {
 	lastUsed time.Time
 	progress map[string]func(done, total float64, msg string)
 	nextTok  int
+	// relistQueued says a re-listing waits or is about to read the list;
+	// lastRelist is when the last one read it, relists how many did.
+	relistQueued bool
+	lastRelist   time.Time
+	relists      int
 }
 
 func newInstance(p *Pool, cfg api.MCPServer, key, dir string, st *serverState) *instance {
@@ -257,7 +262,7 @@ func (i *instance) connect(connCtx context.Context) error {
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "omo", Version: i.pool.o.Version}, &mcp.ClientOptions{
 		Capabilities:                &mcp.ClientCapabilities{RootsV2: &mcp.RootCapabilities{}},
-		ToolListChangedHandler:      func(context.Context, *mcp.ToolListChangedRequest) { go i.relist() },
+		ToolListChangedHandler:      func(context.Context, *mcp.ToolListChangedRequest) { i.toolListChanged() },
 		ProgressNotificationHandler: i.onProgress,
 		LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
 			data, _ := json.Marshal(req.Params.Data)
@@ -341,13 +346,42 @@ func (i *instance) list(ctx context.Context) (toolSet, error) {
 	return offerTools(i.cfg.Name, i.cfg.Tools, tools, limit), nil
 }
 
-// relist reads the tool list again after the upstream announced a change.
+// toolListChanged handles the upstream's notice of a changed tool list:
+// notices are coalesced into one re-listing at a time, at most one every
+// relistGap.
+func (i *instance) toolListChanged() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.relistQueued {
+		return
+	}
+	i.relistQueued = true
+	go i.relist()
+}
+
+// relist reads the tool list again after the upstream announced a change,
+// and announces it only when the offered tools changed.
 func (i *instance) relist() {
 	select {
 	case <-i.ready:
 	case <-time.After(startupTimeout(i.cfg)):
+		i.mu.Lock()
+		i.relistQueued = false
+		i.mu.Unlock()
 		return
 	}
+	i.mu.Lock()
+	wait := time.Until(i.lastRelist.Add(i.pool.t.relistGap))
+	i.mu.Unlock()
+	if wait > 0 {
+		time.Sleep(wait)
+	}
+	// Notices from now on need another listing.
+	i.mu.Lock()
+	i.relistQueued = false
+	i.lastRelist = time.Now()
+	i.relists++
+	i.mu.Unlock()
 	if i.err != nil || i.test {
 		return
 	}
@@ -359,8 +393,12 @@ func (i *instance) relist() {
 		return
 	}
 	i.mu.Lock()
+	same := sameTools(i.tools, set)
 	i.tools = set
 	i.mu.Unlock()
+	if same {
+		return
+	}
 	p := i.pool
 	p.mu.Lock()
 	i.publishTools()
@@ -369,6 +407,14 @@ func (i *instance) relist() {
 	p.changed(i.cfg.Name)
 	// The schema of a tool may have changed under the same name.
 	p.toolsChanged()
+}
+
+// sameTools reports whether a and b offer the same tools with the same
+// definitions and leave out the same ones.
+func sameTools(a, b toolSet) bool {
+	ja, errA := json.Marshal([]any{a.tools, a.omitted})
+	jb, errB := json.Marshal([]any{b.tools, b.omitted})
+	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
 // watch waits for the end of the connection. An end omo did not ask for

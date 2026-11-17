@@ -47,6 +47,7 @@ func testTunables() tunables {
 	t.stopWait = time.Second
 	t.connectWait = 5 * time.Second
 	t.loginWait = 10 * time.Second
+	t.relistGap = 50 * time.Millisecond
 	return t
 }
 
