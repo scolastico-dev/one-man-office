@@ -130,7 +130,7 @@ Who may approve:
 - The CEO: see [The CEO](#the-ceo).
 - A product manager **releases** the tasks it created in its story, unless
   **Tasks are released by** is **You** (Settings → Review, or per story
-  **Task release**). Then you release each task.
+  in its details). Then you release each task.
 
 Tasks of a story start only while the story is In Progress, that is once its
 product manager runs.
@@ -192,7 +192,7 @@ folder, also after Done. The folder stays after Done and after a cancel;
 in work** (2). A ticket takes a slot when it moves to In Progress and gives it
 back when it is Done, or when it is moved back to Ready For Dev or Planning;
 waiting, review and questions do not free it. Tasks in a story count too. A
-story can also limit its own parallel tasks (**Tasks at once**). The CEO never
+story can also limit its own parallel tasks (**Max parallel tasks**). The CEO never
 counts, and agents that continue started work (reviewers, export jobs, a
 developer after a rejection) are never held back. Lowering a limit stops
 nothing. A ticket that waits shows "waiting for a task slot", "waiting for a

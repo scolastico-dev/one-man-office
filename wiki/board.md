@@ -72,7 +72,7 @@ The top bar filters the board:
   project.
 - **Story**: one story and its tasks; clicking a card's story chip does the
   same.
-- **Supervisor**: Anyone, Me, CEO or Product manager.
+- **Supervisor**: Anyone, You, CEO or Product manager.
 - **Needs me**: tickets with a question for you, a review that waits for you,
   or a flag on a ticket you supervise.
 - **Search** (`/`): numbers and titles at once, descriptions through the
@@ -97,8 +97,8 @@ resets them.
 - **Description**, in Markdown. A story starts from a template with the
   headings Goal, Do, Don't and Done when.
 - **More options**: **Supervisor**, **Model** (default: the role's models),
-  **Review**, **When approved** (Merge locally or Export as pull request),
-  **Task release** and **Max parallel tasks** for a story, and **Depends on**
+  **Review**, **When approved** (Merge locally or Export as a pull request),
+  **Tasks are released by** and **Max parallel tasks** for a story, and **Depends on**
   (ticket numbers).
 
 A new ticket starts in Planning. Its base branch is the branch the project's
@@ -131,7 +131,7 @@ The ticket shows:
   anyway…** (waiting for usage), **Open terminal**, **Cancel ticket…**, and the
   buttons of plugins.
 - **Details**: Project, Story, Depends on, Blocks, Supervisor, Model, Review,
-  When approved, Tasks released by and Tasks at once (stories), Working folder
+  When approved, Tasks are released by and Max parallel tasks (stories), Working folder
   (a task without a project), Branch, Base branch, dates and the description's
   version. A field that an agent's work depends on is locked with the reason
   ("Locked while the branch omo/login exists."). Changing a field while an

@@ -11,7 +11,7 @@ export type { Filters }
 
 /** The supervisors the filter offers. */
 export const SUPERVISOR_FILTERS: ReadonlyArray<{ role: Role; label: string }> = [
-  { role: 'user', label: 'Me' },
+  { role: 'user', label: 'You' },
   { role: 'ceo', label: 'CEO' },
   { role: 'pm', label: 'Product manager' },
 ]
