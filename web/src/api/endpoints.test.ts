@@ -371,4 +371,51 @@ describe('endpoints', () => {
       '/api/plugins/a%2Fb/actions/c%20d',
     ])
   })
+
+  it('the MCP routes: writes carry If-Match where settings are written, names are escaped, apply sends only the plan hash', async () => {
+    const { client, seen } = spy()
+    const srv = { name: 'a/b' } as Parameters<typeof e.putMCPServer>[1]
+    await e.getMCPServers(client)
+    await e.putMCPServer(client, srv, '0')
+    await e.deleteMCPServer(client, 'a/b', 'rev1')
+    await e.testMCPServer(client, srv)
+    await e.restartMCPServer(client, 'a/b')
+    await e.getMCPServerLog(client, 'a/b')
+    await e.connectMCPServer(client, 'a/b')
+    await e.disconnectMCPServer(client, 'a/b')
+    await e.createMCPToken(client, { name: 'laptop' })
+    await e.revokeMCPToken(client, 'ab12')
+    await e.planMCPClient(client, 'codex-1a2b', 'install')
+    await e.applyMCPClient(client, 'codex-1a2b', 'h1')
+    await e.applyMCPTakeover(client, { take: [{ key: 'k', name: 'n' }], remove_from_cli: true })
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/mcp/servers',
+      'PUT /api/mcp/servers/a%2Fb',
+      'DELETE /api/mcp/servers/a%2Fb',
+      'POST /api/mcp/servers/test',
+      'POST /api/mcp/servers/a%2Fb/restart',
+      'GET /api/mcp/servers/a%2Fb/log',
+      'POST /api/mcp/servers/a%2Fb/connect',
+      'POST /api/mcp/servers/a%2Fb/disconnect',
+      'POST /api/mcp/tokens',
+      'DELETE /api/mcp/tokens/ab12',
+      'POST /api/mcp/clients/codex-1a2b/plan',
+      'POST /api/mcp/clients/codex-1a2b/apply',
+      'POST /api/mcp/takeover/apply',
+    ])
+    expect(seen[1]!.opts).toEqual({ ifMatch: '0' })
+    expect(seen[2]!.opts).toEqual({ ifMatch: 'rev1' })
+    expect(seen[10]!.body).toEqual({ action: 'install' })
+    expect(seen[11]!.body).toEqual({ plan: 'h1' })
+    for (const i of [4, 6, 7]) expect(seen[i]!.body).toEqual({})
+  })
+
+  it('the consent API gets the authorization request\'s query as it came and posts it back unchanged', async () => {
+    const { client, seen } = spy()
+    const q = 'client_id=omo_dcr_x&redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcb&state=a%20b'
+    await e.getOAuthConsent(client, q)
+    await e.decideOAuthConsent(client, q, false)
+    expect(seen[0]).toMatchObject({ method: 'GET', path: '/api/oauth/consent', query: { client_id: 'omo_dcr_x', redirect_uri: 'http://127.0.0.1:5/cb', state: 'a b' } })
+    expect(seen[1]).toMatchObject({ method: 'POST', path: '/api/oauth/consent', body: { query: q, approve: false } })
+  })
 })

@@ -81,6 +81,22 @@ import type {
   UsageState,
   UsageTest,
   UsageTestResult,
+  MCPClientApplied,
+  MCPClientPlan,
+  MCPClientState,
+  MCPConnect,
+  MCPLogLine,
+  MCPServer,
+  MCPServersResponse,
+  MCPTakeover,
+  MCPTakeoverApply,
+  MCPTakeoverReport,
+  MCPTestResult,
+  MCPToken,
+  MCPTokenCreated,
+  MCPTokenRequest,
+  OAuthConsent,
+  OAuthRedirect,
 } from './types'
 
 type R<T> = Promise<ApiResult<T>>
@@ -558,4 +574,93 @@ export function stageImport(c: ApiClient, file: Blob): R<ImportPlan> {
 /** Applies the uploaded zip `body.id`. */
 export function applyImport(c: ApiClient, body: ImportApply): R<ImportResult> {
   return c.send('POST', '/api/settings/import/apply', body)
+}
+
+// MCP: the servers omo relays, the agent programs' configurations, the take-over
+// of their servers, the tokens of MCP clients and the OAuth consent.
+
+export function getMCPServers(c: ApiClient): R<MCPServersResponse> {
+  return c.get('/api/mcp/servers')
+}
+
+/** A revision of "0" creates the server only when it does not exist yet. */
+export function putMCPServer(c: ApiClient, s: MCPServer, revision: string): R<MCPServer> {
+  return c.send('PUT', `/api/mcp/servers/${seg(s.name)}`, s, { ifMatch: revision })
+}
+
+export function deleteMCPServer(c: ApiClient, name: string, revision: string): R<unknown> {
+  return c.send('DELETE', `/api/mcp/servers/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+/** Starts a draft server, lists its tools and stops it; nothing is saved. */
+export function testMCPServer(c: ApiClient, s: MCPServer): R<MCPTestResult> {
+  return c.send('POST', '/api/mcp/servers/test', s)
+}
+
+export function restartMCPServer(c: ApiClient, name: string): R<unknown> {
+  return c.send('POST', `/api/mcp/servers/${seg(name)}/restart`, {})
+}
+
+export function getMCPServerLog(c: ApiClient, name: string): R<MCPLogLine[]> {
+  return c.get(`/api/mcp/servers/${seg(name)}/log`)
+}
+
+/** Starts omo's sign-in at a server with auth oauth; answers the address the browser opens. */
+export function connectMCPServer(c: ApiClient, name: string): R<MCPConnect> {
+  return c.send('POST', `/api/mcp/servers/${seg(name)}/connect`, {})
+}
+
+export function disconnectMCPServer(c: ApiClient, name: string): R<unknown> {
+  return c.send('POST', `/api/mcp/servers/${seg(name)}/disconnect`, {})
+}
+
+/** The personal access tokens and OAuth grants of MCP clients (no secrets). */
+export function listMCPTokens(c: ApiClient): R<MCPToken[]> {
+  return c.get('/api/mcp/tokens')
+}
+
+/** Creates a personal access token; its secret is in this answer only. */
+export function createMCPToken(c: ApiClient, req: MCPTokenRequest): R<MCPTokenCreated> {
+  return c.send('POST', '/api/mcp/tokens', req)
+}
+
+/** Revokes a personal access token or an OAuth grant. */
+export function revokeMCPToken(c: ApiClient, id: string): R<unknown> {
+  return c.send('DELETE', `/api/mcp/tokens/${seg(id)}`)
+}
+
+/** The agent programs' configurations and whether omo is registered in each (values masked). */
+export function listMCPClients(c: ApiClient): R<MCPClientState[]> {
+  return c.get('/api/mcp/clients')
+}
+
+/** What installing or removing omo's entry would run; nothing runs. */
+export function planMCPClient(c: ApiClient, target: string, action: 'install' | 'remove'): R<MCPClientPlan> {
+  return c.send('POST', `/api/mcp/clients/${seg(target)}/plan`, { action })
+}
+
+/** Runs a plan shown before, named by its hash; a changed file is refused with 409. */
+export function applyMCPClient(c: ApiClient, target: string, hash: string): R<MCPClientApplied> {
+  return c.send('POST', `/api/mcp/clients/${seg(target)}/apply`, { plan: hash })
+}
+
+/** The servers of the agent programs' files omo can take over, and those that stay (values masked). */
+export function getMCPTakeover(c: ApiClient): R<MCPTakeover> {
+  return c.get('/api/mcp/takeover')
+}
+
+export function applyMCPTakeover(c: ApiClient, body: MCPTakeoverApply): R<MCPTakeoverReport> {
+  return c.send('POST', '/api/mcp/takeover/apply', body)
+}
+
+/** Checks the authorization request whose query is `query` (as in the address of /oauth/authorize). */
+export function getOAuthConsent(c: ApiClient, query: string): R<OAuthConsent> {
+  const q: Record<string, string> = {}
+  for (const [k, v] of new URLSearchParams(query)) q[k] = v
+  return c.get('/api/oauth/consent', q)
+}
+
+/** The user's answer to the authorization request; answers where the browser goes next. */
+export function decideOAuthConsent(c: ApiClient, query: string, approve: boolean): R<OAuthRedirect> {
+  return c.send('POST', '/api/oauth/consent', { query, approve })
 }
