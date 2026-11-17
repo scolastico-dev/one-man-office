@@ -1,6 +1,9 @@
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import UsageMeter, { resetWords } from './UsageMeter.vue'
+
+// The shown times share one clock (useNow): a view left mounted would keep it running into the next test.
+enableAutoUnmount(afterEach)
 
 const NOW = '2026-11-15T12:00:30Z'
 

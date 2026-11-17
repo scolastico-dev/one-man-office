@@ -1,6 +1,9 @@
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import RelativeTime from './RelativeTime.vue'
+
+// The shown times share one clock (useNow): a view left mounted would keep it running into the next test.
+enableAutoUnmount(afterEach)
 
 const FULL: Intl.DateTimeFormatOptions = { dateStyle: 'full', timeStyle: 'medium' }
 

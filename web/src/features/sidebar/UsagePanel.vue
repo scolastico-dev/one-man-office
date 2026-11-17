@@ -5,7 +5,8 @@
 // script's error when its last run failed, and the models agents are kept
 // off. Names, window names and error texts come from outside and are shown
 // as text.
-import { computed, onBeforeUnmount, ref, useId } from 'vue'
+import { computed, useId } from 'vue'
+import { useNow } from '../../components/ui/useNow'
 import { RouterLink, useRoute } from 'vue-router'
 import type { ModelUsage, UsageReading, UsageWindow } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
@@ -23,10 +24,7 @@ const store = useBoard()
 const route = useRoute()
 const headingId = useId()
 
-const MINUTE = 60_000
-const now = ref(Date.now())
-const timer = setInterval(() => (now.value = Date.now()), MINUTE)
-onBeforeUnmount(() => clearInterval(timer))
+const now = useNow()
 
 const STATE_WORDS = { soft: 'near its limit', hard: 'at its limit' } as const
 

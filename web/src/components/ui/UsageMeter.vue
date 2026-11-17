@@ -49,7 +49,8 @@ export function resetWords(at: string, now: number): string {
 // bar with marks where agents start to wait (soft) and where they are
 // stopped (hard), the state in words beside the number, and when the window
 // resets. Colour only repeats what the words say.
-import { computed, onBeforeUnmount, ref, useId } from 'vue'
+import { computed, useId } from 'vue'
+import { useNow } from './useNow'
 import { visibleText } from './visibleText'
 
 const props = withDefaults(
@@ -82,9 +83,7 @@ const STATE_WORDS: Record<UsageMeterState, string> = {
 
 const labelId = useId()
 
-const now = ref(Date.now())
-const timer = setInterval(() => (now.value = Date.now()), MINUTE)
-onBeforeUnmount(() => clearInterval(timer))
+const now = useNow()
 
 /** The share used, between 0 and 100, or null when there is none. */
 const value = computed(() => {

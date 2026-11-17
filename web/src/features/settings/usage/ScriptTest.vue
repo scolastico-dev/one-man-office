@@ -7,7 +7,8 @@
 // with, its log and how long it took. Everything in it comes from the
 // script, so names, errors and log lines go through visibleText. Once the
 // text or the profile changes, the result says it belongs to an earlier one.
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useNow } from '../../../components/ui/useNow'
 import { fieldOf } from '../../../api/client'
 import { getProfiles, testUsageScript } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
@@ -66,9 +67,10 @@ const running = ref(false)
 watch(running, (b) => emit('busy', b))
 const result = ref<(UsageTestResult & { profile: string; at: string; draft: string }) | null>(null)
 
-const now = ref(Date.now())
-const timer = setInterval(() => (now.value = Date.now()), 60_000)
-onBeforeUnmount(() => clearInterval(timer))
+/** The page's clock, or the moment of the newest result when the clock has not ticked since. */
+const clock = useNow()
+const resultTime = ref(0)
+const now = computed(() => Math.max(clock.value, resultTime.value))
 /** The windows of the result, each judged as the server would judge a reading taken at the test. */
 const meters = computed(() => {
   const r = result.value
@@ -88,7 +90,7 @@ async function run() {
   try {
     const { data } = await testUsageScript(client, props.name, { text: draft, profile: as })
     result.value = { ...data, profile: as, at: new Date().toISOString(), draft }
-    now.value = Date.now()
+    resultTime.value = Date.now()
     announce.polite(data.error ? 'The script failed.' : `The script reported ${data.windows.length} ${data.windows.length === 1 ? 'window' : 'windows'}.`)
   } catch (e) {
     const text = failureText(e, { lost: 'No answer from omo; the test may still be running. Try again in a minute.', refused: 'The test was refused.' })

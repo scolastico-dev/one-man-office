@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // A point in time as "3 min ago", with the full local date and time in the
 // tooltip and the exact value in `datetime`. Follows the clock each minute.
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed } from 'vue'
 import { timeKey } from '../../api/time'
+import { useNow } from './useNow'
 
 const props = defineProps<{
   /** RFC 3339, as the server writes it. */
@@ -15,9 +16,7 @@ const DAY = 24 * HOUR
 /** Older than this shows the date instead of a count of days. */
 const DAYS_SHOWN = 7
 
-const now = ref(Date.now())
-const timer = setInterval(() => (now.value = Date.now()), MINUTE)
-onBeforeUnmount(() => clearInterval(timer))
+const now = useNow()
 
 /** Milliseconds since the epoch, or null for text that is no RFC 3339 time. */
 const ms = computed(() => {
