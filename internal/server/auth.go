@@ -51,7 +51,7 @@ func (s *Server) BrowserHandler() http.Handler {
 			return
 		}
 		if ownAuth(r.URL.Path) {
-			s.serveMCP(w, r, false)
+			s.serveOwnAuth(w, r, false)
 			return
 		}
 		switch s.opts.Config.Auth {

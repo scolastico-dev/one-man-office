@@ -383,13 +383,11 @@ func TestMCPWithoutSessionGetsNoOmoTools(t *testing.T) {
 	})
 	t.Run("personal token", func(t *testing.T) {
 		s := newTestServer(t)
-		s.mcp.verify = func(_ context.Context, token, resource string) (string, error) {
-			if token != "omo_pat_good" || !strings.HasSuffix(resource, "/mcp") {
-				return "", api.Errorf(api.CodeUnauthorized, "unknown token")
-			}
-			return api.MCPTokenPAT, nil
+		_, secret, err := s.mcpAuth.tokens.CreatePAT(context.Background(), "laptop", nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-		check(t, viaBearer(t, s, "omo_pat_good"))
+		check(t, viaBearer(t, s, secret))
 	})
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
@@ -27,8 +28,7 @@ var sessionBearer = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // error for a token it does not accept.
 type mcpTokenVerifier func(ctx context.Context, token, resource string) (kind string, err error)
 
-// refuseMCPTokens accepts no token: no personal access token or OAuth
-// grant exists yet.
+// refuseMCPTokens accepts no token; it stands in for a missing verifier.
 func refuseMCPTokens(context.Context, string, string) (string, error) {
 	return "", api.Errorf(api.CodeUnauthorized, "unknown or expired token")
 }
@@ -39,7 +39,8 @@ type mcpEndpoint struct {
 	handler http.Handler
 	// relay offers the relayed servers; nil offers none.
 	relay mcpserver.Relay
-	// verify checks personal and OAuth tokens; nil accepts none.
+	// verify checks personal and OAuth tokens (the token store's Verify,
+	// set by registerMCPAuth); nil accepts none.
 	verify mcpTokenVerifier
 
 	mu sync.Mutex
@@ -47,11 +48,23 @@ type mcpEndpoint struct {
 	seen map[string]bool
 }
 
-// ownAuth reports whether path authenticates its callers itself, with
-// bearer tokens, and is exempt from basic and login-token authentication
-// and from the JSON content rule.
+// ownAuth reports whether path authenticates its callers itself and is
+// exempt from basic and login-token authentication and from the JSON
+// content rule: /mcp with bearer tokens, and the OAuth endpoints outside
+// /api (oauthPublicRoutes). serveOwnAuth serves them.
 func ownAuth(path string) bool {
-	return path == mcpPath
+	return path == mcpPath || oauthPublicPaths[path]
+}
+
+// serveOwnAuth serves a path for which ownAuth is true: /mcp, or an OAuth
+// endpoint from a mux that holds nothing else, so a wrong method reaches no
+// other route.
+func (s *Server) serveOwnAuth(w http.ResponseWriter, r *http.Request, local bool) {
+	if r.URL.Path == mcpPath {
+		s.serveMCP(w, r, local)
+		return
+	}
+	s.mcpAuth.public.ServeHTTP(w, r)
 }
 
 // mcpHandler returns the handler of /mcp, built at its first use.
@@ -61,9 +74,10 @@ func (s *Server) mcpHandler() http.Handler {
 			Dispatch: func(id mcpserver.Identity) *apiclient.Client {
 				return apiclient.NewWithTransport(apiclient.HandlerTransport(s.SocketHandler()), id.Session)
 			},
-			Seen:    s.mcpSeen,
-			Log:     s.log,
-			Version: s.opts.Version,
+			Settings: s.mcpSettings,
+			Seen:     s.mcpSeen,
+			Log:      s.log,
+			Version:  s.opts.Version,
 		}
 		if s.mcp.relay != nil {
 			opts.Relay = s.mcp.relay
@@ -80,11 +94,16 @@ func (s *Server) mcpHandler() http.Handler {
 // session on the socket and with auth none; elsewhere it is refused. An
 // unknown or ended session is refused and never taken for anything else.
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request, local bool) {
+	if !s.mcpSettings().Enabled {
+		// Switched off, the endpoint does not exist, for every caller.
+		http.NotFound(w, r)
+		return
+	}
 	id, err := s.mcpIdentity(r, local)
 	if err != nil {
 		var e *api.Error
 		if errors.As(err, &e) && !local && (e.Code == api.CodeUnauthorized || e.Code == api.CodeUnknownSession) {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource%s", scope="mcp"`, s.requestBase(r), mcpPath))
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s%s%s", scope="%s"`, s.mcpBase(r), mcpauth.PathResourceMetadata, mcpPath, mcpauth.Scope))
 		}
 		writeError(w, r, err)
 		return
@@ -128,7 +147,7 @@ func (s *Server) mcpIdentity(r *http.Request, local bool) (mcpserver.Identity, e
 	if verify == nil {
 		verify = refuseMCPTokens
 	}
-	kind, err := verify(ctx, token, s.requestBase(r)+mcpPath)
+	kind, err := verify(ctx, token, s.mcpResource(r))
 	if err != nil {
 		// Never the verifier's own words: they might quote the token.
 		return mcpserver.Identity{}, api.Errorf(api.CodeUnauthorized, "unknown or expired token")
@@ -151,16 +170,10 @@ func (s *Server) agentIdentity(ctx context.Context, a board.Actor, via string) (
 	return id, nil
 }
 
-// requestBase is the scheme and host the request was sent to, after the
-// Host check: https for a TLS connection and for the host of an https
-// public_url, whose proxy ends TLS.
-func (s *Server) requestBase(r *http.Request) string {
-	scheme := "http"
-	host, _, _, _ := splitHostHeader(r.Host)
-	if p, ok := s.opts.Config.Public(); r.TLS != nil || ok && p.Scheme == "https" && strings.EqualFold(p.Host, host) {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
+// mcpSettings are the switches of the MCP endpoint in the general
+// settings, read at every request.
+func (s *Server) mcpSettings() api.MCPSettings {
+	return s.settings.General().MCP
 }
 
 // mcpSeen records that an agent session used the endpoint.

@@ -232,9 +232,6 @@ func TestMCPServerActions(t *testing.T) {
 		{"GET", "/api/mcp/servers/docs/log", nil},
 		{"POST", "/api/mcp/servers/github/connect", empty},
 		{"POST", "/api/mcp/servers/github/disconnect", empty},
-		{"GET", "/api/mcp/tokens", nil},
-		{"POST", "/api/mcp/tokens", api.MCPTokenRequest{Name: "laptop"}},
-		{"DELETE", "/api/mcp/tokens/0123456789abcdef", nil},
 		{"GET", "/oauth/callback?state=x", nil},
 	} {
 		if got := asUser(b, s, c.method, c.path, c.body).StatusCode; got != http.StatusServiceUnavailable {

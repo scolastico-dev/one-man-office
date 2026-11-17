@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -18,25 +19,64 @@ type mcpAuthFeature struct {
 	as *mcpauth.AS
 	// upstream keeps the relay's sign-ins at upstream servers.
 	upstream *mcpauth.Upstream
+	// public serves oauthPublicRoutes and nothing else.
+	public *http.ServeMux
 }
+
+// oauthPublicRoutes are the endpoints of the OAuth authorization server
+// outside /api. MCP clients call them before they hold any credential of
+// omo, so they authenticate by their own means (PKCE, refresh token, signed
+// client id) and are served without omo's basic credentials or login token
+// (ownAuth). The consent page /oauth/authorize, the provider callback
+// /oauth/callback and the consent API are not among them: they keep omo's
+// protection.
+var oauthPublicRoutes = []string{
+	"GET " + mcpauth.PathResourceMetadata,
+	"GET " + mcpauth.PathResourceMetadata + mcpauth.PathMCP,
+	"GET " + mcpauth.PathServerMetadata,
+	"POST " + mcpauth.PathToken,
+	"POST " + mcpauth.PathRegister,
+	"POST " + mcpauth.PathRevoke,
+}
+
+// oauthPublicPaths are the paths of oauthPublicRoutes.
+var oauthPublicPaths = func() map[string]bool {
+	out := map[string]bool{}
+	for _, pattern := range oauthPublicRoutes {
+		_, path, _ := strings.Cut(pattern, " ")
+		out[path] = true
+	}
+	return out
+}()
 
 // registerMCPAuth serves the OAuth authorization server of /mcp: the two
 // metadata documents, registration, token and revocation endpoints (outside
-// /api, as the RFCs place them; they authenticate by their own means), and
-// the consent API of the web app's /oauth/authorize page, for the user only.
+// /api, as the RFCs place them; they authenticate by their own means and are
+// served by their own mux, see oauthPublicRoutes), and the consent API of
+// the web app's /oauth/authorize page, for the user only. It hands the
+// token store to /mcp, which verifies personal and OAuth tokens with it, and
+// to the token routes of the settings.
 func (s *Server) registerMCPAuth(mux *http.ServeMux) {
 	tokens := mcpauth.NewStore(s.db, nil)
 	s.mcpAuth = mcpAuthFeature{
 		tokens:   tokens,
 		as:       mcpauth.NewAS(tokens, nil, s.log),
 		upstream: mcpauth.NewUpstream(s.db, nil),
+		public:   http.NewServeMux(),
 	}
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.getMCPResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.getMCPResourceMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.getMCPServerMetadata)
-	mux.Handle("POST /oauth/token", s.mcpAuth.as.Token())
-	mux.Handle("POST /oauth/register", s.mcpAuth.as.Register())
-	mux.Handle("POST /oauth/revoke", s.mcpAuth.as.Revoke())
+	s.mcp.verify = func(ctx context.Context, token, resource string) (string, error) {
+		g, err := tokens.Verify(ctx, token, resource)
+		return g.Kind, err
+	}
+	s.mcpConf.tokens = tokens
+	// The patterns are those of oauthPublicRoutes.
+	public := s.mcpAuth.public
+	public.HandleFunc("GET /.well-known/oauth-protected-resource", s.getMCPResourceMetadata)
+	public.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.getMCPResourceMetadata)
+	public.HandleFunc("GET /.well-known/oauth-authorization-server", s.getMCPServerMetadata)
+	public.Handle("POST /oauth/token", s.mcpAuth.as.Token())
+	public.Handle("POST /oauth/register", s.mcpAuth.as.Register())
+	public.Handle("POST /oauth/revoke", s.mcpAuth.as.Revoke())
 	s.registerRoutes(mux, []apiRoute{
 		{"GET /api/oauth/consent", s.getOAuthConsent, userOnly},
 		{"POST /api/oauth/consent", s.postOAuthConsent, userOnly},
