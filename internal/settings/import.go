@@ -166,7 +166,8 @@ func (s *Store) CheckFiles(scratch string, files map[string][]byte) []FileError 
 // to the home, with slashes) again, also when write failed (it may have put
 // back what it had replaced). The changes are delivered as the store's own,
 // not as hand edits, like those of a save. write replaces files on disk and
-// must not call the store.
+// must not call the store. The error is write's: a folder that cannot be
+// read while loading is read again by the next Reload, as Reload does.
 func (s *Store) Replace(paths []string, write func() error) error {
 	var err error
 	s.mutate(func() ([]Change, error) {
@@ -174,10 +175,7 @@ func (s *Store) Replace(paths []string, write func() error) error {
 		for _, rel := range paths {
 			delete(s.files, filepath.Join(s.root, filepath.FromSlash(rel)))
 		}
-		changes, scanErr := s.scan()
-		if err == nil {
-			err = scanErr
-		}
+		changes, _ := s.scan()
 		return changes, nil
 	})
 	return err

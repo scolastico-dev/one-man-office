@@ -694,3 +694,36 @@ func TestExportRefusesBrokenSettingsFiles(t *testing.T) {
 		t.Fatal("the refused export wrote a zip")
 	}
 }
+
+// An apply that fails after the database was placed leaves the waiting
+// zip as it was: a second apply, once the cause is gone, imports it with
+// its database.
+func TestAFailedApplyKeepsTheDatabaseForTheNextTry(t *testing.T) {
+	a := newHome(t)
+	a.fill(t)
+	zipped := a.export(t, true)
+	b := newHome(t)
+	plan := b.stage(t, zipped)
+	// A folder where the zip has a profile: the copy of the replaced
+	// files fails.
+	blocker := filepath.Join(b.Layout.Root, "profiles", "work.yaml")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Apply(context.Background(), plan.ID, ApplyOptions{Database: true, Now: time.Now()}); err == nil {
+		t.Fatal("the apply succeeded over a folder")
+	}
+	if _, err := os.Stat(filepath.Join(b.Layout.Root, PendingDatabase)); !os.IsNotExist(err) {
+		t.Fatal("a failed import left a database waiting")
+	}
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.Apply(context.Background(), plan.ID, ApplyOptions{Database: true, Now: time.Now()})
+	if err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if !res.DatabasePending {
+		t.Fatalf("result %+v", res)
+	}
+}

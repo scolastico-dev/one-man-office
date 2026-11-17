@@ -208,8 +208,9 @@ type ApplyOptions struct {
 // asked) are written to temporary names, the files they replace are copied
 // into a new folder below BackupFolder, and the temporary files are renamed
 // into place, all while the settings store lets no other write in. When a
-// rename fails, the files already renamed are put back and the waiting
-// database is removed, so nothing is half applied. Files of the allowlist
+// rename fails, the files already renamed are put back and the database
+// goes back to the waiting zip, so nothing is half applied and the zip can
+// be applied again. Files of the allowlist
 // the zip does not hold are left as they are. The store then loads the
 // written files and reports the changes as its own, as after a save.
 func (h Home) Apply(ctx context.Context, id string, o ApplyOptions) (api.ImportResult, error) {
@@ -243,8 +244,18 @@ func (h Home) Apply(ctx context.Context, id string, o ApplyOptions) (api.ImportR
 		}
 	}
 	pending := filepath.Join(h.Layout.Root, PendingDatabase)
+	staged := filepath.Join(dir, DatabaseName)
+	// unplace puts the database back into the waiting zip's folder after a
+	// failure, so that the next try finds it there.
+	unplace := func() {
+		if o.Database {
+			if err := os.Rename(pending, staged); err != nil {
+				os.Remove(pending)
+			}
+		}
+	}
 	if o.Database {
-		if err := os.Rename(filepath.Join(dir, DatabaseName), pending); err != nil {
+		if err := os.Rename(staged, pending); err != nil {
 			return res, fmt.Errorf("place the imported database: %w", err)
 		}
 	}
@@ -260,9 +271,7 @@ func (h Home) Apply(ctx context.Context, id string, o ApplyOptions) (api.ImportR
 			err = copyFiles(h.Layout.Root, backup, replaced, h.limit)
 		}
 		if err != nil {
-			if o.Database {
-				os.Remove(pending)
-			}
+			unplace()
 			return res, fmt.Errorf("keep a copy of the replaced files: %w", err)
 		}
 	}
@@ -270,9 +279,7 @@ func (h Home) Apply(ctx context.Context, id string, o ApplyOptions) (api.ImportR
 		return replaceFiles(h.Layout.Root, backup, writes, a.files)
 	})
 	if err != nil {
-		if o.Database {
-			os.Remove(pending)
-		}
+		unplace()
 		return res, err
 	}
 	os.RemoveAll(h.staging())
