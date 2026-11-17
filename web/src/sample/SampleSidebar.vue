@@ -15,7 +15,7 @@ const tab = defineModel<string>('tab', { required: true })
 defineProps<{ usage?: boolean }>()
 
 const tabs = computed<UiTab[]>(() => [
-  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO when it is not running' },
+  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO unless you stopped it; a stopped CEO starts with its Start button' },
   { id: 'agents', label: 'Agents', count: sampleAgents.length },
   { id: 'terminals', label: 'Terminals', count: 3 },
 ])

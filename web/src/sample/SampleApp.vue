@@ -99,7 +99,7 @@ const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches)
 narrowQuery.addEventListener('change', onNarrow)
 onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
 const sheetTabs = [
-  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO when it is not running' },
+  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO unless you stopped it; a stopped CEO starts with its Start button' },
   { id: 'agents', label: 'Agents', count: sampleAgents.length },
   { id: 'terminals', label: 'Terminals', count: 3 },
 ]

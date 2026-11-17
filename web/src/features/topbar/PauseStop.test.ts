@@ -9,6 +9,7 @@ import { createAppRouter } from '../../router'
 import { createSession, SESSION } from '../../session'
 import { FakeOmo, MemoryStorage } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
+import { agent, emitAgent } from '../sidebar/sidebarTesting'
 
 let mounted: VueWrapper | null = null
 beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
@@ -113,10 +114,12 @@ test('without the server confirming, the switch shows the server state again aft
 
 test('stop all asks first, says what it does, and shows a refusal in the server words', async () => {
   const calls: unknown[][] = []
-  const { wrapper } = await boot(async (...a) => {
+  const { wrapper, omo } = await boot(async (...a) => {
     calls.push(a)
     throw new ApiError(503, 'unavailable', 'agents are not available in this server')
   })
+  emitAgent(omo, 'agent.created', agent({ id: 'c1', role: 'ceo' }))
+  await flushPromises()
   await wrapper.get('button[aria-label="Stop all agents"]').trigger('click')
   await flushPromises()
   expect(calls).toEqual([])
@@ -141,4 +144,24 @@ test('stop all closes the dialog and confirms when the server did it', async () 
   await flushPromises()
   expect((stopDialog(wrapper).element as HTMLDialogElement).open).toBe(false)
   expect(activeToasts.map((t) => t.title)).toContain('All agents stopped')
+})
+
+test('stop all mentions the CEO only while one runs', async () => {
+  const { wrapper, omo } = await boot(async () => ({}))
+  await wrapper.get('button[aria-label="Stop all agents"]').trigger('click')
+  await flushPromises()
+  expect(stopDialog(wrapper).text()).not.toContain('CEO')
+  await stopDialog(wrapper).findAll('button').find((b) => b.text() === 'Stop all agents')!.trigger('click')
+  await flushPromises()
+  expect(activeToasts.map((t) => t.message)).toEqual(['omo is paused.'])
+  for (const t of [...activeToasts]) useToast().dismiss(t.id)
+
+  emitAgent(omo, 'agent.created', agent({ id: 'c1', role: 'ceo' }))
+  await flushPromises()
+  await wrapper.get('button[aria-label="Stop all agents"]').trigger('click')
+  await flushPromises()
+  expect(stopDialog(wrapper).text()).toContain('The CEO keeps running')
+  await stopDialog(wrapper).findAll('button').find((b) => b.text() === 'Stop all agents')!.trigger('click')
+  await flushPromises()
+  expect(activeToasts.map((t) => t.message)).toEqual(['omo is paused. The CEO is still running.'])
 })

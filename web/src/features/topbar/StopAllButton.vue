@@ -1,16 +1,20 @@
 <script setup lang="ts">
 // "Stop all agents": asks for confirmation, then stops them (`stopAllAgents`)
 // and reports the server's answer in words, including when omo refuses.
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { stopAllAgents } from '../../api/endpoints'
 import { isLostAnswer } from '../../api/lostAnswer'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useToast } from '../../components/ui/useToast'
 import { useSession } from '../../session'
+import { useAgents } from '../sidebar/useAgents'
 
 const { client } = useSession()
 const toast = useToast()
+const agents = useAgents()
+/** The CEO is the one agent that stopping all agents leaves alone; it is only worth a word while it runs. */
+const ceoRuns = computed(() => agents.sessions.value.some((s) => s.role === 'ceo'))
 const open = ref(false)
 const busy = ref(false)
 const error = ref('')
@@ -32,7 +36,7 @@ async function confirm() {
   try {
     await stopAllAgents(client)
     open.value = false
-    toast.show({ title: 'All agents stopped', message: 'omo is paused. The CEO is still running.' })
+    toast.show({ title: 'All agents stopped', message: ceoRuns.value ? 'omo is paused. The CEO is still running.' : 'omo is paused.' })
   } catch (e) {
     if (isLostAnswer(e)) {
       // The request may have gone through; the dialog stays so the answer is not mistaken for a failure.
@@ -59,7 +63,8 @@ async function confirm() {
   </UiButton>
   <UiDialog :open="open" title="Stop every running agent?" @close="open = false">
     <p class="stop__text">
-      omo pauses and ends every running agent at once, without asking them to hand over first. The CEO keeps running.
+      omo pauses and ends every running agent at once, without asking them to hand over first.
+      <template v-if="ceoRuns">The CEO keeps running.</template>
       Tickets keep their state; work in progress stays in the worktrees.
     </p>
     <p v-if="error" class="stop__error" role="alert" data-stop-error>{{ error }}</p>

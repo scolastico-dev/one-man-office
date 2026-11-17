@@ -23,7 +23,7 @@ export const sidebarTabs: SidebarTab[] = [
   {
     id: 'ceo',
     label: 'CEO',
-    hint: 'Starts the CEO when it is not running',
+    hint: 'Starts the CEO unless you stopped it; a stopped CEO starts with its Start button',
     visible: (ctx) => ctx.ceoEnabled,
     component: lazyComponent(() => import('./CeoTab.vue')),
   },
