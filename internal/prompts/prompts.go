@@ -84,6 +84,9 @@ type Data struct {
 	CEOEnabled   bool
 	// CEOMayApprove is the setting that lets the CEO approve stories.
 	CEOMayApprove bool
+	// CEOTicketsNeedApproval is the setting that makes the tickets the CEO
+	// creates wait for the user's approval; for the CEO's prompt only.
+	CEOTicketsNeedApproval bool
 	// AgentReview is true when an agent reviews the story.
 	AgentReview bool
 	// Export is what an export job needs; empty for every other prompt.

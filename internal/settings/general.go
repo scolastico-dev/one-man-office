@@ -34,7 +34,7 @@ const defaultMaxDepth = discover.DefaultMaxDepth
 func Defaults() General {
 	return General{
 		Limits: api.LimitSettings{Tasks: 4, Stories: 2},
-		CEO:    api.CEOSettings{Enabled: true, MayApproveStories: false},
+		CEO:    api.CEOSettings{Enabled: true, MayApproveStories: false, TicketsNeedUserApproval: true},
 		Tasks:  api.TaskSettings{RequireUserRelease: false},
 		ReviewDefaults: api.ReviewDefaults{Story: api.ReviewAgentThenHuman, Task: api.ReviewAgentThenHuman,
 			StoryTask: api.ReviewAgent},

@@ -114,8 +114,17 @@ type UISettings struct {
 
 // CEOSettings switches the CEO agent and its powers.
 type CEOSettings struct {
-	Enabled           bool `yaml:"enabled" json:"enabled"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// MayApproveStories lets the CEO approve stories. While
+	// TicketsNeedUserApproval is on it covers only stories the user
+	// created.
 	MayApproveStories bool `yaml:"may_approve_stories" json:"may_approve_stories"`
+	// TicketsNeedUserApproval makes every ticket the CEO creates (stories
+	// and standalone tasks, with or without a project) wait in Planning
+	// until the user approves it: the CEO neither approves nor withdraws
+	// them, whatever MayApproveStories and the task release say. Tasks a
+	// product manager creates in a story are not affected.
+	TicketsNeedUserApproval bool `yaml:"tickets_need_user_approval" json:"tickets_need_user_approval"`
 }
 
 // TaskSettings holds the defaults for tasks.

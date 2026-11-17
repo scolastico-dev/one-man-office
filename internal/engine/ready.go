@@ -77,6 +77,7 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 	d.Instructions = skillsets.Join(d.Instructions, skillsets.Text(name, e.st.SkillSets(), skillsets.CheckoutIn(e.o.Layout.Skills)))
 	if a.Role == api.RoleCEO {
 		d.Home, d.ServerLog = e.o.Layout.Root, filepath.Join(e.o.Layout.Run, "omo.log")
+		d.CEOTicketsNeedApproval = g.CEO.TicketsNeedUserApproval
 		return e.renderPrompt(name, d), nil
 	}
 

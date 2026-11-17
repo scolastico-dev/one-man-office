@@ -71,6 +71,7 @@ func SampleData(name string) Data {
 	switch name {
 	case "ceo":
 		d := role("Nora", "ceo")
+		d.CEOTicketsNeedApproval = true
 		d.Home, d.ServerLog = "/home/you/.local/omo", "/home/you/.local/omo/run/omo.log"
 		return d
 	case "pm":

@@ -233,15 +233,21 @@ func mayCancel(a Actor, t ticketRow) bool {
 }
 
 // checkRelease applies the rule for who gives the green light to t and who
-// may withdraw it: the user always; the CEO a story only while "CEO may
-// approve stories" is on; the CEO a standalone task it created and a pm a
-// task it created in its story, both only while the effective task release
-// is agents.
+// may withdraw it: the user always; the CEO never a ticket it created while
+// "The CEO's tickets wait for your approval" is on; otherwise the CEO a
+// story only while "CEO may approve stories" is on; the CEO a standalone
+// task it created and a pm a task it created in its story, both only while
+// the effective task release is agents.
 func checkRelease(q db.Queryer, p Policy, a Actor, t ticketRow) error {
 	switch a.Role {
 	case api.RoleUser:
 		return nil
 	case api.RoleCEO:
+		if p.CEOTicketsNeedUserApproval && t.CreatedByRole == api.RoleCEO {
+			return api.Errorf(api.CodeForbidden,
+				"the user approves the tickets the CEO creates (setting \"The CEO's tickets wait for your approval\" is on): "+
+					"only the user approves #%d or withdraws its approval; tell the user that #%d waits in Planning for their approval", t.ID, t.ID)
+		}
 		if t.isStory() {
 			if !p.CEOMayApproveStories {
 				return api.Errorf(api.CodeForbidden,

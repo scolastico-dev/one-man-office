@@ -18,14 +18,15 @@ type boardEnv struct {
 func (e boardEnv) Policy() board.Policy {
 	g := e.st.General()
 	return board.Policy{
-		CEOEnabled:              g.CEO.Enabled,
-		CEOMayApproveStories:    g.CEO.MayApproveStories,
-		TasksRequireUserRelease: g.Tasks.RequireUserRelease,
-		ReviewStory:             g.ReviewDefaults.Story,
-		ReviewTask:              g.ReviewDefaults.Task,
-		ReviewStoryTask:         g.ReviewDefaults.StoryTask,
-		WhenApprovedStory:       g.WhenApprovedDefaults.Story,
-		WhenApprovedTask:        g.WhenApprovedDefaults.Task,
+		CEOEnabled:                 g.CEO.Enabled,
+		CEOMayApproveStories:       g.CEO.MayApproveStories,
+		CEOTicketsNeedUserApproval: g.CEO.TicketsNeedUserApproval,
+		TasksRequireUserRelease:    g.Tasks.RequireUserRelease,
+		ReviewStory:                g.ReviewDefaults.Story,
+		ReviewTask:                 g.ReviewDefaults.Task,
+		ReviewStoryTask:            g.ReviewDefaults.StoryTask,
+		WhenApprovedStory:          g.WhenApprovedDefaults.Story,
+		WhenApprovedTask:           g.WhenApprovedDefaults.Task,
 	}
 }
 

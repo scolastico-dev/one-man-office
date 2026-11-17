@@ -156,7 +156,7 @@ func TestGeneralJSONMatchesYAMLKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"limits":{"tasks":4,"stories":2}`, `"may_approve_stories":false`, `"silent_after":"15m"`, `"rescan_interval":"10m"`, `"handoff_timeout":"2m"`} {
+	for _, key := range []string{`"limits":{"tasks":4,"stories":2}`, `"may_approve_stories":false`, `"tickets_need_user_approval":true`, `"silent_after":"15m"`, `"rescan_interval":"10m"`, `"handoff_timeout":"2m"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("json lacks %s: %s", key, b)
 		}
@@ -360,6 +360,28 @@ func TestOpenTicketsAsPageIsOffByDefault(t *testing.T) {
 	raw, _ := os.ReadFile(path)
 	if !strings.Contains(string(raw), "open_tickets_as_page: false") || s.General().UI.OpenTicketsAsPage {
 		t.Fatalf("the write did not keep the key:\n%s", raw)
+	}
+}
+
+func TestCEOTicketsNeedUserApprovalIsOnByDefault(t *testing.T) {
+	if !Defaults().CEO.TicketsNeedUserApproval {
+		t.Fatal("ceo.tickets_need_user_approval is off in the defaults")
+	}
+	// A file that names other CEO keys but not this one keeps it on.
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "settings.yaml")
+	writeFile(t, path, "ceo:\n  enabled: true\n  may_approve_stories: true\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 0 || !s.General().CEO.TicketsNeedUserApproval {
+		t.Fatalf("errors %+v, on %v", errs, s.General().CEO.TicketsNeedUserApproval)
+	}
+	if !LoadGeneral(path).CEO.TicketsNeedUserApproval {
+		t.Fatal("LoadGeneral reads the file as off")
+	}
+	writeFile(t, path, "ceo:\n  tickets_need_user_approval: false\n")
+	s.Reload()
+	if g := s.General(); g.CEO.TicketsNeedUserApproval || !g.CEO.Enabled {
+		t.Fatalf("ceo %+v", g.CEO)
 	}
 }
 

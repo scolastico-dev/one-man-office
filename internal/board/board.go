@@ -17,14 +17,19 @@ import (
 
 // Policy carries the global settings the board rules depend on.
 type Policy struct {
-	CEOEnabled              bool
-	CEOMayApproveStories    bool
-	TasksRequireUserRelease bool
-	ReviewStory             api.Review
-	ReviewTask              api.Review
-	ReviewStoryTask         api.Review
-	WhenApprovedStory       api.WhenApproved
-	WhenApprovedTask        api.WhenApproved
+	CEOEnabled           bool
+	CEOMayApproveStories bool
+	// CEOTicketsNeedUserApproval: the tickets the CEO creates wait in
+	// Planning until the user approves them; the CEO neither approves nor
+	// withdraws them, whatever CEOMayApproveStories and the task release
+	// say.
+	CEOTicketsNeedUserApproval bool
+	TasksRequireUserRelease    bool
+	ReviewStory                api.Review
+	ReviewTask                 api.Review
+	ReviewStoryTask            api.Review
+	WhenApprovedStory          api.WhenApproved
+	WhenApprovedTask           api.WhenApproved
 }
 
 // ProjectInfo is what the board needs to know about a registered project.

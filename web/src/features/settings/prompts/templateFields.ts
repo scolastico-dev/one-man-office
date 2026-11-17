@@ -34,6 +34,7 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   },
   { name: 'CEOEnabled', text: 'True when the CEO is on.' },
   { name: 'CEOMayApprove', text: 'True when the CEO may approve stories.' },
+  { name: 'CEOTicketsNeedApproval', text: "For the CEO: true when the tickets it creates wait for the user's approval." },
   { name: 'AgentReview', text: 'True when an agent reviews the story.' },
   { name: 'StopReason', text: "For the handoff prompt: usage when the agent's model reached its usage limit, empty when omo is stopping." },
   { name: 'Home', text: "For the CEO: omo's home folder, which holds its settings files." },
