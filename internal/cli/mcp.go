@@ -53,20 +53,40 @@ func addMCPCommand(root *cobra.Command) {
 	}
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show what omo's MCP endpoint offers here",
-		Long: "Connect to omo's MCP endpoint as `omo mcp stdio` would in this terminal and list the tools\n" +
-			"it offers.",
+		Short: "Show the relayed MCP servers and what omo's MCP endpoint offers here",
+		Long: "List the MCP servers omo relays with their states (outside an agent session), then connect\n" +
+			"to omo's MCP endpoint as `omo mcp stdio` would in this terminal and list the tools it offers.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			session, dial, err := mcpbridge.Environment()
 			if err != nil {
 				return err
 			}
+			out := cmd.OutOrStdout()
+			if session == "" {
+				// The servers' settings are the user's only.
+				c, err := apiclient.FromEnvironment()
+				if err != nil {
+					return err
+				}
+				var general api.SettingsResponse
+				if err := c.Do(cmd.Context(), http.MethodGet, "/api/settings", nil, &general); err != nil {
+					return err
+				}
+				if !general.Settings.MCP.Enabled {
+					fmt.Fprintln(out, "MCP is switched off in omo's settings (MCP, General switches): omo serves no MCP endpoint and runs no MCP server.")
+					return nil
+				}
+				var list api.MCPServersResponse
+				if err := c.Do(cmd.Context(), http.MethodGet, "/api/mcp/servers", nil, &list); err != nil {
+					return err
+				}
+				printMCPServers(out, list)
+			}
 			st, err := mcpbridge.Inspect(cmd.Context(), dial, session, version)
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			who := "not tied to an omo agent session (OMO_AGENT_ID is not set)"
 			if session != "" {
 				who = "the agent session of OMO_AGENT_ID"
@@ -90,6 +110,55 @@ func addMCPCommand(root *cobra.Command) {
 
 // mcpTokenCommand is `omo mcp token`: the personal access tokens MCP
 // clients outside omo reach /mcp with, through the running omo's routes.
+// mcpStateWords are the states of relayed servers in the words of the
+// settings page.
+var mcpStateWords = map[string]string{
+	api.MCPStateStopped:    "not running",
+	api.MCPStateStarting:   "starting",
+	api.MCPStateRunning:    "running",
+	api.MCPStateFailed:     "failed",
+	api.MCPStateNeedsLogin: "needs login",
+	api.MCPStateDisabled:   "off",
+}
+
+// printMCPServers prints each stored server with its state, its tools while
+// it runs, its last failure and who gets it, as the settings page shows them.
+func printMCPServers(out io.Writer, list api.MCPServersResponse) {
+	fmt.Fprintf(out, "servers (%d):", len(list.Servers))
+	if len(list.Servers) == 0 {
+		fmt.Fprintln(out, " none")
+		return
+	}
+	fmt.Fprintln(out)
+	for _, m := range list.Servers {
+		st := api.MCPServerState{State: api.MCPStateStopped}
+		for _, s := range list.States {
+			if s.Name == m.Name {
+				st = s
+			}
+		}
+		words, ok := mcpStateWords[st.State]
+		if !ok {
+			words = st.State
+		}
+		if st.State == api.MCPStateRunning {
+			words += fmt.Sprintf(", %d tools", len(st.Tools))
+		}
+		if st.LastError != "" && st.State != api.MCPStateRunning && st.State != api.MCPStateDisabled {
+			words += " (" + aicmd.OneLine(st.LastError) + ")"
+		}
+		roles := "every role"
+		if len(m.Roles) > 0 {
+			roles = strings.Join(m.Roles, ", ")
+		}
+		reach := "only omo's sessions"
+		if m.Global {
+			reach = "also without an omo session"
+		}
+		fmt.Fprintf(out, "    %s: %s; for %s, %s\n", aicmd.OneLine(m.Name), words, roles, reach)
+	}
+}
+
 func mcpTokenCommand() *cobra.Command {
 	token := &cobra.Command{
 		Use:   "token",

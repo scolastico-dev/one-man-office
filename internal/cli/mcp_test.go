@@ -26,6 +26,40 @@ func TestMCPStatusWithoutSession(t *testing.T) {
 	contains(t, out, "tools (0): none")
 }
 
+// The status lists the stored servers with their states, in the words of
+// the settings page, for the user.
+func TestMCPStatusListsTheServersAndTheirStates(t *testing.T) {
+	e := startAI(t)
+	for _, m := range []api.MCPServer{
+		{Name: "files", Enabled: true, Transport: api.MCPTransportStdio, Command: "files-mcp", Roles: []string{"developer", "reviewer"}},
+		{Name: "docs", Enabled: false, Transport: api.MCPTransportHTTP, URL: "https://docs.example.invalid/mcp", Global: true},
+	} {
+		if err := e.user.Do(context.Background(), http.MethodPut, "/api/mcp/servers/"+m.Name, m, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := mustExecute(t, "mcp", "status")
+	contains(t, out, "servers (2):\n")
+	contains(t, out, "    docs: off; for every role, also without an omo session\n")
+	contains(t, out, "    files: not running; for developer, reviewer, only omo's sessions\n")
+	contains(t, out, "tools (0): none")
+}
+
+// Switched off in the general settings, the status says so instead of
+// failing on the endpoint that is not there.
+func TestMCPStatusWhenSwitchedOff(t *testing.T) {
+	e := startAI(t)
+	patch := map[string]any{"mcp": map[string]any{"enabled": false, "inject": map[string]any{"claude": true, "codex": true}}}
+	if err := e.user.Do(context.Background(), http.MethodPatch, "/api/settings", patch, nil); err != nil {
+		t.Fatal(err)
+	}
+	out := mustExecute(t, "mcp", "status")
+	contains(t, out, "MCP is switched off in omo's settings")
+	if strings.Contains(out, "tools (") {
+		t.Fatalf("status:\n%s", out)
+	}
+}
+
 func TestMCPStatusOfAnAgentSession(t *testing.T) {
 	e := startAI(t)
 	s, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RoleCEO, Name: "Ada", Model: "m/x", Workdir: t.TempDir(), LogPath: t.TempDir() + "/l"})
