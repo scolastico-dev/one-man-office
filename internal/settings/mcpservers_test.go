@@ -207,7 +207,7 @@ func TestMCPServerDefaultsAndFile(t *testing.T) {
 	}
 	got, _ := s.MCPServer("remote")
 	got.Revision = ""
-	want := normalizeMCPServer(m)
+	want := NormalizeMCPServer(m)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("server = %+v, want %+v", got, want)
 	}

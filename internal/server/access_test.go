@@ -94,7 +94,7 @@ var guardedPrefixes = []string{
 	"/api/settings", "/api/profiles", "/api/models", "/api/roles", "/api/prompts",
 	"/api/projects", "/api/folders", "/api/agent-setup",
 	"/api/usage", "/api/skillsets", "/api/plugins", "/api/images", "/api/terminal-images",
-	"/api/oauth",
+	"/api/mcp", "/api/oauth",
 }
 
 // guardedTicketRoutes are the routes below /api/tickets/{n} that must be in

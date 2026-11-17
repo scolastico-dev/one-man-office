@@ -69,7 +69,7 @@ func (s *Store) mcpServerKind() *kind {
 				return err
 			}
 			m.Name = name
-			m = normalizeMCPServer(m)
+			m = NormalizeMCPServer(m)
 			if err := validateMCPServer(m); err != nil {
 				return err
 			}
@@ -89,10 +89,10 @@ func remote(transport string) bool {
 	return transport == api.MCPTransportHTTP || transport == api.MCPTransportSSE
 }
 
-// normalizeMCPServer copies the lists and maps (empty ones for none), fills
+// NormalizeMCPServer copies the lists and maps (empty ones for none), fills
 // what a file may leave out (instances per_session for stdio; auth headers
 // for a remote server with headers, else none) and drops the revision.
-func normalizeMCPServer(m MCPServer) MCPServer {
+func NormalizeMCPServer(m MCPServer) MCPServer {
 	m.Args = append([]string{}, m.Args...)
 	m.Env = maps.Clone(m.Env)
 	if m.Env == nil {
@@ -342,7 +342,7 @@ func ValidateMCPServer(m MCPServer) error {
 	if !mcpServerPattern.MatchString(m.Name) {
 		return apiError(api.CodeValidation, fieldErr("name", "the MCP server name must match %s (at most 24 characters)", mcpServerPattern))
 	}
-	if err := validateMCPServer(normalizeMCPServer(m)); err != nil {
+	if err := validateMCPServer(NormalizeMCPServer(m)); err != nil {
 		return apiError(api.CodeValidation, err)
 	}
 	return nil
@@ -354,7 +354,7 @@ func (s *Store) MCPServers() []MCPServer {
 	defer s.mu.RUnlock()
 	out := make([]MCPServer, 0, len(s.mcp))
 	for name, m := range s.mcp {
-		m = normalizeMCPServer(m)
+		m = NormalizeMCPServer(m)
 		m.Revision = s.revisionLocked(s.mcpServerPath(name))
 		out = append(out, m)
 	}
@@ -370,7 +370,7 @@ func (s *Store) MCPServer(name string) (MCPServer, bool) {
 	if !ok {
 		return MCPServer{}, false
 	}
-	m = normalizeMCPServer(m)
+	m = NormalizeMCPServer(m)
 	m.Revision = s.revisionLocked(s.mcpServerPath(name))
 	return m, true
 }
@@ -384,7 +384,7 @@ func (s *Store) PutMCPServerIf(rev string, m MCPServer) error {
 	if err := ValidateMCPServer(m); err != nil {
 		return err
 	}
-	m = normalizeMCPServer(m)
+	m = NormalizeMCPServer(m)
 	data, err := encodeYAML(m)
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode MCP server: %v", err)

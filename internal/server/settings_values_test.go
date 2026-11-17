@@ -48,6 +48,10 @@ var valueAnswers = map[string]bool{
 	"PATCH /api/settings":      true,
 	"GET /api/profiles":        true,
 	"PUT /api/profiles/{name}": true,
+	// The MCP servers as stored.
+	"GET /api/mcp/servers":        true,
+	"GET /api/mcp/servers/{name}": true,
+	"PUT /api/mcp/servers/{name}": true,
 }
 
 // valueServer opens a server with its log in logOut and stores the canaries
@@ -79,6 +83,10 @@ func valueServer(t *testing.T, logOut io.Writer) *Server {
 		},
 	}
 	if err := s.settings.PutProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.settings.PutMCPServerIf("", api.MCPServer{Name: "claude", Transport: api.MCPTransportHTTP, URL: "https://mcp.example.invalid/",
+		Headers: map[string]string{"Authorization": canaryProfile}, Env: map[string]string{"KEY": canaryModel}}); err != nil {
 		t.Fatal(err)
 	}
 	s.waitSettingsEvents(context.Background())

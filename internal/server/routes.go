@@ -36,6 +36,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerSkillSets(mux)
 	s.registerPlugins(mux)
 	s.registerMCPAuth(mux)
+	s.registerMCPSettings(mux)
 	mux.HandleFunc("/api", apiNotFound)
 	mux.HandleFunc("/api/", apiNotFound)
 	s.registerSPA(mux)
