@@ -4,7 +4,7 @@ import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
 import { expectCardIn, observe, openBoard } from './support/board'
 import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
-import type { Locator, Page } from '@playwright/test'
+import type { Locator, Page, WebSocketRoute } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { makeWorkspace, type Workspace } from './support/workspace'
 
@@ -160,6 +160,47 @@ test('pasted text cannot end bracketed paste early: nothing after ESC[201~ runs 
     await expectTerminalText(terminal, 'anchor=7')
     await expect(terminal.locator('.xterm-rows')).not.toContainText('pasted=42')
     await expect(terminal.locator('.xterm-rows')).not.toContainText('INJECTED=2')
+  } finally {
+    await closeAll(omo)
+  }
+})
+
+/** How often `text` occurs in what the terminal's screen shows. */
+async function occurrences(terminal: Locator, text: string): Promise<number> {
+  const shown = (await terminal.locator('.xterm-rows').textContent()) ?? ''
+  return shown.split(text).length - 1
+}
+
+test('a terminal whose connection drops connects again and shows its history once', async ({ page, omo }) => {
+  // Every terminal socket goes through here; the ones open so far can be dropped.
+  const open: WebSocketRoute[] = []
+  await page.routeWebSocket(/\/api\/terminals\/[^/]+\/socket$/, (ws) => {
+    const server = ws.connectToServer()
+    open.push(ws)
+    ws.onClose(() => server.close())
+  })
+  try {
+    await openBoard(page, omo)
+    await openTerminalsTab(page)
+    await newTerminal(sidebar(page))
+    const terminal = terminalIn(sidebar(page))
+    await typeInTerminal(page, terminal, 'echo once=$((40 + 2))')
+    await expectTerminalText(terminal, 'once=42')
+    expect(await occurrences(terminal, 'once=42')).toBe(1)
+
+    // A network blip: the socket closes without a word from omo.
+    const before = open.length
+    for (const ws of open.splice(0)) await ws.close({ code: 4000, reason: 'dropped' })
+    await expect(sidebar(page).locator('.tv__state')).toHaveText(/^Disconnected/)
+    await expect.poll(() => open.length).toBeGreaterThan(0)
+    expect(before).toBeGreaterThan(0)
+    await expect(sidebar(page).locator('.tv__state')).toHaveText('Connected')
+    await expectTerminalText(terminal, 'once=42')
+    expect(await occurrences(terminal, 'once=42')).toBe(1)
+    // It is the same shell, and it takes input again.
+    await typeInTerminal(page, terminal, 'echo after=$((6 * 7))')
+    await expectTerminalText(terminal, 'after=42')
+    expect(await occurrences(terminal, 'once=42')).toBe(1)
   } finally {
     await closeAll(omo)
   }

@@ -55,6 +55,8 @@ function make(fetchStatus = 503) {
   const data: Uint8Array[] = []
   const replays: boolean[] = []
   const errors: string[] = []
+  /** What reached the view, in order: 'start' for each replay start, else the decoded output. */
+  const seen: string[] = []
   const fetch = vi.fn(async (_url: string, _init?: unknown) => ({ status: fetchStatus, body: null }))
   const c = createTerminalConnection({
     path: '/api/terminals/t1/socket',
@@ -62,12 +64,14 @@ function make(fetchStatus = 503) {
     onData: (d, replay) => {
       data.push(d)
       replays.push(replay)
+      seen.push(new TextDecoder().decode(d))
     },
+    onReplayStart: () => seen.push('start'),
     onState: (s, w) => states.push([s, w]),
     onError: (e) => errors.push(e),
     deps: deps(fetch),
   })
-  return { c, states, data, replays, errors, fetch, sock: () => FakeSocket.all[FakeSocket.all.length - 1]! }
+  return { c, states, data, replays, errors, seen, fetch, sock: () => FakeSocket.all[FakeSocket.all.length - 1]! }
 }
 
 describe('terminal socket', () => {
@@ -87,6 +91,21 @@ describe('terminal socket', () => {
     sock().message(JSON.stringify({ type: 'replay-end' }))
     sock().message(bytes('live'))
     expect(replays).toEqual([true, false, true, false])
+    c.dispose()
+  })
+
+  test('every connection announces its replay before the first output, so the view can clear what an earlier one showed', async () => {
+    const { c, seen, sock } = make()
+    const bytes = (t: string) => new TextEncoder().encode(t).buffer
+    sock().open()
+    sock().message(bytes('history'))
+    sock().message(JSON.stringify({ type: 'replay-end' }))
+    sock().message(bytes('more'))
+    sock().drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    sock().open()
+    sock().message(bytes('history+more'))
+    expect(seen).toEqual(['start', 'history', 'more', 'start', 'history+more'])
     c.dispose()
   })
 
@@ -202,6 +221,7 @@ describe('terminal socket', () => {
       path: '/x',
       getToken: () => TOKEN,
       onData: () => {},
+      onReplayStart: () => {},
       onState: (s) => states.push(s),
       onError: () => {},
       deps: {

@@ -497,6 +497,8 @@ function start(el: HTMLElement): void {
       replaying++
       t.write(data, () => replaying--)
     },
+    // Every connection replays the whole history: the screen starts empty for it.
+    onReplayStart: () => t.reset(),
     onState,
     onError: (text) => {
       inputError.value = text

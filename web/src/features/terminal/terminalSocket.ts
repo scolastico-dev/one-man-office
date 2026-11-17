@@ -32,6 +32,12 @@ export interface ConnectionOptions {
    * replays on every new connection, up to its end-of-replay frame.
    */
   onData(data: Uint8Array, replay: boolean): void
+  /**
+   * A connection opened; its replay of the whole history follows. What the
+   * screen shows from an earlier connection must go first, or the history
+   * would be shown twice.
+   */
+  onReplayStart(): void
   /** `retryMs` is set while a reconnect is scheduled. */
   onState(state: ConnectionState, retryMs?: number): void
   /** A refusal of input, in words. */
@@ -96,6 +102,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
       if (disposed || socket !== s) return
       opened = true
       failures = 0
+      o.onReplayStart()
       state('live')
       if (size) sendSize(s, size)
       mine.flush()

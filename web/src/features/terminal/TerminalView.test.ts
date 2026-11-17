@@ -79,6 +79,12 @@ vi.mock('@xterm/xterm', () => {
       this.cols = c
       this.rows = r
     }
+    resets = 0
+    /** A full reset: the screen and its history are empty afterwards. */
+    reset() {
+      this.resets++
+      this.written = []
+    }
     focus = vi.fn()
     dispose() {
       this.disposed = true
@@ -182,6 +188,20 @@ describe('TerminalView', () => {
     expect(w.findAll('button').some((b) => b.text() === 'Reconnect')).toBe(false)
     expect(emitted()).toEqual(['live', 'disconnected', 'ended'])
     expect(term().options.disableStdin).toBe(true)
+  })
+
+  test('a new connection empties the screen before its replay, so a reconnect shows the history once', () => {
+    view()
+    const t = term()
+    const bytes = (x: string) => new TextEncoder().encode(x)
+    conn().o.onReplayStart()
+    conn().o.onData(bytes('line 1\r\n'), true)
+    conn().o.onData(bytes('line 2\r\n'), false)
+    // The connection dropped and opened again: the server replays everything.
+    conn().o.onReplayStart()
+    conn().o.onData(bytes('line 1\r\nline 2\r\n'), true)
+    expect(t.resets).toBe(2)
+    expect(t.written.map((d: Uint8Array) => new TextDecoder().decode(d))).toEqual(['line 1\r\nline 2\r\n'])
   })
 
   test('fill makes the view take the height of its column; by default it keeps its own', () => {
