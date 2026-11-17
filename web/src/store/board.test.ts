@@ -391,6 +391,28 @@ describe('loading and the stream', () => {
     expect(f.store.state.general?.limits.tasks).toBe(7)
   })
 
+  test('settings.changed general reads the projects again: their merge modes in effect may have changed', async () => {
+    const f = await started({ tickets: [], event_id: 1 }, { projects: [project('api')] })
+    const before = f.client.open('GET', '/api/projects').length
+    f.client.auto.set('/api/projects', () => [{ ...project('api'), effective_merge: { story: 'pr', task: 'pr', story_task: 'merge' } }])
+    f.send(ev(2, 'settings.changed', { section: 'general', name: '' }))
+    await flush()
+    expect(f.client.open('GET', '/api/projects')).toHaveLength(before + 1)
+    expect(f.store.state.projects.get('api')?.effective_merge.task).toBe('pr')
+  })
+
+  test('a failed refreshProjects keeps the projects, logs and does not reject', async () => {
+    const f = await started({ tickets: [], event_id: 1 }, { projects: [project('api')] })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    f.client.auto.delete('/api/projects')
+    const done = f.store.refreshProjects()
+    f.client.last('GET', '/api/projects').answer.reject(new Error('503'))
+    await expect(done).resolves.toBeUndefined()
+    expect(f.store.state.projects.has('api')).toBe(true)
+    expect(errors).toHaveBeenCalled()
+    errors.mockRestore()
+  })
+
   test('refreshProjects asks again when a project event arrived meanwhile', async () => {
     const f = await started({ tickets: [], event_id: 1 })
     f.client.auto.delete('/api/projects')

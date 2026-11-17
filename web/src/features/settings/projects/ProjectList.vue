@@ -47,14 +47,12 @@ async function readDefaults() {
   }
 }
 
-// A change of the general settings may change the merge modes in effect of
-// every project without a mode of its own, and sends no project event.
+// A change of the general settings changes the defaults' words (the store
+// reads the projects again itself).
 const offs = [
   store.onEvent('projects.scanned', () => void store.refreshProjects()),
   store.onEvent('settings.changed', (ev) => {
-    if ((ev.data as Partial<SettingsChangedData> | null)?.section !== 'general') return
-    void store.refreshProjects()
-    void readDefaults()
+    if ((ev.data as Partial<SettingsChangedData> | null)?.section === 'general') void readDefaults()
   }),
 ]
 onBeforeUnmount(() => offs.forEach((off) => off()))

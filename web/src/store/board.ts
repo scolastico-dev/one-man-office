@@ -89,6 +89,10 @@ export interface BoardStore {
    * and then resolves with `unknown`: the board shows what the server did.
    */
   requestMove(n: number, to: Column, before: number | null, opts?: { reject?: { comment: string } }): Promise<MoveOutcome>
+  /**
+   * Reads the projects again (with their merge modes in effect). A failed read
+   * is logged and keeps the projects shown; it never rejects.
+   */
   refreshProjects(): Promise<void>
   /**
    * Adds tickets from a list answer (search hits); never replaces newer
@@ -329,6 +333,9 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     if (ev.kind === 'project.changed' || ev.kind === 'project.removed') projectMark++
     if (ev.kind === 'settings.changed' && (ev.data as SettingsChangedData | null)?.section === 'general') {
       void refreshSettings()
+      // The general merge defaults decide the modes in effect of every project
+      // without its own; no project event says so.
+      void refreshProjects()
     }
     for (const kind of [ev.kind, '*']) {
       const set = handlers.get(kind)
@@ -559,13 +566,17 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
   }
 
   async function refreshProjects(): Promise<void> {
-    for (let attempt = 0; ; attempt++) {
-      const mark = projectMark
-      const list = (await listProjects(client, true)).data
-      if (mark !== projectMark && attempt < 2) continue
-      state.projects.clear()
-      for (const p of list) state.projects.set(p.id, p)
-      return
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const mark = projectMark
+        const list = (await listProjects(client, true)).data
+        if (mark !== projectMark && attempt < 2) continue
+        state.projects.clear()
+        for (const p of list) state.projects.set(p.id, p)
+        return
+      }
+    } catch (e) {
+      report(e)
     }
   }
 
