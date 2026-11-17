@@ -62,7 +62,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <p v-if="truncated" class="log__note" data-log-truncated>Showing the last 2 MiB.</p>
       <p v-if="text === ''" class="log__note" data-log-empty>The log is empty.</p>
-      <pre v-else class="log__text" tabindex="0" aria-label="Log of the agent session">{{ shown }}</pre>
+      <pre v-else class="omo-logtext log__text" tabindex="0" aria-label="Log of the agent session">{{ shown }}</pre>
     </template>
   </div>
 </template>
@@ -102,7 +102,6 @@ onBeforeUnmount(() => {
   font-family: var(--omo-font);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
-  white-space: pre;
 }
 .log__text:focus-visible {
   outline-offset: calc(var(--omo-focus-width) * -1);

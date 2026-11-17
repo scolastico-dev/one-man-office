@@ -100,6 +100,15 @@
 
 /* Shared looks of the base components in components/ui. */
 @layer components {
+  /*
+   * Text a program wrote (a log, a test's output): lines kept, long ones broken
+   * wherever they must be, so a path, a URL or a JSON blob never widens its box.
+   */
+  .omo-logtext {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .omo-btn {
     display: inline-flex;
     align-items: center;

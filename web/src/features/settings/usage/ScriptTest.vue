@@ -141,7 +141,7 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
         <p v-else-if="!result.error" class="script-test__head" data-test-no-windows>The script reported no window.</p>
         <div v-if="result.log.length" class="script-test__log">
           <p class="script-test__log-label">Log</p>
-          <pre class="script-test__log-text" tabindex="0" aria-label="Log of the test" data-test-log>{{ visibleLines(result.log.join('\n')) }}</pre>
+          <pre class="omo-logtext script-test__log-text" tabindex="0" aria-label="Log of the test" data-test-log>{{ visibleLines(result.log.join('\n')) }}</pre>
         </div>
       </div>
     </div>
@@ -206,7 +206,6 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
   font-family: inherit;
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
-  white-space: pre;
 }
 .script-test__log-text:focus-visible {
   outline-offset: calc(var(--omo-focus-width) * -1);

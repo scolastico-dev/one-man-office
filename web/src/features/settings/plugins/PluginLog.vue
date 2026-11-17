@@ -56,7 +56,7 @@ const label = computed(() => `Log of ${visibleText(props.name)}`)
     </div>
     <p v-if="error" class="plugin-log__error" role="alert">{{ visibleText(error) }}</p>
     <p v-else-if="lines !== null && lines.length === 0" class="plugin-log__empty" data-plugin-log-empty>No log lines yet.</p>
-    <pre v-if="lines !== null && lines.length > 0" class="plugin-log__text" tabindex="0" :aria-label="label" data-plugin-log-text>{{ text }}</pre>
+    <pre v-if="lines !== null && lines.length > 0" class="omo-logtext plugin-log__text" tabindex="0" :aria-label="label" data-plugin-log-text>{{ text }}</pre>
   </div>
 </template>
 
@@ -101,7 +101,6 @@ const label = computed(() => `Log of ${visibleText(props.name)}`)
   font-family: inherit;
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
-  white-space: pre;
 }
 .plugin-log__text:focus-visible {
   outline-offset: calc(var(--omo-focus-width) * -1);
