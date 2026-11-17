@@ -17,6 +17,7 @@ import { ROLE_LABELS } from '../board/model'
 import { STORY_TEMPLATE } from '../create/createRules'
 import DescriptionView from './DescriptionView.vue'
 import ImageAttach from '../images/ImageAttach.vue'
+import { submitKeyName } from '../../components/ui/submitKey'
 import { createImageUploads } from '../images/imageUploads'
 import { ticketDrafts } from './drafts'
 
@@ -165,7 +166,7 @@ defineExpose({ save })
     <div class="editor__row">
       <UiButton type="submit" variant="primary" :disabled="saving || uploads.busy.value > 0" data-save-description>{{ saving ? 'Saving…' : 'Save' }}</UiButton>
       <UiButton @click="emit('close')">Cancel</UiButton>
-      <span class="editor__muted editor__keys">Ctrl+Enter saves.</span>
+      <span class="editor__muted editor__keys">{{ submitKeyName() }} saves.</span>
     </div>
   </form>
 </template>

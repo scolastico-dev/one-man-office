@@ -17,6 +17,7 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import type { TicketSummary } from '../../api/types'
 import { ticketDrafts } from '../ticket/drafts'
+import { submitKeyName } from '../../components/ui/submitKey'
 import ImageAttach from '../images/ImageAttach.vue'
 import { createImageUploads, type UploadImage } from '../images/imageUploads'
 import { askTargets, mentionOptions, type MentionContext, type MentionOption } from './mentions'
@@ -274,7 +275,7 @@ defineExpose({ focus })
     <div class="composer__actions">
       <UiButton variant="primary" type="submit" :disabled="!canSend" data-send>{{ busy ? 'Sending…' : label }}</UiButton>
     </div>
-    <p class="composer__hint">Ctrl+Enter sends.</p>
+    <p class="composer__hint">{{ submitKeyName() }} sends.</p>
   </form>
 </template>
 

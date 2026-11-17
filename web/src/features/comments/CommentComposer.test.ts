@@ -227,3 +227,13 @@ test('composer: without an upload function there is no image button', () => {
   mountComposer()
   expect(w!.find('[data-add-image]').exists()).toBe(false)
 })
+
+test('composer: Cmd+Enter sends as Ctrl+Enter does, and the hint names the key of the platform', async () => {
+  const sent: CommentRequest[] = []
+  mountComposer({ send: async (r) => (sent.push(r), []) })
+  await type('From a Mac')
+  await box().trigger('keydown', { key: 'Enter', metaKey: true })
+  await flushPromises()
+  expect(sent).toEqual([{ body: 'From a Mac', question: false }])
+  expect(w!.get('.composer__hint').text()).toMatch(/^(Ctrl|Cmd)\+Enter sends\.$/)
+})
