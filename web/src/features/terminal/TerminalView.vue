@@ -16,6 +16,7 @@ import { uploadTerminalImage } from '../../api/endpoints'
 import { MAX_IMAGE_BYTES } from '../images/imageUploads'
 import { createLinkHandler, openLink } from './terminalLinks'
 import { cleanPaste, guardPaste } from './terminalPaste'
+import { lineBreakKey } from './terminalKeys'
 import { clipboardKey, execCopy, parseOsc52, writeClipboard } from './terminalClipboard'
 import { isImageFile, pastedPaths } from './terminalImages'
 import { usePopouts } from './popout'
@@ -170,6 +171,13 @@ function clipboardKeyPressed(t: Terminal, ev: KeyboardEvent): boolean | undefine
     }
     if (action === 'copy-clear') t.clearSelection()
   }
+/** Typed input on its way to the program. */
+function sendInput(data: string): void {
+  if (props.readonly || state.value === 'ended' || replaying > 0) return
+  inputError.value = ''
+  connection?.send(data)
+}
+
   return false
 }
 
@@ -474,11 +482,7 @@ function start(el: HTMLElement): void {
     if (ev.type === 'keydown') copyPendingNow()
     return true
   })
-  t.onData((data) => {
-    if (props.readonly || state.value === 'ended' || replaying > 0) return
-    inputError.value = ''
-    connection?.send(data)
-  })
+  t.onData(sendInput)
 
   stopTheme = watchTheme(() => {
     if (!term || !host.value) return
@@ -558,7 +562,6 @@ defineExpose({
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
       <span class="tv__tools">
-        <Toggle v-model="screenReader" size="sm" label="Screen reader mode" />
         <IconButton v-if="target && state !== 'ended'" class="tv__popout" size="sm" variant="default" :label="popoutLabel" data-terminal-popout @click="popOut">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.3">
             <path d="M5 1.5H1.5v9h9V7" />
