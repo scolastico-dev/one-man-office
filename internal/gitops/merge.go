@@ -263,6 +263,9 @@ func (g *Git) commitOf(repo, rev string) (string, error) {
 }
 
 func (g *Git) commitIn(at where, rev string) (string, error) {
+	if err := checkBranchRev(rev); err != nil {
+		return "", err
+	}
 	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: at.dir, wt: at.wt},
 		"rev-parse", "--verify", "--quiet", "--end-of-options", rev+"^{commit}")
 	if err != nil {
@@ -756,6 +759,23 @@ func (g *Git) refValueIn(at where, ref string) (string, error) {
 
 // checkBranchName refuses names git would not accept as a branch, and names
 // that could be read as an option.
+// checkBranchRev refuses a revision that starts as a branch's full ref
+// (refs/heads/<name>) but is something else: a name with revision syntax,
+// such as refs/heads/main~3 or refs/heads/main^2, would resolve to another
+// commit than the branch's. omo builds such revisions from recorded branch
+// names; only its own peel ^{commit} may follow the name.
+func checkBranchRev(rev string) error {
+	name, ok := strings.CutPrefix(rev, "refs/heads/")
+	if !ok {
+		return nil
+	}
+	name = strings.TrimSuffix(name, "^{commit}")
+	if name == "" || strings.ContainsAny(name, "~^:?*[\\ ") || strings.Contains(name, "@{") || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid branch name %q", name)
+	}
+	return nil
+}
+
 func (g *Git) checkBranchName(repo, branch string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("invalid branch name %q", branch)

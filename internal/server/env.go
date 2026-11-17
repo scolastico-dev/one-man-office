@@ -53,3 +53,9 @@ func (e boardEnv) CurrentBranch(path string) (string, error) {
 	e.refs.lookedUp("branch", path)
 	return branch, err
 }
+
+func (e boardEnv) BranchExists(path, branch string) (bool, error) {
+	ok, err := e.git.BranchExists(path, branch)
+	e.refs.lookedUp("branch", path)
+	return ok, err
+}

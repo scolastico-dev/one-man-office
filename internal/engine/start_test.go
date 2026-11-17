@@ -1065,3 +1065,29 @@ func TestLateStartWarningIsCommented(t *testing.T) {
 		t.Fatalf("%d warning comments:\n%s", c, strings.Join(h.comments(task), "\n---\n"))
 	}
 }
+
+// A base branch is a branch of the project's repository: a revision such as
+// main~1 is refused, so the ticket's branch is never cut from an older
+// commit and its merge never goes elsewhere.
+func TestBaseBranchIsABranchOfTheRepository(t *testing.T) {
+	h := gitHarness(t)
+	commit(t, h.repo, "second.txt", "second\n")
+	task := h.standalone("one")
+	for _, bad := range []string{"main~1", "main^", "dev"} {
+		_, err := h.b.Update(h.ctx, board.User, task, api.UpdateTicket{BaseBranches: api.Some(map[string]string{h.project: bad})})
+		var apiErr *api.Error
+		if !asAPIError(err, &apiErr) || apiErr.Code != api.CodeValidation {
+			t.Fatalf("base branch %q: %v", bad, err)
+		}
+	}
+	gitRun(t, h.repo, "branch", "dev", "main~1")
+	if _, err := h.b.Update(h.ctx, board.User, task, api.UpdateTicket{BaseBranches: api.Some(map[string]string{h.project: "dev"})}); err != nil {
+		t.Fatal(err)
+	}
+	h.approve(task)
+	h.step()
+	tk := h.ticket(task)
+	if got, want := gitRun(t, h.repo, "rev-parse", "refs/heads/"+tk.Projects[0].Branch), gitRun(t, h.repo, "rev-parse", "dev"); got != want {
+		t.Fatalf("the branch was cut at %s, want dev's %s", got, want)
+	}
+}

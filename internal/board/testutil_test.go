@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +22,8 @@ type fakeEnv struct {
 	projects map[string]ProjectInfo
 	models   map[string]ModelInfo
 	branches map[string]string
+	// gone are branch names a repository (by path) does not have.
+	gone     map[string][]string
 	notified int
 }
 
@@ -51,6 +55,17 @@ func (e *fakeEnv) CurrentBranch(path string) (string, error) {
 		return "", errors.New("not a git repository: " + path)
 	}
 	return b, nil
+}
+
+// BranchExists takes every name without revision syntax as a branch of a
+// repository, except those listed in gone.
+func (e *fakeEnv) BranchExists(path, branch string) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if strings.ContainsAny(branch, "~^:@ ") {
+		return false, errors.New("invalid branch name " + branch)
+	}
+	return !slices.Contains(e.gone[path], branch), nil
 }
 
 func (e *fakeEnv) setPolicy(fn func(p *Policy)) {

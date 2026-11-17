@@ -120,6 +120,10 @@ func (e boardEnv) CurrentBranch(path string) (string, error) {
 	return e.git.CurrentBranch(path)
 }
 
+func (e boardEnv) BranchExists(path, branch string) (bool, error) {
+	return e.git.BranchExists(path, branch)
+}
+
 // checkHome refuses every home that is not a temporary one.
 func checkHome() error {
 	if os.Getenv("OMO_HOME") == "" {

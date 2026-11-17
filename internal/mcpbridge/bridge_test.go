@@ -57,10 +57,11 @@ func runHelper() int {
 
 type stubEnv struct{}
 
-func (stubEnv) Policy() board.Policy                     { return board.Policy{} }
-func (stubEnv) Project(string) (board.ProjectInfo, bool) { return board.ProjectInfo{}, false }
-func (stubEnv) Model(string) (board.ModelInfo, bool)     { return board.ModelInfo{}, false }
-func (stubEnv) CurrentBranch(string) (string, error)     { return "main", nil }
+func (stubEnv) Policy() board.Policy                      { return board.Policy{} }
+func (stubEnv) Project(string) (board.ProjectInfo, bool)  { return board.ProjectInfo{}, false }
+func (stubEnv) Model(string) (board.ModelInfo, bool)      { return board.ModelInfo{}, false }
+func (stubEnv) CurrentBranch(string) (string, error)      { return "main", nil }
+func (stubEnv) BranchExists(string, string) (bool, error) { return true, nil }
 
 // omo is a real server on a temporary home, reachable on its socket.
 type omo struct {

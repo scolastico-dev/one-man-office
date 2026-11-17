@@ -169,6 +169,37 @@ func TestUpdateProjectsAndBaseBranches(t *testing.T) {
 	wantCode(t, err, api.CodeValidation)
 }
 
+// A base branch is a local branch of the project's repository: a revision
+// (main~3), a name the repository lacks or a tag is refused; an unchanged
+// value is left as it is.
+func TestBaseBranchMustBeABranchOfTheRepository(t *testing.T) {
+	b, env := newTestBoard(t)
+	ctx := context.Background()
+	env.mu.Lock()
+	env.gone = map[string][]string{"/src/api": {"nope", "v1.0"}}
+	env.mu.Unlock()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}})
+	n := int64(s.Number)
+	for _, bad := range []string{"main~3", "main^", "nope", "v1.0", "HEAD@{1}"} {
+		_, err := b.Update(ctx, User, n, api.UpdateTicket{BaseBranches: api.Some(map[string]string{"api": bad})})
+		wantCode(t, err, api.CodeValidation)
+	}
+	if got, err := b.Get(ctx, User, n); err != nil || got.Projects[0].BaseBranch != "main" {
+		t.Fatalf("base %q, %v", got.Projects[0].BaseBranch, err)
+	}
+	got, err := b.Update(ctx, User, n, api.UpdateTicket{BaseBranches: api.Some(map[string]string{"api": "release"})})
+	if err != nil || got.Projects[0].BaseBranch != "release" {
+		t.Fatalf("base %+v, %v", got.Projects, err)
+	}
+	// The branch is gone by now; sending the value again changes nothing.
+	env.mu.Lock()
+	env.gone["/src/api"] = append(env.gone["/src/api"], "release")
+	env.mu.Unlock()
+	if _, err := b.Update(ctx, User, n, api.UpdateTicket{Title: api.Some("S2"), BaseBranches: api.Some(map[string]string{"api": "release"})}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoryCannotDropProjectUsedByTask(t *testing.T) {
 	b, _ := newTestBoard(t)
 	ctx := context.Background()

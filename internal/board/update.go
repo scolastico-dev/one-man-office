@@ -170,16 +170,18 @@ func checkUpdatePermissions(a Actor, t ticketRow, req api.UpdateTicket) error {
 
 // update computes the new state of one ticket.
 type update struct {
-	b      *Board
-	tx     *sql.Tx
-	p      Policy
-	a      Actor
-	req    api.UpdateTicket
-	old    ticketRow
-	new    ticketRow
-	oldPs  []boundProject
-	newPs  []boundProject
-	fields []string
+	b     *Board
+	tx    *sql.Tx
+	p     Policy
+	a     Actor
+	req   api.UpdateTicket
+	old   ticketRow
+	new   ticketRow
+	oldPs []boundProject
+	newPs []boundProject
+	// setBases are the projects whose base branch the request sets.
+	setBases []string
+	fields   []string
 }
 
 func (u *update) changed(field string) { u.fields = append(u.fields, field) }
@@ -268,6 +270,9 @@ func (u *update) placement() error {
 		}
 	}
 
+	if err := u.checkSetBases(); err != nil {
+		return err
+	}
 	if (storyChanged || idsChanged) && u.old.Col != api.ColumnPlanning && !u.new.inStory() {
 		for _, np := range u.newPs {
 			if np.base == "" {
@@ -298,6 +303,31 @@ func (u *update) placement() error {
 	}
 	if basesChanged {
 		u.changed("base_branches")
+	}
+	return nil
+}
+
+// checkSetBases checks every base branch the request changes: it must be a
+// local branch of the project's repository (see checkBaseBranch).
+func (u *update) checkSetBases() error {
+	for _, id := range u.setBases {
+		var base, before string
+		for _, np := range u.newPs {
+			if np.id == id {
+				base = np.base
+			}
+		}
+		for _, op := range u.oldPs {
+			if op.id == id {
+				before = op.base
+			}
+		}
+		if base == before { // exact: an unchanged value stays as it is
+			continue
+		}
+		if err := u.b.checkBaseBranch(id, base); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -413,6 +443,7 @@ func (u *update) baseBranches() error {
 			return api.Errorf(api.CodeValidation, "the base branch of project %q cannot be empty", id)
 		}
 		u.newPs[i].base = branch
+		u.setBases = append(u.setBases, id)
 	}
 	return nil
 }

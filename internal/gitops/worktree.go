@@ -137,8 +137,13 @@ func (g *Git) BranchExists(repo, branch string) (bool, error) {
 	return false, err
 }
 
-// RevParse resolves rev to a full object id.
+// RevParse resolves rev to a full object id. A branch's full ref
+// (refs/heads/<name>, optionally peeled with ^{commit}) resolves only to
+// that branch (see checkBranchRev).
 func (g *Git) RevParse(repo, rev string) (string, error) {
+	if err := checkBranchRev(rev); err != nil {
+		return "", err
+	}
 	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", "--quiet", "--end-of-options", rev)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve %s in %s: %w", rev, repo, err)

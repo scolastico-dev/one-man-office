@@ -298,6 +298,21 @@ func (b *Board) resolveProjects(req api.CreateTicket) ([]newProject, error) {
 	return out, nil
 }
 
+// checkBaseBranch refuses a base branch for project id that is not a local
+// branch of its repository: a revision such as main~3 or a tag would have
+// the ticket's branch cut from, and merged into, something else.
+func (b *Board) checkBaseBranch(id, branch string) error {
+	info, err := b.availableProject(id)
+	if err != nil {
+		return err
+	}
+	ok, err := b.env.BranchExists(info.Path, branch)
+	if err != nil || !ok {
+		return api.Errorf(api.CodeValidation, "the base branch of project %q must be a branch of its repository; %q is not one", id, branch)
+	}
+	return nil
+}
+
 // availableProject returns a project that exists, is enabled and is present
 // on disk.
 func (b *Board) availableProject(id string) (ProjectInfo, error) {

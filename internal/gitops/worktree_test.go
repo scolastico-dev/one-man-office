@@ -616,3 +616,35 @@ func TestProtectedBranches(t *testing.T) {
 		t.Fatalf("%v, %v", got, err)
 	}
 }
+
+// A branch's full ref resolves only to that branch: a stored name with
+// revision syntax (a base branch main~1) never resolves to another commit.
+func TestBranchRefResolvesOnlyTheBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "commit", "-q", "--allow-empty", "-m", "second")
+	if _, err := g.RevParse(repo, "main~1"); err != nil {
+		t.Fatal(err) // the commit main~1 names exists
+	}
+	head, err := g.RevParse(repo, "refs/heads/main^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.RevParse(repo, "refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	for _, rev := range []string{"refs/heads/main~1", "refs/heads/main^", "refs/heads/main^1^{commit}", "refs/heads/main@{1}", "refs/heads/main:f.txt"} {
+		if id, err := g.RevParse(repo, rev); err == nil {
+			t.Errorf("RevParse(%s) = %s", rev, id)
+		}
+		if ok, err := g.IsAncestor(repo, head, rev); err == nil {
+			t.Errorf("IsAncestor(head, %s) = %v", rev, ok)
+		}
+	}
+	if ok, err := g.IsAncestor(repo, "refs/heads/main", head); err != nil || !ok {
+		t.Fatalf("IsAncestor(main, head) = %v, %v", ok, err)
+	}
+	if ok, err := g.BranchExists(repo, "main~1"); err == nil || ok {
+		t.Fatalf("BranchExists(main~1) = %v, %v", ok, err)
+	}
+}

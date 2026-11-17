@@ -56,6 +56,10 @@ type Environment interface {
 	// CurrentBranch returns the checked-out branch of the repository at
 	// path, or "" for a detached HEAD.
 	CurrentBranch(path string) (string, error)
+	// BranchExists reports whether the repository at path has a local
+	// branch of exactly that name; a name that is not a valid branch name
+	// (main~3, a revision) is an error.
+	BranchExists(path, branch string) (bool, error)
 }
 
 // Options tune a Board.

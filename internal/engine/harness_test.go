@@ -239,6 +239,9 @@ func (e testEnv) Model(id string) (board.ModelInfo, bool) {
 }
 
 func (e testEnv) CurrentBranch(path string) (string, error) { return e.git.CurrentBranch(path) }
+func (e testEnv) BranchExists(path, branch string) (bool, error) {
+	return e.git.BranchExists(path, branch)
+}
 
 // ---- harness ----
 

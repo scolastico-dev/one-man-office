@@ -103,7 +103,9 @@ resets them.
 
 A new ticket starts in Planning. Its base branch is the branch the project's
 folder has checked out at that moment; the dialog warns when that is not the
-repository's default branch. Change it later in the ticket's details. Images
+repository's default branch. Change it later in the ticket's details to
+another branch of the repository (a commit, tag or expression such as
+`main~3` is refused). Images
 can be added once the ticket exists.
 
 ## The ticket panel and page
