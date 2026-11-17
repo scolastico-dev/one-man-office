@@ -86,8 +86,11 @@ func (f *fakeRelay) Changed(names []string) {
 	f.changed = append(f.changed, names...)
 }
 
-func (f *fakeRelay) LogLines(name string, n int) []api.MCPLogLine {
-	return []api.MCPLogLine{{At: time.Unix(1, 0).UTC(), Message: "started " + name}}
+func (f *fakeRelay) Log(name string, n int) ([]api.MCPLogLine, error) {
+	if name == "github" {
+		return nil, errors.New("open mcp-github.log: permission denied")
+	}
+	return []api.MCPLogLine{{At: time.Unix(1, 0).UTC(), Message: "started " + name}}, nil
 }
 
 // fakeTokens stands in for the token store.
@@ -261,6 +264,10 @@ func TestMCPServerActions(t *testing.T) {
 	wantStatus(t, asUser(b, s, "POST", "/api/mcp/servers/docs/restart", empty).StatusCode, http.StatusNoContent)
 	if lines := body[[]api.MCPLogLine](t, asUser(b, s, "GET", "/api/mcp/servers/docs/log", nil)); len(lines) != 1 || lines[0].Message != "started docs" {
 		t.Fatalf("log = %+v", lines)
+	}
+	// A log that cannot be read is an error, not an empty log.
+	if resp := asUser(b, s, "GET", "/api/mcp/servers/github/log", nil); resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unreadable log: %d", resp.StatusCode)
 	}
 	if c := body[api.MCPConnect](t, asUser(b, s, "POST", "/api/mcp/servers/github/connect", empty)); !strings.HasPrefix(c.AuthorizeURL, "https://auth.example.invalid/") {
 		t.Fatalf("connect = %+v", c)

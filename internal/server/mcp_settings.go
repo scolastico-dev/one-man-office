@@ -36,9 +36,10 @@ type mcpRelay interface {
 	// Changed tells the relay that the settings of these servers changed
 	// (written, edited by hand or removed).
 	Changed(names []string)
-	// LogLines are the last n lines of a server's log, oldest first, with
-	// the values of its env and headers redacted.
-	LogLines(name string, n int) []api.MCPLogLine
+	// Log is the last n lines of a server's log, oldest first, with the
+	// values of its env and headers redacted; an error says the log cannot
+	// be read.
+	Log(name string, n int) ([]api.MCPLogLine, error)
 }
 
 // mcpTokens is what the routes need from the store of the personal access
@@ -285,7 +286,18 @@ func (s *Server) mcpServerLog(w http.ResponseWriter, r *http.Request) {
 	if relay == nil {
 		return
 	}
-	lines := relay.LogLines(m.Name, mcpLogLines)
+	lines, err := relay.Log(m.Name, mcpLogLines)
+	if err != nil {
+		var e *api.Error
+		if !errors.As(err, &e) {
+			// The reason names files of the log folder, nothing of the
+			// server's settings.
+			logf(r, "%s %s: read the log of MCP server %s: %v", r.Method, r.URL.Path, m.Name, err)
+			e = api.Errorf(api.CodeInternal, "the log of MCP server %s cannot be read", m.Name)
+		}
+		writeError(w, r, e)
+		return
+	}
 	if lines == nil {
 		lines = []api.MCPLogLine{}
 	}
