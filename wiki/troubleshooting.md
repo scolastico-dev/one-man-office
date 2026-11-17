@@ -16,7 +16,10 @@ ended agent's log is also on the ticket's Agents tab (**Show log**).
 
 | Message | What to do |
 |---|---|
-| `omo: /home/you/.local/omo holds the files of omo 0.11 or older. Start omo in a terminal to choose what happens to them, or set OMO_HOME to another folder` | The home belongs to omo 0.11. See [Upgrading from 0.11](upgrading-from-0.11.md). |
+| `omo: /home/you/.local/omo holds the files of omo 0.11 or older. Start omo in a terminal to choose what happens to them, or set OMO_HOME to another folder` | The home belongs to omo 0.11. Run plain `omo` in a terminal and choose to continue, go back or quit ([Upgrading from 0.11](upgrading-from-0.11.md)). Started without a terminal, omo only explains and changes nothing. |
+| `Stop the old omo first (…): quit its terminal or dashboard. Then start omo again. Nothing was changed.` | The old omo or its company dashboard still runs; stop it, then start omo again. |
+| `… the database was made by a newer omo (schema …): update omo to use it (omo update); this omo leaves it as it is` | A newer omo wrote this home's database. Run `omo update`; the database is not changed. |
+| `omo: unknown command "setup" …` (or `company`, `self-update`; flag `--mock`) | These commands of 0.11 are gone. Updating is `omo update`. |
 | `omo needs git 2.38 or newer (found 2.34)` | Update git. |
 | `listen on 127.0.0.1:8090: … address already in use` | Another program (or another omo home) uses the port: `omo config set port 18090`. |
 | `omo is already running: http://…` | Not an error: this home's omo runs already; open that address. |
@@ -56,14 +59,16 @@ Look at the card's badge first:
 | waiting for usage | The role's models are near their usage limits. | Wait for the reset, add a model to the role, or **Start anyway…** on a ticket with its own model. |
 | no usable model | The role has no model that can start. | Settings → Roles; the top of that page says what is missing. |
 
-A task in a story starts only while its story is In Progress, and a story's
-tasks in Planning need to be released (by its product manager, or by you when
-**Tasks are released by** is **You**). The CEO starts only when you open its
+A task in a story starts only while its story is In Progress (until then it
+waits in Ready For Dev), and a story's tasks in Planning need to be released
+(by its product manager or the CEO, or by you when **Tasks are released by** is
+**You**). The CEO starts only when you open its
 tab.
 
 ## A ticket says needs attention
 
-A step that needs a person flags the ticket: the card shows "needs attention",
+A step that needs a person flags the ticket: the card shows "needs attention"
+(its tooltip says which step stopped, for example "the agent stopped working"),
 the panel shows **Needs attention** with the reason, a comment mentions the
 supervisor, and the bell lists it. On a ticket that the CEO or a product manager
 supervises, the card and the panel say "needs the CEO" or "needs the product
@@ -79,8 +84,8 @@ retry it, and you can too. Fix the cause, then press the retry button
 | "… has produced no output for 30m0s, also not in the 15m0s since omo reminded it. …" | The agent went silent. Retry replaces it, or ask it a question if it waits for something. |
 | "no usable model for the developer role; set models in roles/developer.yaml" | Settings → Roles. |
 | "project … is missing or disabled; …" | Restore the folder or switch the project on (Settings → Projects). |
-| "#12 has no base branch in project … (the folder was on a detached HEAD); …" | Set the base branch in the ticket's details. |
-| "the folder … already exists and is not a worktree omo recorded for #12; omo leaves it alone. Move or remove it, then retry." | Something else is in omo's worktree folder. |
+| "#12 has no base branch in project …", "the base branch … of #12 does not exist in project …" | Set **Base branch** in the ticket's details to a branch of the repository (a tag, a commit or `main~3` is refused), then retry. |
+| "the folder … already exists and is not a worktree omo recorded for #12; omo leaves it alone. Move or remove it, then retry." | Something else is in omo's worktree folder. (A worktree left by a start that omo itself interrupted, for example by a crash, is continued at the next start and needs nothing from you.) |
 | "branch … of #12 is checked out in …; omo needs it in its worktree …" | Switch that folder to another branch, then retry. |
 | "omo cannot create the branch of #12 in project …: the branch … exists, so git cannot create … below it; rename that branch or change the branch template, then retry." | A branch named like the template's folder exists (`omo` blocks `omo/…`). |
 | "question 41 to the user has waited 30m0s for an answer" | Answer the question. |
@@ -114,7 +119,9 @@ causes:
 - A remote that is a folder on this machine has no forge to open a pull
   request on.
 - The push was refused (no access, or a branch of that name exists that omo
-  did not push).
+  did not push). A later export after a rejection pushes onto the branch omo
+  pushed before and updates the pull request that exists; it does not fail
+  because of that branch.
 - `gh`, `glab` or `tea` is missing or not signed in: the export agent's log
   (Agents tab) shows its output.
 
@@ -129,7 +136,9 @@ Then approve the export again (only the failed projects are tried), choose
 | `OMO_AGENT_ID is set but empty: this agent terminal is broken; …` | A shell that pretends to be an agent; unset `OMO_AGENT_ID`. |
 | "commit or discard these changes first: …" (an agent's `omo ai done`) | The developer must commit or clean its worktree before handing in. |
 | `this MCP connection is not tied to an omo agent session, so it has no omo tools; …` | An MCP client outside omo; see [MCP](mcp.md#the-board-tools). |
-| "server … needs a sign-in: connect it in omo's settings (MCP servers)" | Press **Connect** on that server (Settings → MCP). |
+| "server … needs a sign-in: connect it in omo's settings (MCP servers)" | Press **Connect** on that server (Settings → MCP). omo also drops a server's sign-in when its address, resource or client id changes or the server is deleted. |
+| "server … answered with 5.3 MiB, more than omo relays (4.0 MiB)" | A relayed tool's result was too large; the agent gets this error instead of the result. Ask the tool for less. |
+| "Some settings files have errors: … Fix them (the settings pages show each error), then export again." | A settings export is refused while a settings file has errors; fix the files named, then export again. |
 
 When an agent behaves oddly, read its terminal: open the ticket's Agents tab
 and type into it like into the program itself.

@@ -37,10 +37,10 @@ it.
 | `worktrees/<project>/<ticket>/` | the agents' git worktrees | no |
 | `workdirs/<ticket>/` | working folders of tasks without a project (kept until you remove them) | no |
 | `ceo/` | the CEO's working folder | no |
-| `logs/` | agent transcripts | no |
+| `logs/` | agent transcripts; `logs/mcp/` holds the logs of relayed MCP servers | no |
 | `images/` | images uploaded to tickets; `images/terminal/` holds images dropped into terminals | no |
 | `run/` | the running server's lock, socket, log (`omo.log`), last usage readings, export folders, autostart settings | no |
-| `backups/` | files a settings import replaced, and a database an import replaced | no |
+| `backups/` | in a folder per action (`<time>-<what>`): files a settings import replaced, a database an import replaced, and the copies of agent programs' configuration files (`~/.claude.json`, `config.toml`, ...) made before omo registered itself in them or took servers over (see [MCP](mcp.md#your-own-sessions-of-the-agent-programs)) | no |
 
 The home and `run/` are readable by your user only.
 
@@ -58,4 +58,6 @@ omo
 `omo stop`, `omo config` and `omo ai` in that shell then act on that omo only.
 
 A home that holds files but no `layout.json` (for example the home of omo
-0.11) is refused; see [Upgrading from 0.11](upgrading-from-0.11.md).
+0.11) is never used as it is: omo offers to delete the old installation or go
+back to 0.11 (see [Upgrading from 0.11](upgrading-from-0.11.md)). A database
+written by a newer omo is refused and left unchanged.

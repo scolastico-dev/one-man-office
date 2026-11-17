@@ -40,6 +40,11 @@ Limits** (`stop.handoff_timeout`). At the next start every ticket that was in
 work gets a fresh agent that reads the handoff (see
 [Restarts](concepts.md#restarts)).
 
+At its first start in a home that holds omo 0.11's files, omo asks what to do
+with them instead of starting (see [Upgrading from 0.11](upgrading-from-0.11.md)).
+An interrupted start of a ticket (omo crashed half way) is continued at the next
+start.
+
 omo needs git 2.38 or newer; an older git stops the start with
 `omo needs git 2.38 or newer (found 2.34)`.
 
@@ -176,8 +181,11 @@ omo update --version TAG      # install exactly this release, also an older one
 
 `omo update` fetches the release for your system from GitHub, checks it
 against the release's `SHA256SUMS` and replaces the `omo` binary it was started
-from. It does not restart a running server: run `omo stop` and start it again.
-Running the installer again does the same.
+from. It does not restart a running server: it says "omo is running with the
+version it started with: restart it (omo stop, then omo) to use the new one."
+Run `omo stop` and start it again. Running the installer again does the same.
+Updating an omo that still has the files of 0.11 is covered in
+[Upgrading from 0.11](upgrading-from-0.11.md).
 
 After an update, compare edited usage scripts with the new defaults (see
 [Usage scripts](agents.md#usage-scripts)): omo never overwrites a script you
@@ -199,6 +207,11 @@ and adds a separate Docker-in-Docker service for agents that need Docker.
 OMO_UID=$(id -u) OMO_GID=$(id -g) OMO_WORKSPACE=~/code docker compose up -d
 docker compose logs omo        # the address with the login token
 ```
+
+When the persisted home still holds the files of omo 0.11, run
+`docker compose run --rm omo` once, choose, stop it, then `docker compose up -d`
+(see [Upgrading from 0.11](upgrading-from-0.11.md#docker)). Without a terminal
+(`docker compose up -d` before the choice) omo explains and exits.
 
 Inside the container your repositories are below `/workspace`: add that folder
 on **Settings → Projects**.
