@@ -182,7 +182,9 @@ export function useTicketView(numberOf: MaybeRefOrGetter<number>, o: TicketViewO
   })
 
   function onBeforeUnload(e: BeforeUnloadEvent) {
-    if (!dirty.value) return
+    // A comment not sent yet is kept while the user moves around the app, but
+    // a reload or a closed tab would drop it like an unsaved edit.
+    if (!dirty.value && ticketDrafts.comment(number.value) === '') return
     e.preventDefault()
     e.returnValue = ''
   }

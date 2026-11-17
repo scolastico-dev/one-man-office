@@ -7,6 +7,7 @@ import { ticket } from '../board/testing'
 import { ref } from 'vue'
 import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import TicketPanel from './TicketPanel.vue'
+import { ticketDrafts } from './drafts'
 import { mountPanel, ok, panelHarness, refuse, type PanelHarness } from './panelTesting'
 
 let mounted: VueWrapper | null = null
@@ -439,6 +440,26 @@ test('leaving the address with unsaved text asks first', async () => {
   await w.get('[data-discard]').trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/')
+})
+
+test('a reload or a closed tab asks first while a comment is typed but not sent, as for an unsaved edit', async () => {
+  ticketDrafts.clear()
+  const t = ticket({ number: 4, projects: [demo] })
+  const hn = await panelHarness(seeded(t))
+  await open(hn, 4)
+  const unload = () => {
+    const e = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(e)
+    return e.defaultPrevented
+  }
+  expect(unload()).toBe(false)
+  ticketDrafts.setComment(4, 'Half an answer')
+  expect(unload()).toBe(true)
+  // A draft on another ticket is not this view's.
+  ticketDrafts.setComment(4, '')
+  ticketDrafts.setComment(5, 'Elsewhere')
+  expect(unload()).toBe(false)
+  ticketDrafts.clear()
 })
 
 test('a description is rendered without raw HTML and with safe links', async () => {
