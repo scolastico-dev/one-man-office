@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // One skill set's form: its repository, branch or tag, how it updates, whether
-// agents are told about it and what each role is told. It has its own
+// agents are told about it, which roles get it, which of its folders and
+// files they get and what each of those roles is told. It has its own
 // resource (loaded with its revision, saved with If-Match, kept current while
 // open) and its own Save bar. "Update now" fetches the stored set at once and
 // shows the answer; the checkout's state comes from the page, which follows
@@ -10,7 +11,9 @@ import { deleteSkillSet, getSkillSets, putSkillSet, updateSkillSet } from '../..
 import { failureText } from '../../../api/lostAnswer'
 import { NO_REVISION, type ApiEvent, type SettingsChangedData, type SettingsInvalidData, type SkillSetState } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
+import Chip from '../../../components/ui/Chip.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
+import ListField from '../../../components/ui/ListField.vue'
 import RelativeTime from '../../../components/ui/RelativeTime.vue'
 import SaveBar from '../../../components/ui/SaveBar.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
@@ -21,6 +24,7 @@ import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
+import { rowErrors } from '../agents/profileForm'
 import { shortCommit } from '../extensionWords'
 import FileErrors from '../FileErrors.vue'
 import UnplacedErrors from '../UnplacedErrors.vue'
@@ -28,16 +32,20 @@ import { unplacedErrors } from '../unplacedErrors'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import {
-  PLACED_FIELDS,
   SKILL_ROLES,
   UPDATE_OPTIONS,
   errorsOfSkillSet,
   fileOfSkillSet,
+  isPlacedField,
   missingState,
+  rolesError,
+  rolesGetting,
   toDraft,
   toSkillSet,
+  toggleRole,
   updateResult,
   type SkillDraft,
+  type SkillRole,
 } from './skillForms'
 
 const props = withDefaults(
@@ -91,7 +99,8 @@ const r = useSettingsResource<SkillDraft>({
     // A new set starts from its own form, unsaved until it is saved; one that
     // was stored and is gone now (deleted by hand) says so instead.
     if (props.initial !== null && !wasStored) {
-      return { value: { ...props.initial, instructions: { ...props.initial.instructions } }, revision: NO_REVISION, errors, unsaved: true }
+      const start = props.initial
+      return { value: { ...start, paths: [...start.paths], roles: [...start.roles], instructions: { ...start.instructions } }, revision: NO_REVISION, errors, unsaved: true }
     }
     gone.value = true
     throw new Error(goneText.value)
@@ -125,7 +134,18 @@ onMounted(() => heading.value?.focus())
 
 const draft = computed(() => r.draft.value)
 const fe = computed(() => r.fieldErrors.value)
-const unplaced = computed(() => unplacedErrors(fe.value, PLACED_FIELDS))
+const unplaced = computed(() => unplacedErrors(fe.value, isPlacedField))
+const rolesId = `${fallbackId}-roles`
+const rolesHintId = `${fallbackId}-roles-hint`
+const rolesErrorId = `${fallbackId}-roles-error`
+const rolesRefusal = computed(() => rolesError(fe.value))
+const pathErrors = computed(() => rowErrors(fe.value, 'paths'))
+const textRoles = computed(() => (draft.value ? rolesGetting(draft.value) : SKILL_ROLES))
+/** The set's stored paths its checkout does not have; only while the form shows the stored paths. */
+const missing = computed(() => (props.state?.missing_paths ?? []).filter((p) => draft.value?.paths.includes(p)))
+function flip(role: SkillRole) {
+  if (draft.value) draft.value.roles = toggleRole(draft.value, role)
+}
 const checkout = computed(() => props.state ?? missingState(props.name))
 const label = computed(() => `Save changes to the skill set ${shownName.value}`)
 
@@ -265,12 +285,61 @@ async function remove() {
       </Callout>
 
       <FormSection
+        legend="Who gets it"
+        :level="4"
+        description="Agents of the chosen roles are given the skills of this set: each skill's name, description and file, under the folder's path."
+      >
+        <div class="omo-field">
+          <p :id="rolesId" class="omo-field__label">Roles</p>
+          <div
+            role="group"
+            class="skill-editor__roles"
+            :aria-labelledby="rolesId"
+            :aria-describedby="[rolesHintId, rolesRefusal ? rolesErrorId : ''].filter(Boolean).join(' ')"
+            data-skillset-roles
+          >
+            <Chip
+              v-for="role in SKILL_ROLES"
+              :key="role.id"
+              as="button"
+              :label="role.label"
+              :pressed="draft.roles.includes(role.id)"
+              :data-skillset-role="role.id"
+              @click="flip(role.id)"
+            />
+          </div>
+          <p :id="rolesHintId" class="omo-field__hint" data-skillset-roles-hint>
+            {{ draft.roles.length === 0 ? 'None chosen: every role gets this set.' : 'Only the chosen roles get this set.' }}
+          </p>
+          <p v-if="rolesRefusal" :id="rolesErrorId" class="omo-field__error">{{ rolesRefusal }}</p>
+        </div>
+        <ListField
+          v-model="draft.paths"
+          label="Folders and files"
+          item-label="Path"
+          add-label="Add path"
+          empty-text="None: the whole repository."
+          placeholder="skills/grill-me"
+          hint="Relative to the repository's root. A folder with a SKILL.md is one skill, a folder without one gives every skill below it, a single file is a skill of its own."
+          :error="fe['paths']"
+          :errors="pathErrors"
+          data-skillset-paths
+        />
+        <Callout v-if="missing.length > 0" tone="warn" data-skillset-missing>
+          <p>
+            Not in the checkout: <span class="skill-editor__path">{{ missing.map(visibleText).join(', ') }}</span>. Agents are not given
+            {{ missing.length === 1 ? 'it' : 'them' }} until the repository has {{ missing.length === 1 ? 'it' : 'them' }}.
+          </p>
+        </Callout>
+      </FormSection>
+
+      <FormSection
         legend="What agents are told"
         :level="4"
-        description="Every agent of a role gets its text, with the folder's path above it. A role with no text is not told about this set."
+        description="A text of your own for each role that gets the set; it comes before the list of skills. Leave it empty to give only the skills."
       >
         <TextArea
-          v-for="role in SKILL_ROLES"
+          v-for="role in textRoles"
           :key="role.id"
           v-model="draft.instructions[role.id]"
           :label="role.label"
@@ -359,6 +428,11 @@ async function remove() {
 .skill-editor__path {
   color: var(--omo-fg);
   overflow-wrap: anywhere;
+}
+.skill-editor__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--omo-space) * 1.5);
 }
 .skill-editor__failure {
   color: var(--omo-danger);

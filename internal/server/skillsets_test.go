@@ -241,3 +241,69 @@ func TestSkillSetFileChangeReachesCheckouts(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 }
+
+// TestSkillSetPathsMustExist: a path the current checkout of the same
+// source does not have is refused, naming the path's field; with a new
+// source (no checkout of it yet) the set is stored and its state names
+// the paths missing once it is fetched.
+func TestSkillSetPathsMustExist(t *testing.T) {
+	isolateGit(t)
+	repo, commit := skillRepo(t)
+	other, otherCommit := skillRepo(t)
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	hdr := func() map[string]string {
+		h := bearer(s)
+		h["If-Match"] = `"` + s.settings.Revision("skillsets", "sp") + `"`
+		return h
+	}
+	set := api.SkillSet{Repository: repo, Update: api.SkillSetAtStart, Enabled: true, Paths: []string{"SKILLS.md"}, Roles: []string{"ceo"}}
+	resp := b.do("PUT", "/api/skillsets/sp", set, hdr())
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if got := decodeBody[api.SkillSet](t, resp.Body); strings.Join(got.Paths, ",") != "SKILLS.md" || strings.Join(got.Roles, ",") != "ceo" {
+		t.Fatalf("PUT answered %+v", got)
+	}
+	if st := waitSkillSet(t, b, s, "sp", "ok"); st.Commit != commit || st.MissingPaths == nil || len(st.MissingPaths) != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+
+	set.Paths = []string{"SKILLS.md", "skills/gone"}
+	resp = b.do("PUT", "/api/skillsets/sp", set, hdr())
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	text, err := readAll(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, `"field":"paths.1"`) || !strings.Contains(text, commit[:7]) {
+		t.Fatalf("refusal = %s", text)
+	}
+	if got, _ := s.settings.SkillSet("sp"); len(got.Paths) != 1 {
+		t.Fatalf("refused paths were stored: %+v", got)
+	}
+	// A path that is not a plain relative path is refused as such first.
+	set.Paths = []string{"SKILLS.md", "../outside"}
+	resp = b.do("PUT", "/api/skillsets/sp", set, hdr())
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	if text, _ := readAll(resp); !strings.Contains(text, "must stay inside the repository") {
+		t.Fatalf("refusal = %s", text)
+	}
+	set.Paths = []string{"SKILLS.md", "skills/gone"}
+
+	set.Repository = other
+	resp = b.do("PUT", "/api/skillsets/sp", set, hdr())
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st := waitSkillSet(t, b, s, "sp", "ok")
+		if st.Commit == otherCommit {
+			if strings.Join(st.MissingPaths, ",") != "skills/gone" {
+				t.Fatalf("state = %+v", st)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state = %+v, want commit %s", st, otherCommit)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,36 +22,62 @@ const MaxText = 64 << 10
 // outside it never names a checkout.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// Text returns the skill set blocks for role: one block per set that is
-// enabled, has text for role and has a checkout, sorted by name, separated
-// by a blank line, "" when there is none. A block is
+// Text returns the skill set blocks for role: one block per set that
+// reaches the role (see ForRole), has a checkout and has something to say
+// to the role (a text or at least one skill), sorted by name, separated by
+// a blank line, "" when there is none. A block is
 //
 //	Skill set <name> (checked out at <path>; read-only, omo updates it):
 //	<text>
+//	Its skills: when a task fits a skill's description, or someone names the skill, read the skill's file and follow it.
+//	- <skill>[ (only when someone asks for it)][: <description>]
+//	  <file>
 //
-// The text is the set's instructions for role, trimmed, with every
-// textsafe character other than line breaks and tabs removed (the store
-// refuses them; a hand-edited file may still hold them). The result is
-// data for a prompt's Instructions field, never a template. Blocks that do
-// not fit into MaxText are left out and named at the end.
+// The skills are what Find finds for the set's paths. The text is the set's
+// instructions for role, trimmed, with every textsafe character other than
+// line breaks and tabs removed (the store refuses them; a hand-edited file
+// may still hold them). The result is data for a prompt's Instructions
+// field, never a template. Blocks that do not fit into MaxText are left
+// out and named at the end.
+//
+// Text is the one way skill sets reach an agent: the engine gives its
+// result to every role's prompt (CEO and export jobs included) whatever
+// program the agent runs, and the prompt preview shows the same.
 func Text(role string, sets []api.SkillSet, checkout func(name string) (path string, ok bool)) string {
 	sorted := append([]api.SkillSet(nil), sets...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	var b strings.Builder
 	var left []string
 	for _, k := range sorted {
-		if !k.Enabled || !namePattern.MatchString(k.Name) {
-			continue
-		}
-		text := clean(k.Instructions[role])
-		if text == "" {
+		if !ForRole(k, role) {
 			continue
 		}
 		path, ok := checkout(k.Name)
 		if !ok {
 			continue
 		}
-		block := fmt.Sprintf("Skill set %s (checked out at %s; read-only, omo updates it):\n%s", k.Name, clean(path), text)
+		text := clean(k.Instructions[role])
+		skills := Find(path, k.Paths)
+		if text == "" && len(skills) == 0 {
+			continue
+		}
+		block := fmt.Sprintf("Skill set %s (checked out at %s; read-only, omo updates it):", k.Name, clean(path))
+		if text != "" {
+			block += "\n" + text
+		}
+		if len(skills) > 0 {
+			block += "\n" + skillsIntro
+			for _, s := range skills {
+				block += "\n- " + s.Name
+				if s.OnRequest {
+					block += " (only when someone asks for it)"
+				}
+				if s.Description != "" {
+					block += ": " + s.Description
+				}
+				block += "\n  " + clean(s.File)
+			}
+		}
 		if b.Len()+len(block)+2 > MaxText {
 			left = append(left, k.Name)
 			continue
@@ -67,6 +94,19 @@ func Text(role string, sets []api.SkillSet, checkout func(name string) (path str
 		fmt.Fprintf(&b, "Skill sets left out because all texts together are longer than %d KiB: %s.", MaxText>>10, strings.Join(left, ", "))
 	}
 	return b.String()
+}
+
+// skillsIntro heads the list of a block's skills.
+const skillsIntro = "Its skills: when a task fits a skill's description, or someone names the skill, read the skill's file and follow it."
+
+// ForRole reports whether the set k reaches the agents of role: it is
+// enabled, has a valid name and either names no roles (every role) or
+// names role. Every place that gives skill sets to agents filters with it.
+func ForRole(k api.SkillSet, role string) bool {
+	if !k.Enabled || !namePattern.MatchString(k.Name) {
+		return false
+	}
+	return len(k.Roles) == 0 || slices.Contains(k.Roles, role)
 }
 
 // Join puts the skill set blocks after the user's own instructions,

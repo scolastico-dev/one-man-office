@@ -18,11 +18,13 @@ const set = (o: Partial<SkillSet> = {}): SkillSet => ({
   ref: 'main',
   update: 'at_start',
   enabled: true,
+  paths: [],
+  roles: [],
   instructions: { developer: 'Use TDD.' },
   revision: 'rev1',
   ...o,
 })
-const state = (o: Partial<SkillSetState> = {}): SkillSetState => ({ name: 'sp', state: 'ok', commit: 'a41c9e0123456', path: '/home/x/skills/sp', updated_at: '2026-11-15T10:00:00Z', message: '', ...o })
+const state = (o: Partial<SkillSetState> = {}): SkillSetState => ({ name: 'sp', state: 'ok', commit: 'a41c9e0123456', path: '/home/x/skills/sp', updated_at: '2026-11-15T10:00:00Z', message: '', missing_paths: [], ...o })
 
 async function open(sets: SkillSet[], props: Record<string, unknown> = {}): Promise<{ w: VueWrapper; h: Harness; read: { value: SkillSetsResponse } }> {
   const h = await harness()
@@ -51,7 +53,16 @@ test('save sends If-Match with the revision the form was read with, and only rol
     {
       method: 'PUT',
       path: '/api/skillsets/sp',
-      body: { name: 'sp', repository: 'https://example.invalid/sp.git', ref: 'main', update: 'at_start', enabled: true, instructions: { developer: 'Use TDD.', reviewer: 'Check the diff.' } },
+      body: {
+        name: 'sp',
+        repository: 'https://example.invalid/sp.git',
+        ref: 'main',
+        update: 'at_start',
+        enabled: true,
+        paths: [],
+        roles: [],
+        instructions: { developer: 'Use TDD.', reviewer: 'Check the diff.' },
+      },
       ifMatch: 'rev1',
     },
   ])
@@ -162,4 +173,49 @@ test('the form says it is busy while Update now runs, so the page keeps it open'
   release(state())
   await flushPromises()
   expect(busy).toEqual([true, false])
+})
+
+test('roles are chips that switch on and off; only roles that get the set have a text field', async () => {
+  const { w, h } = await open([set()])
+  const chip = (id: string) => w.get(`[data-skillset-role="${id}"]`)
+  expect(w.get('[data-skillset-roles]').attributes('role')).toBe('group')
+  for (const id of ['ceo', 'pm', 'developer', 'reviewer', 'export']) expect(chip(id).attributes('aria-pressed')).toBe('false')
+  expect(w.get('[data-skillset-roles-hint]').text()).toBe('None chosen: every role gets this set.')
+  expect(w.findAll('[data-skillset-text]')).toHaveLength(5)
+
+  await chip('ceo').trigger('click')
+  await chip('developer').trigger('click')
+  expect(chip('ceo').attributes('aria-pressed')).toBe('true')
+  expect(w.get('[data-skillset-roles-hint]').text()).toBe('Only the chosen roles get this set.')
+  expect(w.findAll('[data-skillset-text]').map((t) => t.attributes('data-skillset-text'))).toEqual(['ceo', 'developer'])
+  await chip('developer').trigger('click')
+  await save(w)
+  // The developer's text goes with the developer.
+  expect(h.sent[0]?.body).toMatchObject({ roles: ['ceo'], instructions: {} })
+})
+
+test('paths are a list; a refused path shows under its row, a refused role under the chips', async () => {
+  const { w, h } = await open([set({ paths: ['skills/tdd'] })])
+  const list = w.get('[data-skillset-paths]')
+  expect((list.get('[data-row="0"] input').element as HTMLInputElement).value).toBe('skills/tdd')
+  await list.get('[data-part="add"]').trigger('click')
+  await list.get('[data-row="1"] input').setValue('../outside')
+  h.respond.write = () => refuse('validation', 'paths.1 must stay inside the repository (no .. part)', { field: 'paths.1' })
+  await save(w)
+  expect(h.sent[0]?.body).toMatchObject({ paths: ['skills/tdd', '../outside'] })
+  expect(list.get('[data-row="1"]').text()).toContain('paths.1 must stay inside the repository (no .. part)')
+  expect(list.get('[data-row="1"] input').attributes('aria-invalid')).toBe('true')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+
+  h.respond.write = () => refuse('validation', 'roles.0 must be one of ceo, pm', { field: 'roles.0' })
+  await save(w)
+  expect(w.get('[data-skillset-roles]').element.closest('.omo-field')!.textContent).toContain('roles.0 must be one of ceo, pm')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+})
+
+test('paths the checkout does not have are named while the form still has them', async () => {
+  const { w } = await open([set({ paths: ['skills/tdd', 'skills/gone'] })], { state: state({ missing_paths: ['skills/gone'] }) })
+  expect(w.get('[data-skillset-missing]').text()).toContain('Not in the checkout: skills/gone.')
+  await w.get('[data-skillset-paths] [data-row="1"] [data-part="remove"]').trigger('click')
+  expect(w.find('[data-skillset-missing]').exists()).toBe(false)
 })

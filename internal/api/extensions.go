@@ -21,8 +21,15 @@ type SkillSet struct {
 	// Update is SkillSetAtStart or SkillSetPinned.
 	Update  string `yaml:"update" json:"update"`
 	Enabled bool   `yaml:"enabled" json:"enabled"`
-	// Instructions maps a role (ceo, pm, developer, reviewer, export) to the
-	// text that points the role at the checkout.
+	// Paths limit what agents are given to these folders and files,
+	// relative to the repository's root with / between the parts (e.g.
+	// skills/grill-me or docs/style.md); empty gives the whole repository.
+	Paths []string `yaml:"paths,omitempty" json:"paths"`
+	// Roles are the roles (ceo, pm, developer, reviewer, export) whose
+	// agents get the set; empty gives it to every role.
+	Roles []string `yaml:"roles,omitempty" json:"roles"`
+	// Instructions maps a role that gets the set to a text of its own that
+	// comes with the set's skills.
 	Instructions map[string]string `yaml:"instructions" json:"instructions"`
 	// Revision identifies the content of the file for If-Match. It is
 	// ignored in PUT bodies.
@@ -43,6 +50,9 @@ type SkillSetState struct {
 	// Message says why an update failed: git's output, cut and without
 	// credentials.
 	Message string `json:"message"`
+	// MissingPaths are the set's paths that its checkout does not have (a
+	// folder or a regular file each); never null, empty without checkout.
+	MissingPaths []string `json:"missing_paths"`
 }
 
 // SkillSetsResponse is the answer of GET /api/skillsets.

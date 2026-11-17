@@ -7,13 +7,15 @@ import type { SkillSet } from '../../api/types'
 /** The repository of the Superpowers skill set. */
 export const SUPERPOWERS_ADDRESS = 'https://github.com/obra/superpowers.git'
 
-/** The set as stored: updated at every start from main, one instruction per role that needs one. */
+/** The set as stored: updated at every start from main, for the roles that write and check work, one instruction each. */
 export const SUPERPOWERS_SKILL_SET: Readonly<SkillSet> = Object.freeze({
   name: 'superpowers',
   repository: SUPERPOWERS_ADDRESS,
   ref: 'main',
   update: 'at_start',
   enabled: true,
+  paths: [],
+  roles: ['pm', 'developer', 'reviewer'],
   instructions: Object.freeze({
     pm: 'Before you split a story, read skills/brainstorming/SKILL.md and follow it.',
     developer: 'Before you write code, read skills/test-driven-development/SKILL.md and follow it.',
@@ -39,5 +41,11 @@ export function freeName(base: string, taken: readonly string[]): string {
 
 /** The Superpowers set to create under a name no set has yet. */
 export function superpowersSkillSet(taken: readonly string[]): SkillSet {
-  return { ...SUPERPOWERS_SKILL_SET, name: freeName(SUPERPOWERS_SKILL_SET.name, taken), instructions: { ...SUPERPOWERS_SKILL_SET.instructions } }
+  return {
+    ...SUPERPOWERS_SKILL_SET,
+    name: freeName(SUPERPOWERS_SKILL_SET.name, taken),
+    paths: [...SUPERPOWERS_SKILL_SET.paths],
+    roles: [...SUPERPOWERS_SKILL_SET.roles],
+    instructions: { ...SUPERPOWERS_SKILL_SET.instructions },
+  }
 }

@@ -22,7 +22,7 @@ import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import SkillSetEditor from './SkillSetEditor.vue'
 import SkillSetList from './SkillSetList.vue'
-import { blankSkillSet, fileOfSkillSet, freeName, hasSuperpowers, superpowersPreset, SUPERPOWERS_PRESET, type SkillDraft } from './skillForms'
+import { blankSkillSet, fileOfSkillSet, presetOf, RECOMMENDATIONS, type Recommendation, type SkillDraft } from './skillForms'
 
 const def = sectionDef('skills')
 const session = useSession()
@@ -76,7 +76,8 @@ const formId = useId()
 const names = computed(() => sets.value.map((s) => s.name))
 /** Broken files of sets whose form is not open (the open form shows its own). */
 const listErrors = computed(() => errors.value.filter((e) => fileOfSkillSet(e.file) !== selected.value))
-const offerSuperpowers = computed(() => loaded.value && !hasSuperpowers(sets.value))
+/** The recommended sets no stored set gives yet. */
+const offers = computed(() => (loaded.value ? RECOMMENDATIONS.filter((r) => !r.present(sets.value)) : []))
 
 async function toggle(name: string) {
   if (!(await editor.leave())) return
@@ -87,6 +88,10 @@ async function openNew(name: string, start: SkillDraft) {
   if (!(await editor.leave())) return
   selected.value = name
   initial.value = start
+}
+function openRecommended(rec: Recommendation) {
+  const start = presetOf(rec, names.value)
+  void openNew(start.name, start)
 }
 const newButton = ref<InstanceType<typeof UiButton>>()
 /** Focus after the form of `name` went away: its row, else Add skill set…. */
@@ -128,9 +133,7 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
       <SkillSetList v-else :sets="sets" :states="states" :selected="selected" :controls="formId" @select="toggle" />
       <div class="skills__buttons">
         <UiButton ref="newButton" data-new-skillset @click="naming = true">Add skill set…</UiButton>
-        <UiButton v-if="offerSuperpowers" data-add-superpowers @click="openNew(freeName(SUPERPOWERS_PRESET.name, names), superpowersPreset(freeName(SUPERPOWERS_PRESET.name, names)))">
-          Add Superpowers
-        </UiButton>
+        <UiButton v-for="rec in offers" :key="rec.id" :data-add-recommended="rec.id" @click="openRecommended(rec)">Add {{ rec.label }}</UiButton>
       </div>
 
       <Callout v-if="editor.busyNote.value" tone="warn" data-editor-busy>

@@ -17,6 +17,8 @@ func superpowers() SkillSet {
 		Ref:          "main",
 		Update:       api.SkillSetAtStart,
 		Enabled:      true,
+		Paths:        []string{},
+		Roles:        []string{},
 		Instructions: map[string]string{"developer": "Read SKILLS.md first.\n", "reviewer": "Check\tthe skills.\r\n"},
 	}
 }
@@ -37,6 +39,25 @@ func TestSkillSetValidation(t *testing.T) {
 		"instructions.ceo":      func(k *SkillSet) { k.Instructions = map[string]string{"ceo": "a‮b"} },
 		"instructions.export":   func(k *SkillSet) { k.Instructions = map[string]string{"export": "\xff"} },
 		"instructions.reviewer": func(k *SkillSet) { k.Instructions = map[string]string{"reviewer": "a\rb"} },
+		"instructions.developer": func(k *SkillSet) {
+			k.Roles = []string{"reviewer"}
+		},
+		"roles.1":           func(k *SkillSet) { k.Roles = []string{"developer", "tester"} },
+		"roles.2":           func(k *SkillSet) { k.Roles = []string{"developer", "reviewer", "developer"} },
+		"paths":             func(k *SkillSet) { k.Paths = make([]string, 65) },
+		"paths.0":           func(k *SkillSet) { k.Paths = []string{""} },
+		"paths.1":           func(k *SkillSet) { k.Paths = []string{"skills", "/etc/passwd"} },
+		"paths.0 ":          func(k *SkillSet) { k.Paths = []string{"../outside"} },
+		"paths.0  ":         func(k *SkillSet) { k.Paths = []string{"skills/../../outside"} },
+		"paths.0   ":        func(k *SkillSet) { k.Paths = []string{"skills/./tdd"} },
+		"paths.0    ":       func(k *SkillSet) { k.Paths = []string{"skills\\tdd"} },
+		"paths.0     ":      func(k *SkillSet) { k.Paths = []string{"C:/skills"} },
+		"paths.0      ":     func(k *SkillSet) { k.Paths = []string{"."} },
+		"paths.0       ":    func(k *SkillSet) { k.Paths = []string{"skills/"} },
+		"paths.0        ":   func(k *SkillSet) { k.Paths = []string{"a\u202eb"} },
+		"paths.0         ":  func(k *SkillSet) { k.Paths = []string{".git/config"} },
+		"paths.0          ": func(k *SkillSet) { k.Paths = []string{strings.Repeat("x", 513)} },
+		"paths.1 ":          func(k *SkillSet) { k.Paths = []string{"skills/tdd", "skills/tdd"} },
 	}
 	for name, mutate := range cases {
 		k := superpowers()
@@ -52,6 +73,24 @@ func TestSkillSetValidation(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(home, "skillsets")); len(entries) != 0 {
 		t.Fatalf("refused skill sets were written: %v", entries)
+	}
+	// Roles and paths: a text only for a role that gets the set; paths
+	// relative to the repository's root, folders and files alike.
+	k := superpowers()
+	k.Roles = []string{"reviewer", "developer"}
+	k.Paths = []string{"skills/test-driven-development", "skills/brainstorming/SKILL.md", "README.md"}
+	if err := s.PutSkillSetIf("", k); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.SkillSet("superpowers"); !reflect.DeepEqual(got.Roles, k.Roles) || !reflect.DeepEqual(got.Paths, k.Paths) {
+		t.Fatalf("skill set = %+v", got)
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, "skillsets", "superpowers.yaml"))
+	if !strings.Contains(string(raw), "roles:\n  - reviewer\n  - developer\n") || !strings.Contains(string(raw), "paths:\n  - skills/test-driven-development\n") {
+		t.Fatalf("file:\n%s", raw)
+	}
+	if err := s.DeleteSkillSetIf("", "superpowers"); err != nil {
+		t.Fatal(err)
 	}
 	// Accepted addresses and refs.
 	for _, repo := range []string{"git@github.com:obra/superpowers.git", "ssh://git@host/x.git", "/srv/git/skills"} {

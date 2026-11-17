@@ -1,8 +1,10 @@
 package settings
 
 import (
+	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -21,6 +23,13 @@ var SkillSetRoles = []string{"ceo", "pm", "developer", "reviewer", "export"}
 
 // maxSkillSetText is the largest instructions text of one role, in bytes.
 const maxSkillSetText = 16 << 10
+
+// maxSkillSetPaths is the most paths of one skill set; maxSkillSetPath the
+// longest path, in bytes.
+const (
+	maxSkillSetPaths = 64
+	maxSkillSetPath  = 512
+)
 
 func (s *Store) skillSetDir() string { return filepath.Join(s.root, "skillsets") }
 
@@ -55,9 +64,12 @@ func (s *Store) skillSetKind() *kind {
 	}
 }
 
-// normalizeSkillSet copies the instructions (an empty map for none), drops
-// the revision and fills the update mode a file leaves out (at_start).
+// normalizeSkillSet copies the instructions (an empty map for none), the
+// paths and the roles (empty lists for none), drops the revision and fills
+// the update mode a file leaves out (at_start).
 func normalizeSkillSet(k SkillSet) SkillSet {
+	k.Paths = append([]string{}, k.Paths...)
+	k.Roles = append([]string{}, k.Roles...)
 	k.Instructions = maps.Clone(k.Instructions)
 	if k.Instructions == nil {
 		k.Instructions = map[string]string{}
@@ -87,15 +99,26 @@ func validateSkillSet(k SkillSet) error {
 	if k.Update != api.SkillSetAtStart && k.Update != api.SkillSetPinned {
 		return fieldErr("update", "update must be at_start or pinned")
 	}
-	for _, role := range sortedKeys(k.Instructions) {
-		known := false
-		for _, r := range SkillSetRoles {
-			known = known || r == role
+	if err := validateSkillSetPaths(k.Paths); err != nil {
+		return err
+	}
+	for i, role := range k.Roles {
+		key := fmt.Sprintf("roles.%d", i)
+		if !slices.Contains(SkillSetRoles, role) {
+			return fieldErr(key, "%s must be one of %s", key, strings.Join(SkillSetRoles, ", "))
 		}
-		if !known {
+		if slices.Contains(k.Roles[:i], role) {
+			return fieldErr(key, "%s names a role a second time", key)
+		}
+	}
+	for _, role := range sortedKeys(k.Instructions) {
+		if !slices.Contains(SkillSetRoles, role) {
 			return fieldErr("instructions", "instructions may only have the keys %s", strings.Join(SkillSetRoles, ", "))
 		}
 		key := "instructions." + role
+		if len(k.Roles) > 0 && !slices.Contains(k.Roles, role) && k.Instructions[role] != "" {
+			return fieldErr(key, "%s is a text for a role that does not get this skill set; add the role to roles or remove the text", key)
+		}
 		text := k.Instructions[role]
 		if len(text) > maxSkillSetText {
 			return fieldErr(key, "%s must be at most %d KiB", key, maxSkillSetText>>10)
@@ -106,6 +129,56 @@ func validateSkillSet(k SkillSet) error {
 		if hiddenInText(text) {
 			return fieldErr(key, "%s must not hold control, invisible or direction characters other than line breaks and tabs", key)
 		}
+	}
+	return nil
+}
+
+// validateSkillSetPaths checks the paths of a skill set: at most
+// maxSkillSetPaths, each relative to the repository's root with / between
+// clean parts (no "", ".", ".." or ".git" part, no backslash, no drive or
+// leading /), without hidden characters, at most maxSkillSetPath bytes,
+// none twice. Whether a path exists is a question for the checkout.
+func validateSkillSetPaths(paths []string) error {
+	if len(paths) > maxSkillSetPaths {
+		return fieldErr("paths", "paths may have at most %d entries", maxSkillSetPaths)
+	}
+	for i, p := range paths {
+		key := fmt.Sprintf("paths.%d", i)
+		switch {
+		case p == "":
+			return fieldErr(key, "%s must not be empty; remove it to give the whole repository", key)
+		case len(p) > maxSkillSetPath:
+			return fieldErr(key, "%s must be at most %d characters long", key, maxSkillSetPath)
+		case !utf8.ValidString(p) || hasHidden(p):
+			return fieldErr(key, "%s must not hold control, invisible or direction characters", key)
+		case strings.HasPrefix(p, "/") || strings.Contains(p, "\\") || filepath.VolumeName(p) != "" || (len(p) >= 2 && p[1] == ':'):
+			return fieldErr(key, "%s must be relative to the repository's root, like skills/grill-me, not an absolute path", key)
+		}
+		for _, part := range strings.Split(p, "/") {
+			switch part {
+			case "..":
+				return fieldErr(key, "%s must stay inside the repository (no .. part)", key)
+			case "", ".":
+				return fieldErr(key, "%s must be written plainly, like skills/grill-me: no empty or . part and no / at the end", key)
+			case ".git":
+				return fieldErr(key, "%s must not point into git's own .git folder", key)
+			}
+		}
+		if slices.Contains(paths[:i], p) {
+			return fieldErr(key, "%s names a path a second time", key)
+		}
+	}
+	return nil
+}
+
+// ValidateSkillSet checks k as PutSkillSetIf does, without writing: nil or
+// an error with code validation naming the field.
+func ValidateSkillSet(k SkillSet) error {
+	if !idPattern.MatchString(k.Name) {
+		return apiError(api.CodeValidation, fieldErr("name", "the skill set name must match %s", idPattern))
+	}
+	if err := validateSkillSet(normalizeSkillSet(k)); err != nil {
+		return apiError(api.CodeValidation, err)
 	}
 	return nil
 }
@@ -143,13 +216,10 @@ func (s *Store) SkillSet(name string) (SkillSet, bool) {
 // stale_settings; rev NoRevision means create only. Invalid skill sets are
 // refused with code validation naming the field.
 func (s *Store) PutSkillSetIf(rev string, k SkillSet) error {
-	if !idPattern.MatchString(k.Name) {
-		return apiError(api.CodeValidation, fieldErr("name", "the skill set name must match %s", idPattern))
+	if err := ValidateSkillSet(k); err != nil {
+		return err
 	}
 	k = normalizeSkillSet(k)
-	if err := validateSkillSet(k); err != nil {
-		return apiError(api.CodeValidation, err)
-	}
 	data, err := encodeYAML(k)
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode skill set: %v", err)

@@ -548,3 +548,49 @@ func TestMessage(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// The state names the set's paths its checkout does not have, at once
+// after a fetch, after a change of the paths and after a new commit.
+func TestStateNamesMissingPaths(t *testing.T) {
+	u := newUpstream(t, map[string]string{"skills/a/SKILL.md": "a\n", "docs/b.md": "b\n"})
+	e := newEnv(t)
+	k := api.SkillSet{Name: "s", Repository: u.bare, Ref: "main", Update: api.SkillSetAtStart, Enabled: true, Paths: []string{"skills/a", "skills/c", "docs/b.md"}}
+	if err := e.store.PutSkillSetIf("", k); err != nil {
+		t.Fatal(err)
+	}
+	m := e.manager()
+	if st := m.State("s"); st.MissingPaths == nil || len(st.MissingPaths) != 0 {
+		t.Fatalf("without checkout: %+v", st)
+	}
+	m.Start(context.Background())
+	st := waitState(t, m, "s", StateOK)
+	if strings.Join(st.MissingPaths, ",") != "skills/c" {
+		t.Fatalf("state = %+v", st)
+	}
+	e.mu.Lock()
+	last := e.events[len(e.events)-1]
+	e.mu.Unlock()
+	if strings.Join(last.MissingPaths, ",") != "skills/c" {
+		t.Fatalf("event = %+v", last)
+	}
+	k.Paths = []string{"docs/b.md", "skills"}
+	if err := e.store.PutSkillSetIf("", k); err != nil {
+		t.Fatal(err)
+	}
+	if st := m.State("s"); len(st.MissingPaths) != 0 {
+		t.Fatalf("after the change: %+v", st)
+	}
+	u.commit(map[string]string{"docs/b.md": ""})
+	git(t, u.work, "rm", "-q", "docs/b.md")
+	git(t, u.work, "commit", "-q", "-m", "remove")
+	git(t, u.work, "push", "-q", u.bare, "main")
+	m.Update(context.Background(), "s")
+	if st := m.State("s"); strings.Join(st.MissingPaths, ",") != "docs/b.md" {
+		t.Fatalf("after the update: %+v", st)
+	}
+	for _, st := range m.States() {
+		if st.MissingPaths == nil {
+			t.Fatalf("States has nil missing paths: %+v", st)
+		}
+	}
+}

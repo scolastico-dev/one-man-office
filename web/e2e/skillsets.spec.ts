@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
@@ -32,6 +32,7 @@ function makeSource(omo: Omo, name: string): Source {
   const source: Source = {
     bare,
     commit(file, text) {
+      mkdirSync(dirname(join(work, file)), { recursive: true })
       writeFileSync(join(work, file), text)
       git(work, 'add', file)
       git(work, 'commit', '-q', '-m', `write ${file}`)
@@ -44,9 +45,11 @@ function makeSource(omo: Omo, name: string): Source {
 }
 
 interface Stored {
-  skill_sets: { name: string; revision: string; repository: string; instructions: Record<string, string> }[]
-  states: { name: string; state: string; commit: string; path: string; message: string }[]
+  skill_sets: { name: string; revision: string; repository: string; paths: string[]; roles: string[]; instructions: Record<string, string> }[]
+  states: { name: string; state: string; commit: string; path: string; message: string; missing_paths: string[] }[]
 }
+
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 const stored = (omo: Omo) => omo.api<Stored>('GET', '/api/skillsets')
 
 const title = (page: Page) => page.locator('[data-settings-page] h1')
@@ -235,18 +238,98 @@ test('a hand edit of the set file is shown; with a draft it is a conflict', asyn
 
 test('Add Superpowers opens a filled-in form that is stored only when saved', async ({ page, omo }) => {
   await openSkills(page, omo)
-  await page.locator('[data-add-superpowers]').click()
+  await page.locator('[data-add-recommended="superpowers"]').click()
   const ed = editor(page, 'superpowers')
   await expect(ed).toContainText('(not saved yet)')
   await expect(ed.getByLabel('Repository')).toHaveValue('https://github.com/obra/superpowers.git')
   await expect(ed.getByLabel('Branch or tag')).toHaveValue('main')
   await expect(ed.getByLabel('Developer')).toHaveValue(/test-driven-development/)
+  await expect(ed.locator('[data-skillset-role][aria-pressed="true"]')).toHaveText(['Product manager', 'Developer', 'Reviewer'])
+  await expect(ed.locator('[data-skillset-paths] [data-row]')).toHaveCount(0)
   await expect(saveBar(page, 'superpowers').locator('[data-save-state]')).toHaveText('Unsaved changes')
   expect((await stored(omo)).skill_sets).toEqual([])
   await ed.getByRole('button', { name: 'Close' }).click()
   await expect(page.locator('[data-question]')).toContainText('Leave without saving?')
   await page.locator('[data-question-confirm]').click()
   await expect(page.locator('[data-skillset-editor]')).toHaveCount(0)
+})
+
+/** A source with three skills in two groups, for the roles-and-paths tests. */
+function grillSource(omo: Omo): Source {
+  const src = makeSource(omo, 'talk')
+  src.commit('skills/productivity/grill-me/SKILL.md', '---\nname: grill-me\ndescription: A relentless interview.\ndisable-model-invocation: true\n---\nUse grilling.\n')
+  src.commit('skills/productivity/grilling/SKILL.md', '---\nname: grilling\ndescription: Grill the user.\n---\n')
+  src.commit('skills/engineering/tdd/SKILL.md', '---\nname: tdd\ndescription: Test first.\n---\n')
+  return src
+}
+
+async function previewOf(page: Page, omo: Omo, prompt: string) {
+  await page.goto(omo.url('/settings/prompts'))
+  await page.locator(`[data-prompt-row="${prompt}"] [data-prompt-toggle]`).click()
+  const ed = page.locator(`[data-prompt-editor="${prompt}"]`)
+  await ed.getByRole('button', { name: 'Preview' }).click()
+  const text = ed.locator('[data-preview-text]')
+  await expect(text).not.toBeEmpty()
+  return text
+}
+
+test('roles and paths: a set for the CEO with one skill folder reaches only the CEO, with only that skill', async ({ page, omo }) => {
+  const src = grillSource(omo)
+  await openSkills(page, omo)
+  await page.getByRole('button', { name: 'Add skill set…' }).click()
+  await page.getByLabel('Name of the skill set').fill('talk')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  const ed = editor(page, 'talk')
+  await ed.getByLabel('Repository').fill(src.bare)
+  await expect(ed.locator('[data-skillset-roles-hint]')).toHaveText('None chosen: every role gets this set.')
+  await ed.getByRole('button', { name: 'CEO' }).click()
+  await expect(ed.getByRole('button', { name: 'CEO' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(ed.locator('[data-skillset-text]')).toHaveCount(1)
+  await ed.getByRole('button', { name: 'Add path' }).click()
+  await ed.getByRole('textbox', { name: 'Path 1', exact: true }).fill('skills/productivity/grill-me')
+  await saveBar(page, 'talk').getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveBar(page, 'talk').locator('[data-save-state]')).toHaveText('Saved')
+  await expect(row(page, 'talk').locator('[data-skillset-state]')).toHaveText('checked out')
+  await expect(row(page, 'talk').locator('[data-skillset-reach]')).toHaveText('for CEO · skills/productivity/grill-me')
+  const set = (await stored(omo)).skill_sets[0]
+  expect(set?.roles).toEqual(['ceo'])
+  expect(set?.paths).toEqual(['skills/productivity/grill-me'])
+
+  // A path the checkout does not have is refused under its row; one that leaves the repository too.
+  await ed.getByRole('button', { name: 'Add path' }).click()
+  await ed.getByRole('textbox', { name: 'Path 2', exact: true }).fill('skills/productivity/nope')
+  await saveBar(page, 'talk').getByRole('button', { name: 'Save', exact: true }).click()
+  const row2 = ed.locator('[data-skillset-paths] [data-row="1"]')
+  await expect(row2.locator('.omo-field__error')).toContainText('paths.1 is not a folder or file of the checkout at')
+  await expect(ed.getByRole('textbox', { name: 'Path 2', exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await ed.getByRole('textbox', { name: 'Path 2', exact: true }).fill('../outside')
+  await saveBar(page, 'talk').getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(row2.locator('.omo-field__error')).toContainText('paths.1 must stay inside the repository')
+  await ed.getByRole('button', { name: 'Remove path 2' }).click()
+  await expect(saveBar(page, 'talk').getByRole('button', { name: 'Discard' })).toBeDisabled()
+  expect((await stored(omo)).skill_sets[0]?.paths).toEqual(['skills/productivity/grill-me'])
+
+  const ceo = await previewOf(page, omo, 'ceo-instructions')
+  await expect(ceo).toContainText('Skill set talk (checked out at ')
+  await expect(ceo).toContainText('- grill-me (only when someone asks for it): A relentless interview.')
+  await expect(ceo).not.toContainText('grilling')
+  await expect(ceo).not.toContainText('tdd')
+  const dev = await previewOf(page, omo, 'developer-instructions')
+  await expect(dev).not.toContainText('Skill set')
+})
+
+test('a path that disappears from the source is named in the open set', async ({ page, omo }) => {
+  const src = grillSource(omo)
+  await openSkills(page, omo)
+  await addSet(page, omo, 'talk', src, { paths: ['skills/productivity/grill-me', 'skills/engineering/tdd'] })
+  await openEditor(page, 'talk')
+  const ed = editor(page, 'talk')
+  await expect(ed.locator('[data-skillset-missing]')).toHaveCount(0)
+  git(join(src.bare, '..', 'work'), 'rm', '-q', '-r', 'skills/engineering')
+  git(join(src.bare, '..', 'work'), 'commit', '-q', '-m', 'drop tdd')
+  git(join(src.bare, '..', 'work'), 'push', '-q', src.bare, 'main')
+  await ed.getByRole('button', { name: 'Update now' }).click()
+  await expect(ed.locator('[data-skillset-missing]')).toContainText('Not in the checkout: skills/engineering/tdd.')
 })
 
 test('at 390 px the page does not scroll sideways', async ({ page, omo }) => {
@@ -284,6 +367,23 @@ for (const width of [1440, 390] as const) {
         await openEditor(page, 'skills')
         await editor(page, 'skills').getByLabel('Reviewer').fill('Unsaved.')
         expect(await violations(page), 'open set').toEqual([])
+        // Roles chosen, paths listed, one of them not in the checkout.
+        const talk = grillSource(omo)
+        await addSet(page, omo, 'talk', talk, {
+          roles: ['ceo', 'pm'],
+          paths: ['skills/productivity/grill-me', 'skills/productivity/gone'],
+          instructions: { ceo: 'When the user asks you to grill them, follow the grill-me skill.' },
+        })
+        await row(page, 'talk').locator('[data-skillset-toggle]').click()
+        await page.locator('[data-question-confirm]').click()
+        const ed = editor(page, 'talk')
+        await expect(ed.locator('[data-skillset-missing]')).toBeVisible()
+        expect(await violations(page), 'roles and paths').toEqual([])
+        if (SHOTS !== '') {
+          mkdirSync(SHOTS, { recursive: true })
+          await ed.locator('[data-skillset-roles]').scrollIntoViewIfNeeded()
+          await page.screenshot({ path: join(SHOTS, `fix6-skills-${colorScheme}-${width}.png`) })
+        }
       })
     })
   }

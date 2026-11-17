@@ -1118,7 +1118,11 @@ export interface SkillSet {
   ref: string
   update: SkillSetUpdate
   enabled: boolean
-  /** By role: ceo, pm, developer, reviewer, export. */
+  /** Folders and files agents get, relative to the repository's root (`skills/grill-me`); empty: the whole repository. */
+  paths: string[]
+  /** The roles (ceo, pm, developer, reviewer, export) whose agents get the set; empty: every role. */
+  roles: string[]
+  /** By role that gets the set: a text that comes with its skills. */
   instructions: Record<string, string>
   revision?: string
 }
@@ -1134,6 +1138,8 @@ export interface SkillSetState {
   updated_at: string | null
   /** Why an update failed: git output, cut and without credentials. */
   message: string
+  /** The set's paths its checkout does not have; empty without checkout. */
+  missing_paths: string[]
 }
 
 export interface SkillSetsResponse {

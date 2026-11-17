@@ -5,10 +5,12 @@
 // omo checks it out into skills/<name> through gitops.FetchSource (no
 // hooks, filters, submodules or links; a fetch replaces the folder) and
 // tells the agents of a role where it is, with the user's text for that
-// role (see Text). The checkout is shared by every agent. Agents run as the
-// same OS user and can change files in it; omo does not watch for that: the
-// next update replaces the whole folder with a fresh checkout, so changes
-// last until then. omo itself never reads the checkout's files.
+// role (see Text), listing the skills the set's paths select (see Find).
+// The checkout is shared by every agent. Agents run as the same OS user and
+// can change files in it; omo does not watch for that: the next update
+// replaces the whole folder with a fresh checkout, so changes last until
+// then. omo reads only the front matter of the skills' files, never
+// following a link.
 //
 // Fetches run in the background, at most two at a time and never two of
 // one set at once. A fetch that fails or is cancelled keeps the last good
@@ -284,10 +286,24 @@ func (m *Manager) State(name string) api.SkillSetState {
 	m.mu.Lock()
 	st, ok := m.states[name]
 	m.mu.Unlock()
-	if ok {
+	if !ok {
+		st = m.diskState(name)
+	}
+	return m.withMissing(st)
+}
+
+// withMissing fills st.MissingPaths from the set's paths as the settings
+// have them now and the checkout as it is on disk.
+func (m *Manager) withMissing(st api.SkillSetState) api.SkillSetState {
+	st.MissingPaths = []string{}
+	k, ok := m.o.Store.SkillSet(st.Name)
+	if !ok || st.State == StateMissing {
 		return st
 	}
-	return m.diskState(name)
+	if path, ok := m.Checkout(st.Name); ok {
+		st.MissingPaths = append(st.MissingPaths, Missing(path, k.Paths)...)
+	}
+	return st
 }
 
 // diskState describes the checkout of name as it is on disk.
@@ -454,7 +470,7 @@ func (m *Manager) finish(name string, j *job, commit string, err error) {
 // changed reports a state.
 func (m *Manager) changed(st api.SkillSetState) {
 	if m.o.OnChange != nil {
-		m.o.OnChange(st)
+		m.o.OnChange(m.withMissing(st))
 	}
 }
 

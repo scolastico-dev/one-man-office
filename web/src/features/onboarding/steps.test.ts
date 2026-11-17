@@ -194,7 +194,7 @@ test('Add Superpowers creates the set in one click (create only), the step ticks
   expect(step.get('[data-step-action]').classes()).not.toContain('omo-btn--primary')
   expect(stepOf(w, 'project').get('[data-step-action]').classes()).toContain('omo-btn--primary')
 
-  h.respond.skillSets = { skill_sets: [{ name: 'superpowers', repository: 'https://example.com/other.git', ref: '', update: 'pinned', enabled: true, instructions: {} }], states: [], errors: [] }
+  h.respond.skillSets = { skill_sets: [{ name: 'superpowers', repository: 'https://example.com/other.git', ref: '', update: 'pinned', enabled: true, paths: [], roles: [], instructions: {} }], states: [], errors: [] }
   h.respond.write = (s) => {
     h.respond.skillSets = { skill_sets: [...h.respond.skillSets.skill_sets, s.body as never], states: [], errors: [] }
     return ok(s.body)

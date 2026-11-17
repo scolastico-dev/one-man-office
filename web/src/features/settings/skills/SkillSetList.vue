@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The stored skill sets, one row each: name, whether the checkout is there,
-// how it updates and, once checked out, its commit and age; a failed update
+// who gets it and how much of it, how it updates and, once checked out, its commit and age; a failed update
 // shows the server's cleaned message. Names and messages can come from files
 // anyone with access to omo's home can write, so they are shown as visible text.
 import { useId } from 'vue'
@@ -10,7 +10,7 @@ import StatusBadge from '../../../components/ui/StatusBadge.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { SKILL_SET_STATES, shortCommit, stateWords } from '../extensionWords'
-import { missingState, updateWords } from './skillForms'
+import { missingState, reachWords, updateWords } from './skillForms'
 
 const props = defineProps<{
   sets: readonly SkillSet[]
@@ -36,6 +36,7 @@ const fallback = useId()
           <StatusBadge :tone="stateWords(SKILL_SET_STATES, stateOf(s.name).state).tone" :text="stateWords(SKILL_SET_STATES, stateOf(s.name).state).text" data-skillset-state />
           <StatusBadge v-if="!s.enabled" tone="muted" text="off" />
         </p>
+        <p class="skill-list__meta" data-skillset-reach>{{ visibleText(reachWords(s)) }}</p>
         <p class="skill-list__meta">
           {{ visibleText(updateWords(s.update, s.ref)) }}
           <template v-if="stateOf(s.name).commit !== '' && stateOf(s.name).state !== 'missing'">

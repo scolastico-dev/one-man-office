@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -113,6 +115,10 @@ func (s *Server) putSkillSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k.Name, k.Revision = name, ""
+	if err := s.checkSkillSetPaths(k); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	if err := s.settings.PutSkillSetIf(rev, k); err != nil {
 		writeError(w, r, err)
 		return
@@ -127,6 +133,38 @@ func (s *Server) putSkillSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// checkSkillSetPaths checks k as the store does, then refuses a path of k that the set's checkout does not
+// have, when that checkout is of the same repository and ref as k (a new
+// source is fetched after the write; its state then names the paths it
+// does not have). The error names the field paths.N.
+func (s *Server) checkSkillSetPaths(k api.SkillSet) error {
+	if err := settings.ValidateSkillSet(k); err != nil {
+		return err
+	}
+	old, ok := s.settings.SkillSet(k.Name)
+	if !ok || s.skills.m == nil || old.Repository != k.Repository || old.Ref != k.Ref {
+		return nil
+	}
+	path, ok := s.skills.m.Checkout(k.Name)
+	if !ok {
+		return nil
+	}
+	missing := skillsets.Missing(path, k.Paths)
+	if len(missing) == 0 {
+		return nil
+	}
+	i := slices.Index(k.Paths, missing[0])
+	st := s.skills.m.State(k.Name)
+	at := ""
+	if len(st.Commit) >= 7 {
+		at = " at " + st.Commit[:7]
+	}
+	key := fmt.Sprintf("paths.%d", i)
+	e := api.Errorf(api.CodeValidation, "%s is not a folder or file of the checkout%s; check its spelling (relative to the repository's root) or update the skill set first", key, at)
+	e.Details = api.FieldDetail{Field: key}
+	return e
 }
 
 // deleteSkillSet removes a skill set's file and then its checkout.
