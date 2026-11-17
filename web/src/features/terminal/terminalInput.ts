@@ -4,6 +4,9 @@ export interface InputSocket {
   send(data: Uint8Array<ArrayBuffer>): void
 }
 
+/** A refusal of input while no connection is open. */
+export const DISCONNECTED_TEXT = 'Terminal disconnected. This input was not sent; press Reconnect.'
+
 const OPEN = 1
 const MAX_PENDING_BYTES = 4 * 1024 * 1024
 const MAX_QUEUED = 1024
@@ -26,7 +29,7 @@ export class TerminalInput {
 
   send(text: string): void {
     if (this.closed || this.socket.readyState > OPEN) {
-      this.reportError('Terminal disconnected. Select it again before pasting.')
+      this.reportError(DISCONNECTED_TEXT)
       return
     }
     if (this.pendingBytes + text.length > MAX_PENDING_BYTES || this.queue.length >= MAX_QUEUED) {

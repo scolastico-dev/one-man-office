@@ -204,6 +204,29 @@ describe('TerminalView', () => {
     expect(t.written.map((d: Uint8Array) => new TextDecoder().decode(d))).toEqual(['line 1\r\nline 2\r\n'])
   })
 
+  test('a disconnected terminal connects again once the board is live again; a live one is left alone', async () => {
+    const omo = new FakeOmo()
+    const session = createSession({ tokens: createTokenStore(() => window.localStorage), makeClient: omo.makeClient, connect: omo.connect })
+    session.start()
+    await vi.waitFor(() => expect(omo.stream).not.toBeNull())
+    omo.stream!.onState('live')
+    view({}, session)
+    conn().o.onState('live')
+    omo.stream!.onState('retrying', 1000)
+    omo.stream!.onState('live')
+    await nextTick()
+    expect(conn().reconnect).not.toHaveBeenCalled()
+    // It tried its back-off and gave up while omo was away.
+    conn().o.onState('disconnected')
+    omo.stream!.onState('retrying', 1000)
+    await nextTick()
+    expect(conn().reconnect).not.toHaveBeenCalled()
+    omo.stream!.onState('live')
+    await nextTick()
+    expect(conn().reconnect).toHaveBeenCalledTimes(1)
+    session.store.stop()
+  })
+
   test('fill makes the view take the height of its column; by default it keeps its own', () => {
     expect(view().classes()).not.toContain('tv--fill')
     expect(view({ fill: true }).classes()).toContain('tv--fill')

@@ -1,4 +1,4 @@
-import { TerminalInput } from './terminalInput'
+import { DISCONNECTED_TEXT, TerminalInput } from './terminalInput'
 
 export type ConnectionState = 'connecting' | 'live' | 'disconnected' | 'ended'
 
@@ -52,7 +52,7 @@ export interface TerminalConnection {
   send(text: string): void
   /** Tells the process the new size; remembered and sent again on every new connection. */
   resize(rows: number, cols: number): void
-  /** Connects again right now (after `disconnected`). */
+  /** Connects again right now while `disconnected`, with the back-off from its start. */
   reconnect(): void
   /** Closes the socket and stops every timer. */
   dispose(): void
@@ -178,7 +178,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
     send(text) {
       if (disposed) return
       if (!input || finished) {
-        o.onError('Terminal disconnected. Select it again before pasting.')
+        o.onError(DISCONNECTED_TEXT)
         return
       }
       input.send(text)

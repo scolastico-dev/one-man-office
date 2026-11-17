@@ -109,6 +109,15 @@ describe('terminal socket', () => {
     c.dispose()
   })
 
+  test('input on a dead connection is refused in words that name the way out', async () => {
+    const { c, sock, errors } = make()
+    sock().open()
+    sock().drop()
+    c.send('x')
+    expect(errors).toEqual(['Terminal disconnected. This input was not sent; press Reconnect.'])
+    c.dispose()
+  })
+
   test('offers omo and omo-token.<t>; never puts the token in the URL', () => {
     const s = openTerminalSocket('/api/terminals/t1/socket', TOKEN, deps()) as unknown as FakeSocket
     expect(s.url).toBe('wss://omo.test:8090/api/terminals/t1/socket')

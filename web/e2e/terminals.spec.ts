@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
-import { expectCardIn, observe, openBoard } from './support/board'
+import { expectCardIn, nudgeReconnect, observe, openBoard } from './support/board'
 import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page, WebSocketRoute } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
@@ -201,6 +201,58 @@ test('a terminal whose connection drops connects again and shows its history onc
     await typeInTerminal(page, terminal, 'echo after=$((6 * 7))')
     await expectTerminalText(terminal, 'after=42')
     expect(await occurrences(terminal, 'once=42')).toBe(1)
+  } finally {
+    await closeAll(omo)
+  }
+})
+
+test('a terminal that stopped trying while the network was down connects again once the board is live again', async ({ page, omo }) => {
+  await page.clock.install()
+  let down = false
+  const open: WebSocketRoute[] = []
+  await page.routeWebSocket(/\/api\/terminals\/[^/]+\/socket$/, async (ws) => {
+    if (down) {
+      await ws.close({ code: 4000, reason: 'unreachable' })
+      return
+    }
+    const server = ws.connectToServer()
+    open.push(ws)
+    ws.onClose(() => server.close())
+  })
+  try {
+    await openBoard(page, omo)
+    await openTerminalsTab(page)
+    await newTerminal(sidebar(page))
+    const terminal = terminalIn(sidebar(page))
+    await typeInTerminal(page, terminal, 'echo here=$((1 + 1))')
+    await expectTerminalText(terminal, 'here=2')
+
+    // The network goes away: nothing reaches omo, the open terminal socket drops.
+    down = true
+    await page.route('**/api/events*', (route) => route.abort('connectionrefused'))
+    for (const ws of open.splice(0)) await ws.close({ code: 4000, reason: 'dropped' })
+    const status = sidebar(page).locator('.tv__state')
+    // A long sleep: the terminal's back-off runs out and the board's stream goes silent.
+    await expect
+      .poll(
+        async () => {
+          await page.clock.fastForward(20_000)
+          return status.textContent()
+        },
+        { timeout: 30_000 },
+      )
+      .toBe('Disconnected')
+    await page.clock.fastForward(60_000)
+    await expect(page.locator('[data-connection]')).toHaveAttribute('data-state', /^(retrying|reconnecting)$/)
+
+    // The network is back: the board connects again, and the terminal with it.
+    down = false
+    await page.unroute('**/api/events*')
+    await nudgeReconnect(page)
+    await expect(page.locator('[data-connection]')).toHaveAttribute('data-state', 'live')
+    await expect(status).toHaveText('Connected')
+    await expectTerminalText(terminal, 'here=2')
+    expect(await occurrences(terminal, 'here=2')).toBe(1)
   } finally {
     await closeAll(omo)
   }

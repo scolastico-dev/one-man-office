@@ -316,6 +316,18 @@ function onState(next: ConnectionState, wait?: number): void {
   if (next !== previous) emit('state', next)
 }
 
+/**
+ * The board's own connection retries for as long as the page is open: once it
+ * is live again omo is reachable, so a terminal that lost its connection (or
+ * stopped trying) connects again on its own.
+ */
+watch(
+  () => session.store.connection.value,
+  (now, before) => {
+    if (now === 'live' && before !== 'live' && state.value === 'disconnected') connection?.reconnect()
+  },
+)
+
 /** The rows and columns that fit the box, or null when it cannot be measured. */
 function proposed(): { rows: number; cols: number } | null {
   const size = fit?.proposeDimensions()
