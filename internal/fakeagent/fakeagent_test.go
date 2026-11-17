@@ -554,6 +554,24 @@ func TestMCPOpCallsAToolThroughTheBridge(t *testing.T) {
 	}
 }
 
+// The mcp-tools op lists the tools omo offers the agent's session through
+// the bridge, sorted.
+func TestMCPToolsOpListsTheToolsOfTheSession(t *testing.T) {
+	w := startWorld(t)
+	task := w.task("work", w.story("story"))
+	id := w.session(api.RoleDeveloper, task, "dev1")
+	res := runFake(t, Options{Script: "mcp-tools"})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	contains(t, res.out, "fake: mcp tools: ")
+	contains(t, res.out, "comment, comments, done, ")
+	if strings.Contains(res.out, " wait") {
+		t.Fatalf("a command line only tool is listed:\n%s", res.out)
+	}
+	noSecret(t, res.out, id)
+}
+
 func TestImageOpUploadsAndComments(t *testing.T) {
 	w := startWorld(t)
 	task := w.task("work", w.story("story"))

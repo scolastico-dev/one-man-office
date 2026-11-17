@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ func init() {
 		"ask":          {1, 1, "TEXT", nil, opAsk},
 		"wait":         {1, 1, "DURATION", duration(0), opWait},
 		"mcp":          {1, 2, "TOOL[|JSON]", checkJSONObject(1), opMCP},
+		"mcp-tools":    {0, 0, "no fields", nil, opMCPTools},
 		// A pm.
 		"create-tasks":     {1, 2, "COUNT[|chain]", checkCreateTasks, opCreateTasks},
 		"release-all":      {0, 0, "no fields", nil, opReleaseAll},
@@ -764,16 +766,9 @@ func opMCP(ctx context.Context, r *runner, s Step) error {
 			return fmt.Errorf("mcp %s: arguments %q are not a JSON object", s.Args[0], raw)
 		}
 	}
-	exe, err := os.Executable()
+	cs, err := connectBridge(ctx)
 	if err != nil {
 		return err
-	}
-	cmd := exec.CommandContext(ctx, exe)
-	cmd.Env = append(os.Environ(), EnvEnable+"=1", EnvBridge+"=1")
-	c := mcp.NewClient(&mcp.Implementation{Name: "fake-agent", Version: "1"}, nil)
-	cs, err := c.Connect(ctx, &mcp.CommandTransport{Command: cmd}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
-	if err != nil {
-		return fmt.Errorf("mcp: start the bridge: %w", err)
 	}
 	defer cs.Close()
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: s.Args[0], Arguments: args})
@@ -791,4 +786,41 @@ func opMCP(ctx context.Context, r *runner, s Step) error {
 	}
 	r.say("fake: mcp %s: %s", s.Args[0], text.String())
 	return nil
+}
+
+// opMCPTools prints the names of the tools omo's MCP bridge offers this
+// agent's session, sorted.
+func opMCPTools(ctx context.Context, r *runner, _ Step) error {
+	cs, err := connectBridge(ctx)
+	if err != nil {
+		return err
+	}
+	defer cs.Close()
+	var names []string
+	for t, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			return fmt.Errorf("mcp tools: %w", err)
+		}
+		names = append(names, t.Name)
+	}
+	slices.Sort(names)
+	r.say("fake: mcp tools: %s", strings.Join(names, ", "))
+	return nil
+}
+
+// connectBridge starts omo's MCP bridge as this process with the agent's
+// environment and connects to it as an agent program does.
+func connectBridge(ctx context.Context) (*mcp.ClientSession, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, exe)
+	cmd.Env = append(os.Environ(), EnvEnable+"=1", EnvBridge+"=1")
+	c := mcp.NewClient(&mcp.Implementation{Name: "fake-agent", Version: "1"}, nil)
+	cs, err := c.Connect(ctx, &mcp.CommandTransport{Command: cmd}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	if err != nil {
+		return nil, fmt.Errorf("mcp: start the bridge: %w", err)
+	}
+	return cs, nil
 }
