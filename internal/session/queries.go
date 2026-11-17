@@ -3,11 +3,10 @@ package session
 import "bytes"
 
 // omo is the terminal emulator behind every agent PTY, so it has to behave
-// like one: programs built on termenv/bubbletea — including omo's own CLI
-// verbs, which link the TUI — probe the terminal at startup for its
-// foreground/background colours and cursor position, then block on a five
-// second timeout when nothing replies. Answering keeps every in-session
-// `omo inbox`/`omo done` instant.
+// like one: programs built on termenv/bubbletea probe the terminal at
+// startup for its foreground/background colours and cursor position, then
+// block on a five second timeout when nothing replies. Answering keeps such
+// programs, run by an agent in its session, from stalling.
 var (
 	queryDSR = []byte("\x1b[6n")  // device status report: cursor position
 	queryFG  = []byte("\x1b]10;") // OSC 10: foreground colour

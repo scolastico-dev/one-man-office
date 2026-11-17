@@ -68,7 +68,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
-	officedb "github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/luabox"
 )
@@ -469,7 +469,7 @@ type Manager struct {
 	mu      sync.Mutex
 	closed  bool
 	entries []*entry // by name, every plugin of the last Load
-	known   map[string]officedb.PluginRuntime
+	known   map[string]db.PluginRuntime
 
 	manual sync.WaitGroup // running manual actions
 
@@ -719,14 +719,14 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 }
 
 // knownRuntimes are the runtime records of the database, read once.
-func (m *Manager) knownRuntimes() map[string]officedb.PluginRuntime {
+func (m *Manager) knownRuntimes() map[string]db.PluginRuntime {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.known != nil || m.o.DB == nil {
 		return m.known
 	}
-	m.known = map[string]officedb.PluginRuntime{}
-	rows, err := officedb.PluginRuntimes(m.o.DB)
+	m.known = map[string]db.PluginRuntime{}
+	rows, err := db.PluginRuntimes(m.o.DB)
 	if err != nil {
 		m.logf("plugins: read the runtime records: %v", err)
 		return m.known
@@ -1216,7 +1216,7 @@ func (m *Manager) LogLines(plugin string, limit int) []api.PluginLogLine {
 	if m.o.DB == nil {
 		return out
 	}
-	rows, err := officedb.PluginLogTail(m.o.DB, plugin, limit)
+	rows, err := db.PluginLogTail(m.o.DB, plugin, limit)
 	if err != nil {
 		m.logf("plugins: read a log: %v", err)
 		return out
@@ -1244,16 +1244,16 @@ func (m *Manager) syncRuntimes(entries []*entry) {
 	if m.o.DB == nil {
 		return
 	}
-	rows := make([]officedb.PluginRuntime, 0, len(entries))
+	rows := make([]db.PluginRuntime, 0, len(entries))
 	m.mu.Lock()
 	for _, e := range entries {
-		rows = append(rows, officedb.PluginRuntime{
+		rows = append(rows, db.PluginRuntime{
 			Name: e.settings.Name, Version: e.manifest.Version, Description: e.manifest.Description,
 			State: e.state, HookCount: len(e.manifest.Hooks),
 		})
 	}
 	m.mu.Unlock()
-	if err := officedb.SyncPluginRuntimes(m.o.DB, rows); err != nil {
+	if err := db.SyncPluginRuntimes(m.o.DB, rows); err != nil {
 		m.logf("plugins: write the runtime records: %v", err)
 	}
 }
@@ -1262,7 +1262,7 @@ func (m *Manager) saveState(name, state, event string, at time.Time) {
 	if m.o.DB == nil {
 		return
 	}
-	if err := officedb.SetPluginRuntimeState(m.o.DB, name, state, event, at); err != nil {
+	if err := db.SetPluginRuntimeState(m.o.DB, name, state, event, at); err != nil {
 		m.logf("plugins: write the state of %s: %v", name, err)
 	}
 }
@@ -1273,7 +1273,7 @@ func (m *Manager) logLine(name, line string) {
 		return
 	}
 	line = strings.ReplaceAll(cutRunes(line, maxLogLineRunes), "\n", " ")
-	if err := officedb.AppendPluginRuntimeLog(m.o.DB, name, line, m.now(), LogLines); err != nil {
+	if err := db.AppendPluginRuntimeLog(m.o.DB, name, line, m.now(), LogLines); err != nil {
 		m.logf("plugins: write the log of %s: %v", name, err)
 	}
 }

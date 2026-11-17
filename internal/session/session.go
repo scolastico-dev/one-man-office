@@ -31,8 +31,7 @@ type Options struct {
 	NiceIncrement int
 
 	// LogMaxSizeKB caps the live transcript before it rotates (0 = never).
-	// LogKeep bounds live rotation segments; -1 retains all segments. Office
-	// inactive-session retention is applied separately by the supervisor.
+	// LogKeep bounds live rotation segments; -1 retains all segments.
 	LogMaxSizeKB int
 	LogKeep      int
 
@@ -65,7 +64,7 @@ type Session struct {
 	lastLog  time.Time
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
-	inputMu  sync.Mutex // keeps injected prompts, mail notices, and TUI input from interleaving
+	inputMu  sync.Mutex // keeps injected prompts and terminal input from interleaving
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error

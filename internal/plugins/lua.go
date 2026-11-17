@@ -9,7 +9,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	officedb "github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/luabox"
 )
 
@@ -159,7 +159,7 @@ func (m *Manager) luaStoreGet(plugin string) lua.LGFunction {
 		if m.o.DB == nil {
 			return fail(L, "storage is not available")
 		}
-		raw, ok, err := officedb.PluginStoreGet(m.o.DB, plugin, key)
+		raw, ok, err := db.PluginStoreGet(m.o.DB, plugin, key)
 		if err != nil {
 			return fail(L, "storage failed")
 		}
@@ -200,8 +200,8 @@ func (m *Manager) luaStoreSet(plugin string) lua.LGFunction {
 		if m.o.DB == nil {
 			return fail(L, "storage is not available")
 		}
-		if err := officedb.PluginStoreSet(m.o.DB, plugin, key, raw, MaxStoreKeys); err != nil {
-			if errors.Is(err, officedb.ErrPluginStoreFull) {
+		if err := db.PluginStoreSet(m.o.DB, plugin, key, raw, MaxStoreKeys); err != nil {
+			if errors.Is(err, db.ErrPluginStoreFull) {
 				return fail(L, fmt.Sprintf("the plugin stores at most %d keys", MaxStoreKeys))
 			}
 			return fail(L, "storage failed")
@@ -218,7 +218,7 @@ func (m *Manager) luaStoreDelete(plugin string) lua.LGFunction {
 		if m.o.DB == nil {
 			return fail(L, "storage is not available")
 		}
-		if err := officedb.PluginStoreDelete(m.o.DB, plugin, key); err != nil {
+		if err := db.PluginStoreDelete(m.o.DB, plugin, key); err != nil {
 			return fail(L, "storage failed")
 		}
 		L.Push(lua.LTrue)
@@ -232,7 +232,7 @@ func (m *Manager) luaStoreKeys(plugin string) lua.LGFunction {
 		if m.o.DB == nil {
 			return fail(L, "storage is not available")
 		}
-		keys, err := officedb.PluginStoreKeys(m.o.DB, plugin)
+		keys, err := db.PluginStoreKeys(m.o.DB, plugin)
 		if err != nil {
 			return fail(L, "storage failed")
 		}

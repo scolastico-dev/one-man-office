@@ -1,9 +1,9 @@
-// Package claudetrust pre-approves an office's working directories in the
-// Claude Code config.
+// Package claudetrust pre-approves the folders agents work in in the Claude
+// Code config.
 //
 // Claude Code asks "do you trust the files in this folder?" the first time it
 // runs in a directory. An omo agent has no human to answer it: the dialog
-// swallows the start prompt and the agent never reaches `omo ready`. omo
+// swallows the start prompt and the agent never reaches `omo ai ready`. omo
 // therefore records the same consent the user would give by pressing yes —
 // per directory, in ~/.claude.json — before spawning.
 package claudetrust

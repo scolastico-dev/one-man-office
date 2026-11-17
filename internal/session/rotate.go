@@ -6,8 +6,8 @@ import (
 	"sync"
 )
 
-// rotatingWriter caps a session transcript. A CEO lives as long as the office
-// does, so without a bound its log grows without limit. On reaching maxBytes
+// rotatingWriter caps a session transcript. A CEO session can run for days,
+// so without a bound its log grows without limit. On reaching maxBytes
 // the live file becomes <name>.1 and older files shift up. keep < 0 retains
 // every segment; otherwise it bounds segments for this one live session.
 type rotatingWriter struct {
