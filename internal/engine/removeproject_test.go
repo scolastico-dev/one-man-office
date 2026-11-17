@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -382,5 +383,39 @@ func TestExportAfterRemovingProjectWithoutRemote(t *testing.T) {
 	h.steps(2)
 	if tk = h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/a/pull/1" {
 		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
+	}
+}
+
+// A removal requested while omo starts (a tab reconnected at once) keeps
+// its claim: the start's release of the claims a crash left waits for it.
+func TestRemoveProjectKeepsItsClaimWhileARunStarts(t *testing.T) {
+	h := gitHarness(t, withProjects(2))
+	s := h.stoppedStory()
+	startupDone := make(chan struct{})
+	h.e.pause = func(point string) {
+		if point != "project-removal-claimed" {
+			return
+		}
+		go func() {
+			h.e.startup(h.ctx)
+			close(startupDone)
+		}()
+		select {
+		case <-startupDone:
+			t.Error("the start released the claims during a removal")
+		case <-time.After(100 * time.Millisecond):
+		}
+		if !h.ticket(s).Busy {
+			t.Error("the removal's claim was released")
+		}
+	}
+	got, err := h.removeProject(s, h.ids[1], false)
+	h.e.pause = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.awaitClosed("the start", startupDone)
+	if len(got.Projects) != 1 || h.ticket(s).Busy {
+		t.Fatalf("projects %+v busy %v", got.Projects, h.ticket(s).Busy)
 	}
 }

@@ -30,10 +30,15 @@ const maxWorkLines = 20
 // checked: its record goes, its worktree folder and branch stay as they
 // are, and the comment says where they are.
 func (e *Engine) RemoveProject(ctx context.Context, a board.Actor, n int64, req api.RemoveProjectRequest) (api.Ticket, error) {
+	// The request is served while a run may still be starting: the claim
+	// is kept from the run's release of the claims a crash left.
+	e.claims.RLock()
+	defer e.claims.RUnlock()
 	r, err := e.b.ClaimProjectRemoval(ctx, a, n, req.Project)
 	if err != nil {
 		return api.Ticket{}, err
 	}
+	e.at("project-removal-claimed")
 	recorded := false
 	defer func() {
 		if !recorded {

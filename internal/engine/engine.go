@@ -157,6 +157,12 @@ type Engine struct {
 	gitEnv    gitEnvState
 	expandEnv func(context.Context, map[string]string) ([]string, error)
 	setGitEnv func([]string)
+	// claims orders the release of every claim at a run's start (write
+	// lock) against claims taken outside the engine's workers, which a
+	// request makes before or while the run starts (read lock, held from
+	// the claim to its end; see RemoveProject): ReleaseAllClaims never
+	// ends one of them while it is in use.
+	claims sync.RWMutex
 }
 
 // at calls the pause hook, if any, at point.
@@ -322,9 +328,11 @@ func (e *Engine) startup(ctx context.Context) {
 			}
 		}
 	}
+	e.claims.Lock()
 	if err := e.b.ReleaseAllClaims(ctx); err != nil {
 		e.log.Printf("engine: release claims at start: %v", err)
 	}
+	e.claims.Unlock()
 }
 
 // healthTick runs the periodic checks and lets actions that changed nothing
