@@ -62,6 +62,53 @@ type SkillSetsResponse struct {
 	Errors    []FileError     `json:"errors"`
 }
 
+// SkillSearchResult is one skill skills.sh found: an item of GET
+// /api/skillsets/search. Name, SkillID and Source come from skills.sh
+// (someone else's text, checked and cut by omo); Repository and URL are
+// made by omo from Source and SkillID.
+type SkillSearchResult struct {
+	// ID is Source/SkillID.
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	SkillID string `json:"skill_id"`
+	// Source is the GitHub repository as owner/repo.
+	Source   string `json:"source"`
+	Installs int64  `json:"installs"`
+	// Repository is the git address of Source on GitHub.
+	Repository string `json:"repository"`
+	// URL is the skill's page on skills.sh.
+	URL string `json:"url"`
+}
+
+// SkillSearchResponse is the answer of GET /api/skillsets/search?q=.
+type SkillSearchResponse struct {
+	Query   string              `json:"query"`
+	Results []SkillSearchResult `json:"results"`
+}
+
+// SkillSearchChoice is the payload of POST /api/skillsets/search/resolve:
+// a result the user chose.
+type SkillSearchChoice struct {
+	Source  string `json:"source"`
+	SkillID string `json:"skill_id"`
+	Name    string `json:"name"`
+}
+
+// SkillSearchResolved is the answer of POST /api/skillsets/search/resolve:
+// what a new skill set for the chosen result starts with.
+type SkillSearchResolved struct {
+	Repository string `json:"repository"`
+	// Ref is "": the repository's default branch.
+	Ref string `json:"ref"`
+	// Paths is the skill's folder when Found ([] when the skill is the
+	// whole repository or was not found).
+	Paths []string `json:"paths"`
+	// Found says whether a skill of that name is in the repository.
+	Found bool `json:"found"`
+	// Commit is the commit that was looked at.
+	Commit string `json:"commit"`
+}
+
 // PluginSettings is the settings file of one plugin: the payload of PUT
 // /api/plugins/{name} and of POST /api/plugins. Its JSON names equal the keys
 // of plugins/<name>.yaml; the name comes from the file name.

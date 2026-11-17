@@ -31,6 +31,8 @@ var extensionRoutes = []extensionRoute{
 	{"PUT /api/skillsets/{name}", api.SkillSet{Repository: "https://example.invalid/x.git", Update: api.SkillSetPinned}},
 	{"DELETE /api/skillsets/{name}", nil},
 	{"POST /api/skillsets/{name}/update", map[string]any{}},
+	{"GET /api/skillsets/search", nil},
+	{"POST /api/skillsets/search/resolve", api.SkillSearchChoice{Source: "o/r", SkillID: "x"}},
 	{"GET /api/plugins", nil},
 	{"GET /api/plugins/catalog", nil},
 	{"POST /api/plugins", api.PluginInstall{PluginSettings: api.PluginSettings{Name: "x", Source: "https://example.invalid/x.git"}, Acknowledge: api.PluginCommunity}},

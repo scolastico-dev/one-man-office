@@ -219,3 +219,37 @@ test('paths the checkout does not have are named while the form still has them',
   await w.get('[data-skillset-paths] [data-row="1"] [data-part="remove"]').trigger('click')
   expect(w.find('[data-skillset-missing]').exists()).toBe(false)
 })
+
+const fromSearch = { name: '<b>grill-me</b>', source: 'mattpocock/skills', url: 'https://skills.sh/mattpocock/skills/grill-me', folder: 'skills/productivity/grill-me' }
+
+test('a set from a search warns that nobody reviewed it and asks before its first save', async () => {
+  const draft = { ...superpowersPreset('grill-me'), repository: 'https://github.com/mattpocock/skills.git', paths: ['skills/productivity/grill-me'], roles: [] }
+  const { w, h } = await open([], { name: 'grill-me', initial: draft, origin: fromSearch })
+  const warning = w.get('[data-skillset-found]')
+  expect(warning.text()).toContain('Nobody reviewed this skill')
+  expect(warning.text()).toContain('A skill is instructions your agents follow.')
+  // Someone else's text stays text.
+  expect(warning.text()).toContain('<b>grill-me</b>')
+  expect(warning.find('b').exists()).toBe(false)
+  expect(w.get('[data-skillset-found-link]').attributes('href')).toBe('https://skills.sh/mattpocock/skills/grill-me')
+  expect(w.get('[data-skillset-found-folder]').text()).toContain('skills/productivity/grill-me')
+
+  const asked: string[] = []
+  const confirm = window.confirm
+  try {
+    window.confirm = (text?: string) => (asked.push(text ?? ''), false)
+    await save(w)
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toContain('Nobody reviewed this skill')
+    expect(h.sent).toEqual([])
+
+    window.confirm = () => true
+    await save(w)
+    expect(h.sent).toHaveLength(1)
+    expect(h.sent[0]).toMatchObject({ method: 'PUT', path: '/api/skillsets/grill-me', ifMatch: '0' })
+  } finally {
+    window.confirm = confirm
+  }
+  // Once stored, the warning is gone and saving asks nothing.
+  expect(w.find('[data-skillset-found]').exists()).toBe(false)
+})

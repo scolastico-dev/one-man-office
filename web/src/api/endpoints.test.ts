@@ -322,6 +322,8 @@ describe('endpoints', () => {
     await e.putSkillSet(client, set, 'r2')
     await e.deleteSkillSet(client, 'x', 'r3')
     await e.updateSkillSet(client, 'x')
+    await e.searchSkills(client, 'grill me')
+    await e.resolveSkillSearch(client, { source: 'o/r', skill_id: 's', name: 'S' })
     await e.getPlugins(client)
     await e.installPlugin(client, plugin)
     await e.putPlugin(client, plugin, 'r4')
@@ -343,6 +345,8 @@ describe('endpoints', () => {
       { method: 'PUT', path: '/api/skillsets/a%2Fb', body: set, opts: { ifMatch: 'r2' } },
       { method: 'DELETE', path: '/api/skillsets/x', hasBody: false, opts: { ifMatch: 'r3' } },
       { method: 'POST', path: '/api/skillsets/x/update', body: {} },
+      { method: 'GET', path: '/api/skillsets/search', query: { q: 'grill me' } },
+      { method: 'POST', path: '/api/skillsets/search/resolve', body: { source: 'o/r', skill_id: 's', name: 'S' } },
       { method: 'GET', path: '/api/plugins' },
       { method: 'POST', path: '/api/plugins', body: plugin },
       { method: 'PUT', path: '/api/plugins/p%20q', body: plugin, opts: { ifMatch: 'r4' } },

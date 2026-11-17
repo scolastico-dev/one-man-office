@@ -22,6 +22,9 @@ import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import SkillSetEditor from './SkillSetEditor.vue'
 import SkillSetList from './SkillSetList.vue'
+import SkillSearch from './SkillSearch.vue'
+import { draftFromSearch, originOf, type SkillOrigin } from './skillSearch'
+import type { SkillSearchResolved, SkillSearchResult } from '../../../api/types'
 import { blankSkillSet, fileOfSkillSet, presetOf, RECOMMENDATIONS, type Recommendation, type SkillDraft } from './skillForms'
 
 const def = sectionDef('skills')
@@ -70,6 +73,8 @@ function takeState(st: SkillSetState) {
 /** The open set, and for one not stored yet where its form starts. */
 const selected = ref<string | null>(null)
 const initial = ref<SkillDraft | null>(null)
+/** For a set from a search that is not stored yet: where it came from. */
+const origin = ref<SkillOrigin | null>(null)
 const editor = useOpenEditor(() => `the skill set ${visibleText(selected.value ?? '')}`)
 const formId = useId()
 
@@ -83,11 +88,19 @@ async function toggle(name: string) {
   if (!(await editor.leave())) return
   selected.value = selected.value === name ? null : name
   initial.value = null
+  origin.value = null
 }
-async function openNew(name: string, start: SkillDraft) {
-  if (!(await editor.leave())) return
+async function openNew(name: string, start: SkillDraft, from: SkillOrigin | null = null): Promise<boolean> {
+  if (!(await editor.leave())) return false
   selected.value = name
   initial.value = start
+  origin.value = from
+  return true
+}
+/** A search result was chosen: its set opens unsaved, with where it came from. */
+function openFound(result: SkillSearchResult, resolved: SkillSearchResolved) {
+  const start = draftFromSearch(result, resolved, names.value)
+  void openNew(start.name, start, originOf(result, resolved))
 }
 function openRecommended(rec: Recommendation) {
   const start = presetOf(rec, names.value)
@@ -105,6 +118,7 @@ async function closeNew() {
   const name = selected.value
   selected.value = null
   initial.value = null
+  origin.value = null
   if (name !== null && selected.value === null) await focusAfter(name)
 }
 async function deleted() {
@@ -112,6 +126,7 @@ async function deleted() {
   editor.reset()
   selected.value = null
   initial.value = null
+  origin.value = null
   await reload()
   if (name !== null && selected.value === null) await focusAfter(name)
 }
@@ -144,6 +159,7 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
         :key="selected"
         :name="selected"
         :initial="initial"
+        :origin="origin"
         :state="stateOfOpen"
         :form-id="formId"
         @dirty="(d) => (editor.dirty.value = d)"
@@ -153,6 +169,8 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
         @state="takeState"
       />
     </FormSection>
+
+    <SkillSearch @choose="openFound" />
 
     <NameDialog
       :open="naming"

@@ -66,6 +66,9 @@ import type {
   PluginRunResult,
   PluginsResponse,
   PluginUpdate,
+  SkillSearchChoice,
+  SkillSearchResolved,
+  SkillSearchResponse,
   SkillSet,
   SkillSetState,
   SkillSetsResponse,
@@ -458,6 +461,16 @@ export function deleteSkillSet(c: ApiClient, name: string, revision: string): R<
 
 export function updateSkillSet(c: ApiClient, name: string): R<SkillSetState> {
   return c.send('POST', `/api/skillsets/${seg(name)}/update`, {})
+}
+
+/** Searches skills.sh through omo (only `q` is sent there). */
+export function searchSkills(c: ApiClient, q: string): R<SkillSearchResponse> {
+  return c.get('/api/skillsets/search', { q })
+}
+
+/** Fetches a chosen result's repository once and finds the skill's folder; stores nothing. */
+export function resolveSkillSearch(c: ApiClient, choice: SkillSearchChoice): R<SkillSearchResolved> {
+  return c.send('POST', '/api/skillsets/search/resolve', choice)
 }
 
 export function getPlugins(c: ApiClient): R<PluginsResponse> {

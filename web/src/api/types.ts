@@ -1154,6 +1154,44 @@ export interface SkillSetsResponse {
   errors: FileError[]
 }
 
+/** One skill skills.sh found. `name`, `skill_id` and `source` are someone else's text (checked and cut by omo); `repository` and `url` are made by omo. */
+export interface SkillSearchResult {
+  /** `source/skill_id`. */
+  id: string
+  name: string
+  skill_id: string
+  /** The GitHub repository as owner/repo. */
+  source: string
+  installs: number
+  /** The git address of `source` on GitHub. */
+  repository: string
+  /** The skill's page on skills.sh. */
+  url: string
+}
+
+export interface SkillSearchResponse {
+  query: string
+  results: SkillSearchResult[]
+}
+
+/** A search result the user chose (POST /api/skillsets/search/resolve). */
+export interface SkillSearchChoice {
+  source: string
+  skill_id: string
+  name: string
+}
+
+/** What a new skill set for a chosen result starts with. */
+export interface SkillSearchResolved {
+  repository: string
+  /** "": the default branch. */
+  ref: string
+  /** The skill's folder when found; empty when it is the whole repository or was not found. */
+  paths: string[]
+  found: boolean
+  commit: string
+}
+
 export interface PluginSettings {
   name: string
   source: string

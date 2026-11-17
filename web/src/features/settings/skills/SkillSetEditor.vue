@@ -47,18 +47,21 @@ import {
   type SkillDraft,
   type SkillRole,
 } from './skillForms'
+import { folderNote, SEARCH_TRUST_WARNING, type SkillOrigin } from './skillSearch'
 
 const props = withDefaults(
   defineProps<{
     name: string
     /** For a set not stored yet: where its form starts. */
     initial?: SkillDraft | null
+    /** For a set from a search on skills.sh that is not stored yet: where it came from (a warning shows, and saving asks first). */
+    origin?: SkillOrigin | null
     /** What omo knows of the checkout; absent until read. */
     state?: SkillSetState | null
     /** The id of this form, which the list's button names in aria-controls. */
     formId?: string
   }>(),
-  { initial: null, state: null, formId: undefined },
+  { initial: null, origin: null, state: null, formId: undefined },
 )
 const emit = defineEmits<{
   /** Whether the form has unsaved edits. */
@@ -149,7 +152,19 @@ function flip(role: SkillRole) {
 const checkout = computed(() => props.state ?? missingState(props.name))
 const label = computed(() => `Save changes to the skill set ${shownName.value}`)
 
+/** The warning about a set from a search, while it is not stored. */
+const found = computed(() => (stored.value ? null : props.origin))
+
 async function save() {
+  if (found.value !== null) {
+    const ok = await askFirst({
+      title: SEARCH_TRUST_WARNING.title,
+      text: `${SEARCH_TRUST_WARNING.paragraphs.join(' ')} Save the skill set ${shownName.value} from ${visibleText(found.value.source)}?`,
+      confirm: 'Save',
+      cancel: 'Not yet',
+    })
+    if (!ok) return
+  }
   if ((await r.save()) === 'refused') await focusFirstInvalid(root.value)
 }
 
@@ -237,6 +252,15 @@ async function remove() {
 
     <template v-if="draft && !(gone && !r.dirty.value)">
       <UnplacedErrors :errors="unplaced" />
+      <Callout v-if="found" tone="warn" :title="SEARCH_TRUST_WARNING.title" data-skillset-found>
+        <p>
+          From skills.sh: <span class="skill-editor__path">{{ visibleText(found.name) }}</span> in
+          <span class="skill-editor__path">{{ visibleText(found.source) }}</span>
+          (<a :href="found.url" target="_blank" rel="noreferrer noopener" data-skillset-found-link>its page on skills.sh</a>).
+        </p>
+        <p v-for="(p, i) in SEARCH_TRUST_WARNING.paragraphs" :key="i">{{ p }}</p>
+        <p data-skillset-found-folder>{{ visibleText(folderNote(found)) }} Choose the roles that get it; nothing is stored until you save.</p>
+      </Callout>
       <TextField
         v-model="draft.repository"
         label="Repository"

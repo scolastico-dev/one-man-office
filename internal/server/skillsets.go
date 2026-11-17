@@ -16,6 +16,10 @@ import (
 // skillSetFeature holds the state of the skill set routes and checkouts.
 type skillSetFeature struct {
 	m *skillsets.Manager
+	// search asks skills.sh (skillsets_search.go); resolving bounds the
+	// chosen results looked at at once.
+	search    *skillsets.Searcher
+	resolving chan struct{}
 }
 
 // registerSkillSets registers the /api/skillsets routes. They are the
@@ -26,6 +30,8 @@ func (s *Server) registerSkillSets(mux *http.ServeMux) {
 		{"PUT /api/skillsets/{name}", s.putSkillSet, userOnly},
 		{"DELETE /api/skillsets/{name}", s.deleteSkillSet, userOnly},
 		{"POST /api/skillsets/{name}/update", s.updateSkillSet, userOnly},
+		{"GET /api/skillsets/search", s.searchSkills, userOnly},
+		{"POST /api/skillsets/search/resolve", s.resolveSkillSearch, userOnly},
 	})
 }
 
@@ -44,6 +50,7 @@ func (s *Server) startSkillSets(ctx context.Context) {
 		OnChange: s.skillSetChanged, Poll: skillSetPoll,
 	})
 	s.skills.m.Start(ctx)
+	s.startSkillSearch()
 }
 
 // stopSkillSets stops the skill set work before the database is closed: it
