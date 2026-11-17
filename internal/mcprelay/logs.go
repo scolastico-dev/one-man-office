@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/secreturl"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
@@ -131,7 +132,7 @@ func (l *serverLog) line(msg string) {
 		if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
 			return
 		}
-		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		f, err := homefile.Append(l.path, 0o600)
 		if err != nil {
 			return
 		}
@@ -159,7 +160,7 @@ func (l *serverLog) rotate() {
 		os.Rename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
 	}
 	os.Rename(l.path, l.path+".1")
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := homefile.Append(l.path, 0o600)
 	if err != nil {
 		return
 	}
@@ -225,7 +226,7 @@ func readLog(path string, max int) ([]api.MCPLogLine, error) {
 		if i > 0 {
 			p = fmt.Sprintf("%s.%d", path, i)
 		}
-		data, err := os.ReadFile(p)
+		data, err := homefile.Read(p, logMaxBytes+logMaxLine)
 		if os.IsNotExist(err) {
 			break
 		}

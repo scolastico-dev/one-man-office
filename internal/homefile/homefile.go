@@ -66,6 +66,27 @@ func Open(path string) (*os.File, error) {
 	return f, nil
 }
 
+// Append opens the regular file at path for appending, creating it with
+// perm when it is missing. Like Open it refuses a link at the last element
+// (ErrLink) and any other kind of file (ErrNotRegular), and never waits
+// for a reader of a named pipe.
+func Append(path string, perm os.FileMode) (*os.File, error) {
+	f, err := openAppendNoFollow(path, perm)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return nil, &os.PathError{Op: "open", Path: path, Err: ErrNotRegular}
+	}
+	return f, nil
+}
+
 // Read returns the content of the regular file at path, as Open opens it.
 // A file of more than limit bytes gives ErrTooLarge inside an *os.PathError;
 // at most limit+1 bytes are read.
