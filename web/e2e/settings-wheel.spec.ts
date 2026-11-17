@@ -46,7 +46,7 @@ async function expectWheelScrollsPage(page: Page, x: number, y: number, where: s
 for (const width of [1440, 2560]) {
   test(`at ${width} px the wheel scrolls the settings page from the page, the margins, the list and the space below it`, async ({ page, omo }) => {
     await putProfile(omo, 'fake')
-    await page.setViewportSize({ width, height: 1100 })
+    await page.setViewportSize({ width, height: 1400 })
     await openBoard(page, omo)
     await page.goto(omo.url('/settings/agents'))
     await page.locator('[data-profile="fake"]').click()
