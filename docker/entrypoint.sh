@@ -212,7 +212,11 @@ main() {
     run_init_scripts
 
     cd "$runtime_workspace"
-    run_as_runtime_user omo config set host 0.0.0.0 >/dev/null
+    # omo itself explains a home it cannot use (one of omo 0.11 or older, for
+    # example) and, run with a terminal, asks what happens to it, so a
+    # refusal here does not end the container before omo can say so.
+    run_as_runtime_user omo config set host 0.0.0.0 >/dev/null ||
+        printf 'omo container: the listening address was not set to 0.0.0.0\n' >&2
     exec su-exec "$runtime_user" env \
         HOME="$runtime_home" \
         USER="$runtime_user" \
