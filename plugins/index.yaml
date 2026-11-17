@@ -17,3 +17,7 @@ plugins:
     tag: official
     description: Discord messages through a channel webhook when a ticket needs your attention or an agent asks you a question.
     path: plugins/discord
+  - name: pause-notice
+    tag: official
+    description: Tells every running agent to halt when you pause omo, and to continue where it stopped when you lift the pause.
+    path: plugins/pause-notice

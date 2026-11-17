@@ -1,0 +1,22 @@
+{
+  "name": "pause-notice",
+  "version": "1.0.0",
+  "description": "Tells every running agent to halt when you pause omo, and to continue where it stopped when you lift the pause",
+  "default_config": {
+    "halt_message": "the user paused omo. Stop what you are doing now: do not finish the current step, start nothing new, change no files, run no other commands and write no comments. Then wait: run omo ai wait --timeout 60m, and run it again whenever it ends without news, until omo tells you that the pause is over.",
+    "ceo_halt_message": "the user paused omo. Stop what you are doing now: do not finish the current step, start nothing new, change nothing on the board, run no commands and write no comments. End your turn and do nothing until omo tells you that the pause is over.",
+    "resume_message": "the pause is over. Continue where you stopped when omo was paused."
+  },
+  "hooks": [
+    {
+      "event": "omo_paused",
+      "lua": "pause.lua",
+      "timeout": "60s"
+    },
+    {
+      "event": "omo_resumed",
+      "lua": "pause.lua",
+      "timeout": "60s"
+    }
+  ]
+}
