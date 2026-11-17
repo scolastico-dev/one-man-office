@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/scolastico-dev/one-man-office/internal/aicmd"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
 )
@@ -119,12 +120,12 @@ swapped when omo starts again. omo must be running.`,
 }
 
 func printPlan(out io.Writer, p api.ImportPlan, server, database bool) {
-	fmt.Fprintf(out, "Made by omo %s on %s.\n", oneLine(p.Manifest.OmoVersion), p.Manifest.CreatedAt.Local().Format("2006-01-02 15:04"))
+	fmt.Fprintf(out, "Made by omo %s on %s.\n", aicmd.OneLine(p.Manifest.OmoVersion), p.Manifest.CreatedAt.Local().Format("2006-01-02 15:04"))
 	counts := map[string]int{}
 	for _, f := range p.Files {
 		counts[f.Change]++
 		if f.Change != api.ImportSame {
-			fmt.Fprintf(out, "  %-8s %s\n", f.Change, oneLine(f.Path))
+			fmt.Fprintf(out, "  %-8s %s\n", f.Change, aicmd.OneLine(f.Path))
 		}
 	}
 	fmt.Fprintf(out, "%d to add, %d to replace, %d unchanged.\n", counts[api.ImportAdd], counts[api.ImportReplace], counts[api.ImportSame])

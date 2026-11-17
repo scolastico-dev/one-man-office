@@ -1,4 +1,4 @@
-package cli
+package aicmd
 
 import (
 	"bytes"
@@ -86,7 +86,7 @@ func TestBranchNote(t *testing.T) {
 // (tabs kept), so an ESC or a right-to-left override in a comment cannot
 // steer the reader's terminal or reorder what it reads.
 func TestPrintedAuthorTextShowsHiddenCharacters(t *testing.T) {
-	if got := oneLine("a\u200bb\u202ec\ufeffd\U000E0041e"); got != "a b c d e" {
+	if got := OneLine("a\u200bb\u202ec\ufeffd\U000E0041e"); got != "a b c d e" {
 		t.Errorf("oneLine = %q", got)
 	}
 	var out bytes.Buffer

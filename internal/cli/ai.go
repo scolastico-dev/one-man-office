@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
@@ -13,59 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/aicmd"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
-	"github.com/scolastico-dev/one-man-office/internal/images"
 )
-
-// aiCall is the state of one `omo ai` invocation.
-type aiCall struct {
-	ctx    context.Context
-	cmd    *cobra.Command
-	client *apiclient.Client
-	out    io.Writer
-	json   bool
-	// imageNotes caches what withImagePaths found per image id.
-	imageNotes map[string]images.Note
-}
-
-// emit prints the last response body as JSON with --json, otherwise the text
-// form produced by text.
-func (a *aiCall) emit(text func(w io.Writer)) error {
-	if a.json {
-		body := strings.TrimRight(string(a.client.LastBody()), "\n")
-		_, err := fmt.Fprintln(a.out, body)
-		return err
-	}
-	text(a.out)
-	return nil
-}
-
-// aiRun wraps a verb: it connects to the running server (never starting one)
-// and turns server errors into one plain line.
-func aiRun(fn func(a *aiCall, args []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		client, err := apiclient.FromEnvironment()
-		if err != nil {
-			return err
-		}
-		asJSON, _ := cmd.Flags().GetBool("json")
-		a := &aiCall{ctx: cmd.Context(), cmd: cmd, client: client, out: cmd.OutOrStdout(), json: asJSON}
-		if a.ctx == nil {
-			a.ctx = context.Background()
-		}
-		return explain(fn(a, args))
-	}
-}
-
-// explain reduces an error to the server's message plus its code.
-func explain(err error) error {
-	var apiErr *api.Error
-	if errors.As(err, &apiErr) {
-		return fmt.Errorf("%s (%s)", apiErr.Message, apiErr.Code)
-	}
-	return err
-}
 
 // ticketNumber parses "12" or "#12".
 func ticketNumber(s string) (int, error) {
@@ -151,47 +102,241 @@ func checkText(text, source, hint string, allowEmpty bool) (string, error) {
 	return text, nil
 }
 
-const aiLong = `The commands agents use to work on the omo board: read tickets, create and
-update them, link dependencies, comment, ask questions and hand in work. A
-project that already has a branch on a ticket is taken off it with
-omo ai ticket remove-project.
-Every command talks to the running omo server over its local socket and never
-starts one. Without OMO_AGENT_ID you act as the user; with it, as that agent.
-
-Ticket numbers are written 12 or #12. Text arguments (descriptions, comments)
-can be given as words, from a file, or from standard input: a lone "-" in
-place of the words, or the file flag with "-" (for example --body-file -).
-Text must be UTF-8; line endings become \n and whitespace at the very end is
-dropped, everything else is sent as it is.
-Add --json to any command for the server's raw JSON answer. An error prints
-one line and exits with status 1.
-
-Text written by people or agents (descriptions, comments) is indented by four
-spaces; lines at the left margin come from omo. An image in a description or
-comment is written ![name](omo-image:<id>); omo follows it with the local
-path of the image's file, which you can open.`
-
-const aiExample = `  omo ai whoami
-  omo ai ticket list --column ready
-  omo ai ticket show 12
-  omo ai comments 12
-  omo ai comment 12 "@developer please check the failing test"
-  omo ai image add 12 ./screenshot.png`
-
-// addAICommand registers the `omo ai` group.
+// addAICommand registers the `omo ai` group, built from the definitions in
+// internal/aicmd.
 func addAICommand(root *cobra.Command) {
-	ai := &cobra.Command{
-		Use:     "ai",
-		Short:   "Commands for agents working on the board",
-		Long:    aiLong,
-		Example: aiExample,
-		Args:    cobra.NoArgs,
-		RunE:    func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	groups := map[string]*cobra.Command{}
+	for _, g := range aicmd.Groups() {
+		cmd := &cobra.Command{
+			Use:     g.Use,
+			Short:   g.Short,
+			Long:    g.Long,
+			Example: g.Example,
+			Args:    cobra.NoArgs,
+			RunE:    func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+		}
+		key := strings.Join(g.Path, " ")
+		if key == "" {
+			cmd.PersistentFlags().Bool("json", false, "print the server's JSON answer instead of text")
+			root.AddCommand(cmd)
+		} else {
+			groups[strings.Join(g.Path[:len(g.Path)-1], " ")].AddCommand(cmd)
+		}
+		groups[key] = cmd
 	}
-	ai.PersistentFlags().Bool("json", false, "print the server's JSON answer instead of text")
-	addAITicketCommands(ai)
-	addAICommentCommands(ai)
-	addAIMiscCommands(ai)
-	addAIImageCommands(ai)
-	root.AddCommand(ai)
+	for _, def := range aicmd.Commands() {
+		groups[strings.Join(def.Path[:len(def.Path)-1], " ")].AddCommand(aiCommand(def))
+	}
+}
+
+// aiCommand is the command line of def: its arguments and flags come from
+// the tags of its input (aicmd.Fields).
+func aiCommand(def aicmd.Command) *cobra.Command {
+	fields, err := aicmd.Fields(def.Input)
+	if err != nil {
+		panic(err) // a definition error, caught by the guard tests
+	}
+	cmd := &cobra.Command{
+		Use:     def.Use,
+		Short:   def.Short,
+		Long:    def.Long,
+		Example: def.Example,
+		Args:    argsRule(fields),
+	}
+	for _, f := range fields {
+		if f.Flag == "" {
+			continue
+		}
+		flags := cmd.Flags()
+		switch elem(f.Type).Kind() {
+		case reflect.String:
+			flags.String(f.Flag, f.Default, f.Help)
+		case reflect.Int:
+			flags.Int(f.Flag, 0, f.Help)
+		case reflect.Bool:
+			flags.Bool(f.Flag, false, f.Help)
+		case reflect.Slice:
+			if elem(f.Type).Elem().Kind() == reflect.Int {
+				flags.IntSlice(f.Flag, nil, f.Help)
+			} else {
+				flags.StringArray(f.Flag, nil, f.Help)
+			}
+		}
+		if f.Required {
+			_ = cmd.MarkFlagRequired(f.Flag)
+		}
+	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Connect first (never starting a server), then read the input.
+		client, err := apiclient.FromEnvironment()
+		if err != nil {
+			return err
+		}
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		in, err := aiInput(cmd, def, fields, args)
+		if err != nil {
+			return aicmd.Explain(err)
+		}
+		res, err := def.Run(ctx, client, in)
+		if err != nil {
+			return aicmd.Explain(err)
+		}
+		if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), strings.TrimRight(string(res.Value), "\n"))
+			return err
+		}
+		_, err = io.WriteString(cmd.OutOrStdout(), res.Text)
+		return err
+	}
+	return cmd
+}
+
+func elem(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Pointer {
+		return t.Elem()
+	}
+	return t
+}
+
+// argsRule is cobra's argument check for the positional fields.
+func argsRule(fields []aicmd.Field) cobra.PositionalArgs {
+	required, optional, words := 0, 0, false
+	for _, f := range fields {
+		switch {
+		case f.Arg < 0:
+		case f.Words:
+			words = true
+		case f.Optional:
+			optional++
+		default:
+			required++
+		}
+	}
+	switch {
+	case words && required == 0:
+		return cobra.ArbitraryArgs
+	case words:
+		return cobra.MinimumNArgs(required)
+	case optional > 0 && required == 0:
+		return cobra.MaximumNArgs(optional)
+	case optional > 0:
+		return cobra.RangeArgs(required, required+optional)
+	case required == 0:
+		return cobra.NoArgs
+	default:
+		return cobra.ExactArgs(required)
+	}
+}
+
+// aiInput reads the input of def from the arguments, the flags, files and
+// standard input. The checks of the input that need no text run before any
+// file or standard input is read.
+func aiInput(cmd *cobra.Command, def aicmd.Command, fields []aicmd.Field, args []string) (any, error) {
+	ptr := reflect.New(def.Input)
+	in := ptr.Elem()
+	flags := cmd.Flags()
+	for _, f := range fields {
+		v := in.Field(f.Index)
+		switch {
+		case f.Text:
+		case f.Arg >= 0:
+			if f.Arg >= len(args) {
+				continue // an optional argument left out
+			}
+			if f.Type.Kind() == reflect.Int {
+				n, err := ticketNumber(args[f.Arg])
+				if err != nil {
+					return nil, err
+				}
+				v.SetInt(int64(n))
+			} else {
+				v.SetString(args[f.Arg])
+			}
+		default:
+			if f.Type.Kind() == reflect.Pointer && !flags.Changed(f.Flag) {
+				continue
+			}
+			var got any
+			switch elem(f.Type) {
+			case reflect.TypeFor[string]():
+				got, _ = flags.GetString(f.Flag)
+			case reflect.TypeFor[int]():
+				got, _ = flags.GetInt(f.Flag)
+			case reflect.TypeFor[bool]():
+				got, _ = flags.GetBool(f.Flag)
+			case reflect.TypeFor[[]string]():
+				got, _ = flags.GetStringArray(f.Flag)
+			case reflect.TypeFor[[]int]():
+				got, _ = flags.GetIntSlice(f.Flag)
+			}
+			set(v, reflect.ValueOf(got))
+		}
+	}
+	// Texts: which are given, then the checks, then the reading.
+	type text struct {
+		f     aicmd.Field
+		file  string
+		words []string
+	}
+	var texts []text
+	for _, f := range fields {
+		if !f.Text {
+			continue
+		}
+		t := text{f: f}
+		t.file, _ = flags.GetString(f.Flag)
+		given := t.file != ""
+		if f.Words {
+			t.words = []string{}
+			if f.Arg < len(args) {
+				t.words = args[f.Arg:]
+			}
+			given = len(t.words) > 0 || flags.Changed(f.Flag) || f.Type.Kind() != reflect.Pointer
+		}
+		if !given {
+			continue
+		}
+		set(in.Field(f.Index), reflect.ValueOf(""))
+		texts = append(texts, t)
+	}
+	if err := def.Check(ptr.Interface()); err != nil {
+		return nil, err
+	}
+	for _, t := range texts {
+		body, err := readBody(cmd, t.f.Flag, t.file, t.words, t.f.AllowEmpty)
+		if err != nil {
+			return nil, err
+		}
+		set(in.Field(t.f.Index), reflect.ValueOf(body))
+	}
+	for _, f := range fields {
+		v := in.Field(f.Index)
+		if f.StdinHint == "" || v.Kind() == reflect.Pointer && v.IsNil() || reflect.Indirect(v).String() != stdinMark {
+			continue
+		}
+		raw, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return nil, fmt.Errorf("read standard input: %w", err)
+		}
+		value, err := checkText(string(raw), "standard input", f.StdinHint, false)
+		if err != nil {
+			return nil, err
+		}
+		set(v, reflect.ValueOf(value))
+	}
+	return ptr.Interface(), nil
+}
+
+// set stores x in v, through a new pointer when v is one.
+func set(v, x reflect.Value) {
+	if v.Kind() == reflect.Pointer {
+		p := reflect.New(v.Type().Elem())
+		p.Elem().Set(x)
+		v.Set(p)
+		return
+	}
+	v.Set(x)
 }

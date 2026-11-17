@@ -1,4 +1,4 @@
-package cli
+package aicmd
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 
 // ticketLine is the one-line form of a ticket: "#<n> <type> <column> <title>".
 func ticketLine(t api.TicketSummary) string {
-	return fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, oneLine(t.Title))
+	return fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, OneLine(t.Title))
 }
 
 func numbers(ns []int) string {
@@ -61,11 +61,11 @@ func visibleLine(s string) string {
 	return b.String()
 }
 
-// oneLine returns s as one line for printing after bodyIndent: line breaks
+// OneLine returns s as one line for printing after bodyIndent: line breaks
 // and the other characters textsafe.IsHidden names become spaces, so
 // nothing in s can start a line of its own, move the cursor or hide or
 // reorder text.
-func oneLine(s string) string {
+func OneLine(s string) string {
 	return strings.TrimSpace(strings.Map(func(r rune) rune {
 		if textsafe.IsHidden(r) {
 			return ' '
@@ -77,7 +77,7 @@ func oneLine(s string) string {
 // showTicket prints a ticket as a block of "key: value" lines, a blank line
 // and the description, indented.
 func showTicket(w io.Writer, t api.Ticket) {
-	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, oneLine(t.Title))
+	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, OneLine(t.Title))
 	fmt.Fprintf(w, "column: %s\n", t.Column)
 	if t.Resolution != "" {
 		fmt.Fprintf(w, "resolution: %s\n", t.Resolution)
@@ -89,26 +89,26 @@ func showTicket(w io.Writer, t api.Ticket) {
 	}
 	projects := make([]string, len(t.Projects))
 	for i, p := range t.Projects {
-		projects[i] = oneLine(p.Project)
+		projects[i] = OneLine(p.Project)
 	}
 	fmt.Fprintf(w, "projects: %s\n", orNone(strings.Join(projects, ", ")))
 	for _, p := range t.Projects {
-		fmt.Fprintf(w, "base branch (%s): %s\n", oneLine(p.Project), orNone(oneLine(p.BaseBranch)))
+		fmt.Fprintf(w, "base branch (%s): %s\n", OneLine(p.Project), orNone(OneLine(p.BaseBranch)))
 	}
 	for _, p := range t.Projects {
 		if p.EndCommit != "" {
 			// What the ticket's diff ran between when it was done; git
 			// diff START END in the project shows it.
-			fmt.Fprintf(w, "diff commits (%s): %s..%s\n", oneLine(p.Project), oneLine(p.StartCommit), oneLine(p.EndCommit))
+			fmt.Fprintf(w, "diff commits (%s): %s..%s\n", OneLine(p.Project), OneLine(p.StartCommit), OneLine(p.EndCommit))
 		}
 	}
 	noProject := len(t.Projects) == 0 && t.Type == api.TypeTask
 	if noProject {
-		fmt.Fprintf(w, "working folder: %s\n", orNone(oneLine(t.Workdir)))
+		fmt.Fprintf(w, "working folder: %s\n", orNone(OneLine(t.Workdir)))
 	}
 	fmt.Fprintf(w, "supervisor: %s\n", t.Supervisor)
 	fmt.Fprintf(w, "created by: %s\n", t.CreatedBy.Role)
-	fmt.Fprintf(w, "model: %s\n", orNone(oneLine(t.Model)))
+	fmt.Fprintf(w, "model: %s\n", orNone(OneLine(t.Model)))
 	fmt.Fprintf(w, "review: %s\n", t.EffectiveReview)
 	if noProject {
 		fmt.Fprintln(w, "when approved: done (nothing to merge or export)")
@@ -123,12 +123,12 @@ func showTicket(w io.Writer, t api.Ticket) {
 	}
 	if t.Attention != "" {
 		fmt.Fprintln(w, "attention:")
-		fmt.Fprintln(w, bodyIndent+oneLine(t.Attention))
+		fmt.Fprintln(w, bodyIndent+OneLine(t.Attention))
 	}
 	if t.ExportURL != "" {
 		fmt.Fprintf(w, "export (merged: %t):\n", t.ExportMerged)
 		for _, u := range strings.Split(t.ExportURL, "\n") {
-			fmt.Fprintln(w, bodyIndent+oneLine(u))
+			fmt.Fprintln(w, bodyIndent+OneLine(u))
 		}
 	}
 	fmt.Fprintf(w, "depends on: %s\n", numbers(t.DependsOn))
