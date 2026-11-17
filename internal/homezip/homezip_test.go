@@ -669,3 +669,28 @@ func TestUnclassifiedNamesNewEntries(t *testing.T) {
 		t.Fatalf("unclassified %q, want %q", left, want)
 	}
 }
+
+// A settings file with a broken hand edit keeps its last valid content in
+// effect; an export that left it out would lose it, so the export is
+// refused and names the file.
+func TestExportRefusesBrokenSettingsFiles(t *testing.T) {
+	h := newHome(t)
+	h.fill(t)
+	path := filepath.Join(h.Layout.Root, "profiles", "work.yaml")
+	if err := os.WriteFile(path, []byte("cli: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.Settings.Reload()
+	if len(h.Settings.Errors()) == 0 {
+		t.Fatal("the broken file is not reported")
+	}
+	var buf bytes.Buffer
+	err := h.Export(context.Background(), &buf, false, time.Now())
+	var p *Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Message, "profiles/work.yaml") {
+		t.Fatalf("export: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatal("the refused export wrote a zip")
+	}
+}

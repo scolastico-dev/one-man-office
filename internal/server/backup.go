@@ -65,7 +65,7 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Del("Content-Disposition")
-		writeError(w, r, err)
+		writeError(w, r, importError(err))
 	}
 }
 

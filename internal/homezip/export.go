@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -47,18 +48,26 @@ func (h Home) limit(rel string) (int64, bool) {
 	return h.Settings.ItemFile(rel)
 }
 
-// files lists the allowlisted files present in the home, sorted. Settings
-// files the store cannot load are left out: they are not in effect.
+// files lists the allowlisted files present in the home, sorted. A
+// settings file the store cannot load refuses the export (a Problem naming
+// the files): the store keeps its last valid content in effect, which
+// neither the file nor a zip without it holds.
 func (h Home) files() ([]string, error) {
-	broken := map[string]bool{}
+	var broken []string
 	for _, e := range h.Settings.Errors() {
 		if rel, err := filepath.Rel(h.Layout.Root, e.File); err == nil {
-			broken[filepath.ToSlash(rel)] = true
+			if rel = filepath.ToSlash(rel); !slices.Contains(broken, rel) {
+				broken = append(broken, rel)
+			}
 		}
+	}
+	if len(broken) > 0 {
+		sort.Strings(broken)
+		return nil, problem("Some settings files have errors: %s. Fix them (the settings pages show each error), then export again.", strings.Join(broken, ", "))
 	}
 	var out []string
 	add := func(rel string) {
-		if _, ok := h.limit(rel); ok && !broken[rel] {
+		if _, ok := h.limit(rel); ok {
 			out = append(out, rel)
 		}
 	}
