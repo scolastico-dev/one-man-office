@@ -40,6 +40,8 @@ const (
 	SectionSkillSets = api.SectionSkillSets
 	// SectionPlugins names the plugin settings (plugins/<name>.yaml).
 	SectionPlugins = api.SectionPlugins
+	// SectionMCPServers names the MCP servers omo relays (mcpservers/<name>.yaml).
+	SectionMCPServers = api.SectionMCPServers
 )
 
 // FileError reports a settings file that could not be loaded.
@@ -153,6 +155,7 @@ type Store struct {
 	scripts  map[string]string  // usage script files by name
 	skills   map[string]SkillSet
 	plugins  map[string]PluginSettings
+	mcp      map[string]MCPServer
 }
 
 // Open loads the settings below root (the omo home). It creates the settings
@@ -176,13 +179,14 @@ func Open(root string, o Options) (*Store, error) {
 		scripts:  map[string]string{},
 		skills:   map[string]SkillSet{},
 		plugins:  map[string]PluginSettings{},
+		mcp:      map[string]MCPServer{},
 	}
 	s.opts.UsageDefaults = maps.Clone(o.UsageDefaults)
 	for _, name := range RoleNames {
 		s.roles[name] = emptyRole(name)
 	}
 	s.kinds = []*kind{s.generalKind(), s.projectKind(), s.profileKind(), s.roleKind(), s.promptKind(),
-		s.usageKind(), s.skillSetKind(), s.pluginKind()}
+		s.usageKind(), s.skillSetKind(), s.pluginKind(), s.mcpServerKind()}
 	for _, k := range s.kinds {
 		dir := k.dir
 		if dir == "" {

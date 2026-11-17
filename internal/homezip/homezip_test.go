@@ -96,6 +96,10 @@ func (h *testHome) fill(t *testing.T) {
 	if err := st.PutPluginIf("0", settings.PluginSettings{Name: "notify", Source: "https://example.invalid/notify.git", Config: map[string]any{"user_key": "k"}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.PutMCPServerIf("0", settings.MCPServer{Name: "docs", Enabled: true, Transport: api.MCPTransportHTTP, URL: "https://mcp.example.invalid/mcp",
+		Headers: map[string]string{"Authorization": "Bearer mcp-secret-value"}, Global: true, Roles: []string{"developer"}}); err != nil {
+		t.Fatal(err)
+	}
 	repo := filepath.Join(t.TempDir(), "app")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -195,7 +199,7 @@ func TestExportHoldsAllowlistedFilesAndManifest(t *testing.T) {
 		names = append(names, n)
 	}
 	slices.Sort(names)
-	want := []string{"manifest.json", "plugins/notify.yaml", "profiles/work.yaml", "projects/app.yaml", "prompts/developer-instructions.md",
+	want := []string{"manifest.json", "mcpservers/docs.yaml", "plugins/notify.yaml", "profiles/work.yaml", "projects/app.yaml", "prompts/developer-instructions.md",
 		"roles/ceo.yaml", "roles/developer.yaml", "roles/pm.yaml", "roles/reviewer.yaml",
 		"server.yaml", "settings.yaml", "skillsets/tools.yaml", "usage/mine.lua"}
 	if !slices.Equal(names, want) {
@@ -210,6 +214,9 @@ func TestExportHoldsAllowlistedFilesAndManifest(t *testing.T) {
 	}
 	if !bytes.Contains(got["settings.yaml"], []byte("secret-value")) {
 		t.Fatal("the environment values are not in the zip")
+	}
+	if !bytes.Contains(got["mcpservers/docs.yaml"], []byte("mcp-secret-value")) {
+		t.Fatal("the MCP server's header values are not in the zip")
 	}
 }
 
@@ -252,6 +259,7 @@ func TestRoundTrip(t *testing.T) {
 		func(st *settings.Store) any { return st.Prompts() },
 		func(st *settings.Store) any { return st.SkillSets() },
 		func(st *settings.Store) any { return st.Plugins() },
+		func(st *settings.Store) any { return st.MCPServers() },
 		func(st *settings.Store) any { return st.UsageScripts() },
 		func(st *settings.Store) any { return st.Projects(true) },
 	} {

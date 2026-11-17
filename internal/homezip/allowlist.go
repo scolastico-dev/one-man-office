@@ -54,6 +54,10 @@ var Exported = []Entry{
 	// plugin's files are not in the zip; the Plugins page installs them
 	// again from their source.
 	{Pattern: "plugins/*.yaml"},
+	// MCP servers omo relays: command, address, headers, environment and
+	// OAuth client settings (values as stored, including tokens). omo's
+	// sign-in at a server (its OAuth tokens) is in the database.
+	{Pattern: "mcpservers/*.yaml"},
 }
 
 // NotExported names every other entry at the top of the omo home, and why a
