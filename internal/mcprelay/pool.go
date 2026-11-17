@@ -25,6 +25,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
@@ -33,7 +34,7 @@ type Options struct {
 	// Servers returns the configured servers.
 	Servers func() []api.MCPServer
 	// Auth keeps the OAuth sign-ins; nil keeps them in memory.
-	Auth UpstreamStore
+	Auth mcpauth.UpstreamStore
 	// Redirect returns the address of omo's OAuth callback
 	// (<public_url>/oauth/callback or http://localhost:<port>/oauth/callback).
 	Redirect func() string
@@ -122,7 +123,7 @@ func defaultTunables() tunables {
 type Pool struct {
 	o     Options
 	t     tunables
-	store UpstreamStore
+	store mcpauth.UpstreamStore
 	// base sends the requests to HTTP servers and authorization servers.
 	base http.RoundTripper
 

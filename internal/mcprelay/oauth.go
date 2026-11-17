@@ -19,6 +19,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 )
 
 // oauthHTTPTimeout bounds each request to an authorization server.
@@ -173,7 +174,7 @@ func (l *login) fetch(f *authFlows, wait time.Duration) auth.AuthorizationCodeFe
 // configured client id is used as a pre-registered client; otherwise a
 // client omo registered before for the same callback address is reused,
 // and else omo registers one.
-func (p *Pool) newAuthorizer(s api.MCPServer, prior UpstreamAuth, hasPrior bool, l *login) (authorizer, error) {
+func (p *Pool) newAuthorizer(s api.MCPServer, prior mcpauth.UpstreamAuth, hasPrior bool, l *login) (authorizer, error) {
 	meta := &metaRecorder{base: p.base, l: l}
 	client := &http.Client{Timeout: oauthHTTPTimeout, Transport: &resourceOverride{base: meta, resource: s.OAuth.Resource}}
 	cfg := &auth.AuthorizationCodeHandlerConfig{
@@ -421,13 +422,13 @@ func (p *Pool) saveLogin(s api.MCPServer, l *login) error {
 		Registered:    l.registered,
 	}
 	raw, _ := json.Marshal(reg)
-	a := UpstreamAuth{
+	a := mcpauth.UpstreamAuth{
 		Server:       s.Name,
 		Issuer:       issuer,
 		ClientID:     l.conf.ClientID,
 		ClientSecret: l.conf.ClientSecret,
 		RedirectURI:  l.redirect,
-		State:        AuthStateConnected,
+		State:        api.MCPAuthStateConnected,
 		Registration: raw,
 		Token:        l.token,
 		Scopes:       grantedScopes(l.token, l.conf.Scopes),
@@ -443,7 +444,7 @@ func grantedScopes(tok *oauth2.Token, requested []string) []string {
 	return requested
 }
 
-func (p *Pool) learnAuthSecrets(name string, a UpstreamAuth) {
+func (p *Pool) learnAuthSecrets(name string, a mcpauth.UpstreamAuth) {
 	p.mu.Lock()
 	r := p.state(name).redact
 	p.mu.Unlock()
@@ -538,9 +539,9 @@ func (p *Pool) loadAuth(name string, st *serverState) {
 	case err != nil:
 		st.auth = api.MCPAuthState{State: api.MCPAuthStateError}
 		st.lastError = "the stored sign-in cannot be read"
-	case !ok || a.Token == nil || a.State == AuthStateNeedsLogin:
+	case !ok || a.Token == nil || a.State == api.MCPAuthStateNeedsLogin:
 		st.auth = api.MCPAuthState{State: api.MCPAuthStateNeedsLogin}
-	case a.State == AuthStateError:
+	case a.State == api.MCPAuthStateError:
 		st.auth = api.MCPAuthState{State: api.MCPAuthStateError}
 	default:
 		st.auth = api.MCPAuthState{State: api.MCPAuthStateConnected, Scopes: a.Scopes}
@@ -558,7 +559,7 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState) (oauth2.TokenSource
 	if err != nil {
 		return nil, fmt.Errorf("reading the sign-in: %w", err)
 	}
-	if !ok || a.Token == nil || a.State != AuthStateConnected {
+	if !ok || a.Token == nil || a.State != api.MCPAuthStateConnected {
 		return nil, errNeedsLogin
 	}
 	var reg registration
@@ -582,7 +583,7 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState) (oauth2.TokenSource
 type persistedSource struct {
 	p    *Pool
 	mu   sync.Mutex
-	auth UpstreamAuth
+	auth mcpauth.UpstreamAuth
 	src  oauth2.TokenSource
 	last string
 }
@@ -601,7 +602,7 @@ func (s *persistedSource) Token() (*oauth2.Token, error) {
 	if tok.AccessToken != s.last {
 		s.last = tok.AccessToken
 		s.auth.Token = tok
-		s.auth.State = AuthStateConnected
+		s.auth.State = api.MCPAuthStateConnected
 		s.p.learnAuthSecrets(s.auth.Server, s.auth)
 		if err := s.p.store.Save(context.Background(), s.auth); err != nil {
 			s.p.mu.Lock()
@@ -627,8 +628,8 @@ func (p *Pool) loginLost(inst *instance) {
 func (p *Pool) markNeedsLogin(name, why string) {
 	ctx := context.Background()
 	a, ok, err := p.store.Load(ctx, name)
-	if err == nil && ok && a.State != AuthStateNeedsLogin {
-		a.State = AuthStateNeedsLogin
+	if err == nil && ok && a.State != api.MCPAuthStateNeedsLogin {
+		a.State = api.MCPAuthStateNeedsLogin
 		a.Error = why
 		a.Token = nil
 		_ = p.store.Save(ctx, a)
@@ -685,7 +686,7 @@ func (p *Pool) Disconnect(ctx context.Context, name string) error {
 
 // revoke asks the authorization server to revoke the tokens of a (RFC
 // 7009); failures are only logged.
-func (p *Pool) revoke(ctx context.Context, name string, a UpstreamAuth) {
+func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth) {
 	var reg registration
 	if json.Unmarshal(a.Registration, &reg) != nil || reg.RevocationURL == "" || a.Token == nil {
 		return
