@@ -24,8 +24,8 @@ func addBackupCommands(config *cobra.Command) {
 		Use:   "export FILE",
 		Short: "Write omo's settings to a zip file",
 		Long: `Write omo's settings to a zip file: the general settings, server.yaml,
-projects, agent profiles, roles, prompts, usage scripts, skill sets and
-plugin settings. With --with-db a consistent copy of the database (tickets,
+projects, agent profiles, roles, prompts, usage scripts, skill sets, plugin
+settings and the MCP servers omo relays. With --with-db a consistent copy of the database (tickets,
 comments, history) is added.
 
 The file contains your tokens and environment values; keep it private.

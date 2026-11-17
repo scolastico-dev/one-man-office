@@ -147,7 +147,7 @@ async function apply() {
     <div class="backup">
       <FormSection
         legend="Export"
-        description="A zip file with the general settings, the server settings, projects, agent profiles, roles, prompts, usage scripts, skill sets and plugin settings."
+        description="A zip file with the general settings, the server settings, projects, agent profiles, roles, prompts, usage scripts, skill sets, plugin settings and the MCP servers omo relays."
         data-backup-export
       >
         <label class="backup__check">
