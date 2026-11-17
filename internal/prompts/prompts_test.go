@@ -211,7 +211,7 @@ func TestWaitingAlwaysHasTimeout(t *testing.T) {
 	// Every "omo ai wait" is either an instruction to run it with a
 	// timeout or one of the phrases that describe it.
 	wait := regexp.MustCompile("(.{0,12})omo ai wait([^`;\n]*)")
-	described := []string{"result of `", "Do not use `"}
+	described := []string{"result of `", "Do not use `", "waiting: `"}
 	for name, text := range Defaults() {
 		for _, m := range wait.FindAllStringSubmatch(text, -1) {
 			if strings.Contains(m[2], "--timeout ") {
