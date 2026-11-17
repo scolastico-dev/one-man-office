@@ -787,6 +787,9 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 		MCPBridge:     e.mcpBridge(prof.CLI),
 		Delivery:      en.delivery,
 		AwaitingReady: en.awaitingReady,
+		OnWarning: func(msg string) {
+			e.startWarnings(context.WithoutCancel(ctx), r.ticket, name, []string{msg})
+		},
 	}
 	en.started = e.now()
 	ag, err := e.o.Runner.Start(spec)
@@ -814,17 +817,24 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 		_ = ag.Kill()
 		return sess, nil
 	}
-	if w := ag.Warnings(); len(w) > 0 {
-		msg := fmt.Sprintf("%s started with warnings:\n- %s", name, strings.Join(w, "\n- "))
-		if r.ticket != 0 {
-			if _, err := e.b.Comment(ctx, board.System, r.ticket, api.CommentRequest{Body: msg}); err != nil {
-				e.log.Printf("engine: comment on #%d: %v", r.ticket, err)
-			}
-		} else {
-			e.log.Print(msg)
-		}
-	}
+	e.startWarnings(ctx, r.ticket, name, ag.Warnings())
 	return sess, nil
+}
+
+// startWarnings tells about problems that did not stop the start of agent
+// name on ticket (0 for the CEO): in a comment on the ticket, or in the log.
+func (e *Engine) startWarnings(ctx context.Context, ticket int64, name string, w []string) {
+	if len(w) == 0 {
+		return
+	}
+	msg := fmt.Sprintf("%s started with warnings:\n- %s", name, strings.Join(w, "\n- "))
+	if ticket != 0 {
+		if _, err := e.b.Comment(ctx, board.System, ticket, api.CommentRequest{Body: msg}); err != nil {
+			e.log.Printf("engine: comment on #%d: %v", ticket, err)
+		}
+		return
+	}
+	e.log.Print(msg)
 }
 
 // startFailed ends the session of an agent whose process did not start and

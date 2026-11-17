@@ -157,7 +157,7 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	go a.notes.run()
 	go func() {
 		defer close(a.delivery)
-		deliverStartPrompt(sess, spec.StartPrompt, launch.PromptInjected, spec.Delivery, spec.AwaitingReady, a.LastOutput, now, a.warn)
+		deliverStartPrompt(sess, spec.StartPrompt, launch.PromptInjected, spec.Delivery, spec.AwaitingReady, a.LastOutput, now, lateWarning(spec.OnWarning))
 	}()
 	return a, nil
 }
@@ -196,6 +196,16 @@ func prepareLaunch(spec Spec) agentcli.Launch {
 		}
 	}
 	return launch
+}
+
+// lateWarning is where a problem found after Start returned goes: to on,
+// or nowhere without it (nobody reads Warnings again).
+func lateWarning(on func(string)) func(string) {
+	return func(message string) {
+		if on != nil {
+			on(message)
+		}
+	}
 }
 
 func (a *ptyAgent) warn(message string) {

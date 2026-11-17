@@ -129,6 +129,11 @@ type Spec struct {
 	// start prompt. Typed deliveries and resends happen only while it
 	// returns true; nil means "always". It must return quickly.
 	AwaitingReady func() bool
+	// OnWarning, when set, gets each problem found after Start returned
+	// that did not stop the agent (a start prompt that could not be
+	// typed), from another goroutine; it must not block for long.
+	// Warnings lists only what was found before Start returned.
+	OnWarning func(message string)
 }
 
 // Agent is one running agent process.
@@ -174,8 +179,9 @@ type Agent interface {
 	Tail(n int) []string
 	// Terminal is the agent's web terminal.
 	Terminal() *webterm.Terminal
-	// Warnings lists problems that did not stop the agent, such as a folder
-	// trust entry that could not be written.
+	// Warnings lists problems that did not stop the agent and were found
+	// while it started, such as a folder trust entry that could not be
+	// written. Later ones go to Spec.OnWarning.
 	Warnings() []string
 }
 

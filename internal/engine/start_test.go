@@ -1048,3 +1048,20 @@ func TestStartWaitsWhenUsageRoseSincePlanned(t *testing.T) {
 		t.Fatalf("%d failed attempts recorded", fails)
 	}
 }
+
+// A problem with the start prompt that comes up after the agent's process
+// started (typing it runs later) reaches the ticket like the problems found
+// while it started.
+func TestLateStartWarningIsCommented(t *testing.T) {
+	h := newHarness(t)
+	task, dev := h.readyDeveloper("one")
+	specs := h.runner.specList()
+	spec := specs[len(specs)-1]
+	if spec.SessionID != dev.ID || spec.OnWarning == nil {
+		t.Fatalf("the developer's spec has no warning callback")
+	}
+	spec.OnWarning("typing the start prompt failed: broken pipe")
+	if c := h.commentsWith(task, dev.Name+" started with warnings:\n- typing the start prompt failed: broken pipe"); c != 1 {
+		t.Fatalf("%d warning comments:\n%s", c, strings.Join(h.comments(task), "\n---\n"))
+	}
+}
