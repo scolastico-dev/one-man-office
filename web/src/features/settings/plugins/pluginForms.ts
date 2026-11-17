@@ -47,11 +47,6 @@ export function eventNoun(event: string): string {
   return EVENT_NOUNS[event] ?? event
 }
 
-/** Whether the plugin's hooks run: installed, enabled and loaded. */
-export function runsHooks(state: string): boolean {
-  return state === 'ready' || state === 'running' || state === 'error'
-}
-
 /** The manual actions of a plugin with the given scope, in the manifest's order. */
 export function manualActions(info: Pick<PluginInfo, 'hooks'>, scope: 'ticket' | 'global'): PluginHook[] {
   return info.hooks.filter((h) => h.event === 'manual' && (h.scope || 'global') === scope && h.name !== '')

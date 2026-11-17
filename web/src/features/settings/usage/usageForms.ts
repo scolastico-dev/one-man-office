@@ -2,7 +2,7 @@
 // code that runs as the user with the user's credentials; the page keeps its
 // text exactly as typed. The server checks every value and every script; the
 // browser only turns typed text into the numbers a field needs.
-import type { FileError, UsageReading, UsageScriptInfo, UsageThreshold } from '../../../api/types'
+import type { UsageReading, UsageScriptInfo, UsageThreshold } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { windowWithName } from '../../usage/windowLabel'
@@ -80,11 +80,6 @@ export function placedLimitField(field: string): boolean {
 export function fileOfScript(file: string): string | null {
   const m = /(?:^|[\\/])usage[\\/]([^\\/]+)\.lua$/.exec(file)
   return m === null ? null : (m[1] ?? null)
-}
-
-/** The broken files that belong to the script `name`. */
-export function errorsOfScript(errors: readonly FileError[], name: string): FileError[] {
-  return errors.filter((e) => fileOfScript(e.file) === name)
 }
 
 /** The profiles a test can run as: those that use the script first, then the others; none, "No profile". */

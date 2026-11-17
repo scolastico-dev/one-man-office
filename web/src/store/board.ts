@@ -11,6 +11,7 @@ import { getServer, getSettings, listProjects, listTickets, moveTicket, rejectTi
 import { connectEventStream, type EventStreamConnection, type StreamState, type StreamTimers } from '../api/eventStream'
 import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedData, TicketList, TicketSummary } from '../api/types'
 import { COLUMNS } from '../api/types'
+import { displayRank } from '../board/ordering'
 import { slotView, type SlotView } from '../board/slots'
 import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, staleTickets, type BoardState } from './boardState'
 
@@ -24,7 +25,6 @@ export const CONFIRM_TIMEOUT_MS = 10_000
 export const RESYNC_RETRY_MS = 3000
 export const RESYNC_RETRY_MAX_MS = 30_000
 /** Rank distance used for an overlay at either end of a column. */
-const RANK_STEP = 1024
 
 /** A move shown before the stream confirmed it. */
 export interface PendingMove {
@@ -411,20 +411,6 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
 
   // Moves
 
-  function overlayRank(n: number, column: Column, before: number | null): number {
-    const cards = columns.value[column].all.filter((t) => t.number !== n)
-    if (before !== null) {
-      const i = cards.findIndex((t) => t.number === before)
-      const next = cards[i]
-      if (next !== undefined) {
-        const prev = cards[i - 1]
-        return prev === undefined ? next.rank - RANK_STEP : (prev.rank + next.rank) / 2
-      }
-    }
-    const last = cards[cards.length - 1]
-    return last === undefined ? RANK_STEP : last.rank + RANK_STEP
-  }
-
   function endOverlay(n: number, requestId: number): void {
     if (pending.get(n)?.requestId === requestId) pending.delete(n)
   }
@@ -502,7 +488,7 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     const column: Column = reject !== undefined ? 'in_progress' : to
     const move: PendingMove = approval
       ? { column: 'review', rank: cur.rank, stage: cur.effective_when_approved === 'export' ? 'exporting' : 'merging', requestId, waitFor: null }
-      : { column, rank: overlayRank(n, column, before), requestId, waitFor: null }
+      : { column, rank: displayRank(columns.value[column].all, before, n), requestId, waitFor: null }
     pending.set(n, move)
 
     // Moves and rejections go out one after the other for all tickets: a move names a neighbour as `before`,

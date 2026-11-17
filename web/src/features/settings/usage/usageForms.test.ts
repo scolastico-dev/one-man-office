@@ -9,7 +9,6 @@ import {
   ENTER_NAME,
   ENTER_PERCENT,
   NAME_TWICE,
-  errorsOfScript,
   fileOfScript,
   overrideError,
   overrideKeyWords,
@@ -72,7 +71,6 @@ test('usageForms: kinds, files and profiles', () => {
   expect(scriptKind({ has_default: false, customized: true })).toBe('Yours')
   expect(fileOfScript('/h/omo/usage/claude.lua')).toBe('claude')
   expect(fileOfScript('/h/omo/prompts/claude.md')).toBeNull()
-  expect(errorsOfScript([{ file: '/h/omo/usage/a.lua', message: 'x' }, { file: '/h/omo/usage/b.lua', message: 'y' }], 'b')).toEqual([{ file: '/h/omo/usage/b.lua', message: 'y' }])
   expect(testProfiles(['codex', 'claude', 'work'], ['work', 'claude']).map((o) => o.value)).toEqual(['claude', 'work', 'codex'])
   expect(testProfiles(['claude'], ['claude'])[0]!.label).toBe('claude (uses this script)')
   expect(testProfiles([], [])).toEqual([{ value: '', label: 'No profile (no account folder)' }])

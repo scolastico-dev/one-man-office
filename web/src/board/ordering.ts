@@ -1,4 +1,4 @@
-import type { Column, TicketSummary } from '../api/types'
+import type { TicketSummary } from '../api/types'
 import { compareTime } from '../api/time'
 
 /** Distance between ranks of neighbouring cards when the server hands them out. */
@@ -27,19 +27,6 @@ function byClosing(a: TicketSummary, b: TicketSummary): number {
 /** The cards of the Done column, most recently closed first. */
 export function doneOrder(tickets: readonly TicketSummary[]): TicketSummary[] {
   return tickets.filter((t) => t.column === 'done').sort(byClosing)
-}
-
-/**
- * The cards of one column in display order: stories first, then tasks, each
- * group in rank order. Done is the exception: closing time decides, and the
- * two groups follow that order.
- */
-export function columnOrder(tickets: readonly TicketSummary[], column: Column): { stories: TicketSummary[]; tasks: TicketSummary[] } {
-  const inColumn = column === 'done' ? doneOrder(tickets) : tickets.filter((t) => t.column === column).sort(byRank)
-  return {
-    stories: inColumn.filter((t) => t.type === 'story'),
-    tasks: inColumn.filter((t) => t.type === 'task'),
-  }
 }
 
 /**

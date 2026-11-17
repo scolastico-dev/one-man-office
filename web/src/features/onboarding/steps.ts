@@ -126,19 +126,7 @@ function builtIn(): Step[] {
   ]
 }
 
-const added: { step: Step; after: string | undefined }[] = []
-
-/** Adds a step after the step with id `after`, or at the end. */
-export function registerStep(step: Step, after?: string): void {
-  added.push({ step, after })
-}
-
-/** The steps in order: the built-in ones (Superpowers and the Antigravity entry optional), with those registered placed among them. */
+/** The steps in order (Superpowers and the Antigravity entry optional). */
 export function firstSteps(): Step[] {
-  const list = builtIn()
-  for (const { step, after } of added) {
-    const i = after === undefined ? -1 : list.findIndex((s) => s.id === after)
-    list.splice(i < 0 ? list.length : i + 1, 0, step)
-  }
-  return list
+  return builtIn()
 }

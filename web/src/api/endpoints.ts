@@ -542,11 +542,6 @@ export function uploadTerminalImage(c: ApiClient, file: Blob, name: string): R<T
   return c.upload('/api/terminal-images', file, { [IMAGE_NAME_HEADER]: encodeURIComponent(name) })
 }
 
-/** Every image of ticket `n`, with its state. */
-export function listTicketImages(c: ApiClient, n: number): R<Image[]> {
-  return c.get(`${ticketPath(n)}/images`)
-}
-
 /** The record of one image (any ticket the caller may read). */
 export function getImage(c: ApiClient, id: string): R<Image> {
   return c.get(`/api/images/${encodeURIComponent(id)}`)
@@ -555,10 +550,6 @@ export function getImage(c: ApiClient, id: string): R<Image> {
 /** The bytes of a stored image, fetched with the login token (never in an address). */
 export function getImageBytes(c: ApiClient, id: string): Promise<Blob> {
   return c.getBlob(`/api/images/${encodeURIComponent(id)}/content`)
-}
-
-export function deleteImage(c: ApiClient, id: string): R<unknown> {
-  return c.send('DELETE', `/api/images/${encodeURIComponent(id)}`)
 }
 
 /** The settings zip as bytes; with `database` a consistent copy of the database is inside. The user's only. */

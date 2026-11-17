@@ -5,14 +5,9 @@
 import type { AgentRef, Role, TicketSummary } from '../../api/types'
 import { ROLE_LABELS } from '../board/model'
 
-/**
- * The board's rule, in its words, so a reader can compare:
- * a task in a story accepts @developer, @reviewer, @pm, @supervisor, @ceo and @user;
- * a standalone task all but @pm; a story all but @developer; @ceo only while the CEO is on.
- */
-export const MENTION_RULE =
-  'a task in a story accepts @developer, @reviewer, @pm, @supervisor, @ceo and @user; ' +
-  'a standalone task all but @pm; a story all but @developer; @ceo only while the CEO is on'
+// The board's rule: a task in a story accepts @developer, @reviewer, @pm,
+// @supervisor, @ceo and @user; a standalone task all but @pm; a story all but
+// @developer; @ceo only while the CEO is on.
 
 export interface MentionContext {
   ceoEnabled: boolean

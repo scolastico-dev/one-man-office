@@ -9,7 +9,6 @@ import {
   installResult,
   manualActions,
   parseConfig,
-  runsHooks,
   suggestName,
 } from './pluginForms'
 
@@ -28,11 +27,6 @@ test('hooks described in words', () => {
   expect(hookWords(hook('omo_resumed'))).toBe('When the pause ends')
   expect(eventNoun('omo_paused')).toBe('the pause')
   expect(eventNoun('omo_resumed')).toBe('the end of the pause')
-})
-
-test('only installed, enabled and loaded plugins run hooks', () => {
-  expect(['ready', 'running', 'error'].every(runsHooks)).toBe(true)
-  expect(['disabled', 'not_installed', 'invalid'].some(runsHooks)).toBe(false)
 })
 
 test('manual actions by scope, global by default', () => {

@@ -120,21 +120,6 @@ export function describeSetup(d: SetupData): SetupReport {
   }
 }
 
-/** Where the settings files are when nothing says otherwise. The server does not tell. */
-export const DEFAULT_HOME_TEXT = '~/.local/omo (on Windows %APPDATA%\\omo)'
-
-export const PROFILE_EXAMPLE = `cli: claude
-command: claude
-models:
-  sonnet:
-    args: ["--model", "sonnet"]`
-
-export function roleExample(model: string): string {
-  return `models:
-  - ${model}
-assignment: round_robin`
-}
-
 export interface AgentSetup {
   loading: Ref<boolean>
   loaded: Ref<boolean>

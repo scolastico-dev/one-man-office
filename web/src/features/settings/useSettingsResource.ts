@@ -147,11 +147,6 @@ export function diskChangeText(at: string): string {
   return `Changed on disk at ${time}, not through omo.`
 }
 
-/** "<file> cannot be read: <message>. omo uses the last version it could read." */
-export function brokenText(e: FileError): string {
-  return `${e.file} cannot be read: ${e.message.replace(/[.\s]+$/, '')}. omo uses the last version it could read.`
-}
-
 /** Deep equality of JSON values; key order does not matter, a missing key equals `undefined`. */
 export function sameJSON(a: unknown, b: unknown): boolean {
   if (a === b) return true

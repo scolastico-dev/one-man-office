@@ -11,7 +11,7 @@ import { useSettingsDialogs } from '../topbar/settingsDialogs'
 import { describeSetup, type SetupData } from './agentSetup'
 import { FIRST_STEPS_KEY, resetDismissed } from './dismissed'
 import FirstSteps from './FirstSteps.vue'
-import { firstSteps, forContext, registerStep, type StepContext } from './steps'
+import { firstSteps, forContext, type StepContext } from './steps'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -321,10 +321,4 @@ test('without an Antigravity profile the agent programs are not read', async () 
   await flushPromises()
   expect(w.findAll('li.step h3').map((x) => x.text())).not.toContain('Register omo in Antigravity (recommended)')
   expect(reads).not.toContain('/api/mcp/clients')
-})
-
-// Last: the registry is module state.
-test('registered steps are placed after the one named', () => {
-  registerStep({ id: 'extra', title: 'Extra', text: '', done: () => false, action: { label: 'Go', run: () => {} } }, 'project')
-  expect(firstSteps().map((s) => s.id)).toEqual(['superpowers', 'project', 'extra', 'agents', 'agy-mcp', 'ticket'])
 })

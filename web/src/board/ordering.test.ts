@@ -1,19 +1,20 @@
 import { describe, expect, test } from 'vitest'
 import type { TicketSummary } from '../api/types'
 import { ticket } from '../features/board/testing'
-import { beforeFor, columnOrder, displayRank, doneOrder } from './ordering'
+import { beforeFor, displayRank, doneOrder } from './ordering'
 
 const task = (number: number, rank: number, over: Partial<TicketSummary> = {}) => ticket({ number, rank, type: 'task', column: 'planning', ...over })
 const story = (number: number, rank: number, over: Partial<TicketSummary> = {}) => ticket({ number, rank, type: 'story', column: 'planning', ...over })
 const nums = (l: TicketSummary[]) => l.map((t) => t.number)
 
-describe('columnOrder', () => {
-  test('stories come first, each group by rank then number; Done newest first', () => {
-    const list = [task(1, 5), story(2, 9), task(3, 5), story(4, 1), task(5, 2), task(6, 1, { column: 'ready' })]
-    const o = columnOrder(list, 'planning')
-    expect(nums(o.stories)).toEqual([4, 2])
-    expect(nums(o.tasks)).toEqual([5, 1, 3])
-    expect(nums(columnOrder(list, 'ready').tasks)).toEqual([6])
+/** The board's groups of the Planning column (store/board.ts): stories and tasks, each by rank then number. */
+function planningGroups(tickets: readonly TicketSummary[]): { stories: TicketSummary[]; tasks: TicketSummary[] } {
+  const inColumn = tickets.filter((t) => t.column === 'planning').sort((a, b) => a.rank - b.rank || a.number - b.number)
+  return { stories: inColumn.filter((t) => t.type === 'story'), tasks: inColumn.filter((t) => t.type === 'task') }
+}
+
+describe('doneOrder', () => {
+  test('newest closed first, then the higher number', () => {
     const done = [
       task(1, 1, { column: 'done', closed_at: '2026-11-01T10:00:00Z' }),
       task(2, 1, { column: 'done', closed_at: '2026-11-03T10:00:00Z' }),
@@ -21,13 +22,8 @@ describe('columnOrder', () => {
       task(4, 1, { column: 'done', closed_at: '2026-11-03T10:00:00Z' }),
     ]
     expect(nums(doneOrder(done))).toEqual([4, 2, 3, 1])
-    const o2 = columnOrder(done, 'done')
-    expect(nums(o2.stories)).toEqual([3])
-    expect(nums(o2.tasks)).toEqual([4, 2, 1])
   })
-})
 
-describe('doneOrder', () => {
   test('compares closing times by value: the server drops trailing zeros of the fraction', () => {
     // Same second. As text, '…:05Z' would sort after both others, because 'Z' > '.'.
     const done = [
@@ -107,7 +103,7 @@ describe('beforeFor', () => {
       const cards: TicketSummary[] = []
       for (let i = 1; i <= size; i++) cards.push((rnd(3) === 0 ? story : task)(i, rnd(4)))
       const d = cards[rnd(size)]!
-      const group = columnOrder(cards, 'planning')[d.type === 'story' ? 'stories' : 'tasks'].filter((t) => t.number !== d.number)
+      const group = planningGroups(cards)[d.type === 'story' ? 'stories' : 'tasks'].filter((t) => t.number !== d.number)
       const at = rnd(group.length + 1)
       const wanted = [...nums(group)]
       wanted.splice(at, 0, d.number)
@@ -120,11 +116,11 @@ describe('beforeFor', () => {
       full.splice(i, 0, d)
       // Ranks as the server renumbers them, then the board's display order.
       const after = full.map((t, k) => ({ ...t, rank: k }))
-      const o = columnOrder(after, 'planning')
+      const o = planningGroups(after)
       expect(nums(d.type === 'story' ? o.stories : o.tasks)).toEqual(wanted)
       // The other group keeps its order.
       const other = d.type === 'story' ? 'tasks' : 'stories'
-      expect(nums(o[other])).toEqual(nums(columnOrder(cards, 'planning')[other]))
+      expect(nums(o[other])).toEqual(nums(planningGroups(cards)[other]))
     }
   })
 

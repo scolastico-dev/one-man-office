@@ -13,7 +13,6 @@ import type {
   MCPServer,
   MCPServerState,
   MCPServerStateName,
-  MCPToken,
   MCPTransport,
 } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
@@ -338,11 +337,6 @@ export function entryText(v: unknown): string {
 }
 
 // Access
-
-/** A token's or grant's dates in words. */
-export function tokenKindWords(t: MCPToken): string {
-  return t.kind === 'pat' ? 'Personal access token' : 'OAuth grant'
-}
 
 export interface ConnectionCommand {
   id: string

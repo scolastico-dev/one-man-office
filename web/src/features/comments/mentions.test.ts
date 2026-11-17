@@ -1,14 +1,10 @@
 import { expect, test } from 'vitest'
 import type { AgentRef } from '../../api/types'
 import { ticket } from '../board/testing'
-import { askTargets, mentionNames, mentionOptions, MENTION_RULE } from './mentions'
+import { askTargets, mentionNames, mentionOptions } from './mentions'
 
 const agent = (role: AgentRef['role'], name: string, session = `s-${name}`): AgentRef => ({ session, role, name, state: 'running', purpose: 'work' })
 const roles = (o: { role: string }[]) => o.map((x) => x.role)
-
-test('the rule text is the board rule', () => {
-  expect(MENTION_RULE).toContain('@ceo only while the CEO is on')
-})
 
 test('mentionOptions: @ceo only while enabled; @pm only with a story; names beside roles', () => {
   const standalone = ticket({ number: 1, type: 'task', story: null })
