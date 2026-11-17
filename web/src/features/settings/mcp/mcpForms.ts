@@ -215,14 +215,6 @@ export const unknownState = (name: string): MCPServerState => ({
   offers_prompts: false,
 })
 
-/**
- * Whether the relay of this omo is missing: it would tell a state for every
- * stored server, so stored servers without any state mean no relay runs.
- */
-export function relayMissing(servers: readonly MCPServer[], states: readonly MCPServerState[]): boolean {
-  return servers.length > 0 && states.length === 0
-}
-
 /** Who gets a server, in words: "for every role · only omo's sessions". */
 export function reachWords(s: Pick<MCPServer, 'roles' | 'global'>): string {
   const roles = s.roles.length === 0 ? 'every role' : s.roles.map((r) => MCP_ROLES.find((x) => x.id === r)?.label ?? r).join(', ')

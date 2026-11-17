@@ -27,7 +27,7 @@ import McpServerEditor from './McpServerEditor.vue'
 import McpServerList from './McpServerList.vue'
 import McpSwitches from './McpSwitches.vue'
 import McpTakeover from './McpTakeover.vue'
-import { blankServer, fileOfMCPServer, relayMissing, type McpDraft } from './mcpForms'
+import { blankServer, fileOfMCPServer, type McpDraft } from './mcpForms'
 
 const def = sectionDef('mcp')
 const session = useSession()
@@ -38,8 +38,8 @@ const states = ref<MCPServerState[]>([])
 const errors = ref<FileError[]>([])
 const loaded = ref(false)
 const loadError = ref('')
-/** An action of the relay was answered "not available" (no relay runs in this omo). */
-const relayRefused = ref(false)
+/** MCP is switched off in the stored general switches: omo serves no endpoint and runs no server. */
+const off = ref(false)
 
 function concernsServers(ev: ApiEvent): boolean {
   if (ev.kind === 'settings.changed') return (ev.data as Partial<SettingsChangedData> | null)?.section === 'mcpservers'
@@ -75,8 +75,6 @@ onScopeDispose(
     states.value = [...states.value.filter((s) => s.name !== st.name), st]
   }),
 )
-
-const noRelay = computed(() => relayRefused.value || relayMissing(servers.value, states.value))
 
 const selected = ref<string | null>(null)
 const initial = ref<McpDraft | null>(null)
@@ -137,10 +135,10 @@ const naming = ref(false)
         <p>{{ loadError }}</p>
         <template #actions><UiButton size="sm" @click="reload()">Try again</UiButton></template>
       </Callout>
-      <Callout v-if="noRelay" tone="warn" title="Relay not available" data-mcp-no-relay>
+      <Callout v-if="off" tone="warn" title="MCP is switched off" data-mcp-off>
         <p>
-          This omo does not run MCP servers yet: the settings are stored, but no server is started or connected, and Test, Restart, Log and Connect
-          are not available. They work once omo runs its relay.
+          omo serves no MCP endpoint, starts or connects to none of these servers and gives its agents no MCP entry. The settings are kept; the
+          general switches below turn it on again.
         </p>
       </Callout>
       <p v-if="!loaded" class="mcp__note">Reading the MCP servers…</p>
@@ -159,16 +157,15 @@ const naming = ref(false)
         :name="selected"
         :initial="initial"
         :state="stateOfOpen"
-        :no-relay="noRelay"
+        :off="off"
         :form-id="formId"
         @dirty="(d) => (editor.dirty.value = d)"
         @busy="(b) => (editor.busy.value = b)"
         @deleted="deleted"
         @close="closeNew"
-        @no-relay="relayRefused = true"
       />
 
-      <McpSwitches />
+      <McpSwitches @enabled="(on) => (off = !on)" />
     </FormSection>
 
     <McpClients />

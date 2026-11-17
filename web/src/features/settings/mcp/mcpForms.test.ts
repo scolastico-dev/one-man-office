@@ -12,7 +12,6 @@ import {
   listErrors,
   mapErrors,
   reachWords,
-  relayMissing,
   stateWords,
   toDraft,
   toServer,
@@ -84,12 +83,6 @@ test('reach, transport and state words', () => {
   expect(transportWords({ transport: 'stdio', command: 'npx', url: '' })).toBe('stdio · npx')
   expect(stateWords('needs_login')).toEqual({ text: 'needs login', tone: 'warn' })
   expect(stateWords('weird').text).toBe('weird')
-})
-
-test('the relay is missing when stored servers have no state at all', () => {
-  expect(relayMissing([], [])).toBe(false)
-  expect(relayMissing([FakeMcp.server()], [])).toBe(true)
-  expect(relayMissing([FakeMcp.server()], [FakeMcp.state()])).toBe(false)
 })
 
 test('refusals are placed under the fields the form shows', () => {

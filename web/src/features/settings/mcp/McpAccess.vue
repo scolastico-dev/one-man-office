@@ -7,7 +7,6 @@
 // connection gets only the relayed servers marked "Also available without
 // an omo session", never board or ticket actions.
 import { computed, ref } from 'vue'
-import { ApiError } from '../../../api/client'
 import { createMCPToken, listMCPTokens, revokeMCPToken } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import type { MCPToken } from '../../../api/types'
@@ -36,8 +35,6 @@ const commands = connectionCommands(base)
 
 const tokens = ref<MCPToken[] | null>(null)
 const loadError = ref('')
-/** omo answered that its token store is not available. */
-const unavailable = ref(false)
 let seq = 0
 async function read() {
   const mine = ++seq
@@ -46,11 +43,9 @@ async function read() {
     if (mine !== seq) return
     tokens.value = data ?? []
     loadError.value = ''
-    unavailable.value = false
   } catch (e) {
     if (mine !== seq) return
-    if (e instanceof ApiError && e.status === 503) unavailable.value = true
-    else loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The tokens could not be read.'
+    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The tokens could not be read.'
   }
 }
 void read()
@@ -88,7 +83,6 @@ async function create() {
     name.value = ''
     announce.polite(`Token ${visibleText(data.token.name)} created.`)
   } catch (e) {
-    if (e instanceof ApiError && e.status === 503) unavailable.value = true
     const msg = failureText(e, { lost: 'No answer from omo; the token may have been created. Its secret is lost then: revoke it in the list.', refused: 'The token was not created.' })
     if (fieldOf(e) === 'name') nameError.value = msg
     else createError.value = msg
@@ -150,66 +144,61 @@ async function revoke(t: MCPToken) {
       <p class="access__note">With a token, put it into the variable OMO_MCP_TOKEN of the program's environment; never into a shared file.</p>
     </FormSection>
 
-    <Callout v-if="unavailable" tone="warn" title="Tokens not available" data-mcp-tokens-unavailable>
-      <p>This omo cannot create or list MCP tokens yet. Programs on this computer connect through the entry under Agent programs.</p>
-    </Callout>
     <Callout v-if="loadError" tone="danger" live="assertive" data-mcp-tokens-error>
       <p>{{ visibleText(loadError) }}</p>
       <template #actions><UiButton size="sm" @click="read()">Try again</UiButton></template>
     </Callout>
 
-    <template v-if="!unavailable">
-      <FormSection legend="Personal access tokens" :level="3" description="A token is shown once, when it is created; omo keeps only a fingerprint of it.">
-        <form class="access__create" novalidate data-mcp-token-create @submit.prevent="create">
-          <TextField v-model="name" label="Name" hint="What the token is for, e.g. laptop or ci." :error="nameError" autocomplete="off" data-mcp-token-name />
-          <SelectField v-model="expiry" label="Valid" :options="EXPIRY_OPTIONS" />
-          <div>
-            <UiButton type="submit" :disabled="creating" :aria-busy="creating ? 'true' : undefined" data-mcp-token-submit>{{ creating ? 'Creating…' : 'Create token' }}</UiButton>
+    <FormSection legend="Personal access tokens" :level="3" description="A token is shown once, when it is created; omo keeps only a fingerprint of it.">
+      <form class="access__create" novalidate data-mcp-token-create @submit.prevent="create">
+        <TextField v-model="name" label="Name" hint="What the token is for, e.g. laptop or ci." :error="nameError" autocomplete="off" data-mcp-token-name />
+        <SelectField v-model="expiry" label="Valid" :options="EXPIRY_OPTIONS" />
+        <div>
+          <UiButton type="submit" :disabled="creating" :aria-busy="creating ? 'true' : undefined" data-mcp-token-submit>{{ creating ? 'Creating…' : 'Create token' }}</UiButton>
+        </div>
+      </form>
+      <Callout v-if="createError" tone="danger" data-mcp-token-error>
+        <p>{{ visibleText(createError) }}</p>
+      </Callout>
+      <p v-if="tokens !== null && pats.length === 0" class="access__note" data-no-mcp-tokens>No token yet.</p>
+      <ul v-if="pats.length > 0" class="access__list" data-mcp-tokens>
+        <li v-for="t in pats" :key="t.id" class="access__row" :data-mcp-token="t.name">
+          <div class="access__main">
+            <p class="access__name">{{ visibleText(t.name) }}</p>
+            <p class="access__meta">
+              created <RelativeTime :at="t.created_at" /> ·
+              <template v-if="t.last_used_at">last used <RelativeTime :at="t.last_used_at" /></template><template v-else>never used</template> ·
+              <template v-if="t.expires_at">ends <RelativeTime :at="t.expires_at" /></template><template v-else>does not end</template>
+            </p>
+            <p v-if="revokeError?.id === t.id" class="access__error">{{ visibleText(revokeError.text) }}</p>
           </div>
-        </form>
-        <Callout v-if="createError" tone="danger" data-mcp-token-error>
-          <p>{{ visibleText(createError) }}</p>
-        </Callout>
-        <p v-if="tokens !== null && pats.length === 0" class="access__note" data-no-mcp-tokens>No token yet.</p>
-        <ul v-if="pats.length > 0" class="access__list" data-mcp-tokens>
-          <li v-for="t in pats" :key="t.id" class="access__row" :data-mcp-token="t.name">
-            <div class="access__main">
-              <p class="access__name">{{ visibleText(t.name) }}</p>
-              <p class="access__meta">
-                created <RelativeTime :at="t.created_at" /> ·
-                <template v-if="t.last_used_at">last used <RelativeTime :at="t.last_used_at" /></template><template v-else>never used</template> ·
-                <template v-if="t.expires_at">ends <RelativeTime :at="t.expires_at" /></template><template v-else>does not end</template>
-              </p>
-              <p v-if="revokeError?.id === t.id" class="access__error">{{ visibleText(revokeError.text) }}</p>
-            </div>
-            <UiButton size="sm" variant="danger" :disabled="revoking === t.id" data-mcp-token-revoke @click="revoke(t)">
-              Revoke…<span class="sr-only"> {{ visibleText(t.name) }}</span>
-            </UiButton>
-          </li>
-        </ul>
-      </FormSection>
+          <UiButton size="sm" variant="danger" :disabled="revoking === t.id" data-mcp-token-revoke @click="revoke(t)">
+            Revoke…<span class="sr-only"> {{ visibleText(t.name) }}</span>
+          </UiButton>
+        </li>
+      </ul>
+    </FormSection>
 
-      <FormSection legend="OAuth grants" :level="3" description="Programs you approved on omo's consent page. A grant ends when the program does not use it for 30 days.">
-        <p v-if="tokens !== null && grants.length === 0" class="access__note" data-no-mcp-grants>No program approved yet.</p>
-        <ul v-if="grants.length > 0" class="access__list" data-mcp-grants>
-          <li v-for="t in grants" :key="t.id" class="access__row" :data-mcp-grant="t.name">
-            <div class="access__main">
-              <p class="access__name">{{ visibleText(t.name) }}</p>
-              <p class="access__meta">answers went to {{ visibleText(t.redirect_host) }} · client {{ visibleText(t.client_id) }}</p>
-              <p class="access__meta">
-                approved <RelativeTime :at="t.created_at" /> ·
-                <template v-if="t.last_used_at">last used <RelativeTime :at="t.last_used_at" /></template><template v-else>never used</template>
-                <template v-if="t.refresh_expires_at"> · ends <RelativeTime :at="t.refresh_expires_at" /> unless used</template>
-              </p>
-              <p v-if="revokeError?.id === t.id" class="access__error">{{ visibleText(revokeError.text) }}</p>
-            </div>
-            <UiButton size="sm" variant="danger" :disabled="revoking === t.id" data-mcp-grant-revoke @click="revoke(t)">
-              Revoke…<span class="sr-only"> {{ visibleText(t.name) }}</span>
-            </UiButton>
-          </li>
-        </ul>
-      </FormSection>
-    </template>
+    <FormSection legend="OAuth grants" :level="3" description="Programs you approved on omo's consent page. A grant ends when the program does not use it for 30 days.">
+      <p v-if="tokens !== null && grants.length === 0" class="access__note" data-no-mcp-grants>No program approved yet.</p>
+      <ul v-if="grants.length > 0" class="access__list" data-mcp-grants>
+        <li v-for="t in grants" :key="t.id" class="access__row" :data-mcp-grant="t.name">
+          <div class="access__main">
+            <p class="access__name">{{ visibleText(t.name) }}</p>
+            <p class="access__meta">answers went to {{ visibleText(t.redirect_host) }} · client {{ visibleText(t.client_id) }}</p>
+            <p class="access__meta">
+              approved <RelativeTime :at="t.created_at" /> ·
+              <template v-if="t.last_used_at">last used <RelativeTime :at="t.last_used_at" /></template><template v-else>never used</template>
+              <template v-if="t.refresh_expires_at"> · ends <RelativeTime :at="t.refresh_expires_at" /> unless used</template>
+            </p>
+            <p v-if="revokeError?.id === t.id" class="access__error">{{ visibleText(revokeError.text) }}</p>
+          </div>
+          <UiButton size="sm" variant="danger" :disabled="revoking === t.id" data-mcp-grant-revoke @click="revoke(t)">
+            Revoke…<span class="sr-only"> {{ visibleText(t.name) }}</span>
+          </UiButton>
+        </li>
+      </ul>
+    </FormSection>
 
     <UiDialog :open="secret !== ''" title="Your new token" eyebrow="MCP access" data-mcp-token-secret @close="closeSecret">
       <div class="access__secret">

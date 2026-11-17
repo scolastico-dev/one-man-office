@@ -9,7 +9,6 @@
 // and never put into an address, a log line or a toast. Every text the
 // server or the relay wrote is shown as visible text.
 import { computed, onMounted, ref, useId, watch } from 'vue'
-import { ApiError } from '../../../api/client'
 import { connectMCPServer, deleteMCPServer, disconnectMCPServer, getMCPServers, putMCPServer, restartMCPServer, testMCPServer } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import { NO_REVISION, type ApiEvent, type MCPServerState, type MCPTestResult, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
@@ -62,12 +61,12 @@ const props = withDefaults(
     initial?: McpDraft | null
     /** What the relay says of the server; absent until told. */
     state?: MCPServerState | null
-    /** No relay runs in this omo: Test, Restart, Log and Connect are not offered. */
-    noRelay?: boolean
+    /** MCP is switched off: omo runs no server, so its state, Test, Restart, Log and Connect are not offered. */
+    off?: boolean
     /** The id of this form, which the list's button names in aria-controls. */
     formId?: string
   }>(),
-  { initial: null, state: null, noRelay: false, formId: undefined },
+  { initial: null, state: null, off: false, formId: undefined },
 )
 const emit = defineEmits<{
   dirty: [boolean]
@@ -75,8 +74,6 @@ const emit = defineEmits<{
   close: []
   /** omo is working on the server for this form (Test, Restart, Connect, Delete). */
   busy: [boolean]
-  /** The relay answered that it is not available. */
-  noRelay: []
 }>()
 
 const session = useSession()
@@ -159,9 +156,8 @@ async function save() {
   if ((await r.save()) === 'refused') await focusFirstInvalid(root.value)
 }
 
-/** A refusal of the relay; "not available" also tells the page. */
+/** A refusal of the relay. */
 function relayFailure(e: unknown, what: string): string {
-  if (e instanceof ApiError && e.status === 503) emit('noRelay')
   return failureText(e, { lost: `No answer from omo; the ${what} may still be running. Look at the state above.`, refused: `The ${what} was refused.` })
 }
 
@@ -318,7 +314,7 @@ async function remove() {
     <template v-if="draft && !(gone && !r.dirty.value)">
       <UnplacedErrors :errors="unplaced" />
 
-      <div v-if="stored && !noRelay" class="mcp-editor__state" data-mcp-server-status>
+      <div v-if="stored && !off" class="mcp-editor__state" data-mcp-server-status>
         <div class="mcp-editor__state-text">
           <p>
             <template v-if="st && words">
@@ -472,7 +468,7 @@ async function remove() {
         <p v-if="draft.source" class="mcp-editor__note">Taken over from {{ visibleText(draft.source) }}.</p>
       </template>
 
-      <div v-if="!noRelay" class="mcp-editor__test">
+      <div v-if="!off" class="mcp-editor__test">
         <UiButton size="sm" :disabled="testing" :aria-busy="testing ? 'true' : undefined" data-mcp-test @click="test">{{ testing ? 'Testing…' : 'Test' }}</UiButton>
         <p class="mcp-editor__note">Starts the form as it is now once, lists its tools and stops it; nothing is saved.</p>
       </div>

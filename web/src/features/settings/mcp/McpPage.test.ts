@@ -40,15 +40,15 @@ test('the list shows each server with its live state, and mcp.changed updates it
   expect(row(w, 'files').get('[data-mcp-server-state]').text()).toBe('failed')
   expect(row(w, 'files').get('[data-mcp-server-failure]').text()).toBe('exit status 1')
   expect(h.omo.reads.filter((p) => p === '/api/mcp/servers').length).toBe(reads)
-  expect(w.find('[data-mcp-no-relay]').exists()).toBe(false)
+  expect(w.find('[data-mcp-off]').exists()).toBe(false)
 })
 
-test('without a relay the page says so cleanly and the editor offers no relay actions', async () => {
+test('with MCP switched off the page says so and the editor offers no relay actions', async () => {
   const { w } = await open((omo) => {
-    omo.mcp.relay = false
+    omo.settings.mcp.enabled = false
     omo.mcp.servers = [FakeMcp.server()]
   })
-  expect(w.get('[data-mcp-no-relay]').text()).toContain('Relay not available')
+  expect(w.get('[data-mcp-off]').text()).toContain('MCP is switched off')
   expect(row(w, 'files').find('[data-mcp-server-state]').exists()).toBe(false)
   await row(w, 'files').get('[data-mcp-server-toggle]').trigger('click')
   await flushPromises()

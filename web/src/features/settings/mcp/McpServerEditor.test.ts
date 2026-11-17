@@ -78,21 +78,11 @@ test('Test sends the draft unsaved and lists the tools', async () => {
   await w.get('[data-mcp-test]').trigger('click')
   await flushPromises()
   expect(h.sent[0]).toMatchObject({ method: 'POST', path: '/api/mcp/servers/test' })
-  expect(w.get('[data-mcp-test-result]').text()).toContain('2 tools in 42 ms: read_file, write_file')
+  expect(w.get('[data-mcp-test-result]').text()).toContain('2 tools in 42 ms: files__read_file, files__write_file')
 })
 
-test('a relay that is not available is reported to the page', async () => {
-  const { w, h } = await open([FakeMcp.server()])
-  h.omo.mcp.relay = false
-  await w.get('[data-mcp-test]').trigger('click')
-  await flushPromises()
-  expect(w.get('[data-mcp-test-error]').text()).toContain('not available')
-  const host = w.findComponent(McpServerEditor)
-  expect(host.emitted('noRelay')).toHaveLength(1)
-})
-
-test('with no relay the state, Restart, Log and Test are not offered', async () => {
-  const { w } = await open([FakeMcp.server()], { noRelay: true })
+test('with MCP switched off the state, Restart, Log and Test are not offered', async () => {
+  const { w } = await open([FakeMcp.server()], { off: true })
   expect(w.find('[data-mcp-server-status]').exists()).toBe(false)
   expect(w.find('[data-mcp-test]').exists()).toBe(false)
   expect(w.find('[data-mcp-server-delete]').exists()).toBe(true)

@@ -93,12 +93,3 @@ test('grants are listed apart from tokens and can be revoked after asking', asyn
   expect(w.find('[data-mcp-grant="Claude Code"]').exists()).toBe(false)
   expect(w.find('[data-no-mcp-grants]').exists()).toBe(true)
 })
-
-test('an omo without the token store says so instead of the lists', async () => {
-  const { w } = await open((omo) => {
-    omo.mcp.tokensAvailable = false
-  })
-  expect(w.get('[data-mcp-tokens-unavailable]').text()).toContain('Tokens not available')
-  expect(w.find('[data-mcp-token-create]').exists()).toBe(false)
-  expect(w.find('[data-mcp-tokens-error]').exists()).toBe(false)
-})

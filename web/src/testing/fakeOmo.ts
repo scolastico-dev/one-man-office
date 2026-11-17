@@ -78,7 +78,6 @@ export interface FakeWrite {
 }
 
 const answered = <T,>(data: T): ApiResult<T> => ({ data, eventId: null })
-const unavailable = (what: string) => new ApiError(503, 'unavailable', `omo's MCP ${what} is not available in this version`)
 
 /**
  * omo's MCP routes in memory: the relayed servers and their states, the
@@ -89,14 +88,10 @@ const unavailable = (what: string) => new ApiError(503, 'unavailable', `omo's MC
 export class FakeMcp {
   servers: MCPServer[] = []
   states: MCPServerState[] = []
-  /** False answers the relay's routes with 503, as an omo without a relay. */
-  relay = true
-  /** False answers the token routes with 503. */
-  tokensAvailable = true
   tokens: MCPToken[] = []
   /** The secret the next created token gets. */
   nextSecret = 'omo_pat_TESTSECRETabcdefghijklmnopqrstuvwxyz012345'
-  testResult: MCPTestResult = { tools: ['read_file', 'write_file'], omitted: [], error: '', offers_resources: false, offers_prompts: false, millis: 42 }
+  testResult: MCPTestResult = { tools: ['files__read_file', 'files__write_file'], omitted: [], error: '', offers_resources: false, offers_prompts: false, millis: 42 }
   authorizeUrl = 'https://auth.example.invalid/authorize?client_id=omo&state=s1'
   clients: MCPClientState[] = []
   takeover: MCPTakeover = { candidates: [], stays: [] }
@@ -179,14 +174,12 @@ export class FakeMcp {
   read(path: string): { found: boolean; value?: unknown } {
     const log = /^\/api\/mcp\/servers\/([^/]+)\/log$/.exec(path)
     if (log) {
-      if (!this.relay) throw unavailable('relay')
       return { found: true, value: [{ at: '2026-11-17T10:00:00Z', message: 'started' }] }
     }
     switch (path) {
       case '/api/mcp/servers':
-        return { found: true, value: { servers: this.servers, states: this.relay ? this.states : [], errors: [] } }
+        return { found: true, value: { servers: this.servers, states: this.states, errors: [] } }
       case '/api/mcp/tokens':
-        if (!this.tokensAvailable) throw unavailable('tokens')
         return { found: true, value: this.tokens }
       case '/api/mcp/clients':
         return { found: true, value: this.clients }
@@ -201,7 +194,6 @@ export class FakeMcp {
   write(w: FakeWrite): ApiResult<unknown> {
     const m = /^\/api\/mcp\/servers\/([^/]+)(?:\/([a-z]+))?$/.exec(w.path)
     if (w.path === '/api/mcp/servers/test') {
-      if (!this.relay) throw unavailable('relay')
       return answered(this.testResult)
     }
     if (m) {
@@ -221,12 +213,10 @@ export class FakeMcp {
         return answered(null)
       }
       if (i < 0) throw new ApiError(404, 'not_found', `no MCP server "${name}"`)
-      if (!this.relay) throw unavailable('relay')
       if (action === 'connect') return answered({ authorize_url: this.authorizeUrl })
       return answered(null)
     }
     if (w.path === '/api/mcp/tokens' && w.method === 'POST') {
-      if (!this.tokensAvailable) throw unavailable('tokens')
       const req = w.body as { name: string; expires_at?: string }
       const token: MCPToken = {
         id: (++this.ids).toString(16).padStart(16, '0'),
@@ -246,7 +236,6 @@ export class FakeMcp {
     }
     const tok = /^\/api\/mcp\/tokens\/([^/]+)$/.exec(w.path)
     if (tok && w.method === 'DELETE') {
-      if (!this.tokensAvailable) throw unavailable('tokens')
       const i = this.tokens.findIndex((t) => t.id === tok[1])
       if (i < 0) throw new ApiError(404, 'not_found', 'no MCP token')
       this.tokens.splice(i, 1)
@@ -293,6 +282,8 @@ export class FakeOmo {
   paused = false
   /** Fields of `GET /api/server` a test overrides. */
   server: Partial<ServerInfo> = {}
+  /** What GET /api/settings answers as the general settings. */
+  settings: General = JSON.parse(JSON.stringify(general)) as General
   /** What GET /api/usage answers. */
   usage: UsageState = { readings: [], models: [] }
   eventId = 1
@@ -402,7 +393,7 @@ export class FakeOmo {
       case '/api/usage':
         return this.usage
       case '/api/settings':
-        return { settings: general, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
+        return { settings: this.settings, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
       default: {
         const mcp = this.mcp.read(path)
         if (mcp.found) return mcp.value

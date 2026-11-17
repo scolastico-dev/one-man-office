@@ -3,7 +3,7 @@
 // serves its MCP endpoint, and per agent program whether the sessions omo
 // starts get omo's MCP entry. A form of its own with its own Save bar; a
 // change of other general settings is no conflict for it.
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SaveBar from '../../../components/ui/SaveBar.vue'
@@ -17,7 +17,19 @@ import { unplacedErrors } from '../unplacedErrors'
 import { useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid } from '../useSettingsResource'
 
+const emit = defineEmits<{
+  /** Whether MCP is switched on, as stored (not as edited). */
+  enabled: [boolean]
+}>()
+
 const form = useGeneralForm(['mcp'])
+watch(
+  () => form.value.value?.mcp.enabled,
+  (on) => {
+    if (on !== undefined) emit('enabled', on)
+  },
+  { immediate: true },
+)
 useLeaveGuard(form.dirty)
 const draft = computed(() => form.draft.value)
 const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, []))
