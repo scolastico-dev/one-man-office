@@ -145,8 +145,8 @@ Use "omo ai [command] --help" for more information about a command.
 ```text
 Post a question on ticket N to your supervisor (default), the pm, the ceo or
 the user. The text is the words after N, or a file, or standard input with a
-lone - or --body-file -. The question stays open until the addressed role
-replies to it; read the answer with "omo ai comments N".
+lone - or --body-file -. The question stays open until the addressed role or
+the user replies to it; read the answer with "omo ai comments N".
 
 Usage:
   omo ai ask N [--to supervisor|pm|ceo|user] [--body-file FILE|-] [TEXT...|-] [flags]
@@ -666,7 +666,8 @@ Global Flags:
 ```text
 Start again the step of ticket N that stopped and needs a person: its agent
 start, an agent that ended without handing in, or its merge. The user retries
-every ticket, the CEO tickets it supervises.
+every ticket, the CEO the tickets it supervises, a product manager the tasks of
+its story.
 
 Usage:
   omo ai ticket retry N [flags]
@@ -742,8 +743,10 @@ Global Flags:
 ### `omo ai wait`
 
 ```text
-Wait for the next event meant for you (an answer, a review result, a released
-dependency). Prints the reason it returned. DUR is a duration such as 90s or 10m.
+Wait for the next notice meant for you: an answer to your question, a comment
+that mentions your role, a done task of your story (a product manager), or a
+line from omo itself such as a stop request. Prints the notice; when DUR passes
+first it prints a message saying so. DUR is a duration such as 90s or 10m.
 
 Usage:
   omo ai wait [--timeout DUR] [flags]
@@ -846,9 +849,9 @@ Use "omo config [command] --help" for more information about a command.
 
 ```text
 Write omo's settings to a zip file: the general settings, server.yaml,
-projects, agent profiles, roles, prompts, usage scripts, skill sets and
-plugin settings. With --with-db a consistent copy of the database (tickets,
-comments, history) is added.
+projects, agent profiles, roles, prompts, usage scripts, skill sets, plugin
+settings and the MCP servers omo relays. With --with-db a consistent copy of
+the database (tickets, comments, history) is added.
 
 The file contains your tokens and environment values; keep it private.
 omo must be running.
@@ -953,10 +956,10 @@ Flags:
 ### `omo mcp`
 
 ```text
-omo serves its `omo ai` commands as MCP tools, and the tools of the MCP servers it relays,
-at /mcp. Agent programs reach it through `omo mcp stdio`, which acts as the agent session
-of OMO_AGENT_ID, as `omo ai` does. `omo mcp install` registers that bridge in the agent
-programs; `omo mcp token` manages the tokens other MCP clients reach /mcp with.
+omo serves its "omo ai" commands as MCP tools, and the tools of the MCP servers it relays,
+at /mcp. Agent programs reach it through "omo mcp stdio", which acts as the agent session
+of OMO_AGENT_ID, as "omo ai" does. "omo mcp install" registers that bridge in the agent
+programs; "omo mcp token" manages the tokens other MCP clients reach /mcp with.
 
 Usage:
   omo mcp [command]
@@ -977,7 +980,7 @@ Use "omo mcp [command] --help" for more information about a command.
 ### `omo mcp install`
 
 ```text
-Show how omo registers its MCP server (`omo mcp stdio`) in the configuration of the agent
+Show how omo registers its MCP server ("omo mcp stdio") in the configuration of the agent
 programs: every program and profile account omo knows, the targets of one PROGRAM (claude,
 codex, agy), or one TARGET by the id the MCP page shows. Nothing changes without --yes; omo
 keeps a copy of every file it changes. omo must be running.
@@ -994,7 +997,7 @@ Flags:
 
 ```text
 List the MCP servers omo relays with their states (outside an agent session), then connect
-to omo's MCP endpoint as `omo mcp stdio` would in this terminal and list the tools it offers.
+to omo's MCP endpoint as "omo mcp stdio" would in this terminal and list the tools it offers.
 
 Usage:
   omo mcp status [flags]
@@ -1081,7 +1084,7 @@ Flags:
 ### `omo mcp uninstall`
 
 ```text
-Show how omo removes its MCP server (`omo mcp stdio`) in the configuration of the agent
+Show how omo removes its MCP server ("omo mcp stdio") in the configuration of the agent
 programs: every program and profile account omo knows, the targets of one PROGRAM (claude,
 codex, agy), or one TARGET by the id the MCP page shows. Nothing changes without --yes; omo
 keeps a copy of every file it changes. omo must be running.
