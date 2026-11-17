@@ -65,7 +65,10 @@ tab.
 
 A step that needs a person flags the ticket: the card shows "needs attention",
 the panel shows **Needs attention** with the reason, a comment mentions the
-supervisor, and the bell lists it. Fix the cause, then press the retry button
+supervisor, and the bell lists it. On a ticket that the CEO or a product manager
+supervises, the card and the panel say "needs the CEO" or "needs the product
+manager" instead, and the bell leaves it out: that supervisor is told and may
+retry it, and you can too. Fix the cause, then press the retry button
 (**Retry start**, **Retry agent** or **Retry merge**; `omo ai ticket retry N`).
 
 | Reason | Meaning |

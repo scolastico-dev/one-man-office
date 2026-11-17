@@ -17,7 +17,7 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import RejectDialog from '../board/dialogs/RejectDialog.vue'
-import { captionFor } from '../../board/badges'
+import { attentionOwner, captionFor } from '../../board/badges'
 import { useUsage } from '../sidebar/useUsage'
 import { usageWaitText } from './usageWait'
 import ApproveDialog from './ApproveDialog.vue'
@@ -87,7 +87,8 @@ const attention = computed(() => {
   const t = props.ticket
   if (!t.failed_step && !t.attention) return null
   const step = t.failed_step ? STEP_TEXT[t.failed_step] ?? `The step ${t.failed_step} failed.` : ''
-  return { step, reason: t.attention }
+  const owner = attentionOwner(t)
+  return { head: owner === '' ? 'Needs attention' : `Needs ${owner}`, step, reason: t.attention }
 })
 
 const caption = computed(() => captionFor(props.ticket))
@@ -205,7 +206,7 @@ function confirmCancel(deleteBranch: boolean) {
 <template>
   <div class="actions" data-ticket-actions>
     <div v-if="attention" class="actions__attention" role="status" data-attention>
-      <p class="actions__attention-head">Needs attention</p>
+      <p class="actions__attention-head">{{ attention.head }}</p>
       <p v-if="attention.step" class="actions__line">{{ attention.step }}</p>
       <p v-if="attention.reason" class="actions__line">{{ attention.reason }}</p>
     </div>

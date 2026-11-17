@@ -31,7 +31,7 @@ urgent of:
 
 | Badge | Meaning |
 |---|---|
-| needs attention | a step failed or omo flagged the ticket; the line under it says why (see [Troubleshooting](troubleshooting.md#a-ticket-says-needs-attention)) |
+| needs attention | a step failed or omo flagged a ticket you supervise; the line under it says why (see [Troubleshooting](troubleshooting.md#a-ticket-says-needs-attention)). A ticket another supervisor handles says "needs the CEO" or "needs the product manager" instead, and the bell and Needs me leave it out |
 | question for you | an agent asked you something |
 | your review | the review waits for you |
 | waiting for #N | a dependency is not done yet (" · PR not merged", " · cancelled") |

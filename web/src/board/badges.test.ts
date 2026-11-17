@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { TicketSummary } from '../api/types'
 import { ticket } from '../features/board/testing'
 import { badgeFor, captionFor } from './badges'
+import { needsMe } from './filters'
 import { slotView } from './slots'
 
 const t = (over: Partial<TicketSummary>) => ticket(over)
@@ -107,6 +108,20 @@ describe('badgeFor', () => {
   test('every badge has words', () => {
     for (const over of [{ attention: 'x' }, { questions_for_user: 1 }, { column: 'review', review_stage: 'human' }, { waiting_for: [{ ticket: 1, reason: 'cancelled' }] }, { start_blocked: 'paused' }] as Partial<TicketSummary>[]) {
       expect(badgeFor(t(over))?.text.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('a ticket that needs a person', () => {
+  test('is "needs attention" for the user and names the supervisor otherwise, as the counters count only the user\'s', () => {
+    expect(badgeFor(t({ attention: 'stuck' }))).toMatchObject({ tone: 'danger', text: 'needs attention' })
+    expect(badgeFor(t({ attention: 'stuck', supervisor: 'ceo' }))).toMatchObject({ tone: 'warn', text: 'needs the CEO', title: 'stuck' })
+    expect(badgeFor(t({ failed_step: 'agent', supervisor: 'pm' }))).toMatchObject({ tone: 'warn', text: 'needs the product manager' })
+  })
+  test('the card says "needs attention" exactly for the tickets Needs me counts', () => {
+    for (const supervisor of ['user', 'ceo', 'pm'] as const) {
+      const ticket = t({ attention: 'stuck', supervisor })
+      expect(badgeFor(ticket)?.text === 'needs attention').toBe(needsMe(ticket))
     }
   })
 })

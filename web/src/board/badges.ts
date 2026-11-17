@@ -47,6 +47,23 @@ function slotBadge(t: TicketSummary, slots: SlotView | null | undefined): Badge 
   return { tone: 'muted', text: `waiting for a ${kind} slot`, title }
 }
 
+/** Who a ticket with attention is waiting for, in words ("the CEO"); empty when it is the user, whom "needs attention" is about. */
+export function attentionOwner(t: TicketSummary): string {
+  return t.supervisor === 'ceo' ? 'the CEO' : t.supervisor === 'pm' ? 'the product manager' : ''
+}
+
+/**
+ * What the card and the panel call a ticket that needs a person: "needs
+ * attention" for a ticket the user supervises, which the bell and Needs me
+ * count too; for the ticket of another supervisor, who is told and may retry
+ * it, "needs the CEO" and no alarm, so the cards and the counters name the
+ * same tickets as the user's own.
+ */
+export function attentionWords(t: TicketSummary): { text: string; tone: 'danger' | 'warn' } {
+  const owner = attentionOwner(t)
+  return owner === '' ? { text: 'needs attention', tone: 'danger' } : { text: `needs ${owner}`, tone: 'warn' }
+}
+
 /**
  * The one badge a card shows: the most urgent of needs attention (also when
  * a step failed), a question for you, your review, waiting for a ticket, and
@@ -58,9 +75,9 @@ function slotBadge(t: TicketSummary, slots: SlotView | null | undefined): Badge 
 export function badgeFor(t: TicketSummary, slots?: SlotView | null): Badge | null {
   if (t.failed_step) {
     const step = failedStepText(t.failed_step)
-    return { tone: 'danger', text: 'needs attention', title: t.attention ? `${step}: ${t.attention}` : step }
+    return { ...attentionWords(t), title: t.attention ? `${step}: ${t.attention}` : step }
   }
-  if (t.attention) return { tone: 'danger', text: 'needs attention', title: t.attention }
+  if (t.attention) return { ...attentionWords(t), title: t.attention }
   if (t.questions_for_user > 0) {
     const n = t.questions_for_user
     return { tone: 'warn', text: 'question for you', title: `${n} open question${n === 1 ? '' : 's'} for you` }

@@ -572,3 +572,16 @@ test('the working folder of a done task without a project is removed after a con
   expect(hn.sent[0]).toEqual({ method: 'POST', path: '/api/tickets/5/remove-workdir', body: undefined })
   expect(w.get('[data-remove-workdir-dialog] [data-action-error]').text()).toContain('a terminal is open')
 })
+
+test('the attention heading is Needs attention for the user and names the supervisor otherwise', async () => {
+  const hn = await panelHarness(
+    seeded(
+      ticket({ number: 1, column: 'in_progress', failed_step: 'agent', attention: 'The agent keeps failing.', projects: [demo] }),
+      ticket({ number: 2, column: 'in_progress', failed_step: 'agent', attention: 'The agent keeps failing.', supervisor: 'ceo', projects: [demo] }),
+    ),
+  )
+  const { w } = await open(hn, 1)
+  expect(w.get('[data-attention] .actions__attention-head').text()).toBe('Needs attention')
+  const { w: other } = await open(hn, 2)
+  expect(other.get('[data-attention] .actions__attention-head').text()).toBe('Needs the CEO')
+})
