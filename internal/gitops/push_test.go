@@ -284,7 +284,7 @@ func TestPushCommitAcceptsAnyTemplateName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, branch := range []string{"omo/fix-login", "omo/12-fix-login", "fix-login", "jb/task/fix-login", "JIRA-12_fix"} {
+	for _, branch := range []string{"omo/fix-login", "omo/12-fix-login", "fix-login", "ada/task/fix-login", "JIRA-12_fix"} {
 		commit := commitOn(t, repo, branch, "work", map[string]string{"f.txt": branch})
 		if err := g.PushCommit(context.Background(), repo, r, commit, branch, ""); err != nil {
 			t.Errorf("%s: %v", branch, err)

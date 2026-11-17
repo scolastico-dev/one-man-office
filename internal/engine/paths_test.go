@@ -29,7 +29,7 @@ func branchNameWith(t *testing.T, tmpl string, n int64, title string, taken func
 	if taken != nil {
 		exists = func(b string) (bool, error) { return taken(b), nil }
 	}
-	name, err := BranchName(tmpl, branchname.Vars{Number: n, Title: title, Type: "task", Project: "api", Host: "box", User: "jb"}, exists)
+	name, err := BranchName(tmpl, branchname.Vars{Number: n, Title: title, Type: "task", Project: "api", Host: "box", User: "ada"}, exists)
 	if err != nil {
 		t.Fatal(err)
 	}

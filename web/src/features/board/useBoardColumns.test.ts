@@ -64,11 +64,11 @@ test('cards name their projects (the id when unknown) and their story (the numbe
       ticket({ number: 2, story: 1, projects: [on('ui'), on('gone')] }),
       ticket({ number: 3, story: 99 }),
     ],
-    (omo) => (omo.projects = [project('ui', 'not-three/ui')]),
+    (omo) => (omo.projects = [project('ui', 'acme-corp/ui')]),
   )
   const cards = useBoardColumns({ store, filters: noFilter() }).value[0]!.cards
   const two = cards.find((c) => c.ticket.number === 2)!
-  expect(two.projectNames).toEqual(['not-three/ui', 'gone'])
+  expect(two.projectNames).toEqual(['acme-corp/ui', 'gone'])
   expect(two.storyTitle).toBe('The story')
   expect(cards.find((c) => c.ticket.number === 3)!.storyTitle).toBeUndefined()
 })

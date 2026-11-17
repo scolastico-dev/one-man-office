@@ -42,7 +42,7 @@ const cardsIn = (w: VueWrapper, column: string) =>
 
 function omoWithBoard(): FakeOmo {
   const omo = new FakeOmo()
-  omo.projects = [project('ui', 'not-three/ui')]
+  omo.projects = [project('ui', 'acme-corp/ui')]
   omo.tickets = [
     ticket({ number: 1, type: 'story', title: 'Story one', rank: 1 }),
     ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] }),
@@ -89,7 +89,7 @@ test('renders five columns from the snapshot with counts', async () => {
   expect(headings(wrapper)).toEqual(['Planning 2', 'Ready For Dev 1', 'In Progress 0', 'Review 0', 'Done 1'])
   expect(cardsIn(wrapper, 'planning')).toEqual([1, 2])
   const task = wrapper.get('[data-board] [data-ticket="2"]')
-  expect(task.text()).toContain('not-three/ui')
+  expect(task.text()).toContain('acme-corp/ui')
   expect(task.text()).toContain('#1 Story one')
   expect(wrapper.get('h1').text()).toBe('Board')
 })

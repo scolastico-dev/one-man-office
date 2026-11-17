@@ -76,8 +76,8 @@ test('TicketCard shows the badge in words and the caption', () => {
 
 test('shortenMiddle keeps both ends of long names', () => {
   expect(shortenMiddle('ui', 10)).toBe('ui')
-  expect(shortenMiddle('github.com/not-three/ui', 20)).toBe('github.com/…/ui')
-  expect(shortenMiddle('github.com/not-three/ui', 30)).toBe('github.com/not-three/ui')
+  expect(shortenMiddle('github.com/acme-corp/ui', 20)).toBe('github.com/…/ui')
+  expect(shortenMiddle('github.com/acme-corp/ui', 30)).toBe('github.com/acme-corp/ui')
   expect(shortenMiddle('feature/very-long-branch-name-here', 16)).toBe('feature/…me-here')
   expect(shortenMiddle('abcdefghijklmnop', 9).length).toBe(9)
 })

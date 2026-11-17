@@ -128,12 +128,12 @@ func TestDiscoverKeepsUserChoices(t *testing.T) {
 func TestDiscoverNamesByRelativePath(t *testing.T) {
 	s, home, _ := openTest(t)
 	ws := realTemp(t)
-	repo := newRepo(t, ws, "github.com/not-three/ui")
-	added, err := s.DiscoverProjects("~/ws", []Found{{Path: repo, Rel: "github.com/not-three/ui"}})
+	repo := newRepo(t, ws, "github.com/acme-corp/ui")
+	added, err := s.DiscoverProjects("~/ws", []Found{{Path: repo, Rel: "github.com/acme-corp/ui"}})
 	if err != nil || len(added) != 1 {
 		t.Fatalf("added = %+v %v", added, err)
 	}
-	want := Project{ID: "github.com-not-three-ui", Name: "github.com/not-three/ui", Path: repo, Enabled: true, Root: "~/ws"}
+	want := Project{ID: "github.com-acme-corp-ui", Name: "github.com/acme-corp/ui", Path: repo, Enabled: true, Root: "~/ws"}
 	want = withEffective(want, Defaults().MergeDefaults)
 	if added[0] != want {
 		t.Fatalf("project = %+v, want %+v", added[0], want)

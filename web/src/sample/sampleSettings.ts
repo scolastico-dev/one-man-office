@@ -59,8 +59,8 @@ export interface SampleProject {
 }
 
 export const sampleProjects: SampleProject[] = [
-  { id: 'p1', name: 'github.com/not-three/api', path: '~/workspace/github.com/not-three/api', root: '~/workspace', state: 'ready' },
-  { id: 'p2', name: 'github.com/not-three/ui', path: '~/workspace/github.com/not-three/ui', root: '~/workspace', state: 'ready' },
+  { id: 'p1', name: 'github.com/acme-corp/api', path: '~/workspace/github.com/acme-corp/api', root: '~/workspace', state: 'ready' },
+  { id: 'p2', name: 'github.com/acme-corp/ui', path: '~/workspace/github.com/acme-corp/ui', root: '~/workspace', state: 'ready' },
   { id: 'p3', name: 'homelab-infrastructure-ansible-playbooks', path: '/srv/git/homelab-infrastructure-ansible-playbooks', root: '/srv/git', state: 'off' },
   { id: 'p4', name: 'one-man-office', path: '~/code/one-man-office', root: null, state: 'ready' },
   { id: 'p5', name: 'github.com/old/prototype', path: '~/workspace/github.com/old/prototype', root: '~/workspace', state: 'missing' },
@@ -133,7 +133,7 @@ Prefer small commits with conventional commit messages.
 Never edit files under vendor/.`
 
 export const samplePreview = `You are the developer on ticket #13, "Drag a card between columns",
-in the project github.com/not-three/ui.
+in the project github.com/acme-corp/ui.
 
 ## Your instructions
 
@@ -152,7 +152,7 @@ export interface SampleFolder {
 export const samplePickerPath = '/home/you/workspace/github.com'
 
 export const sampleFolders: SampleFolder[] = [
-  { name: 'not-three', repository: false, link: false, hidden: false },
+  { name: 'acme-corp', repository: false, link: false, hidden: false },
   { name: 'one-man-office', repository: true, link: false, hidden: false },
   { name: 'scolastico-dev', repository: false, link: false, hidden: false },
   { name: 'shared-notes', repository: false, link: true, hidden: false },

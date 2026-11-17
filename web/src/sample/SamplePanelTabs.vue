@@ -111,7 +111,7 @@ const calmSince = minutesAgo(64)
               <template v-else-if="active === 'diff'">
                 <div class="sdiff">
                   <header class="sdiff__head">
-                    <h4 class="sdiff__project">github.com/not-three/ui</h4>
+                    <h4 class="sdiff__project">github.com/acme-corp/ui</h4>
                     <p class="sdiff__sum">
                       <code>{{ project.branch }}</code> against <code>{{ project.base }}</code> · {{ project.files.length }} files ·
                       <span class="sdiff__add">+{{ additions }}</span> <span class="sdiff__del">−{{ deletions }}</span>

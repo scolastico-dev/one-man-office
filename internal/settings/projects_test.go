@@ -41,18 +41,18 @@ func wantCode(t *testing.T, err error, code string) {
 func TestAddProjectGeneratesStableID(t *testing.T) {
 	s, home, log := openTest(t)
 	ws := t.TempDir()
-	a, err := s.AddProject(newRepo(t, ws, "ui"), "github.com/not-three/ui")
+	a, err := s.AddProject(newRepo(t, ws, "ui"), "github.com/acme-corp/ui")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "github.com-not-three-ui" || !a.Enabled || a.EffectiveMerge.Story != "merge" || a.Merge != (api.MergeModes{}) || a.Root != "" {
+	if a.ID != "github.com-acme-corp-ui" || !a.Enabled || a.EffectiveMerge.Story != "merge" || a.Merge != (api.MergeModes{}) || a.Root != "" {
 		t.Fatalf("project = %+v", a)
 	}
-	b, err := s.AddProject(newRepo(t, ws, "ui2"), "github.com/not-three/ui")
+	b, err := s.AddProject(newRepo(t, ws, "ui2"), "github.com/acme-corp/ui")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.ID != "github.com-not-three-ui-2" {
+	if b.ID != "github.com-acme-corp-ui-2" {
 		t.Fatalf("second id = %q", b.ID)
 	}
 	if ch := log.take(); len(ch) != 2 || ch[0].Section != SectionProjects || ch[0].Name != a.ID {
@@ -86,7 +86,7 @@ func TestAddProjectGeneratesStableID(t *testing.T) {
 
 func TestProjectIDFromName(t *testing.T) {
 	cases := map[string]string{
-		"github.com/not-three/ui": "github.com-not-three-ui",
+		"github.com/acme-corp/ui": "github.com-acme-corp-ui",
 		"My Project!!":            "my-project",
 		"  --Weird__Name--  ":     "weird__name",
 		"日本":                      "project",

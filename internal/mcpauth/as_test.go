@@ -580,7 +580,7 @@ func TestSafeClientRefusesLoopback(t *testing.T) {
 func TestPublicAddr(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"93.184.216.34": true, "2606:2800:220:1::1": true, "8.8.8.8": true,
-		"127.0.0.1": false, "::1": false, "10.1.2.3": false, "172.16.0.1": false, "192.168.69.10": false,
+		"127.0.0.1": false, "::1": false, "10.1.2.3": false, "172.16.0.1": false, "192.168.1.10": false,
 		"169.254.169.254": false, "fe80::1": false, "fc00::1": false, "224.0.0.1": false, "ff02::1": false,
 		"0.0.0.0": false, "::": false, "0.1.2.3": false, "100.64.0.1": false, "255.255.255.255": false,
 		"::ffff:127.0.0.1": false, "::ffff:10.0.0.1": false,

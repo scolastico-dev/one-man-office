@@ -497,7 +497,7 @@ func TestAddWorktreeNewBranchPicksUniqueNamesConcurrently(t *testing.T) {
 func TestAddWorktreeNewBranchFolderConflicts(t *testing.T) {
 	repo := newTestRepo(t)
 	g := testGit(t)
-	tg(t, repo, "branch", "jb/task/fix/old")
+	tg(t, repo, "branch", "ada/task/fix/old")
 	tg(t, repo, "branch", "team")
 	tg(t, repo, "update-ref", "refs/remotes/origin/far", "main")
 	first := func(name string) func(func(string) (bool, error)) (string, error) {
@@ -514,8 +514,8 @@ func TestAddWorktreeNewBranchFolderConflicts(t *testing.T) {
 			return "", errors.New("all taken")
 		}
 	}
-	got, err := g.AddWorktreeNewBranch(repo, filepath.Join(t.TempDir(), "a"), "main", first("jb/task/fix"))
-	if err != nil || got != "jb/task/fix-2" {
+	got, err := g.AddWorktreeNewBranch(repo, filepath.Join(t.TempDir(), "a"), "main", first("ada/task/fix"))
+	if err != nil || got != "ada/task/fix-2" {
 		t.Fatalf("below: %q, %v", got, err)
 	}
 	for name, existing := range map[string]string{"team/x": "team", "far/y/z": "origin/far"} {

@@ -38,7 +38,7 @@ func TestCheckOwnBranch(t *testing.T) {
 		tk := h.engineTicket(n)
 		return h.e.checkOwnBranch(h.ctx, tk, tk.Projects[0], h.repo, branch)
 	}
-	for _, branch := range []string{"fix-login", "jb/task/fix-login", "omo/1-old", "omo/old"} {
+	for _, branch := range []string{"fix-login", "ada/task/fix-login", "omo/1-old", "omo/old"} {
 		if err := check(branch); err != nil {
 			t.Errorf("%s: %v", branch, err)
 		}

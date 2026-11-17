@@ -16,7 +16,7 @@ afterEach(() => {
 
 async function boot(path = '/') {
   const omo = new FakeOmo()
-  omo.projects = [project('ui', 'not-three/ui')]
+  omo.projects = [project('ui', 'acme-corp/ui')]
   omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story one' }), ticket({ number: 2, title: 'Task two', story: 1 })]
   const router = createAppRouter({ history: createMemoryHistory() })
   await router.push(path)
@@ -74,7 +74,7 @@ test('the active filter count shows on the Filters button and the sheet holds th
   expect(dialog.text()).toContain('Filters')
   // Project and story are searches; the supervisor's short list stays a select.
   expect(dialog.findAll('select').length).toBe(1)
-  expect(dialog.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: not-three/ui')
+  expect(dialog.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: acme-corp/ui')
   expect(dialog.get('[data-filter-story] button').attributes('aria-label')).toBe('Story: All stories')
   const clear = dialog.findAll('button').find((b) => b.text() === 'Clear filters')!
   await clear.trigger('click')

@@ -24,7 +24,7 @@ const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', work
 
 function omoWithBoard(): FakeOmo {
   const omo = new FakeOmo()
-  omo.projects = [project('ui', 'not-three/ui'), project('api', 'not-three/api')]
+  omo.projects = [project('ui', 'acme-corp/ui'), project('api', 'acme-corp/api')]
   omo.tickets = [
     ticket({ number: 1, type: 'story', title: 'Story one', rank: 1 }),
     ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [on('ui')] }),
@@ -80,7 +80,7 @@ const cards = (w: VueWrapper) => w.findAll('[data-board] [data-ticket]').map((c)
 test('filters round-trip through the URL query', async () => {
   const { wrapper, router } = await boot(omoWithBoard(), undefined, '/?project=ui&needs_me=1')
   expect(cards(wrapper)).toEqual([4])
-  expect(wrapper.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: not-three/ui')
+  expect(wrapper.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: acme-corp/ui')
 
   // Clearing writes the address; other query parts and the path stay.
   await wrapper.get('[data-clear-filters]').trigger('click')
@@ -254,7 +254,7 @@ test('the project filter searches the projects, keeps All projects first and wri
   await flushPromises()
   expect(router.currentRoute.value.query).toEqual({ project: 'ui' })
   expect(cards(wrapper)).toEqual([2, 4])
-  expect(picker.get('button').text()).toBe('not-three/ui')
+  expect(picker.get('button').text()).toBe('acme-corp/ui')
 
   await pickProject(wrapper, '')
   expect(router.currentRoute.value.query).toEqual({})

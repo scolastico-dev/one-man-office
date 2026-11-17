@@ -87,7 +87,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 /**
  * Shortens `text` to at most `max` characters by cutting out the middle, so
  * both the start and the distinctive end stay readable. Paths keep their
- * first segment and as much of the end as fits: `github.com/…/not-three/ui`.
+ * first segment and as much of the end as fits: `github.com/…/acme-corp/ui`.
  */
 export function shortenMiddle(text: string, max: number): string {
   if (text.length <= max) return text
