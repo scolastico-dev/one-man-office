@@ -147,7 +147,7 @@ function remove(index: number) {
   align-items: center;
   gap: calc(var(--omo-space) * 0.5);
 }
-.reorder__buttons > .omo-btn:disabled {
+.reorder__buttons > .omo-btn:is(:disabled, [aria-disabled='true']) {
   border-color: transparent;
   color: var(--omo-line-strong);
 }

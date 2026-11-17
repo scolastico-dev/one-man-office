@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { vDisabled } from './vDisabled'
+
 withDefaults(
   defineProps<{
     /** Accessible name and tooltip; required because the button shows only an icon. */
@@ -17,7 +19,7 @@ withDefaults(
 <template>
   <button
     :type="type"
-    :disabled="disabled"
+    v-disabled="disabled"
     :aria-label="label"
     :title="label"
     :aria-pressed="pressed"

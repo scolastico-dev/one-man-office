@@ -35,3 +35,20 @@ test('Toggle: state words show the state for the eye while the label stays the a
   await wrapper.setProps({ modelValue: true })
   expect(button.text()).toBe('Paused')
 })
+
+test('Toggle: switched off while it has the focus, it keeps the focus and Space and clicks do nothing', async () => {
+  const wrapper = mount(Toggle, {
+    attachTo: document.body,
+    props: { label: 'Pause', modelValue: false, 'onUpdate:modelValue': (v: boolean) => wrapper.setProps({ modelValue: v, disabled: true }) },
+  })
+  const button = wrapper.get('[role="switch"]')
+  ;(button.element as HTMLButtonElement).focus()
+  await button.trigger('keydown', { key: ' ' })
+  expect(button.attributes('aria-checked')).toBe('true')
+  expect(document.activeElement).toBe(button.element)
+  expect(button.attributes('aria-disabled')).toBe('true')
+  await button.trigger('keydown', { key: ' ' })
+  ;(button.element as HTMLButtonElement).click()
+  expect(button.attributes('aria-checked')).toBe('true')
+  wrapper.unmount()
+})

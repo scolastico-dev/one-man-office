@@ -15,6 +15,7 @@ import { expandable, expanders, NOTHING_REVEALED, viewRows, type ExpandAction, t
 import { fileStatus } from './fileStatus'
 import { lineText, parsePatch, ROW_STEP } from './parsePatch'
 import type { Expansion } from './useDiff'
+import { vDisabled } from '../../components/ui/vDisabled'
 
 const props = withDefaults(
   defineProps<{
@@ -165,7 +166,7 @@ const bodyId = computed(() => `${props.domId}-body`)
       </p>
       <p v-else-if="file.patch === null || rows.length === 0" class="dfile__msg" data-note>No changes in the text.</p>
       <p v-if="hiding || errorAt(0)" class="dfile__msg dfile__tools" data-expand-tools>
-        <UiButton v-if="hiding" size="sm" :disabled="expanding" :aria-label="`Show the whole file ${path}`" data-whole-file @click="emit('expand', { kind: 'all' })">
+        <UiButton v-if="hiding" size="sm" v-disabled="expanding" :aria-label="`Show the whole file ${path}`" data-whole-file @click="emit('expand', { kind: 'all' })">
           {{ expanding && expansion?.errorAt === 0 ? 'Loading…' : 'Show the whole file' }}
         </UiButton>
         <span v-if="errorAt(0)" class="dfile__error" role="alert" data-expand-error>{{ errorAt(0) }}</span>
@@ -191,7 +192,7 @@ const bodyId = computed(() => `${props.domId}-body`)
                   type="button"
                   class="drow__expander"
                   :aria-label="b.name"
-                  :disabled="expanding"
+                  v-disabled="expanding"
                   :data-expand="b.action.kind"
                   @click="expand(b, $event)"
                 >
@@ -381,7 +382,7 @@ const bodyId = computed(() => `${props.domId}-body`)
   text-underline-offset: 2px;
   cursor: pointer;
 }
-.drow__expander:disabled {
+.drow__expander:is(:disabled, [aria-disabled='true']) {
   color: var(--omo-muted);
   cursor: default;
 }

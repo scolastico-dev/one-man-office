@@ -15,6 +15,7 @@ import { COLUMN_TITLES } from '../../board/model'
 import FieldRow from '../FieldRow.vue'
 import { addDependencyState, dependencyCandidates, matchCandidates, unsatisfiedWords, type FieldState } from '../fieldRules'
 import TicketLink from '../TicketLink.vue'
+import { vDisabled } from '../../../components/ui/vDisabled'
 
 const props = defineProps<{ ticket: TicketSummary; state: FieldState }>()
 const store = useBoard()
@@ -180,13 +181,13 @@ function onKeydown(e: KeyboardEvent) {
           <p :id="`${id}-hint`" class="omo-field__hint">Offers the tickets this one can depend on. Enter adds the first.</p>
           <ul v-if="results.length > 0 || typed > 0" class="add__results" role="list" :aria-label="`Tickets matching ${query}`">
             <li v-for="c in results" :key="c.number">
-              <button type="button" class="add__pick" :disabled="busy" :data-candidate="c.number" @click="add(c.number)">
+              <button type="button" class="add__pick" v-disabled="busy" :data-candidate="c.number" @click="add(c.number)">
                 <span>#{{ c.number }} {{ c.title }}</span>
                 <span class="dep__column">{{ COLUMN_TITLES[c.column] }}</span>
               </button>
             </li>
             <li v-if="typed > 0">
-              <button type="button" class="add__pick" :disabled="busy" data-candidate-anyway @click="add(typed)">
+              <button type="button" class="add__pick" v-disabled="busy" data-candidate-anyway @click="add(typed)">
                 <span>Try #{{ typed }} anyway</span>
                 <span class="dep__column">omo is not offering it; it will say why if it refuses</span>
               </button>
@@ -265,12 +266,12 @@ function onKeydown(e: KeyboardEvent) {
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.add__pick:disabled {
+.add__pick:is(:disabled, [aria-disabled='true']) {
   color: var(--omo-muted);
   cursor: not-allowed;
 }
 @media (hover: hover) {
-  .add__pick:hover:not(:disabled) {
+  .add__pick:hover:not(:disabled, [aria-disabled='true']) {
     border-color: var(--omo-accent);
   }
 }

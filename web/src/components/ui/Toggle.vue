@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(
+import { vDisabled } from './vDisabled'
+
+const props = withDefaults(
   defineProps<{
     label: string
     /** Keep the label as the accessible name but do not show it. */
@@ -32,7 +34,7 @@ let spaceDown = false
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== ' ') return
   event.preventDefault()
-  if (event.repeat) return
+  if (event.repeat || props.disabled) return
   spaceDown = true
   toggle()
 }
@@ -53,7 +55,7 @@ function onKeyup(event: KeyboardEvent) {
     :aria-checked="model"
     :aria-label="hideLabel || states ? label : undefined"
     :title="hideLabel ? label : undefined"
-    :disabled="disabled"
+    v-disabled="disabled"
     @click="onClick"
     @keydown="onKeydown"
     @keyup="onKeyup"
@@ -84,7 +86,7 @@ function onKeyup(event: KeyboardEvent) {
 .toggle__label {
   text-align: left;
 }
-.toggle:disabled {
+.toggle:is(:disabled, [aria-disabled='true']) {
   color: var(--omo-muted);
   cursor: not-allowed;
 }
@@ -118,11 +120,11 @@ function onKeyup(event: KeyboardEvent) {
   background: var(--omo-accent-fg);
   transform: translateX(calc(var(--omo-space) * 3.5));
 }
-.toggle:disabled .toggle__track {
+.toggle:is(:disabled, [aria-disabled='true']) .toggle__track {
   border-color: var(--omo-line);
 }
 @media (hover: hover) {
-  .toggle:hover:not(:disabled) .toggle__track {
+  .toggle:hover:not(:disabled, [aria-disabled='true']) .toggle__track {
     border-color: var(--omo-accent);
   }
 }

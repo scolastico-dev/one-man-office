@@ -9,6 +9,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { revealInBox } from './scrollBox'
 import { filterPicks, type PickItem } from './searchPick'
+import { vDisabled } from './vDisabled'
 
 export type { PickItem } from './searchPick'
 
@@ -141,7 +142,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDownO
       :aria-label="buttonName"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-controls="popId"
-      :disabled="disabled"
+      v-disabled="disabled"
       @click="onButtonClick"
     >
       {{ label }}

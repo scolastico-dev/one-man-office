@@ -181,7 +181,7 @@ function add() {
   margin-right: var(--omo-space);
 }
 /* A move button that cannot move stays as quiet as the ghost buttons beside it. */
-.list-field__line > .omo-btn:disabled {
+.list-field__line > .omo-btn:is(:disabled, [aria-disabled='true']) {
   border-color: transparent;
   color: var(--omo-line-strong);
 }

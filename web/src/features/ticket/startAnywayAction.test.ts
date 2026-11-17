@@ -148,7 +148,9 @@ test('a model that reaches its hard limit while the question is open changes the
   hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', window_label: '', used_percent: 99, resets_at: null }] })
   await flushPromises()
   expect(dialog()?.textContent).toContain('Starts it on fake/b although the model is at its usage limit: its agent would be stopped again at once.')
-  expect(document.body.querySelector<HTMLButtonElement>('[data-start-anyway-confirm]')!.disabled).toBe(true)
+  // It has the focus, so it is held as aria-disabled rather than natively disabled.
+  const confirm = document.body.querySelector<HTMLButtonElement>('[data-start-anyway-confirm]')!
+  expect(confirm.disabled || confirm.getAttribute('aria-disabled') === 'true').toBe(true)
 })
 
 test('a refusal stays in the row when the ticket leaves the state at the same moment; it goes with the next action or another ticket', async () => {

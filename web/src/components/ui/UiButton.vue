@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { vDisabled } from './vDisabled'
+
 withDefaults(
   defineProps<{
     variant?: 'default' | 'primary' | 'danger' | 'ghost'
@@ -13,7 +15,7 @@ withDefaults(
 <template>
   <button
     :type="type"
-    :disabled="disabled"
+    v-disabled="disabled"
     class="omo-btn"
     :class="[`omo-btn--${variant}`, `omo-btn--${size}`]"
     :data-primary="variant === 'primary' ? '' : undefined"

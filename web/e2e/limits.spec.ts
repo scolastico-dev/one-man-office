@@ -394,3 +394,22 @@ test('images are kept 60 days after Done by default; 0 keeps them for ever; too 
   await expect(bar(page)).toContainText('Saved')
   expect(onDisk(omo)).toMatch(/images:\n\s+keep_days_after_done: 0\b/)
 })
+
+test('by keyboard: Save keeps the focus while it saves and after, so Tab goes on from the bar', async ({ page, omo }) => {
+  await openLimits(page, omo)
+  await taskLimit(page).fill('3')
+  await expect(bar(page)).toContainText('Unsaved changes')
+  await saveButton(page).focus()
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toMatch(/limits:\n\s+tasks: 3\n/)
+  // Nothing is left to save, so Save is off; the focus stayed on it rather than falling to the page.
+  await expect(saveButton(page)).toBeFocused()
+  await expect(saveButton(page)).toBeDisabled()
+  // Enter on it again does nothing.
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toContainText('Saved')
+  // Shift+Tab goes on from the bar into the form, not from the top of the page.
+  await page.keyboard.press('Shift+Tab')
+  expect(await page.evaluate(() => document.activeElement?.closest('[data-settings-page]') !== null)).toBe(true)
+})

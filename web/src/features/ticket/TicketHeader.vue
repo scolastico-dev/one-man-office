@@ -15,6 +15,7 @@ import { hasHidden } from '../../components/ui/visibleText'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import { COLUMN_TITLES } from '../board/model'
+import { vDisabled } from '../../components/ui/vDisabled'
 
 const props = withDefaults(
   defineProps<{
@@ -199,7 +200,7 @@ defineExpose({ discard: () => (editing.value = false) })
         <p class="head__note">Enter saves, Escape cancels. {{ length }} of {{ TITLE_MAX }} characters.</p>
       </div>
       <div class="head__edit-actions">
-        <button type="submit" class="omo-btn omo-btn--primary omo-btn--sm" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
+        <button type="submit" class="omo-btn omo-btn--primary omo-btn--sm" v-disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
         <button type="button" class="omo-btn omo-btn--sm" @click="endEdit">Cancel</button>
       </div>
     </form>
