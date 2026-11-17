@@ -1,7 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import { harness, mountWith, type Harness } from '../../create/dialogTesting'
-import { FakeMcp, type FakeOmo } from '../../../testing/fakeOmo'
+import { FakeMcp, general, type FakeOmo } from '../../../testing/fakeOmo'
 import McpPage from './McpPage.vue'
 
 let mounted: VueWrapper | null = null
@@ -50,7 +50,7 @@ test('the list shows each server with its live state, and mcp.changed updates it
 
 test('with MCP switched off the page says so and the editor offers no relay actions', async () => {
   const { w } = await open((omo) => {
-    omo.settings.mcp.enabled = false
+    omo.settings = { ...general, mcp: { ...general.mcp, enabled: false } }
     omo.mcp.servers = [FakeMcp.server()]
   })
   expect(w.get('[data-mcp-off]').text()).toContain('MCP is switched off')

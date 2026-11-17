@@ -282,8 +282,8 @@ export class FakeOmo {
   paused = false
   /** Fields of `GET /api/server` a test overrides. */
   server: Partial<ServerInfo> = {}
-  /** What GET /api/settings answers as the general settings. */
-  settings: General = JSON.parse(JSON.stringify(general)) as General
+  /** What GET /api/settings answers as the general settings, in place of the shared `general`. */
+  settings: General | null = null
   /** What GET /api/usage answers. */
   usage: UsageState = { readings: [], models: [] }
   eventId = 1
@@ -393,7 +393,7 @@ export class FakeOmo {
       case '/api/usage':
         return this.usage
       case '/api/settings':
-        return { settings: this.settings, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
+        return { settings: this.settings ?? general, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
       default: {
         const mcp = this.mcp.read(path)
         if (mcp.found) return mcp.value
