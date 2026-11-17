@@ -445,6 +445,10 @@ func TestRunPrintsOmoLocalhostAddress(t *testing.T) {
 	if len(lines) < 2 || lines[1] != "also: http://127.0.0.1:"+first[1]+"/#"+first[2] {
 		t.Fatalf("second line %q", lines[1])
 	}
+	// A new user learns what the address is for and what the key is.
+	if len(lines) < 3 || lines[2] != "Open the address in your browser. The part after # is your login key: keep it to yourself." {
+		t.Fatalf("third line %q", lines[2])
+	}
 
 	// The printed address answers through the TCP listener.
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:"+first[1]+"/api/server", nil)

@@ -417,6 +417,9 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 			fmt.Fprintf(out, "also: %s%s\n", a, fragment)
 		}
 	}
+	if fragment != "" {
+		fmt.Fprintln(out, "Open the address in your browser. The part after # is your login key: keep it to yourself.")
+	}
 	name, _ := hostName()
 	printHostNameHint(out, o.Config, tcp.Addr().(*net.TCPAddr), name)
 	printWarnings(out, o.Config, tcp.Addr().(*net.TCPAddr))
