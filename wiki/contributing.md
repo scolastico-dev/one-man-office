@@ -11,10 +11,11 @@ omo is a Go server with the board, a Vue app, built into the binary.
 ```bash
 make build           # bin/omo (builds the board first: needs Node.js 24 and npm)
 make build NO_WEB=1  # bin/omo without the board, no Node.js needed
-make check           # gofmt check, go vet and the full Go test suite: what CI runs
+make check           # gofmt check, go vet, unused code (with staticcheck installed) and the full Go test suite: what CI runs
 make web-check       # type-check and unit-test the board
 make e2e             # build omo and run the browser tests (Playwright, Chromium)
 make cross           # binaries for Linux, macOS and Windows on amd64 and arm64
+make notices         # bin/THIRD_PARTY_NOTICES, the licences of the Go modules and the bundled npm packages
 ```
 
 To run your build next to an omo you use, give it its own home and port (see
