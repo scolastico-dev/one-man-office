@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import logo from '../../assets/logo.png'
+// A 128 px copy of logo.png: enough for the largest use (40 px) on a 3x
+// display; the full-size original is kept for the README graphics.
+import logo from '../../assets/logo-128.png'
 
 withDefaults(
   defineProps<{
