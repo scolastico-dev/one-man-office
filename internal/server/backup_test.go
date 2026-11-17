@@ -269,3 +269,73 @@ func (w *processWorld) download(path string) []byte {
 	}
 	return raw
 }
+
+// TestDatabaseImportPausesBeforeItChangesAnything: the board is paused
+// before the check that no agent runs, so nothing can start in between;
+// an import that fails afterwards takes the pause back, and a pause the
+// user set stays.
+func TestDatabaseImportPausesBeforeItChangesAnything(t *testing.T) {
+	a := newTestServer(t)
+	if err := a.settings.PutPrompt("developer-instructions", "From the zip."); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := a.home().Export(context.Background(), &buf, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t)
+	if err := s.settings.PutPrompt("developer-instructions", "Here."); err != nil {
+		t.Fatal(err)
+	}
+	rec := rawSocket(t, s, "/api/settings/import", buf.Bytes(), "")
+	wantStatus(t, rec.Code, http.StatusOK)
+	plan := decodeBody[api.ImportPlan](t, rec.Body)
+
+	// The engine's view while the import checks for agents: paused.
+	pausedAtCheck := false
+	beforeImportCheck = func() { pausedAtCheck, _ = s.board.Paused(context.Background()) }
+	t.Cleanup(func() { beforeImportCheck = nil })
+
+	// A folder in place of the prompt file: the apply fails after the check.
+	prompt := filepath.Join(s.opts.Layout.Root, "prompts", "developer-instructions.md")
+	if err := os.Remove(prompt); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(prompt, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec = socketDo(t, s, "POST", "/api/settings/import/apply", api.ImportApply{ID: plan.ID, Database: true}, "")
+	if rec.Code == http.StatusOK {
+		t.Fatal("the import succeeded over a folder")
+	}
+	if !pausedAtCheck {
+		t.Fatal("the board was not paused when the import checked for agents")
+	}
+	if paused, _ := s.board.Paused(context.Background()); paused {
+		t.Fatal("a failed import left the board paused")
+	}
+
+	// A pause of the user's stays after a failure.
+	if err := s.board.SetPaused(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	rec = socketDo(t, s, "POST", "/api/settings/import/apply", api.ImportApply{ID: plan.ID, Database: true}, "")
+	if rec.Code == http.StatusOK {
+		t.Fatal("the import succeeded over a folder")
+	}
+	if paused, _ := s.board.Paused(context.Background()); !paused {
+		t.Fatal("a failed import took back the user's pause")
+	}
+	if err := s.board.SetPaused(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(prompt); err != nil {
+		t.Fatal(err)
+	}
+	rec = socketDo(t, s, "POST", "/api/settings/import/apply", api.ImportApply{ID: plan.ID, Database: true}, "")
+	wantStatus(t, rec.Code, http.StatusOK)
+	if paused, _ := s.board.Paused(context.Background()); !paused {
+		t.Fatal("the board is not paused until the restart")
+	}
+}

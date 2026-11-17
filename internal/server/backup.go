@@ -97,6 +97,10 @@ func (s *Server) stageImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, plan)
 }
 
+// beforeImportCheck, when set by a test, runs right before a database
+// import checks that no agent runs.
+var beforeImportCheck func()
+
 func (s *Server) applyImport(w http.ResponseWriter, r *http.Request) {
 	var req api.ImportApply
 	if err := decode(w, r, &req); err != nil {
@@ -108,29 +112,46 @@ func (s *Server) applyImport(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.detached(r, 10*time.Minute)
 	defer cancel()
 	o := homezip.ApplyOptions{Server: req.Server, Database: req.Database, Now: time.Now()}
+	// pausedHere is set when the import paused the board; a failed import
+	// takes that pause back (a pause of the user's stays).
+	pausedHere := false
+	unpause := func() {
+		if pausedHere {
+			if err := s.board.SetPaused(ctx, false); err != nil {
+				logf(r, "resume after a failed database import: %v", err)
+			}
+		}
+	}
 	if req.Database {
 		o.Ready = func() error {
-			n, err := s.runningAgents(r)
+			// Nothing may start from the check until the restart: the
+			// database that would hold such work is replaced. The pause
+			// comes first, so no agent starts between check and import.
+			paused, err := s.board.Paused(ctx)
 			if err != nil {
 				return err
 			}
-			if n > 0 {
-				return api.Errorf(api.CodeConflict, "%s. The database can only be imported while no agent runs: stop them first (Stop all on the Agents tab, and the CEO on its tab).", agentsRun(n))
+			if !paused {
+				if err := s.board.SetPaused(ctx, true); err != nil {
+					return fmt.Errorf("pause the board for the database import: %w", err)
+				}
+				pausedHere = true
 			}
-			return nil
+			if beforeImportCheck != nil {
+				beforeImportCheck()
+			}
+			n, err := s.runningAgents(r)
+			if err == nil && n > 0 {
+				err = api.Errorf(api.CodeConflict, "%s. The database can only be imported while no agent runs: stop them first (Stop all on the Agents tab, and the CEO on its tab).", agentsRun(n))
+			}
+			return err
 		}
 	}
 	res, err := s.home().Apply(ctx, req.ID, o)
 	if err != nil {
+		unpause()
 		writeError(w, r, importError(err))
 		return
-	}
-	if res.DatabasePending {
-		// Nothing may start between now and the restart: the database
-		// that holds such work is replaced.
-		if err := s.board.SetPaused(ctx, true); err != nil {
-			logf(r, "pause after a database import: %v", err)
-		}
 	}
 	writeJSON(w, http.StatusOK, res)
 }
