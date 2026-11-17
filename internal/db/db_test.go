@@ -29,13 +29,13 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 6 || SchemaVersion != 6 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 6", v, SchemaVersion)
+	if v := userVersion(t, d); v != 7 || SchemaVersion != 7 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 7", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
 		"comment_mentions", "review_verdicts", "agent_sessions", "events", "server_state",
-		"plugin_storage", "plugin_runtime", "plugin_logs", "images",
+		"plugin_storage", "plugin_runtime", "plugin_logs", "images", "mcp_tokens", "mcp_upstream_auth",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
@@ -408,6 +408,69 @@ func TestMigrationFourUpgradesVersionThree(t *testing.T) {
 	}
 	if _, err := d.Exec(`INSERT INTO images (id, ticket_id, author_role, name, content_type, size, created_at) VALUES ('b', 1, 'user', 'x.svg', 'image/svg+xml', 3, 'x')`); err == nil {
 		t.Fatal("an SVG image record was accepted")
+	}
+	if fresh := schemaOf(t, open(t)); fresh != schemaOf(t, d) {
+		t.Fatal("upgraded schema differs from fresh schema")
+	}
+}
+
+// TestMigrationSevenUpgradesVersionSix opens a database at schema 6 with
+// data in it: the MCP token and upstream sign-in tables are added, nothing
+// else changes, and the result equals a fresh database.
+func TestMigrationSevenUpgradesVersionSix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	old, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for v := 0; v < 6; v++ {
+		if _, err := old.Exec(migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := old.Exec(`PRAGMA user_version = 6`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO tickets (type, title, rank, supervisor, created_by_role, created_at, updated_at) VALUES ('task', 'keep me', 1, 'user', 'user', 'x', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO ticket_projects (ticket_id, project_id, position, start_commit) VALUES (1, 'api', 0, 'abc')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO server_state (key, value) VALUES ('paused', 'true')`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if v := userVersion(t, d); v != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, SchemaVersion)
+	}
+	var title, commit, paused string
+	if err := d.QueryRow(`SELECT t.title, p.start_commit FROM tickets t JOIN ticket_projects p ON p.ticket_id = t.id`).Scan(&title, &commit); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT value FROM server_state WHERE key = 'paused'`).Scan(&paused); err != nil {
+		t.Fatal(err)
+	}
+	if title != "keep me" || commit != "abc" || paused != "true" {
+		t.Fatalf("data after upgrade: %q %q %q", title, commit, paused)
+	}
+	if _, err := d.Exec(`INSERT INTO mcp_tokens (id, kind, name, token_hash, created_at) VALUES ('a', 'pat', 'laptop', 'h1', 'x')`); err != nil {
+		t.Fatalf("insert a token after the upgrade: %v", err)
+	}
+	if _, err := d.Exec(`INSERT INTO mcp_tokens (id, kind, name, token_hash, created_at) VALUES ('b', 'login', 'x', 'h2', 'x')`); err == nil {
+		t.Fatal("a token of an unknown kind was accepted")
+	}
+	if _, err := d.Exec(`INSERT INTO mcp_tokens (id, kind, name, token_hash, created_at) VALUES ('c', 'pat', 'x', 'h1', 'x')`); err == nil {
+		t.Fatal("a second token with the same hash was accepted")
+	}
+	if _, err := d.Exec(`INSERT INTO mcp_upstream_auth (server, issuer, client_id, redirect_uri, state, updated_at) VALUES ('github', 'https://as', 'id', 'http://localhost:8090/oauth/callback', 'connected', 'x')`); err != nil {
+		t.Fatalf("insert an upstream sign-in after the upgrade: %v", err)
 	}
 	if fresh := schemaOf(t, open(t)); fresh != schemaOf(t, d) {
 		t.Fatal("upgraded schema differs from fresh schema")

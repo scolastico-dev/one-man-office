@@ -198,5 +198,41 @@ CREATE INDEX images_ticket ON images(ticket_id);
 	`ALTER TABLE ticket_projects ADD COLUMN start_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE ticket_projects ADD COLUMN end_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE ticket_projects ADD COLUMN range_round INTEGER NOT NULL DEFAULT 0;
+`, // Version 7: the personal access tokens and OAuth grants of MCP clients
+	// (only hashes of their secrets) and omo's own sign-ins at upstream MCP
+	// servers (stored as they are).
+	`CREATE TABLE mcp_tokens (
+  id                 TEXT PRIMARY KEY,
+  kind               TEXT NOT NULL CHECK (kind IN ('pat','oauth')),
+  name               TEXT NOT NULL,
+  client_id          TEXT NOT NULL DEFAULT '',
+  redirect_host      TEXT NOT NULL DEFAULT '',
+  resource           TEXT NOT NULL DEFAULT '',
+  scope              TEXT NOT NULL DEFAULT 'mcp',
+  token_hash         TEXT NOT NULL UNIQUE,
+  refresh_hash       TEXT UNIQUE,
+  prior_refresh_hash TEXT,
+  created_at         TEXT NOT NULL,
+  expires_at         TEXT,
+  refresh_expires_at TEXT,
+  last_used_at       TEXT,
+  revoked_at         TEXT
+);
+CREATE TABLE mcp_upstream_auth (
+  server        TEXT PRIMARY KEY,
+  issuer        TEXT NOT NULL,
+  client_id     TEXT NOT NULL,
+  client_secret TEXT NOT NULL DEFAULT '',
+  registration  TEXT NOT NULL DEFAULT '{}',
+  redirect_uri  TEXT NOT NULL,
+  access_token  TEXT NOT NULL DEFAULT '',
+  refresh_token TEXT NOT NULL DEFAULT '',
+  token_type    TEXT NOT NULL DEFAULT 'Bearer',
+  expiry        TEXT,
+  scopes        TEXT NOT NULL DEFAULT '',
+  state         TEXT NOT NULL,
+  error         TEXT NOT NULL DEFAULT '',
+  updated_at    TEXT NOT NULL
+);
 `,
 }
