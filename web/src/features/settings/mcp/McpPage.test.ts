@@ -40,6 +40,11 @@ test('the list shows each server with its live state, and mcp.changed updates it
   expect(row(w, 'files').get('[data-mcp-server-state]').text()).toBe('failed')
   expect(row(w, 'files').get('[data-mcp-server-failure]').text()).toBe('exit status 1')
   expect(h.omo.reads.filter((p) => p === '/api/mcp/servers').length).toBe(reads)
+  // Between two attempts the server is not running, and the list still says why.
+  h.omo.emit('mcp.changed', FakeMcp.state({ state: 'stopped', instances: 0, last_error: 'exit status 1' }))
+  await flushPromises()
+  expect(row(w, 'files').get('[data-mcp-server-state]').text()).toBe('not running')
+  expect(row(w, 'files').get('[data-mcp-server-failure]').text()).toBe('exit status 1')
   expect(w.find('[data-mcp-off]').exists()).toBe(false)
 })
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The stored MCP servers, one row each: name, live state, what it is, who
 // gets it and, while it runs, how many tools it offers; a failure shows the
-// relay's cleaned message, a server without a sign-in says it needs one.
+// relay's cleaned message (also while omo still retries it), a server
+// without a sign-in says it needs one.
 // Names and messages can come from files anyone with access to omo's home
 // can write, so they are shown as visible text.
 import { useId } from 'vue'
@@ -22,6 +23,11 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [name: string] }>()
 
 const stateOf = (name: string): MCPServerState | null => props.states.find((s) => s.name === name) ?? null
+/** Why a server that does not run failed last: also between two attempts, not only once omo gave up. */
+const failureOf = (name: string): string => {
+  const st = stateOf(name)
+  return st !== null && st.state !== 'running' && st.state !== 'disabled' ? st.last_error : ''
+}
 const words = (name: string) => stateWords((stateOf(name) ?? unknownState(name)).state)
 const fallback = useId()
 </script>
@@ -42,8 +48,8 @@ const fallback = useId()
         <p v-if="stateOf(s.name)?.state === 'needs_login'" class="mcp-list__warn" data-mcp-server-login>
           omo is not signed in at this server; Connect in its form signs in.
         </p>
-        <p v-if="stateOf(s.name)?.state === 'failed' && stateOf(s.name)!.last_error" class="mcp-list__error" data-mcp-server-failure>
-          {{ visibleText(stateOf(s.name)!.last_error) }}
+        <p v-if="failureOf(s.name)" class="mcp-list__error" data-mcp-server-failure>
+          {{ visibleText(failureOf(s.name)) }}
         </p>
       </div>
       <UiButton
