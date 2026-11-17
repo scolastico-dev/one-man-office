@@ -274,3 +274,39 @@ func TestForeignFolderInPlaceOfTheWorkingFolderFailsTheStart(t *testing.T) {
 		t.Fatalf("failed %q, attention %q, workdir %q", tk.FailedStep, tk.Attention, tk.Workdir)
 	}
 }
+
+// The working folder is recorded before it is made: a start interrupted
+// in between (omo stopped) leaves a recorded folder that the next start
+// makes and goes on with, never an unrecorded one that stops the ticket.
+func TestStartContinuesWithRecordedWorkingFolder(t *testing.T) {
+	h := newHarness(t)
+	n := h.noProject(api.CreateTicket{Title: "Interrupted"})
+	h.approve(n)
+	checked := false
+	h.e.pause = func(point string) {
+		if point == "workdir-recorded" {
+			checked = true
+			if tk := h.ticket(n); tk.Workdir != h.workdir(n) || pathExists(h.workdir(n)) {
+				t.Errorf("before the folder is made: recorded %q, exists %v", tk.Workdir, pathExists(h.workdir(n)))
+			}
+		}
+	}
+	h.step()
+	h.e.pause = nil
+	if !checked {
+		t.Fatal("the start did not record the working folder")
+	}
+
+	// Another task as omo left it: recorded, not made, still Ready.
+	m := h.noProject(api.CreateTicket{Title: "Left"})
+	if err := h.b.SetWorkdir(h.ctx, m, h.workdir(m)); err != nil {
+		t.Fatal(err)
+	}
+	h.approve(m)
+	h.step()
+	tk := h.ticket(m)
+	if tk.FailedStep != api.FailedNone || tk.Column != api.ColumnInProgress || tk.Workdir != h.workdir(m) || !pathExists(h.workdir(m)) {
+		t.Fatalf("failed %q (%s), column %s, workdir %q", tk.FailedStep, tk.Attention, tk.Column, tk.Workdir)
+	}
+	h.live(api.RoleDeveloper, m)
+}

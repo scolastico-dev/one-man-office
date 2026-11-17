@@ -53,6 +53,25 @@ func BranchName(tmpl string, v branchname.Vars, exists func(string) (bool, error
 	return "", fmt.Errorf("the branches %s to %s-%d all exist", base, base, maxBranchSuffix)
 }
 
+// ownBranchName reports whether name is one BranchName can give for the
+// template and values: the expanded name, or it with a suffix it appends.
+func ownBranchName(tmpl string, v branchname.Vars, name string) bool {
+	base, err := branchname.Expand(tmpl, v)
+	if err != nil {
+		return false
+	}
+	for i := 1; i <= maxBranchSuffix; i++ {
+		candidate := base
+		if i > 1 {
+			candidate += "-" + strconv.Itoa(i)
+		}
+		if branchname.Same(candidate, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // branchVars are the values of the branch template for ticket t in project.
 func branchVars(t board.EngineTicket, project string) branchname.Vars {
 	host, user := branchname.Machine()

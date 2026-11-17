@@ -253,6 +253,18 @@ func (g *Git) registered(repo, dir string) (bool, error) {
 	return ok, err
 }
 
+// BranchAt returns the branch the worktree at dir of repo has checked out,
+// as git records it; found is false when repo records no worktree there or
+// it has no branch checked out (detached or bare).
+func (g *Git) BranchAt(repo, dir string) (branch string, found bool, err error) {
+	wt, ok, err := g.findWorktree(repo, dir)
+	if err != nil || !ok || wt.detached || wt.bare {
+		return "", false, err
+	}
+	name, ok := strings.CutPrefix(wt.branch, "refs/heads/")
+	return name, ok && name != "", nil
+}
+
 // findWorktree returns the registration of the worktree at dir.
 func (g *Git) findWorktree(repo, dir string) (worktreeEntry, bool, error) {
 	list, err := g.listWorktrees(repo)

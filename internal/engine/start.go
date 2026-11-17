@@ -60,9 +60,10 @@ type starter struct {
 	claimed bool
 	// cuts are the branches and worktrees this start created.
 	cuts []cutBranch
-	// madeWorkdir is the working folder this start created and recorded
-	// for a task without a project.
-	madeWorkdir string
+	// recordedWorkdir is set once this start recorded the working folder
+	// of a task without a project, madeWorkdir once it created it.
+	recordedWorkdir bool
+	madeWorkdir     string
 	// begun is set once the ticket moved to In Progress: from then on the
 	// ticket owns what was cut.
 	begun bool
@@ -382,13 +383,18 @@ func (s *starter) workdir(t board.EngineTicket) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return "", problemf("cannot create the working folders' folder %s: %v", filepath.Dir(dir), err)
 	}
+	// Recorded before it is made: a start interrupted in between (omo
+	// stopped) leaves a recorded folder, which the next start makes, never
+	// an unrecorded one that would stop it.
+	if err := e.b.SetWorkdir(s.ctx, t.ID, dir); err != nil {
+		return "", fmt.Errorf("record the working folder of #%d: %w", t.ID, err)
+	}
+	s.recordedWorkdir = true
+	e.at("workdir-recorded")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return "", problemf("cannot create the working folder %s of #%d: %v", dir, t.ID, err)
 	}
 	s.madeWorkdir = dir
-	if err := e.b.SetWorkdir(s.ctx, t.ID, dir); err != nil {
-		return "", fmt.Errorf("record the working folder of #%d: %w", t.ID, err)
-	}
 	return dir, nil
 }
 
@@ -416,15 +422,14 @@ func (s *starter) worktree(t board.EngineTicket, p board.EngineProject, base str
 func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base string) (string, error) {
 	e := s.e
 	dir := WorktreeDir(e.o.Layout.Worktrees, p.ID, t.ID)
-	if _, err := os.Lstat(dir); err == nil {
-		return "", problemf("the folder %s already exists and is not a worktree omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", dir, t.ID)
-	}
+	_, err := os.Lstat(dir)
+	exists := err == nil
 	baseID, err := e.git.RevParse(repo, "refs/heads/"+base)
 	if err != nil {
+		if exists {
+			return "", problemf("the folder %s already exists and is not a worktree omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", dir, t.ID)
+		}
 		return "", problemf("the base branch %s of #%d does not exist in project %s", base, t.ID, p.ID)
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
-		return "", problemf("cannot create the worktrees folder %s: %v", filepath.Dir(dir), err)
 	}
 	// The name comes from the branch template; it is picked and the branch
 	// created under the repository's lock (gitops), so tickets started in
@@ -449,6 +454,12 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 		protected = append(protected, cur)
 	}
 	vars := branchVars(t, p.ID)
+	if exists {
+		return s.adopt(t, p.ID, repo, dir, baseID, tmpl, vars, recorded, protected)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return "", problemf("cannot create the worktrees folder %s: %v", filepath.Dir(dir), err)
+	}
 	branch, err := e.git.AddWorktreeNewBranch(repo, dir, baseID, func(taken func(string) (bool, error)) (string, error) {
 		return BranchName(tmpl, vars, func(name string) (bool, error) {
 			if branchname.In(protected, name) {
@@ -484,6 +495,52 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 	}
 	s.cuts = append(s.cuts, c)
 	if err := e.b.SetBranch(s.ctx, t.ID, p.ID, branch, dir); err != nil {
+		return "", fmt.Errorf("record branch %s of #%d: %w", branch, t.ID, err)
+	}
+	s.cuts[len(s.cuts)-1].recorded = true
+	return dir, nil
+}
+
+// adopt continues with the branch and worktree an interrupted start of t
+// cut in project (omo stopped after git made them and before the board
+// recorded them) and records them: the folder dir is a worktree repo
+// records, plain, with the .git file git wrote and without changes, and
+// its branch is named as a start of t names it, is recorded on no ticket,
+// is not protected and holds no commit its base (at baseID) lacks.
+// Anything else in that place is not omo's and fails the start.
+func (s *starter) adopt(t board.EngineTicket, project, repo, dir, baseID, tmpl string, vars branchname.Vars,
+	recorded []board.RecordedBranch, protected []string) (string, error) {
+	e := s.e
+	foreign := problemf("the folder %s already exists and is not a worktree omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", dir, t.ID)
+	branch, found, err := e.git.BranchAt(repo, dir)
+	if err != nil || !found || !ownBranchName(tmpl, vars, branch) || branchname.In(protected, branch) {
+		return "", foreign
+	}
+	for _, r := range recorded {
+		if branchname.Same(r.Branch, branch) || branchname.Below(r.Branch, branch) || branchname.Below(branch, r.Branch) {
+			return "", foreign
+		}
+	}
+	at, ok, err := e.git.WorktreeOf(repo, branch)
+	if err != nil || !ok || !sameWorktree(at, dir) {
+		return "", foreign
+	}
+	if err := e.git.CheckWorktreeGitFile(s.ctx, repo, dir); err != nil {
+		return "", foreign
+	}
+	if dirty, err := e.git.Status(repo, dir); err != nil || len(dirty) > 0 {
+		return "", foreign
+	}
+	head, err := e.git.RevParse(repo, "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return "", foreign
+	}
+	if own, err := e.git.IsAncestor(repo, head, baseID); err != nil || !own {
+		return "", foreign
+	}
+	e.log.Printf("engine: #%d goes on with branch %s and worktree %s in project %s, made by a start that was interrupted", t.ID, branch, dir, project)
+	s.cuts = append(s.cuts, cutBranch{project: project, repo: repo, dir: dir, branch: branch, base: head})
+	if err := e.b.SetBranch(s.ctx, t.ID, project, branch, dir); err != nil {
 		return "", fmt.Errorf("record branch %s of #%d: %w", branch, t.ID, err)
 	}
 	s.cuts[len(s.cuts)-1].recorded = true
@@ -602,10 +659,13 @@ func (s *starter) finish() {
 // undo removes the branches and worktrees this start cut, newest first,
 // and the working folder it made while it is still empty.
 func (s *starter) undo() {
-	if dir := s.madeWorkdir; dir != "" {
+	if s.recordedWorkdir {
 		if err := s.e.b.SetWorkdir(context.WithoutCancel(s.ctx), s.job.ticket, ""); err != nil {
 			s.e.log.Printf("engine: forget the working folder of #%d: %v", s.job.ticket, err)
 		}
+		s.recordedWorkdir = false
+	}
+	if dir := s.madeWorkdir; dir != "" {
 		if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			s.e.log.Printf("engine: kept the working folder %s of #%d: %v", dir, s.job.ticket, err)
 		}

@@ -428,6 +428,97 @@ func TestUnknownFolderAtWorktreePathIsNotTouched(t *testing.T) {
 	}
 }
 
+// interruptedCut makes the branch and worktree a start of task in the
+// project cuts, without recording them: omo stopped in between. It returns
+// the branch.
+func (h *harness) interruptedCut(task int64, name string) string {
+	h.t.Helper()
+	dir := WorktreeDir(h.layout.Worktrees, h.project, task)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		h.t.Fatal(err)
+	}
+	base := gitRun(h.t, h.repo, "rev-parse", "main")
+	branch, err := h.git.AddWorktreeNewBranch(h.repo, dir, base, func(func(string) (bool, error)) (string, error) { return name, nil })
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return branch
+}
+
+// A start interrupted after git cut the branch and worktree and before the
+// board recorded them is continued by the next start, with that branch.
+func TestStartContinuesWithBranchOfInterruptedStart(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	tk := h.ticket(task)
+	name, err := BranchName(h.st.General().Branches.Template, branchVars(board.EngineTicket{ID: task, Title: tk.Title, Type: tk.Type}, h.project), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch := h.interruptedCut(task, name)
+	h.approve(task)
+	h.step()
+	tk = h.ticket(task)
+	dir := WorktreeDir(h.layout.Worktrees, h.project, task)
+	if tk.FailedStep != api.FailedNone || tk.Column != api.ColumnInProgress {
+		t.Fatalf("failed %q (%s), column %s", tk.FailedStep, tk.Attention, tk.Column)
+	}
+	if tk.Projects[0].Branch != branch || tk.Projects[0].Worktree != dir {
+		t.Fatalf("branch %q in %q, want %s in %s", tk.Projects[0].Branch, tk.Projects[0].Worktree, branch, dir)
+	}
+	if b := h.branches(h.repo); len(b) != 1 {
+		t.Fatalf("branches %v, want only %s", b, branch)
+	}
+	h.live(api.RoleDeveloper, task)
+}
+
+// What is in the worktree's place is continued only when it is that start's
+// own: another ticket's branch name, a branch with commits of its own or
+// uncommitted changes fail the start and are left alone.
+func TestStartRefusesWorktreeThatIsNotItsOwn(t *testing.T) {
+	cases := map[string]func(h *harness, task int64, own string) string{
+		"other name": func(h *harness, task int64, own string) string { return h.interruptedCut(task, "someone/else") },
+		"own commits": func(h *harness, task int64, own string) string {
+			b := h.interruptedCut(task, own)
+			commit(h.t, WorktreeDir(h.layout.Worktrees, h.project, task), "mine.txt", "mine\n")
+			return b
+		},
+		"changes": func(h *harness, task int64, own string) string {
+			b := h.interruptedCut(task, own)
+			write(h.t, WorktreeDir(h.layout.Worktrees, h.project, task), "draft.txt", "draft\n")
+			return b
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			task := h.standalone("one")
+			tk := h.ticket(task)
+			own, err := BranchName(h.st.General().Branches.Template, branchVars(board.EngineTicket{ID: task, Title: tk.Title, Type: tk.Type}, h.project), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch := setup(h, task, own)
+			head := gitRun(t, h.repo, "rev-parse", "refs/heads/"+branch)
+			h.approve(task)
+			h.step()
+			tk = h.ticket(task)
+			if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "already exists and is not a worktree omo recorded") {
+				t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
+			}
+			if tk.Projects[0].Branch != "" || len(h.runner.all()) != 0 {
+				t.Fatalf("branch %q recorded, %d agents", tk.Projects[0].Branch, len(h.runner.all()))
+			}
+			if got := gitRun(t, h.repo, "rev-parse", "refs/heads/"+branch); got != head {
+				t.Fatalf("branch %s moved to %s", branch, got)
+			}
+			if !pathExists(WorktreeDir(h.layout.Worktrees, h.project, task)) {
+				t.Fatal("the worktree was removed")
+			}
+		})
+	}
+}
+
 func TestNoModelForRoleSetsStartBlocked(t *testing.T) {
 	h := newHarness(t)
 	if err := h.st.PutRole(settings.Role{Name: "developer", Assignment: api.AssignmentRoundRobin}); err != nil {
