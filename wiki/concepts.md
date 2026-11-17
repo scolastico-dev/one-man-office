@@ -37,7 +37,8 @@ exported and its pull request merged). A cancelled dependency keeps it waiting.
 
 The **base branch** of a ticket is the branch its project's folder had checked
 out when the ticket was created; change it in the ticket's details before work
-starts. A task in a story has none: it builds on the story's branch.
+starts, to another branch of the repository (a tag, a commit or an expression
+such as `main~3` is refused). A task in a story has none: it builds on the story's branch.
 
 ## Columns
 
@@ -129,7 +130,8 @@ Who may approve:
 - You: every ticket.
 - The CEO: see [The CEO](#the-ceo).
 - A product manager **releases** the tasks it created in its story, unless
-  **Tasks are released by** is **You** (Settings → Review, or per story
+  **Tasks are released by** is **You** (the default is **The product manager
+  or the CEO**) (Settings → Review, or per story
   in its details). Then you release each task.
 
 Tasks of a story start only while the story is In Progress, that is once its

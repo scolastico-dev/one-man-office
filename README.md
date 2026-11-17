@@ -19,7 +19,7 @@ you, for all your repositories at once.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-board-dark.png">
-  <img alt="The omo board: tickets in the columns Planning, Ready For Dev, In Progress, Review and Done, with the sidebar listing the running agents" src=".github/assets/screenshot-board-light.png">
+  <img alt="The omo board of an invented invoicing product: tickets in the columns Planning, Ready For Dev, In Progress, Review and Done, with the sidebar listing the agents at work" src=".github/assets/screenshot-board-light.png">
 </picture>
 
 <picture>
@@ -62,14 +62,17 @@ omo stop    # stop it
 ```
 
 Open the printed address (`http://omo.localhost:8090/#…`). At the first start
-omo finds your agent programs and sets them up. The empty board then walks you
-through the first steps: add the folder that holds your repositories, check
-which models each role uses, and create a ticket. Approve it by dragging it to
-Ready For Dev, and watch the agent in the ticket's Agents tab.
+omo finds your agent programs and sets them up. (If it finds the files of omo
+0.11 it asks what to do with them first: see
+[Upgrading from 0.11](wiki/upgrading-from-0.11.md).) The empty board then walks
+you through the first steps: add the folder that holds your repositories, check
+which models each role uses, and create a ticket. It waits in Planning: approve
+it by dragging it to Ready For Dev, and watch the agent in the ticket's Agents
+tab.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-ticket-dark.png">
-  <img alt="A ticket in progress: its details on the right and the developer agent's terminal in the Agents tab" src=".github/assets/screenshot-ticket-light.png">
+  <img alt="A ticket in progress: the developer agent's terminal in the Agents tab, with the ticket's details on the right" src=".github/assets/screenshot-ticket-light.png">
 </picture>
 
 When the agents are done, the ticket waits in Review for you: read the Diff
@@ -78,7 +81,7 @@ the sidebar what you want and approve the tickets it writes.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-ceo-dark.png">
-  <img alt="The CEO tab in the sidebar: a conversation with the CEO agent next to the board" src=".github/assets/screenshot-ceo-light.png">
+  <img alt="The CEO tab in the sidebar: a conversation in which the CEO has drafted tickets that wait in Planning, next to the board" src=".github/assets/screenshot-ceo-light.png">
 </picture>
 
 The whole first ticket, step by step: [Getting started](wiki/getting-started.md).
@@ -113,4 +116,4 @@ Questions, bug reports and suggestions are welcome on the
 
 Copyright (C) 2026 Joschua Becker EDV.
 
-Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
+Licensed under the [GNU Affero General Public License, version 3](LICENSE).

@@ -40,6 +40,13 @@ Only you can open shells and read terminals and agent logs; agents cannot.
 
 An ended agent's terminal shows its saved log instead.
 
+A terminal whose connection drops reconnects on its own, and once the board's
+connection is live again every disconnected terminal connects again; the
+**Reconnect** button does it at once. Every connection replays the terminal's
+history, and the screen is cleared first, so it shows the history once. Input
+typed while disconnected is not sent ("Terminal disconnected. This input was
+not sent; press Reconnect.").
+
 ## Copy and paste
 
 Copying works the same in every terminal view: the CEO, an agent, your shells,

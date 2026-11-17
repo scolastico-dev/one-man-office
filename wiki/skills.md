@@ -32,8 +32,12 @@ A skill set has:
 
 The set is stored in `skillsets/<name>.yaml`; omo keeps one read-only checkout
 in `OMO_HOME/skills/<name>/` and only ever fetches into it. **Update now**
-fetches at once; a failed fetch keeps the last good checkout. The page shows
-the commit that is checked out.
+fetches at once; a failed fetch keeps the last good checkout of an unchanged
+source. A checkout belongs to the repository and branch or tag it was fetched
+from: when you change either, omo fetches the set again at once, whatever its
+update setting (pinned means not following the branch, not keeping another
+source), and agents get nothing of that set until the fetch succeeds. The page
+shows the commit that is checked out.
 
 ## What agents get
 

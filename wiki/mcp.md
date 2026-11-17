@@ -148,6 +148,18 @@ program calling omo are never passed on to a relayed server.
 The OAuth sign-in at a relayed server works only when the server's sign-in
 addresses are https (or on this machine).
 
+- A sign-in belongs to the address, resource and client it was made for. When
+  one of them changes, or the server is deleted, omo drops the sign-in (and
+  revokes it): press **Connect** again. **Test** on an unsaved form uses the
+  stored sign-in only when its address, resource and client match the saved
+  server.
+- The endpoints an upstream server names (its sign-in metadata, registration,
+  token and revocation endpoints) must be public addresses or on the server's
+  own host. omo follows a redirect of a relayed server only on the same host
+  and never from https to http, and never sends its credentials elsewhere.
+- Addresses of relayed servers are shown, logged and put into error texts with
+  passwords and query values masked (`https://host/mcp?api_key=***`).
+
 ## Your own sessions of the agent programs
 
 **Agent programs** registers omo in the programs' own configuration, so the
@@ -247,7 +259,8 @@ commands for whoever gets in (see [Security](security.md)).
 
 - Only tools are relayed; the resources and prompts of a server are not.
 - At most 64 stdio processes run at once; a server has at most 512 tools; a
-  tool's result is cut at 4 MiB.
+  tool's result of more than 4 MiB is not passed on: the agent gets an error
+  ("server <name> answered with <size> MiB, more than omo relays (4.0 MiB)").
 - A server that fails 5 times within 10 minutes stays failed until you restart
   it or change its settings.
 - No server per project.

@@ -60,14 +60,15 @@ With **Export as a pull request**, or **Export…** on a ticket whose review
 waits for you, omo pushes and an export agent opens a pull request per
 repository:
 
-1. A project whose branch has no commits of its own is left out ("left out:
-   nothing to export").
+1. A project whose branch has no commits of its own is left out of the export
+   (it has nothing to export).
 2. For every other project omo pushes the commit that was reviewed to the
    repository's push remote (`branch.<base>.pushRemote`, `remote.pushDefault`,
    `branch.<base>.remote`, then `origin`), as the ticket's branch. It never
    force-pushes and never pushes onto a remote branch of that name that it did
    not push itself, and runs no hooks. Your credentials for that remote are
-   used as git finds them.
+   used as git finds them. After a rejection, a later export of the ticket
+   moves the same remote branch on and edits the pull request that exists.
 3. An export agent runs per project in a folder under `OMO_HOME/run/export/`.
    omo gives it `material.md` (the ticket, a story's tasks, this repository's
    commits and changed files, the other repositories of the ticket and their
@@ -84,6 +85,9 @@ repository:
    name starts with `gitlab`) or `tea` (any other host), or updates the one
    that exists for the branch, and reports its address. omo itself never runs
    these tools: they must be installed and signed in for your user.
+
+While omo exports, the card says "exporting…"; other changes to the ticket
+are refused with that word until it is done.
 
 A comment links each pull request and says whether the agent or omo wrote its
 text. When every project has its pull request, the ticket is Done (exported).

@@ -20,7 +20,10 @@ skill sets, plugin settings and relayed MCP servers, with a `manifest.json`
 **Include the database (tickets, comments, history)** (`--with-db`) adds a
 consistent copy of `omo.db`, taken while omo runs.
 
-The file contains your tokens and environment values: keep it private.
+The file contains your tokens and environment values: keep it private. An
+export is refused while a settings file has errors ("Some settings files have
+errors: <files>. Fix them (the settings pages show each error), then export
+again."), so a zip never holds a broken file.
 
 Not in the zip: the login token, logs, worktrees, the working folders of tasks
 without a project, images, skill set checkouts and installed plugin files.
