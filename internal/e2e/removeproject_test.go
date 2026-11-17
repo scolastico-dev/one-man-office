@@ -35,7 +35,7 @@ func (w *world) addProject(name, address string, noAddress bool) (id, repo, bare
 		g.AgentEnv["GIT_CONFIG_COUNT"] = strconv.Itoa(n + 1)
 		g.AgentEnv["GIT_CONFIG_KEY_"+strconv.Itoa(n)] = "url." + bare + ".insteadOf"
 		g.AgentEnv["GIT_CONFIG_VALUE_"+strconv.Itoa(n)] = address
-		if err := st.SetGeneral(g); err != nil {
+		if err := st.SetGeneralIf("", g); err != nil {
 			w.t.Fatal(err)
 		}
 	}

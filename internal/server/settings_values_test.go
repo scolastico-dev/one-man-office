@@ -71,7 +71,7 @@ func valueServer(t *testing.T, logOut io.Writer) *Server {
 		"REF_SECRET":        "$OTHER",
 		"PATH":              "/usr/bin",
 	}
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	p := api.Profile{
@@ -82,7 +82,7 @@ func valueServer(t *testing.T, logOut io.Writer) *Server {
 			"opus":   {},
 		},
 	}
-	if err := s.settings.PutProfile(p); err != nil {
+	if err := s.settings.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.settings.PutMCPServerIf("", api.MCPServer{Name: "claude", Transport: api.MCPTransportHTTP, URL: "https://mcp.example.invalid/",

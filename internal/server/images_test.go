@@ -354,7 +354,7 @@ func setKeepDays(t *testing.T, s *Server, days int) {
 	t.Helper()
 	g := s.settings.General()
 	g.Images.KeepDaysAfterDone = days
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 }

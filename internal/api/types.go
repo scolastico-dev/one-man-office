@@ -32,7 +32,6 @@ type Resolution string
 
 // Resolutions.
 const (
-	ResolutionNone      Resolution = ""
 	ResolutionCompleted Resolution = "completed"
 	ResolutionCancelled Resolution = "cancelled"
 	ResolutionExported  Resolution = "exported"

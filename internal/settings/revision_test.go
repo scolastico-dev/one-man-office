@@ -50,7 +50,7 @@ func TestRevisionsFollowFiles(t *testing.T) {
 	}
 
 	// A write changes it.
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
 	first := s.Revision(SectionProfiles, "x")
@@ -59,7 +59,7 @@ func TestRevisionsFollowFiles(t *testing.T) {
 	}
 	p := fakeProfile("x")
 	p.Command = "other"
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	second := s.Revision(SectionProfiles, "x")
@@ -75,7 +75,7 @@ func TestRevisionsFollowFiles(t *testing.T) {
 	}
 	g := s.General()
 	g.Limits.Tasks = 4
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, "profiles", "x.yaml"), "cli: custom\ncommand: fake\nmodels:\n  a: {}\n")
@@ -98,7 +98,7 @@ func TestRevisionsFollowFiles(t *testing.T) {
 	}
 
 	// Removed: no revision.
-	if err := s.DeleteProfile("x"); err != nil {
+	if err := s.DeleteProfileIf("", "x"); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.Revision(SectionProfiles, "x"); got != NoRevision {
@@ -108,7 +108,7 @@ func TestRevisionsFollowFiles(t *testing.T) {
 
 func TestWriteRefusedAfterUnpolledHandEdit(t *testing.T) {
 	s, home, log := openTest(t)
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
 	rev := s.Revision(SectionProfiles, "x")
@@ -154,7 +154,7 @@ func TestWriteRefusedAfterUnpolledHandEdit(t *testing.T) {
 
 func TestWriteWithCurrentRevision(t *testing.T) {
 	s, _, log := openTest(t)
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
 	log.take()
@@ -192,10 +192,10 @@ func TestEveryGuardedWriteChecksTheRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutPrompt("developer", "mine"); err != nil {
+	if err := s.PutPromptIf("", "developer", "mine"); err != nil {
 		t.Fatal(err)
 	}
 	for _, write := range []error{
@@ -258,7 +258,7 @@ func TestUpdateGeneralChangesOnlyItsKeys(t *testing.T) {
 	g := s.General()
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/ws", MaxDepth: 3, Ignore: []string{"node_modules"}}}
 	g.AgentEnv = map[string]string{"A": "1"}
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	log.take()
@@ -357,7 +357,7 @@ func TestValidationNamesTheField(t *testing.T) {
 	for field, mutate := range general {
 		g := Defaults()
 		mutate(&g)
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		wantCode(t, err, api.CodeInvalidSettings)
 		if got := fieldOf(err); got != field {
 			t.Errorf("%s: field = %q (%v)", field, got, err)
@@ -371,7 +371,7 @@ func TestValidationNamesTheField(t *testing.T) {
 	g.Health.QuestionUnansweredAfter = Duration(7 * 24 * time.Hour)
 	g.Stop.HandoffTimeout = Duration(5 * time.Second)
 	g.RescanInterval = Duration(time.Minute)
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 
@@ -399,7 +399,7 @@ func TestValidationNamesTheField(t *testing.T) {
 	for field, mutate := range profiles {
 		p := fakeProfile("x")
 		mutate(&p)
-		err := s.PutProfile(p)
+		err := s.PutProfileIf("", p)
 		wantCode(t, err, api.CodeValidation)
 		if got := fieldOf(err); got != field {
 			t.Errorf("%s: field = %q (%v)", field, got, err)
@@ -407,16 +407,16 @@ func TestValidationNamesTheField(t *testing.T) {
 	}
 	p := fakeProfile("x")
 	p.Models = map[string]Model{"a": {Description: strings.Repeat("é", 200)}}
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 
-	err := s.PutRole(Role{Name: "developer", Models: []string{"x/a", "x/nope"}})
+	err := s.PutRoleIf("", Role{Name: "developer", Models: []string{"x/a", "x/nope"}})
 	wantCode(t, err, api.CodeValidation)
 	if fieldOf(err) != "models.1" {
 		t.Errorf("role field = %q", fieldOf(err))
 	}
-	err = s.PutRole(Role{Name: "developer", Assignment: "x"})
+	err = s.PutRoleIf("", Role{Name: "developer", Assignment: "x"})
 	wantCode(t, err, api.CodeValidation)
 	if fieldOf(err) != "assignment" {
 		t.Errorf("role field = %q", fieldOf(err))
@@ -495,20 +495,20 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 	g.ReviewDefaults.Task = secret
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: []string{secret + "/"}}}
 	writes := map[string]error{}
-	writes["general"] = s.SetGeneral(g)
+	writes["general"] = s.SetGeneralIf("", g)
 	g = Defaults()
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: secret}}
-	writes["root"] = s.SetGeneral(g)
+	writes["root"] = s.SetGeneralIf("", g)
 	g = Defaults()
 	g.AgentEnv = map[string]string{"A": strings.Repeat(secret, 4000)}
-	writes["env size"] = s.SetGeneral(g)
+	writes["env size"] = s.SetGeneralIf("", g)
 	p := fakeProfile("x")
 	p.CLI = secret
-	writes["cli"] = s.PutProfile(p)
+	writes["cli"] = s.PutProfileIf("", p)
 	p = fakeProfile("x")
 	p.UsageScript = secret
-	writes["usage script"] = s.PutProfile(p)
-	writes["assignment"] = s.PutRole(Role{Name: "developer", Assignment: secret})
+	writes["usage script"] = s.PutProfileIf("", p)
+	writes["assignment"] = s.PutRoleIf("", Role{Name: "developer", Assignment: secret})
 	k := superpowers()
 	k.Repository = "https://user:" + secret + "@host/x\u202e"
 	writes["skill set repository"] = s.PutSkillSetIf("", k)
@@ -548,23 +548,23 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		name := "a" + h + "b"
 		pr := fakeProfile("x")
 		pr.Models = map[string]Model{"a": {Description: name}}
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.Models = map[string]Model{name: {}}
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.Env = map[string]string{name: "v"}
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.Models = map[string]Model{"a": {Env: map[string]string{name: "v"}}}
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.AccountDir = "/" + name
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
-		wantCode(t, s.PutProfile(fakeProfile(name)), api.CodeValidation)
-		wantCode(t, s.PutRole(Role{Name: "developer", Models: []string{"x/" + name}}), api.CodeValidation)
-		wantCode(t, s.PutRole(Role{Name: name}), api.CodeNotFound)
-		wantCode(t, s.PutPrompt(name, "t"), api.CodeNotFound)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", fakeProfile(name)), api.CodeValidation)
+		wantCode(t, s.PutRoleIf("", Role{Name: "developer", Models: []string{"x/" + name}}), api.CodeValidation)
+		wantCode(t, s.PutRoleIf("", Role{Name: name}), api.CodeNotFound)
+		wantCode(t, s.PutPromptIf("", name, "t"), api.CodeNotFound)
 		wantCode(t, s.PutUsageScriptIf("", name, "t"), api.CodeValidation)
 		wantCode(t, s.PutUsageScriptIf("", "x", name), api.CodeValidation)
 		k := superpowers()
@@ -587,7 +587,7 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.Models = map[string]Model{"a": {UsageWindows: []string{name}}}
-		wantCode(t, s.PutProfile(pr), api.CodeValidation)
+		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 
 		for _, g := range []func(*General){
 			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/" + name}} },
@@ -597,7 +597,7 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		} {
 			gen := Defaults()
 			g(&gen)
-			wantCode(t, s.SetGeneral(gen), api.CodeInvalidSettings)
+			wantCode(t, s.SetGeneralIf("", gen), api.CodeInvalidSettings)
 		}
 	}
 }
@@ -606,13 +606,13 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 // temporary file in the same folder and leaves it readable by the user only.
 func TestWritesAreAtomicAndPrivate(t *testing.T) {
 	s, home, _ := openWithPrompts(t, map[string]string{"developer": "D"})
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRole(Role{Name: "developer", Models: []string{"x/a"}}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "developer", Models: []string{"x/a"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutPrompt("developer", "mine"); err != nil {
+	if err := s.PutPromptIf("", "developer", "mine"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutUsageScriptIf("", "fake", "mine"); err != nil {

@@ -81,13 +81,11 @@ const maxPromptSize = homefile.MaxPromptFile
 // default is empty.
 func isInstructions(name string) bool { return strings.HasSuffix(name, "-instructions") }
 
-// PutPrompt stores text as the override of a prompt. Only prompts that have
+// PutPromptIf stores text as the override of a prompt. Only prompts that have
 // a default can be saved (others give not_found). The text must not be blank,
 // except for an instructions prompt, where blank text is a reset.
 // Options.ValidatePrompt checks the text first.
-func (s *Store) PutPrompt(name, text string) error { return s.PutPromptIf("", name, text) }
-
-// PutPromptIf is PutPrompt guarded by a revision: the prompt's file is read
+// It is guarded by a revision: the prompt's file is read
 // again first, and when rev is not empty and differs from the file's revision
 // (NoRevision when the prompt is not customized) the write is refused with
 // code stale_settings.
@@ -132,12 +130,10 @@ func (s *Store) knownPrompt(name string) bool {
 	return ok && idPattern.MatchString(name)
 }
 
-// ResetPrompt removes a prompt's override so the default applies again. A
+// ResetPromptIf removes a prompt's override so the default applies again. A
 // prompt without a default gives not_found; resetting a prompt that is not
 // customized does nothing.
-func (s *Store) ResetPrompt(name string) error { return s.ResetPromptIf("", name) }
-
-// ResetPromptIf is ResetPrompt guarded by a revision, as PutPromptIf.
+// It is guarded by a revision, as PutPromptIf.
 func (s *Store) ResetPromptIf(rev, name string) error {
 	if !s.knownPrompt(name) {
 		return api.Errorf(api.CodeNotFound, "no prompt %s", showKey(name))

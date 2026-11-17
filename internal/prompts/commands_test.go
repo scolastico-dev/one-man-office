@@ -103,7 +103,7 @@ func TestUserInstructionsSurviveNewDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutPrompt("developer-instructions", "Write commit messages in German.\n"); err != nil {
+	if err := s.PutPromptIf("", "developer-instructions", "Write commit messages in German.\n"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,7 +121,7 @@ func TestUserInstructionsSurviveNewDefaults(t *testing.T) {
 	if !ok || !custom || text != "Write commit messages in German.\n" {
 		t.Fatalf("developer-instructions = %q %v %v, want the user's text", text, custom, ok)
 	}
-	if err := s.ResetPrompt("developer-instructions"); err != nil {
+	if err := s.ResetPromptIf("", "developer-instructions"); err != nil {
 		t.Fatal(err)
 	}
 	if text, custom, ok = s.Prompt("developer-instructions"); !ok || custom || text != "" {

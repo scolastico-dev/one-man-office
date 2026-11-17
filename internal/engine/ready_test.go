@@ -89,7 +89,7 @@ func TestCustomPromptThatFailsFallsBackToDefault(t *testing.T) {
 		}
 		return nil
 	}
-	if err := h.st.PutPrompt("developer", "{{.Nope}}"); err != nil {
+	if err := h.st.PutPromptIf("", "developer", "{{.Nope}}"); err != nil {
 		t.Fatal(err)
 	}
 	_, dev := h.readyDeveloper("one")
@@ -109,7 +109,7 @@ func TestCustomPromptThatFailsFallsBackToDefault(t *testing.T) {
 
 func TestUserInstructionsAreInThePrompt(t *testing.T) {
 	h := newHarness(t)
-	if err := h.st.PutPrompt("developer-instructions", "Always write tests first."); err != nil {
+	if err := h.st.PutPromptIf("", "developer-instructions", "Always write tests first."); err != nil {
 		t.Fatal(err)
 	}
 	_, dev := h.readyDeveloper("one")
@@ -184,7 +184,7 @@ func TestCustomPromptErrorIsBounded(t *testing.T) {
 				}
 				return nil
 			}
-			if err := h.st.PutPrompt("developer", text); err != nil {
+			if err := h.st.PutPromptIf("", "developer", text); err != nil {
 				t.Fatal(err)
 			}
 			_, dev := h.readyDeveloper("one")
@@ -211,7 +211,7 @@ func TestCustomPromptErrorIsBounded(t *testing.T) {
 
 func TestRolePromptHasSkillSetBlocks(t *testing.T) {
 	h := newHarness(t)
-	if err := h.st.PutPrompt("developer-instructions", "Always write tests first."); err != nil {
+	if err := h.st.PutPromptIf("", "developer-instructions", "Always write tests first."); err != nil {
 		t.Fatal(err)
 	}
 	put := func(name string, enabled bool, text map[string]string) {
@@ -250,7 +250,7 @@ func TestRolePromptHasSkillSetBlocks(t *testing.T) {
 		t.Fatalf("reviewer prompt has a skill set block:\n%s", rp)
 	}
 	// A customized role prompt gets the blocks through its Instructions.
-	if err := h.st.PutPrompt("developer", "Custom.\n{{.Instructions}}"); err != nil {
+	if err := h.st.PutPromptIf("", "developer", "Custom.\n{{.Instructions}}"); err != nil {
 		t.Fatal(err)
 	}
 	p, err = h.e.rolePrompt(h.ctx, h.actor(dev.ID))

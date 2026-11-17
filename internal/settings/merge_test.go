@@ -60,7 +60,7 @@ func TestMergeDefaultsAreValidated(t *testing.T) {
 	} {
 		g := Defaults()
 		mutate(&g)
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, field) {
 			t.Errorf("%s: err = %v", field, err)
@@ -86,7 +86,7 @@ func TestProjectMergeModesOverrideTheDefaults(t *testing.T) {
 	}
 	g := s.General()
 	g.MergeDefaults.Task = api.MergeModeSquash
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Project(p.ID)

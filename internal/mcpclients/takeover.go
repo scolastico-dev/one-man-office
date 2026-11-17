@@ -299,12 +299,6 @@ func (c *Clients) ApplyTakeover(ctx context.Context, targets []Target, req api.M
 	return report
 }
 
-// RemoveEntry removes the entry from t's file with the program's command
-// and checks that it is gone.
-func (c *Clients) RemoveEntry(ctx context.Context, t Target, entry string) error {
-	return c.removeEntry(ctx, t, entry, c.inspect(t).secrets)
-}
-
 func (c *Clients) removeEntry(ctx context.Context, t Target, entry string, secrets *redactor) error {
 	if strings.HasPrefix(entry, "-") {
 		return fmt.Errorf("the name starts with '-'")

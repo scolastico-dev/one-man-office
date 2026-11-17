@@ -31,13 +31,13 @@ func TestRoleFilesCreatedAtOpen(t *testing.T) {
 
 func TestRoleRejectsUnknownModel(t *testing.T) {
 	s, _, _ := openTest(t)
-	wantCode(t, s.PutRole(Role{Name: "pm", Models: []string{"claude/fable"}, Assignment: api.AssignmentRandom}), api.CodeValidation)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	wantCode(t, s.PutRoleIf("", Role{Name: "pm", Models: []string{"claude/fable"}, Assignment: api.AssignmentRandom}), api.CodeValidation)
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, s.PutRole(Role{Name: "pm", Models: []string{"claude/fable"}, Assignment: "fastest"}), api.CodeValidation)
-	wantCode(t, s.PutRole(Role{Name: "janitor"}), api.CodeNotFound)
-	if err := s.PutRole(Role{Name: "pm", Models: []string{"claude/fable", "claude/fable", "claude/opus"}, Assignment: api.AssignmentRandom}); err != nil {
+	wantCode(t, s.PutRoleIf("", Role{Name: "pm", Models: []string{"claude/fable"}, Assignment: "fastest"}), api.CodeValidation)
+	wantCode(t, s.PutRoleIf("", Role{Name: "janitor"}), api.CodeNotFound)
+	if err := s.PutRoleIf("", Role{Name: "pm", Models: []string{"claude/fable", "claude/fable", "claude/opus"}, Assignment: api.AssignmentRandom}); err != nil {
 		t.Fatal(err)
 	}
 	r, _ := s.Role("pm")
@@ -48,10 +48,10 @@ func TestRoleRejectsUnknownModel(t *testing.T) {
 
 func TestRoleHandEditKeepsLastValid(t *testing.T) {
 	s, home, log := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRole(Role{Name: "ceo", Models: []string{"claude/fable"}, Assignment: api.AssignmentSmart}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "ceo", Models: []string{"claude/fable"}, Assignment: api.AssignmentSmart}); err != nil {
 		t.Fatal(err)
 	}
 	log.take()

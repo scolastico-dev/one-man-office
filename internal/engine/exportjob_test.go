@@ -526,7 +526,7 @@ func TestExportAgainAfterRejectionUpdatesItsBranch(t *testing.T) {
 	g.AgentEnv["GIT_CONFIG_COUNT"] = "1"
 	g.AgentEnv["GIT_CONFIG_KEY_0"] = "url." + bare + ".insteadOf"
 	g.AgentEnv["GIT_CONFIG_VALUE_0"] = address
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	h.e.syncGitEnvironment(h.ctx)

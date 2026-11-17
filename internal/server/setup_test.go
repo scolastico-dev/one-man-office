@@ -205,10 +205,10 @@ func TestDetectRouteCreatesEverySupportedProgram(t *testing.T) {
 func TestDetectNeverOverwrites(t *testing.T) {
 	s := newTestServer(t)
 	mine := settings.Profile{Name: "claude", CLI: api.CLIClaude, Command: "my-claude", Models: map[string]settings.Model{"x": {}}}
-	if err := s.settings.PutProfile(mine); err != nil {
+	if err := s.settings.PutProfileIf("", mine); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutRole(settings.Role{Name: "developer", Models: []string{"claude/x"}, Assignment: api.AssignmentRandom}); err != nil {
+	if err := s.settings.PutRoleIf("", settings.Role{Name: "developer", Models: []string{"claude/x"}, Assignment: api.AssignmentRandom}); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := s.settings.Profile("claude")
@@ -505,7 +505,7 @@ func TestPromptPreviewRoute(t *testing.T) {
 		t.Errorf("instructions preview = %d %+v", status, p)
 	}
 	// A customized role prompt is the one in effect.
-	if err := s.settings.PutPrompt("developer", "Custom role prompt.\n{{.Instructions}}"); err != nil {
+	if err := s.settings.PutPromptIf("", "developer", "Custom role prompt.\n{{.Instructions}}"); err != nil {
 		t.Fatal(err)
 	}
 	if _, p = preview("developer-instructions", "Be brief."); p.Text != "Custom role prompt.\nBe brief." {

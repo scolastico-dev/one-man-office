@@ -86,7 +86,7 @@ func TestUsageDefaultsAndBounds(t *testing.T) {
 	for name, mutate := range cases {
 		g := Defaults()
 		mutate(&g.Usage)
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		want := strings.TrimSpace(name)
 		if fieldOf(err) != want {
 			t.Errorf("%s: err = %v (field %q)", name, err, fieldOf(err))
@@ -108,7 +108,7 @@ func TestUsageDefaultsAndBounds(t *testing.T) {
 		"my.script/weekly":           {HardPercent: pct(99)},
 		"codex/gpt-5_3-spark_weekly": {},
 	}}
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(s.General().Usage, g.Usage) {
@@ -231,7 +231,7 @@ func TestUsageScriptInUse(t *testing.T) {
 	for _, name := range []string{"b", "a"} {
 		p := fakeProfile(name)
 		p.UsageScript = "fake"
-		if err := s.PutProfile(p); err != nil {
+		if err := s.PutProfileIf("", p); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -247,7 +247,7 @@ func TestUsageScriptInUse(t *testing.T) {
 	// stays.
 	p := fakeProfile("c")
 	p.UsageScript = "claude"
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutUsageScriptIf("", "claude", "y"); err != nil {
@@ -294,7 +294,7 @@ func TestProfileNamesExistingScript(t *testing.T) {
 	s, home, _ := openWithScripts(t, map[string]string{"claude": "x"}, nil)
 	p := fakeProfile("x")
 	p.UsageScript = "nope"
-	err := s.PutProfile(p)
+	err := s.PutProfileIf("", p)
 	wantCode(t, err, api.CodeValidation)
 	if fieldOf(err) != "usage_script" {
 		t.Fatalf("err = %v", err)
@@ -303,18 +303,18 @@ func TestProfileNamesExistingScript(t *testing.T) {
 		t.Fatal("refused profile was written")
 	}
 	p.UsageScript = "claude"
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	p.UsageScript = ""
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutUsageScriptIf("", "mine", "x"); err != nil {
 		t.Fatal(err)
 	}
 	p.UsageScript = "mine"
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	// At load, a missing script is no error: the tracker shows it.
@@ -326,7 +326,7 @@ func TestProfileNamesExistingScript(t *testing.T) {
 	// A store without script defaults does not check the name.
 	s2, _, _ := openTest(t)
 	p.UsageScript = "anything"
-	if err := s2.PutProfile(p); err != nil {
+	if err := s2.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -345,7 +345,7 @@ func TestModelUsageWindowsValidated(t *testing.T) {
 	} {
 		p := fakeProfile("x")
 		p.Models = map[string]Model{"a": {UsageWindows: windows}}
-		err := s.PutProfile(p)
+		err := s.PutProfileIf("", p)
 		wantCode(t, err, api.CodeValidation)
 		if fieldOf(err) != field {
 			t.Errorf("%s: err = %v", field, err)
@@ -353,7 +353,7 @@ func TestModelUsageWindowsValidated(t *testing.T) {
 	}
 	p := fakeProfile("x")
 	p.Models = map[string]Model{"a": {UsageWindows: []string{"session", "weekly", "fable_weekly", strings.Repeat("w", 40)}}}
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, "profiles", "y.yaml"), "cli: custom\ncommand: x\nmodels:\n  a:\n    usage_windows: [a, a]\n")

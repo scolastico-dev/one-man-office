@@ -415,11 +415,9 @@ func (s *Store) General() General {
 	return s.general.clone()
 }
 
-// SetGeneral validates g and writes it to settings.yaml. Invalid settings
+// SetGeneralIf validates g and writes it to settings.yaml. Invalid settings
 // are rejected with code invalid_settings.
-func (s *Store) SetGeneral(g General) error { return s.SetGeneralIf("", g) }
-
-// SetGeneralIf is SetGeneral guarded by a revision: settings.yaml is read
+// It is guarded by a revision: settings.yaml is read
 // again first, and when rev is not empty and differs from the file's
 // revision the write is refused with code stale_settings.
 func (s *Store) SetGeneralIf(rev string, g General) error {

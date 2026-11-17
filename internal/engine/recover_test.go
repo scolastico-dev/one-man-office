@@ -281,7 +281,7 @@ func TestRecoverySetsGitEnvironmentForMerges(t *testing.T) {
 	// A changed agent environment reaches git with the next health check.
 	g := h.st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Other", "GIT_AUTHOR_EMAIL": "other@example.invalid"}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	h.e.checkHealth(h.ctx, h.clock.Now())

@@ -218,14 +218,14 @@ func engineServerWith(t *testing.T, runner agents.Runner, prof settings.Profile,
 	})
 	g := s.settings.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.invalid"}
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutProfile(prof); err != nil {
+	if err := s.settings.PutProfileIf("", prof); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range settings.RoleNames {
-		if err := s.settings.PutRole(settings.Role{Name: r, Models: []string{"fake/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
+		if err := s.settings.PutRoleIf("", settings.Role{Name: r, Models: []string{"fake/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -692,7 +692,7 @@ func TestCEORoutes(t *testing.T) {
 	// Switched off, the CEO does not open.
 	g := s.settings.General()
 	g.CEO.Enabled = false
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the CEO to end", func() bool { return sessionByID(t, s, fresh.ID).State == api.SessionEnded })
@@ -914,7 +914,7 @@ func TestCloseEndsAgentsAtOnce(t *testing.T) {
 	_, dev := startDeveloper(t, s, p)
 	g := s.settings.General()
 	g.Stop.HandoffTimeout = api.Duration(time.Hour)
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -948,7 +948,7 @@ func TestSettingsChangeWakesEngine(t *testing.T) {
 	s, p := engineServer(t, r, fakeProfile(), false)
 	g := s.settings.General()
 	g.Limits.Tasks = 1
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	s.StartEngine()

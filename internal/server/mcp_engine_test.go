@@ -54,7 +54,7 @@ func TestEngineFollowsTheMCPSwitches(t *testing.T) {
 				t.Helper()
 				g := s.settings.General()
 				change(&g.MCP)
-				if err := s.settings.SetGeneral(g); err != nil {
+				if err := s.settings.SetGeneralIf("", g); err != nil {
 					t.Fatal(err)
 				}
 				s.waitSettingsEvents(context.Background())

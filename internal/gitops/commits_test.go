@@ -201,3 +201,18 @@ func TestKeptCommitsStayOutOfBranchesAndPushes(t *testing.T) {
 		t.Fatalf("the remote has %q", got)
 	}
 }
+
+// TicketCommits lists the commits ticket n's refs hold in the repository
+// at repo, sorted.
+func (g *Git) TicketCommits(repo string, n int64) ([]string, error) {
+	have, err := g.ticketCommits(repo, n)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(have))
+	for _, id := range have {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, nil
+}

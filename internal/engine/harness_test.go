@@ -376,7 +376,7 @@ func newHarness(t *testing.T, opts ...func(*harnessConfig)) *harness {
 	g := h.st.General()
 	g.Limits = api.LimitSettings{Tasks: cfg.limit, Stories: cfg.limit}
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.invalid"}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	prof := settings.Profile{Name: "fake", CLI: api.CLICustom, Command: "fake-agent",
@@ -384,7 +384,7 @@ func newHarness(t *testing.T, opts ...func(*harnessConfig)) *harness {
 	if cfg.profile != nil {
 		prof = *cfg.profile
 	}
-	if err := h.st.PutProfile(prof); err != nil {
+	if err := h.st.PutProfileIf("", prof); err != nil {
 		t.Fatal(err)
 	}
 	h.setRoleModels("fake/a", "fake/b")
@@ -463,7 +463,7 @@ func (h *harness) engine() *Engine {
 func (h *harness) setRoleModels(models ...string) {
 	h.t.Helper()
 	for _, r := range settings.RoleNames {
-		if err := h.st.PutRole(settings.Role{Name: r, Models: models, Assignment: api.AssignmentRoundRobin}); err != nil {
+		if err := h.st.PutRoleIf("", settings.Role{Name: r, Models: models, Assignment: api.AssignmentRoundRobin}); err != nil {
 			h.t.Fatal(err)
 		}
 	}
@@ -474,7 +474,7 @@ func (h *harness) setLimit(n int) {
 	h.t.Helper()
 	g := h.st.General()
 	g.Limits = api.LimitSettings{Tasks: n, Stories: n}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }

@@ -56,7 +56,7 @@ func (h *harness) setHandoffTimeout(d time.Duration) {
 	h.t.Helper()
 	g := h.st.General()
 	g.Stop.HandoffTimeout = api.Duration(d)
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }

@@ -106,7 +106,7 @@ func meter(t *testing.T, s *Server, profile, script string, models ...string) {
 	for _, m := range models {
 		p.Models[m] = settings.Model{}
 	}
-	if err := s.settings.PutProfile(p); err != nil {
+	if err := s.settings.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	s.waitSettingsEvents(context.Background())
@@ -137,7 +137,7 @@ func TestUsageStateRoute(t *testing.T) {
 	useRun(s, f.run)
 	meter(t, s, "fake", "fake", "a", "b")
 	meter(t, s, "other", "broken", "x")
-	if err := s.settings.PutProfile(settings.Profile{Name: "plain", CLI: api.CLICustom, Command: "plain", Models: map[string]settings.Model{"m": {}}}); err != nil {
+	if err := s.settings.PutProfileIf("", settings.Profile{Name: "plain", CLI: api.CLICustom, Command: "plain", Models: map[string]settings.Model{"m": {}}}); err != nil {
 		t.Fatal(err)
 	}
 	s.waitSettingsEvents(context.Background())
@@ -569,7 +569,7 @@ func TestPatchReplacesListsInsideObjects(t *testing.T) {
 	s := newTestServer(t)
 	g := s.settings.General()
 	g.Usage.Windows = map[string]api.UsageThreshold{"x": {SoftPercent: pct(50)}, "y": {SoftPercent: pct(60)}}
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	b := newBrowser(t, s)
@@ -598,7 +598,7 @@ func TestUsageSettingsReachTheTracker(t *testing.T) {
 	// A profile change: a new account (another environment) runs at once.
 	runs := f.count()
 	second := settings.Profile{Name: "second", CLI: api.CLICustom, Command: "second", UsageScript: "fake", Env: map[string]string{"ACCOUNT": "two"}, Models: map[string]settings.Model{"z": {}}}
-	if err := s.settings.PutProfile(second); err != nil {
+	if err := s.settings.PutProfileIf("", second); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the tracker to know the new profile's model", func() bool {
@@ -629,7 +629,7 @@ func TestStartAnywayRoute(t *testing.T) {
 	if err := s.settings.PutUsageScriptIf("", "fake", emptyScript); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutProfile(prof); err != nil {
+	if err := s.settings.PutProfileIf("", prof); err != nil {
 		t.Fatal(err)
 	}
 	s.waitSettingsEvents(context.Background())
@@ -699,7 +699,7 @@ func TestEngineSeesUsage(t *testing.T) {
 	if err := s.settings.PutUsageScriptIf("", "fake", emptyScript); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutProfile(prof); err != nil {
+	if err := s.settings.PutProfileIf("", prof); err != nil {
 		t.Fatal(err)
 	}
 	s.waitSettingsEvents(context.Background())
@@ -820,7 +820,7 @@ func TestDetectedProfilesUseShippedScripts(t *testing.T) {
 		return scripts["claude"] && scripts["codex"]
 	})
 	// A profile write that names a script that does not exist is refused.
-	err := s.settings.PutProfile(settings.Profile{Name: "x", CLI: api.CLICustom, Command: "x", UsageScript: "nope", Models: map[string]settings.Model{"m": {}}})
+	err := s.settings.PutProfileIf("", settings.Profile{Name: "x", CLI: api.CLICustom, Command: "x", UsageScript: "nope", Models: map[string]settings.Model{"m": {}}})
 	var ae *api.Error
 	if !errors.As(err, &ae) || ae.Code != api.CodeValidation {
 		t.Fatalf("profile with a missing script: %v", err)

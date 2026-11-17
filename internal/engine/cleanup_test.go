@@ -211,7 +211,7 @@ func TestIgnoredFilesDoNotBlockRemoval(t *testing.T) {
 func TestRemovalForgetsClaudeTrust(t *testing.T) {
 	h := gitHarness(t)
 	account := filepath.Join(t.TempDir(), "claude-account")
-	if err := h.st.PutProfile(settings.Profile{Name: "claude", CLI: api.CLIClaude, Command: "claude", AccountDir: account,
+	if err := h.st.PutProfileIf("", settings.Profile{Name: "claude", CLI: api.CLIClaude, Command: "claude", AccountDir: account,
 		Models: map[string]settings.Model{"m": {}}}); err != nil {
 		t.Fatal(err)
 	}

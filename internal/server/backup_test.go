@@ -113,7 +113,7 @@ func TestImportRoutes(t *testing.T) {
 	a := newTestServer(t)
 	g := a.settings.General()
 	g.Limits.Tasks = 7
-	if err := a.settings.SetGeneral(g); err != nil {
+	if err := a.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
@@ -276,7 +276,7 @@ func (w *processWorld) download(path string) []byte {
 // user set stays.
 func TestDatabaseImportPausesBeforeItChangesAnything(t *testing.T) {
 	a := newTestServer(t)
-	if err := a.settings.PutPrompt("developer-instructions", "From the zip."); err != nil {
+	if err := a.settings.PutPromptIf("", "developer-instructions", "From the zip."); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
@@ -284,7 +284,7 @@ func TestDatabaseImportPausesBeforeItChangesAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := newTestServer(t)
-	if err := s.settings.PutPrompt("developer-instructions", "Here."); err != nil {
+	if err := s.settings.PutPromptIf("", "developer-instructions", "Here."); err != nil {
 		t.Fatal(err)
 	}
 	rec := rawSocket(t, s, "/api/settings/import", buf.Bytes(), "")

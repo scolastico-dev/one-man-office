@@ -101,13 +101,13 @@ func checkPoll(t *testing.T, r replacement) {
 	s, home, _ := openTest(t)
 	g := s.General()
 	g.Limits.Tasks = 7
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRole(Role{Name: "developer", Models: []string{"x/a"}}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "developer", Models: []string{"x/a"}}); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, "prompts", "developer.md"), "be careful\n")
@@ -191,12 +191,12 @@ func checkPoll(t *testing.T, r replacement) {
 
 func checkGuard(t *testing.T, r replacement) {
 	s, home, _ := openTest(t)
-	if err := s.PutProfile(fakeProfile("x")); err != nil {
+	if err := s.PutProfileIf("", fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
 	g := s.General()
 	g.Limits.Tasks = 7
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	profileRev := s.Revision(SectionProfiles, "x")

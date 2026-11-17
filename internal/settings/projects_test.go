@@ -427,7 +427,7 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 	newRepo(t, ws, "gone")
 	g := s.General()
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: ws, MaxDepth: 4, Ignore: []string{"node_modules"}}}
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DiscoverProjects(ws, foundAt(ws, "a/one", "gone")); err != nil {
@@ -453,7 +453,7 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 
 	// An ignore pattern that hides it from the scan allows removing it.
 	g.WorkspaceRoots[0].Ignore = []string{"a"}
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RemoveProject("a-one"); err != nil {
@@ -463,7 +463,7 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 	// Found again under the root: refused, until the root is removed from
 	// the settings.
 	g.WorkspaceRoots[0].Ignore = nil
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DiscoverProjects(ws, []Found{{Path: repo, Rel: "a/one"}}); err != nil {
@@ -471,7 +471,7 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 	}
 	wantCode(t, s.RemoveProject("a-one"), api.CodeValidation)
 	g.WorkspaceRoots = nil
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RemoveProject("a-one"); err != nil {

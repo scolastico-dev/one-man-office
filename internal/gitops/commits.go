@@ -102,21 +102,6 @@ func (g *Git) KeepCommits(repo string, n int64, commits []string) error {
 	return nil
 }
 
-// TicketCommits lists the commits ticket n's refs hold in the repository
-// at repo, sorted.
-func (g *Git) TicketCommits(repo string, n int64) ([]string, error) {
-	have, err := g.ticketCommits(repo, n)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(have))
-	for _, id := range have {
-		out = append(out, id)
-	}
-	slices.Sort(out)
-	return out, nil
-}
-
 // ticketCommits maps each ref of ticket n to the object it points at.
 func (g *Git) ticketCommits(repo string, n int64) (map[string]string, error) {
 	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "for-each-ref", "--format=%(refname) %(objectname)", "--end-of-options", ticketRefs(n))

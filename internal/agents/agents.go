@@ -275,19 +275,6 @@ func (r *Registry) Terminal(sessionID string) (*webterm.Terminal, bool) {
 	return a.Terminal(), true
 }
 
-// TerminalByID returns the web terminal with the given terminal id (see
-// Agent.TerminalID).
-func (r *Registry) TerminalByID(terminalID string) (*webterm.Terminal, bool) {
-	r.mu.Lock()
-	sessionID, ok := r.terminals[terminalID]
-	a := r.agents[sessionID]
-	r.mu.Unlock()
-	if !ok || a == nil {
-		return nil, false
-	}
-	return a.Terminal(), true
-}
-
 // All returns every running agent.
 func (r *Registry) All() []Agent {
 	r.mu.Lock()

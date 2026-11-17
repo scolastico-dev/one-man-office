@@ -80,16 +80,16 @@ func startProcessWorld(t *testing.T, script string, handoff time.Duration) *proc
 	g := st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.invalid"}
 	g.Stop.HandoffTimeout = api.Duration(handoff)
-	if err := st.SetGeneral(g); err != nil {
+	if err := st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	off := false
-	if err := st.PutProfile(settings.Profile{Name: "fake", CLI: api.CLICustom, Command: exe, Env: fakeagent.Env(script),
+	if err := st.PutProfileIf("", settings.Profile{Name: "fake", CLI: api.CLICustom, Command: exe, Env: fakeagent.Env(script),
 		PromptDelivery: api.PromptDelivery{Inject: &off}, Models: map[string]settings.Model{"a": {}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range settings.RoleNames {
-		if err := st.PutRole(settings.Role{Name: r, Models: []string{"fake/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
+		if err := st.PutRoleIf("", settings.Role{Name: r, Models: []string{"fake/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -21,7 +21,7 @@ func (h *harness) setHealth(silent, question time.Duration) {
 	g := h.st.General()
 	g.Health.SilentAfter = settings.Duration(silent)
 	g.Health.QuestionUnansweredAfter = settings.Duration(question)
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -434,7 +434,7 @@ func (h *harness) setAuthor(name string) {
 	h.t.Helper()
 	g := h.st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": name}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -543,7 +543,7 @@ func TestHangingGitEnvironmentBlocksNeitherTickNorStop(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "`sleep 60`"}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	began := time.Now()

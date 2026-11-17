@@ -29,7 +29,7 @@ func claudeProfile() Profile {
 
 func TestModelsFlattenProfiles(t *testing.T) {
 	s, _, log := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
 	var ids []string
@@ -59,7 +59,7 @@ func TestModelsFlattenProfiles(t *testing.T) {
 	// A model that leaves selectable out is selectable.
 	p := claudeProfile()
 	p.Models = map[string]Model{"plain": {}}
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	if m, _ := s.Model("claude/plain"); !m.Selectable {
@@ -71,18 +71,18 @@ func TestProfileNeedsAModel(t *testing.T) {
 	s, _, _ := openTest(t)
 	p := claudeProfile()
 	p.Models = nil
-	wantCode(t, s.PutProfile(p), api.CodeValidation)
+	wantCode(t, s.PutProfileIf("", p), api.CodeValidation)
 	p.Models = map[string]Model{}
-	wantCode(t, s.PutProfile(p), api.CodeValidation)
+	wantCode(t, s.PutProfileIf("", p), api.CodeValidation)
 	p = claudeProfile()
 	p.CLI = "vim"
-	wantCode(t, s.PutProfile(p), api.CodeValidation)
+	wantCode(t, s.PutProfileIf("", p), api.CodeValidation)
 	p = claudeProfile()
 	p.Name = "Bad Name"
-	wantCode(t, s.PutProfile(p), api.CodeValidation)
+	wantCode(t, s.PutProfileIf("", p), api.CodeValidation)
 	p = claudeProfile()
 	p.Models = map[string]Model{"a/b": {}}
-	wantCode(t, s.PutProfile(p), api.CodeValidation)
+	wantCode(t, s.PutProfileIf("", p), api.CodeValidation)
 	if len(s.Profiles()) != 0 {
 		t.Fatal("an invalid profile was stored")
 	}
@@ -94,7 +94,7 @@ func TestProfileRoundTripsThroughItsFile(t *testing.T) {
 	d := api.Duration(3 * time.Second)
 	n := 3
 	p.PromptDelivery = PromptDelivery{Inject: boolPtr(true), Delay: &d, Retries: &n}
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
 	// A reload that reads the written file gives the same profile.
@@ -121,7 +121,7 @@ func TestProfileRoundTripsThroughItsFile(t *testing.T) {
 
 func TestMalformedProfileHandEditKeepsLastValid(t *testing.T) {
 	s, home, log := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
 	log.take()
@@ -157,13 +157,13 @@ func TestMalformedProfileHandEditKeepsLastValid(t *testing.T) {
 
 func TestDeleteProfileInUse(t *testing.T) {
 	s, home, _ := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRole(Role{Name: "developer", Models: []string{"claude/fable"}, Assignment: api.AssignmentFailover}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "developer", Models: []string{"claude/fable"}, Assignment: api.AssignmentFailover}); err != nil {
 		t.Fatal(err)
 	}
-	err := s.DeleteProfile("claude")
+	err := s.DeleteProfileIf("", "claude")
 	wantCode(t, err, api.CodeInUse)
 	if !strings.Contains(err.Error(), "developer") {
 		t.Fatalf("error %q does not name the role", err)
@@ -171,24 +171,24 @@ func TestDeleteProfileInUse(t *testing.T) {
 	if _, ok := s.Profile("claude"); !ok {
 		t.Fatal("profile deleted despite being in use")
 	}
-	if err := s.PutRole(Role{Name: "developer"}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "developer"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteProfile("claude"); err != nil {
+	if err := s.DeleteProfileIf("", "claude"); err != nil {
 		t.Fatal(err)
 	}
 	if fileExists(filepath.Join(home, "profiles", "claude.yaml")) {
 		t.Fatal("profile file remains")
 	}
-	wantCode(t, s.DeleteProfile("claude"), api.CodeNotFound)
+	wantCode(t, s.DeleteProfileIf("", "claude"), api.CodeNotFound)
 }
 
 func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
 	s, home, _ := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutRole(Role{Name: "developer", Models: []string{"claude/fable", "claude/opus"}, Assignment: api.AssignmentFailover}); err != nil {
+	if err := s.PutRoleIf("", Role{Name: "developer", Models: []string{"claude/fable", "claude/opus"}, Assignment: api.AssignmentFailover}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(filepath.Join(home, "profiles", "claude.yaml"))
@@ -197,7 +197,7 @@ func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
 	}
 	p := claudeProfile()
 	delete(p.Models, "opus")
-	err = s.PutProfile(p)
+	err = s.PutProfileIf("", p)
 	wantCode(t, err, api.CodeInUse)
 	if !strings.Contains(err.Error(), "developer") || !strings.Contains(err.Error(), "claude/opus") || strings.Contains(err.Error(), "claude/fable") {
 		t.Fatalf("error %q does not name the role and the dropped model", err)
@@ -212,20 +212,20 @@ func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
 	// Keeping every listed model, or dropping an unused one, is fine.
 	p = claudeProfile()
 	p.Models["extra"] = Model{}
-	if err := s.PutProfile(p); err != nil {
+	if err := s.PutProfileIf("", p); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
 	// A profile no role uses can be replaced freely.
 	other := claudeProfile()
 	other.Name = "other"
-	if err := s.PutProfile(other); err != nil {
+	if err := s.PutProfileIf("", other); err != nil {
 		t.Fatal(err)
 	}
 	other.Models = map[string]Model{"only": {}}
-	if err := s.PutProfile(other); err != nil {
+	if err := s.PutProfileIf("", other); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -234,11 +234,11 @@ func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
 // a role may end up with no model.
 func TestDeleteProfileDetachesRoles(t *testing.T) {
 	s, home, _ := openTest(t)
-	if err := s.PutProfile(claudeProfile()); err != nil {
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
 		t.Fatal(err)
 	}
 	other := Profile{Name: "codex", CLI: api.CLICodex, Command: "codex", Models: map[string]Model{"sol": {}}}
-	if err := s.PutProfile(other); err != nil {
+	if err := s.PutProfileIf("", other); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range []Role{
@@ -246,11 +246,11 @@ func TestDeleteProfileDetachesRoles(t *testing.T) {
 		{Name: "developer", Models: []string{"codex/sol", "claude/opus", "claude/fable"}, Assignment: api.AssignmentRoundRobin},
 		{Name: "reviewer", Models: []string{"codex/sol"}, Assignment: api.AssignmentRandom},
 	} {
-		if err := s.PutRole(r); err != nil {
+		if err := s.PutRoleIf("", r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	err := s.DeleteProfile("claude")
+	err := s.DeleteProfileIf("", "claude")
 	wantCode(t, err, api.CodeInUse)
 	var apiErr *api.Error
 	if !errors.As(err, &apiErr) || !reflect.DeepEqual(apiErr.Details, api.ProfileInUse{Roles: []string{"ceo", "developer"}}) {
@@ -287,7 +287,7 @@ func TestDeleteProfileDetachesRoles(t *testing.T) {
 		t.Fatalf("developer %+v", dev)
 	}
 	// Nothing to detach: the profile just goes.
-	if err := s.PutProfile(other); err != nil {
+	if err := s.PutProfileIf("", other); err != nil {
 		t.Fatal(err)
 	}
 	if detached, err := s.DeleteProfileDetachIf("", "codex"); err != nil || detached == nil || len(detached) != 0 {

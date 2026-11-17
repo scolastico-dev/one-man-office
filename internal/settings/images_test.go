@@ -28,7 +28,7 @@ func TestImageKeepDays(t *testing.T) {
 	for _, bad := range []int{-1, 3651} {
 		g := Defaults()
 		g.Images.KeepDaysAfterDone = bad
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, "images.keep_days_after_done") {
 			t.Errorf("%d: err = %v", bad, err)
@@ -39,7 +39,7 @@ func TestImageKeepDays(t *testing.T) {
 	}
 	g := Defaults()
 	g.Images.KeepDaysAfterDone = 3650
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 }

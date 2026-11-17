@@ -204,15 +204,6 @@ func (s *Session) SendSubmit() error {
 	return s.sendText("\r")
 }
 
-// SendTextAndKeys keeps typed text and following control keys in distinct PTY
-// writes. Full-screen CLIs can otherwise interpret the combined burst as a
-// paste and insert Enter instead of submitting the text.
-func (s *Session) SendTextAndKeys(text, keys string) error {
-	s.inputMu.Lock()
-	defer s.inputMu.Unlock()
-	return s.sendTextAndKeys(text, keys)
-}
-
 // SendTextAndKeysIf writes only when ready returns true after this session
 // owns the input stream. This closes the race between an external readiness
 // check and a competing terminal writer acquiring inputMu. The callback must
@@ -245,8 +236,6 @@ func (s *Session) sendText(text string) error {
 	_, err := s.proc.Write([]byte(text))
 	return err
 }
-
-func (s *Session) SendLine(text string) error { return s.SendText(text + "\r") }
 
 // SubmitDelay separates typed text from its Enter. Full-screen CLIs (Claude
 // Code among them) treat a fast burst of bytes as a *paste*, in which a

@@ -117,12 +117,12 @@ func newWorld(t *testing.T, c config) *world {
 		g.AgentEnv["GIT_CONFIG_KEY_0"] = "url." + w.origin + ".insteadOf"
 		g.AgentEnv["GIT_CONFIG_VALUE_0"] = originAddress
 	}
-	if err := st.SetGeneral(g); err != nil {
+	if err := st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	w.setScripts(st, c)
 	for _, r := range settings.RoleNames {
-		if err := st.PutRole(settings.Role{Name: r, Models: []string{fakeModel}, Assignment: api.AssignmentRoundRobin}); err != nil {
+		if err := st.PutRoleIf("", settings.Role{Name: r, Models: []string{fakeModel}, Assignment: api.AssignmentRoundRobin}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +163,7 @@ func (w *world) setScripts(st *settings.Store, c config) {
 	if c.delivery != nil {
 		delivery = *c.delivery
 	}
-	if err := st.PutProfile(settings.Profile{Name: "fake", CLI: api.CLICustom, Command: exe, Env: env,
+	if err := st.PutProfileIf("", settings.Profile{Name: "fake", CLI: api.CLICustom, Command: exe, Env: env,
 		PromptDelivery: delivery, Models: map[string]settings.Model{"default": {}}}); err != nil {
 		w.t.Fatal(err)
 	}

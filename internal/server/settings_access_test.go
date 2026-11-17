@@ -61,15 +61,15 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	s := newTestServer(t)
 	keep := api.Profile{Name: "keep", CLI: "custom", Command: "keep", Models: map[string]api.ProfileModel{"m": {}}}
-	if err := s.settings.PutProfile(keep); err != nil {
+	if err := s.settings.PutProfileIf("", keep); err != nil {
 		t.Fatal(err)
 	}
 	// A role lists the profile: deleting it with detach would change the
 	// role as well.
-	if err := s.settings.PutRole(api.RoleSettings{Name: "ceo", Models: []string{"keep/m"}, Assignment: "failover"}); err != nil {
+	if err := s.settings.PutRoleIf("", api.RoleSettings{Name: "ceo", Models: []string{"keep/m"}, Assignment: "failover"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutPrompt("pm", "customized pm"); err != nil {
+	if err := s.settings.PutPromptIf("", "pm", "customized pm"); err != nil {
 		t.Fatal(err)
 	}
 	free, err := s.settings.AddProject(newRepo(t), "free")
@@ -395,12 +395,12 @@ func TestAgentReadsNoCodeExecutionSettings(t *testing.T) {
 	if err := s.settings.PutUsageScriptIf("", "usage-canary", "function usage() return {} end\n"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutProfile(prof); err != nil {
+	if err := s.settings.PutProfileIf("", prof); err != nil {
 		t.Fatal(err)
 	}
 	g := s.settings.General()
 	g.AgentEnv = map[string]string{"GLOBAL": "env-canary"}
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	for _, role := range agentRoles {
@@ -446,7 +446,7 @@ func TestAgentReadsNoCodeExecutionSettings(t *testing.T) {
 // content type apply to the new routes.
 func TestForeignOriginRejectedOnSettingsWrites(t *testing.T) {
 	s := newTestServer(t)
-	if err := s.settings.PutPrompt("pm", "mine"); err != nil {
+	if err := s.settings.PutPromptIf("", "pm", "mine"); err != nil {
 		t.Fatal(err)
 	}
 	b := newBrowser(t, s)

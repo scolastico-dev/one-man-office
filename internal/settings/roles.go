@@ -135,11 +135,9 @@ func (s *Store) Role(name string) (Role, bool) {
 	return normalizeRole(r), true
 }
 
-// PutRole replaces a role's models and assignment mode. Unknown roles give
+// PutRoleIf replaces a role's models and assignment mode. Unknown roles give
 // not_found; unknown model ids and an invalid assignment give validation.
-func (s *Store) PutRole(r Role) error { return s.PutRoleIf("", r) }
-
-// PutRoleIf is PutRole guarded by a revision: the role's file is read again
+// It is guarded by a revision: the role's file is read again
 // first, and when rev is not empty and differs from the file's revision the
 // write is refused with code stale_settings.
 func (s *Store) PutRoleIf(rev string, r Role) error {

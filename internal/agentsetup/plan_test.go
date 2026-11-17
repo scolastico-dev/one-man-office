@@ -60,7 +60,7 @@ func TestCatalogProfilesValidate(t *testing.T) {
 		if !ok {
 			t.Fatalf("no catalog entry for %s", cli)
 		}
-		if err := s.PutProfile(p); err != nil {
+		if err := s.PutProfileIf("", p); err != nil {
 			t.Fatalf("%s: %v", cli, err)
 		}
 		for _, name := range Strength(cli) {

@@ -30,6 +30,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
+	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
 
 const helperEnv = "OMO_AGENTS_TEST_HELPER"
@@ -729,4 +730,17 @@ func TestStartPromptRetypedWhenItNeverShowed(t *testing.T) {
 	if n := strings.Count(a.sess.Screen(), "fake: typed:"); n != 1 {
 		t.Fatalf("%d lines reached the agent, want 1:\n%s", n, screen)
 	}
+}
+
+// TerminalByID returns the web terminal with the given terminal id (see
+// Agent.TerminalID).
+func (r *Registry) TerminalByID(terminalID string) (*webterm.Terminal, bool) {
+	r.mu.Lock()
+	sessionID, ok := r.terminals[terminalID]
+	a := r.agents[sessionID]
+	r.mu.Unlock()
+	if !ok || a == nil {
+		return nil, false
+	}
+	return a.Terminal(), true
 }

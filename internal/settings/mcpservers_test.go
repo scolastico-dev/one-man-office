@@ -277,7 +277,7 @@ func TestMCPGeneralSettings(t *testing.T) {
 	}
 	g := s.General()
 	g.MCP.Enabled = false
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(home, "settings.yaml"))

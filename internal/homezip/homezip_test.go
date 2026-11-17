@@ -74,17 +74,17 @@ func (h *testHome) fill(t *testing.T) {
 	g := st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Someone", "TOKEN": "secret-value"}
 	g.Limits.Tasks = 3
-	if err := st.SetGeneral(g); err != nil {
+	if err := st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutProfile(settings.Profile{Name: "work", CLI: api.CLICustom, Command: "agent", Env: map[string]string{"KEY": "v"},
+	if err := st.PutProfileIf("", settings.Profile{Name: "work", CLI: api.CLICustom, Command: "agent", Env: map[string]string{"KEY": "v"},
 		Models: map[string]settings.Model{"a": {}, "b": {}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutRole(settings.Role{Name: "developer", Models: []string{"work/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
+	if err := st.PutRoleIf("", settings.Role{Name: "developer", Models: []string{"work/a"}, Assignment: api.AssignmentRoundRobin}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutPrompt("developer-instructions", "Write tests first."); err != nil {
+	if err := st.PutPromptIf("", "developer-instructions", "Write tests first."); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.PutUsageScriptIf("0", "mine", "function usage() return {} end"); err != nil {
@@ -329,13 +329,13 @@ func TestFailedRenamePutsEverythingBack(t *testing.T) {
 	a.fill(t)
 	g := a.Settings.General()
 	g.Limits.Tasks = 7
-	if err := a.Settings.SetGeneral(g); err != nil {
+	if err := a.Settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Settings.PutPrompt("developer-instructions", "Other text."); err != nil {
+	if err := a.Settings.PutPromptIf("", "developer-instructions", "Other text."); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Settings.PutPrompt("pm-instructions", "New text."); err != nil {
+	if err := a.Settings.PutPromptIf("", "pm-instructions", "New text."); err != nil {
 		t.Fatal(err)
 	}
 	zipped := a.export(t, false)

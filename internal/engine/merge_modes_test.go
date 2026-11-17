@@ -22,7 +22,7 @@ func (h *harness) setMergeDefault(kind, mode string) {
 	case "story_task":
 		g.MergeDefaults.StoryTask = mode
 	}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }

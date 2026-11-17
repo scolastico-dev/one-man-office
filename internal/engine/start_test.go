@@ -521,7 +521,7 @@ func TestStartRefusesWorktreeThatIsNotItsOwn(t *testing.T) {
 
 func TestNoModelForRoleSetsStartBlocked(t *testing.T) {
 	h := newHarness(t)
-	if err := h.st.PutRole(settings.Role{Name: "developer", Assignment: api.AssignmentRoundRobin}); err != nil {
+	if err := h.st.PutRoleIf("", settings.Role{Name: "developer", Assignment: api.AssignmentRoundRobin}); err != nil {
 		t.Fatal(err)
 	}
 	task := h.standalone("one")
@@ -543,7 +543,7 @@ func TestNoModelForResumedWorkSetsAttention(t *testing.T) {
 	h.approve(task)
 	h.step()
 	dev := h.live(api.RoleDeveloper, task)
-	if err := h.st.PutRole(settings.Role{Name: "developer", Assignment: api.AssignmentRoundRobin}); err != nil {
+	if err := h.st.PutRoleIf("", settings.Role{Name: "developer", Assignment: api.AssignmentRoundRobin}); err != nil {
 		t.Fatal(err)
 	}
 	h.agent(dev.ID).exit(errors.New("exit status 1"))
@@ -938,7 +938,7 @@ func TestEveryBranchNameTakenFailsStart(t *testing.T) {
 func TestCrashRestartFailsOverToNextModel(t *testing.T) {
 	h := newHarness(t)
 	for _, r := range settings.RoleNames {
-		if err := h.st.PutRole(settings.Role{Name: r, Models: []string{"fake/a", "fake/b"}, Assignment: api.AssignmentFailover}); err != nil {
+		if err := h.st.PutRoleIf("", settings.Role{Name: r, Models: []string{"fake/a", "fake/b"}, Assignment: api.AssignmentFailover}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -127,7 +127,7 @@ func TestCEOSwitchedOffIsRefused(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
 	g.CEO.Enabled = false
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.e.StartCEO(h.ctx, false); errCodeOf(err) != api.CodeValidation {

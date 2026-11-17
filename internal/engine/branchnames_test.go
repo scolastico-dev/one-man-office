@@ -14,7 +14,7 @@ func (h *harness) setBranchTemplate(tmpl string) {
 	h.t.Helper()
 	g := h.st.General()
 	g.Branches.Template = tmpl
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -157,7 +157,7 @@ func TestBranchNamesTakenByRepositoryAndRecords(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
 	g.Limits = api.LimitSettings{Tasks: 20, Stories: 20}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	gitRun(t, h.repo, "branch", "omo/local-one")
@@ -199,7 +199,7 @@ func TestBranchTemplateNeverAdoptsAForeignBranch(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
 	g.Limits = api.LimitSettings{Tasks: 20, Stories: 20}
-	if err := h.st.SetGeneral(g); err != nil {
+	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	h.setBranchTemplate("{slug}")

@@ -592,7 +592,7 @@ func TestSettingsWriteWhileClosingDoesNotPanic(t *testing.T) {
 	s := newTestServer(t)
 	s.Close()
 	// The store still works; the change cannot be recorded any more.
-	if err := s.settings.SetGeneral(s.settings.General()); err != nil {
+	if err := s.settings.SetGeneralIf("", s.settings.General()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -948,7 +948,7 @@ func TestPatchSettingsReplacesLists(t *testing.T) {
 	g := s.settings.General()
 	g.WorkspaceRoots = []api.WorkspaceRoot{{Path: a, MaxDepth: 2, Ignore: []string{"x"}}, {Path: t.TempDir(), MaxDepth: 3}}
 	g.AgentEnv = map[string]string{"A": "1", "B": "2"}
-	if err := s.settings.SetGeneral(g); err != nil {
+	if err := s.settings.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"workspace_roots": []map[string]any{{"path": c}}})

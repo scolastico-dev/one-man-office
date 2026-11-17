@@ -74,7 +74,7 @@ func TestExportTextPerRepositoryEndToEnd(t *testing.T) {
 	st := w.openSettings()
 	g := st.General()
 	g.AgentEnv[ghLogVariable] = log
-	if err := st.SetGeneral(g); err != nil {
+	if err := st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	w.setScripts(st, config{scripts: map[string]string{

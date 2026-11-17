@@ -41,7 +41,7 @@ func TestMalformedHandEditKeepsLastValidAndReportsError(t *testing.T) {
 	s, home, log := openTest(t)
 	g := s.General()
 	g.Limits.Tasks = 6
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	log.take()
@@ -125,7 +125,7 @@ func TestSetGeneralValidates(t *testing.T) {
 	for field, mutate := range cases {
 		g := Defaults()
 		mutate(&g)
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, field) {
 			t.Errorf("%s: err = %v", field, err)
@@ -137,7 +137,7 @@ func TestSetGeneralValidates(t *testing.T) {
 	g := Defaults()
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: "~/workspace", MaxDepth: 4, Ignore: []string{"node_modules"}}}
 	g.Health.SilentAfter = Duration(time.Hour)
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(s.General(), g) {
@@ -216,7 +216,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	} {
 		g := Defaults()
 		g.WorkspaceRoots = c.roots
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || fieldOf(err) != c.field {
 			t.Errorf("%s: err = %v", c.field, err)
@@ -228,7 +228,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	// The same pattern in two roots is fine.
 	g := Defaults()
 	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", MaxDepth: 4, Ignore: []string{"x"}}, {Path: "/b", MaxDepth: 4, Ignore: []string{"x"}}}
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,7 +245,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	if _, err := s.UpdateGeneral("", func(g *General) error { g.Limits.Tasks = 5; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGeneral(s.General()); err != nil {
+	if err := s.SetGeneralIf("", s.General()); err != nil {
 		t.Fatal(err)
 	}
 	// A new repeat is refused.
@@ -319,7 +319,7 @@ func TestStoryTaskDefaultsAreValidated(t *testing.T) {
 	} {
 		g := Defaults()
 		mutate(&g)
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, field) {
 			t.Errorf("%s: err = %v", field, err)
@@ -354,7 +354,7 @@ func TestOpenTicketsAsPageIsOffByDefault(t *testing.T) {
 	}
 	g := s.General()
 	g.UI.OpenTicketsAsPage = false
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
@@ -445,7 +445,7 @@ func TestPluginLists(t *testing.T) {
 	good := []string{"https://raw.githubusercontent.com/someone/lists/main/omo.yaml", "http://127.0.0.1:8080/list.yaml?x=1"}
 	g := Defaults()
 	g.PluginLists = good
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.General().PluginLists; !reflect.DeepEqual(got, good) {
@@ -471,7 +471,7 @@ func TestPluginLists(t *testing.T) {
 	} {
 		g := Defaults()
 		g.PluginLists = c.lists
-		err := s.SetGeneral(g)
+		err := s.SetGeneralIf("", g)
 		var ae *api.Error
 		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, c.want) {
 			t.Errorf("%.40q: err = %v, want %q", c.lists, err, c.want)

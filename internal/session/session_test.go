@@ -215,3 +215,15 @@ func TestOnOutputReceivesRawBytes(t *testing.T) {
 		t.Fatalf("OnOutput bytes = %q, want %q", got, "a\x1b[1mb")
 	}
 }
+
+// SendTextAndKeys keeps typed text and following control keys in distinct PTY
+// writes. Full-screen CLIs can otherwise interpret the combined burst as a
+// paste and insert Enter instead of submitting the text.
+func (s *Session) SendTextAndKeys(text, keys string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	return s.sendTextAndKeys(text, keys)
+}
+
+// SendLine types text and a carriage return.
+func (s *Session) SendLine(text string) error { return s.SendText(text + "\r") }

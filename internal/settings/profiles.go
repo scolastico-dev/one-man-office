@@ -277,13 +277,11 @@ func (s *Store) Profile(name string) (Profile, bool) {
 	return normalizeProfile(p), true
 }
 
-// PutProfile creates or replaces a profile and writes its file. Invalid
+// PutProfileIf creates or replaces a profile and writes its file. Invalid
 // profiles are rejected with code validation. A profile that drops a model
 // which a role still lists is refused with code in_use, naming the roles and
 // models.
-func (s *Store) PutProfile(p Profile) error { return s.PutProfileIf("", p) }
-
-// PutProfileIf is PutProfile guarded by a revision: the profile's file is
+// It is guarded by a revision: the profile's file is
 // read again first, and when rev is not empty and differs from the file's
 // revision the write is refused with code stale_settings. rev NoRevision
 // means create only: refused when the file exists.
@@ -335,12 +333,10 @@ func (s *Store) PutProfileIf(rev string, p Profile) error {
 	})
 }
 
-// DeleteProfile removes a profile's file. It fails with code in_use, naming
+// DeleteProfileIf removes a profile's file. It fails with code in_use, naming
 // the roles (Details api.ProfileInUse), while a role lists one of the
 // profile's models. A file that could not be loaded can be deleted too.
-func (s *Store) DeleteProfile(name string) error { return s.DeleteProfileIf("", name) }
-
-// DeleteProfileIf is DeleteProfile guarded by a revision, as PutProfileIf.
+// It is guarded by a revision, as PutProfileIf.
 func (s *Store) DeleteProfileIf(rev, name string) error {
 	_, err := s.deleteProfile(rev, name, false)
 	return err
