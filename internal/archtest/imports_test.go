@@ -25,7 +25,7 @@ var guarded = []string{
 	"usage", "luabox", "skillsets", "forge", "plugins", "pluginmanager",
 	"codexauth", "discover", "agentsetup", "folderlist", "textsafe", "userterm",
 	"claudetrust", "agentcli", "homefile", "childenv", "branchname", "homezip",
-	"mcpserver", "aicmd",
+	"mcpserver", "aicmd", "mcpauth", "mcprelay", "mcpclients",
 }
 
 var forbidden = []string{
