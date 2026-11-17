@@ -1,784 +1,277 @@
-# Writing plugins
+# Plugins
 
-Until the omo 1.0.0 release, every repository plugin manifest stays at version
-1.0.0; do not increment plugin versions.
+A plugin reacts to what happens on the board: a ticket that needs you, a
+question, an agent that starts or ends, a timer, or a button you press. omo
+lists plugins on **Settings → Plugins** and installs them from a git source.
 
-Plugins react to office events and run on a schedule or on demand. A plugin is
-a directory with a `plugin.json` manifest plus the Lua files or executables it
-references. Plugins run with the user's permissions. Lua `io` provides
-unrestricted direct file reads and writes; command hooks and `omo.exec` also run
-with those permissions.
+Plugins run as you, with your rights. Install only plugins whose code you
+trust; the tags below say who looked at it, nothing more.
 
-The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
-the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
-Lua and command hooks. The bundled [`filebrowser`](../plugins/filebrowser)
-plugin is the reference global company-load plugin with listing, picker, and
-cross-platform POSIX/Windows transfer behavior.
+- [Installing a plugin](#installing-a-plugin)
+- [The plugins omo ships](#the-plugins-omo-ships)
+- [Additional plugin lists](#additional-plugin-lists)
+- [Writing a plugin](#writing-a-plugin)
 
-## Where plugins live
+## Installing a plugin
 
-| Scope | Directory | Configuration |
+**Settings → Plugins** has three parts:
+
+- **Installed**: every installed plugin with its state, a **Runs its hooks**
+  switch, its source and version, its configuration, its log and its global
+  buttons. **Update** fetches the plugin again from the same source.
+  **Install plugin…** installs from a source you type.
+- **Available plugins**: omo's plugin list, with an **Install** button per
+  plugin.
+- **Additional plugin lists**: lists other people publish (see
+  [below](#additional-plugin-lists)).
+
+Each listed plugin has a tag:
+
+| Tag | Meaning | What omo does on Install |
 |---|---|---|
-| Office-local | `.omo/plugins/<name>/` | `plugins.installed.<name>` in `.omo/omo.yaml` |
-| Global | `OMO_HOME/plugins/<name>/` | `plugins.installed.<name>` in the global `config.yaml` |
+| `official` | Kept in omo's repository by its maintainers and released with omo. | Installs at once. |
+| `recommended` | Someone else's plugin that the maintainers looked at, at the listed version. | Warns that it is someone else's code and asks first. |
+| `community` | Listed, not reviewed. | Warns more strongly and asks first. |
 
-The company dashboard loads only global plugins. That keeps its lifecycle
-independent of which offices happen to be running; office-local plugins cannot
-inject code into the shared dashboard.
+A source you type under **Install plugin…** always counts as `community`, even
+when omo's list names it. omo decides the tag on the server: changing a
+plugin's source, folder or branch, or updating it from a source other than the
+installed one, asks again.
 
-The bundled `filebrowser` plugin is installed globally at
-`OMO_HOME/plugins/filebrowser` and recorded as `builtin:filebrowser` in the
-independent global `config.yaml`. It is available to every company dashboard,
-not to office-local plugin runtimes. Disable it with `omo plugin disable
---global filebrowser`; the disabled configuration entry and directory remain. Removing
-the configuration entry while retaining the directory is an explicit opt-out:
-automatic bundled reclaim does not claim that directory. Configure the entry
-again to resume managed global loading.
+The **Install plugin…** dialog takes:
 
-Omo-owned global `filebrowser` copies carry a `.omo-bundled` marker containing
-the `builtin:filebrowser` source and the embedded content digest. Startup and
-explicit global sync refresh a marked copy when the embedded content changes.
-A configured `builtin:filebrowser` entry also authorizes one refresh and marker
-adoption for an existing markerless copy. Other markerless directories and
-copies with a foreign or malformed marker remain user-owned and untouched.
+- **Source**: an `https://` or `ssh://` address, a `host:path` address, or an
+  absolute path to a folder on this computer. `http://`, `git://` and
+  `file://` are not accepted.
+- **Folder in the repository**: the plugin's folder; empty for the top.
+- **Branch or tag**: empty for the default branch. Pin a tag or commit you
+  read: a plugin that follows a branch changes when its author pushes.
+- **Name**: the plugin's name in omo.
 
-Unmanaged directories are loaded as they are. Managed plugins are cloned from
-Git into `.repos/` inside the plugin root and activated by an atomic copy into
-`<name>/`. A local directory or configuration entry shadows the same global
-installation name, including a disabled local entry. See
-[Global plugins](global-home.md#global-plugins) for the shared scope.
+omo fetches the source into `OMO_HOME/plugins/<name>/` and checks the plugin
+before it replaces an earlier version; a failed update keeps the earlier one.
+Nothing is fetched when omo starts. The plugin's switch and configuration are
+stored in `OMO_HOME/plugins/<name>.yaml`.
 
-## A first plugin
+Where the list comes from: omo reads `plugins/index.yaml` from the `release`
+branch of its repository when the page asks, and keeps it for ten minutes. When
+it cannot be read, the page says "omo's plugin list could not be loaded" with
+**Retry**; installed plugins keep working. The variable
+`OMO_PLUGIN_CATALOG=<source>[#<ref>]`, set when omo starts, makes it read the
+list from another repository or folder (a fork, for example); the official
+plugins then install from there too.
 
-Create `.omo/plugins/hello/plugin.json`:
+How a plugin gets onto omo's list is described in
+[plugins/README.md](../plugins/README.md).
 
-```json
-{
-  "name": "hello",
-  "version": "1.0.0",
-  "description": "Log every new job",
-  "hooks": [
-    {"event": "job_create", "lua": "hello.lua", "timeout": "5s"}
-  ]
-}
+### A plugin's state
+
+The list shows whether each plugin is ready, running, switched off, failed in
+its last run ("The last run failed"), does not load ("It does not load"), or is
+"Not installed" (its settings are there, its files are not; **Install** fetches
+it). The plugin's log keeps its last 500 lines, newest last.
+
+## The plugins omo ships
+
+| Plugin | What it does |
+|---|---|
+| [pushover](../plugins/pushover/README.md) | A Pushover notification on your phone when a ticket needs your attention or an agent asks you a question. Button: "Send a test notification". |
+| [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
+| [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
+
+Each plugin's README lists its configuration keys. Pushover and Discord send at
+most 20 messages an hour by default (`max_per_hour`).
+
+## Additional plugin lists
+
+Under **Additional plugin lists** (or `plugin_lists` in `settings.yaml`) you
+can add up to 16 addresses of list files that someone else publishes:
+
+```yaml
+plugin_lists:
+  - https://raw.githubusercontent.com/someone/omo-plugins/main/index.yaml
 ```
 
-And `.omo/plugins/hello/hello.lua`:
-
-```lua
-omo.log("new " .. event.data.role .. " job: " .. event.data.title)
-```
-
-Start the office. The Plugins tab in the TUI lists `hello` and shows its latest
-log line after the first job is created. The plugin also needs no entry in
-`omo.yaml`; unmanaged directories are picked up automatically.
-
-![Plugins tab listing loaded plugins with hook counts and last run](../.github/assets/plugins.png)
-
-## The manifest
-
-```json
-{
-  "name": "example",
-  "version": "1.0.0",
-  "description": "What the plugin does",
-  "default_config": {
-    "check_interval": "10m",
-    "reminders": {"enabled": true, "after": "5m"}
-  },
-  "requires": [
-    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules", "branch": "stable", "version": "^1.2.3"}
-  ],
-  "hooks": [
-    {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
-    {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
-    {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"},
-    {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "roles": ["user", "ceo"], "lua": "report.lua"},
-    {"event": "load", "lua": "load.lua"},
-    {"event": "startup", "lua": "startup.lua"},
-    {"event": "shutdown", "lua": "shutdown.lua"},
-    {"event": "unload", "lua": "unload.lua"},
-    {"event": "company_startup", "lua": "company.lua"},
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
-  ]
-}
-```
-
-| Field | Required | Meaning |
-|---|---|---|
-| `name` | yes | Manifest name: one path segment of letters, digits, `.`, `_`, or `-`. Shown in the Plugins tab and used by `omo plugin actions`/`trigger`. Must be unique across all loaded plugins. |
-| `version`, `description` | no | `version` is a SemVer version such as `1.2.3`; `description` is informational. |
-| `default_config` | no | A JSON object copied into `plugins.installed.<name>.config` on install and merged on update (see [Configuration](#plugin-configuration)). Must be an object; omit it or use `{}` for none. |
-| `requires` | no | Other plugins this one needs (see [Dependencies](#dependencies)). |
-| `hooks` | yes | The list of hooks below. Hooks run in manifest order. |
-
-Each hook has:
-
-| Field | Meaning |
-|---|---|
-| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `load`, `unload`, `startup`, `shutdown`, `company_shutdown`, `company_startup`, or `company_load`. |
-| `lua` | A Lua file relative to the plugin directory. Exactly one of `lua` or `command` is required. |
-| `command` | An argv array. The executable is resolved on `PATH`; no shell is involved. |
-| `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`, or `10s` for lifecycle hooks. The hook is cancelled when it expires. |
-| `interval` | Cron only: how often to run, as a positive duration. |
-| `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
-| `name`, `description` | Manual only: the action name and a non-empty description. |
-| `manual_args` | Manual only: whether `omo plugin trigger` may pass arguments. Defaults to `false`. |
-| `roles` | Manual only: identities allowed to trigger the action. Values are `user` or any role from `config.AllRoles`; duplicates and unknown roles are rejected. The default is exactly `["user"]`. |
-| `javascript` | `company_load` only: one exact regular JavaScript file injected after the dashboard and its initial state load. Required for that event. |
-| `files` | `company_load` only: additional exports. A declaration may name one exact regular file, a directory (trailing `/` is optional when it resolves to a directory), or a glob using `*`, `?`, character classes, and `**`. Paths stay relative to the plugin. |
-
-The manifest is decoded strictly; unknown fields, a hook with both `lua` and
-`command`, a Lua path outside the plugin directory, or a missing Lua file
-fail at load time with the plugin name in the error.
-
-## Events
-
-Every event carries `event.event` (the name) and `event.data`. Ordinary events
-also receive `at` (RFC 3339) and `at_unix` in `event.data`; office lifecycle
-events use only the exact payload fields documented below.
-
-### Company lifecycle
-
-The company dashboard recognizes two hooks from enabled or unmanaged **global**
-plugins:
-
-- `company_startup` is a normal Lua or command hook. It runs once while
-  `omo company` starts, before the public HTTP server accepts requests. Its
-  event data contains `home_path`, the absolute `OMO_HOME` directory. Startup hook
-  errors abort startup. Its durable plugin storage and logs live in
-  `OMO_HOME/plugins.db`; command hooks also receive `OMO_COMPANY=1` and use
-  `OMO_HOME` as `OMO_OFFICE_DIR`.
-- `company_load` is a declarative browser hook and therefore cannot use
-  `lua` or `command`. It requires `javascript` and may list extra `files`.
-  The loader validates exact files, directory trees, and glob matches at load
-  time. Every matched path must be regular and no symlink may cross the
-  snapshot boundary. The company snapshots the global plugin generation under
-  the shared update lock, exposes only declared files under a plugin-namespaced
-  URL, and resolves each request against that immutable snapshot. A directory
-  declaration exposes its regular files but never a directory listing; missing,
-  dangling, traversal, symlink, directory, and undeclared requests are not
-  served. Scripts and their `omo:company_load` events run sequentially in
-  dependency-first order, retaining manifest order within each plugin, and
-  awaited event listeners finish before the next plugin loads.
-
-The browser event's frozen `detail` contains `plugin` and the resolved,
-deep-frozen `config` snapshot for that plugin.
-
-### Office lifecycle
-
-Plugins are resolved in dependency-first order. Independent plugins retain the
-lexical installation-directory order, and `requires.name` may match either an
-installation name or a manifest name. Cycles reject loading with a deterministic
-cycle path. Hooks remain in manifest order within each plugin. `load` runs once
-after all selected plugins are loaded and receives `plugin` (installation name)
-and `scope` (`office` or `global`). `startup` runs after the office socket and
-runtime loops are running and CEO spawn has been requested; its data contains
-`office_path` and `office_started_at_unix`.
-
-`shutdown` runs exactly once when shutdown begins, before agents stop. It runs
-in reverse dependency order and receives `office_path`, `reason`, and `safe`.
-Safe shutdown supplies its first reason; ordinary close supplies an empty reason
-and `safe: false`. `unload` runs in reverse dependency order during idempotent
-manager close, before the closed barrier and before shared runtime snapshots are
-removed; it receives `plugin` and `scope`. Failures are logged and later hooks
-still run sequentially. These lifecycle events are immutable.
-
-`company_shutdown` runs in reverse dependency order at the beginning of company
-server close, before owned offices or shells stop, and receives `home_path`.
-
-Every `javascript` and `files` path is relative to the plugin directory on
-disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, an
-exact declaration `web/theme.css` therefore resolves from that plugin's
-immutable runtime snapshot. At runtime the company serves it as
-`/plugins/report-dashboard/web/theme.css`. The manifest name is always the
-first URL segment after `/plugins/`, so two plugins can both declare
-`web/theme.css` without colliding. The `javascript` entrypoint is exposed
-automatically and does not need to be repeated in `files`; undeclared files are
-not served, and directory declarations do not create directory listings. Use
-the manifest name and relative path directly when referring to an asset:
-
-```javascript
-const {onLoad} = window.omo;
-onLoad('report-dashboard', () => {
-  const css = document.createElement('link');
-  css.rel = 'stylesheet';
-  css.href = '/plugins/report-dashboard/web/theme.css';
-  document.head.append(css);
-});
-```
-
-Scripts are classic same-origin JavaScript. The deliberately small, frozen
-`window.omo` object contains:
-
-| Member | Purpose |
-|---|---|
-| `execute(command, args?, options?)` | Execute literal argv without a shell and return a promise for its exit event. |
-| `$(id)` | Short form of `document.getElementById(id)`. |
-| `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
-| `onLoad(pluginName, listener)` | Listen for `omo:company_load` for the named plugin and return a function that removes the listener. The callback receives the normal browser event. |
-| `selectedInstanceId(): string` | Return the live selected dashboard instance ID, or `''` when none is selected. This also works from a plugin-scoped API captured during extension loading and reports office, shell, and setup selections. |
-| `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
-| `trigger(office, action, args?)` | Trigger the bound plugin's manual action. `office === null` runs the global hook synchronously and returns `{request_id, result}`; an instance ID forwards through the authenticated office socket, starts the hook asynchronously, and returns `{request_id}`. |
-
-A replacement UI can use the token for the company's existing API routes:
-
-```javascript
-const {token} = window.omo;
-const headers = {'Content-Type': 'application/json'};
-if (token) headers.Authorization = `Bearer ${token}`;
-const state = await fetch('/api/state', {headers}).then(response => response.json());
-```
-
-After a capability-mode page reload, `token` is empty unless the page was
-opened again with the original access URL, because the fragment is deliberately
-removed from browser history.
-
-`execute` defaults to the company user's home directory. Set `options.cwd`
-to the canonical path of a trusted office to run there; any other directory is
-rejected. `options.onOutput({stream, data})` receives live `stdout` and
-`stderr` chunks, and `options.signal` accepts an `AbortSignal`. The promise
-rejects for a non-zero exit. At most eight plugin commands run at once;
-requests allow 128 literal arguments and never invoke a shell. `options.stdin`
-accepts a string, `Uint8Array`, `Blob`, or `File`. Requests with stdin use
-multipart form data with a JSON `request` part first and a `stdin` part second;
-requests without stdin retain the JSON body and content type. The multipart
-stream reaches the command's stdin and ends with EOF, while command output
-continues as NDJSON events. Plugins should ignore expected command statistics
-and show only useful stderr/errors.
-
-Company `trigger(null, action, args)` calls the global manual route and waits
-for the hook result. `trigger(office, action, args)` calls the running office's
-authenticated socket route and returns its durable request ID after admission;
-the office hook and its completion/failure audit continue asynchronously. Both
-routes bind the plugin name to the loaded extension, authenticate the user (or
-the forwarded office identity), enforce the action's allowed role before
-admission, reject disabled or missing actions, and apply the same per-plugin
-overlap guard. Global hook errors are returned in the HTTP response; office
-forwarding errors are returned only if the request cannot be admitted or sent.
-
-This complete example adds its own button to the sidebar, invokes a global
-manual action without a live office, and writes command output into an element
-the plugin owns:
-
-```javascript
-const {execute, $, ids, onLoad} = window.omo;
-
-onLoad('report-dashboard', () => {
-  const output = document.createElement('pre');
-  const button = document.createElement('button');
-  button.textContent = 'Build report';
-  button.onclick = async () => {
-    output.textContent = '';
-    await execute(
-      'omo',
-      ['plugin', 'trigger', '--global', 'report-dashboard', 'weekly'],
-      {onOutput: ({stream, data}) => { output.textContent += `${stream}: ${data}`; }}
-    );
-  };
-  $(ids.sidebar).append(button, output);
-});
-```
-
-Company plugins are trusted code. Startup hooks and injected JavaScript run
-with the user's authority, and same-origin plugin code is not a security
-sandbox. `window.omo.token` deliberately exposes the bearer capability so a
-plugin can make custom API requests. Treat it as a secret: never render, log,
-persist, or send it elsewhere. In Basic-auth and unsafe modes it is empty;
-custom requests should omit the `Authorization` header then so the browser can
-apply Basic credentials normally. Declared plugin files are served like
-built-in static assets (Basic auth still protects the whole site), so do not
-put credentials or other secrets in them.
-
-### `job_create` (mutable)
-
-Fires when a user or agent runs `omo job create`, before validation and
-persistence. Job-create authorization has already been checked.
-
-| `event.data` field | Meaning |
-|---|---|
-| `title`, `goal` | The requested title and goal text. |
-| `role` | `product_manager`, `developer`, or `freelancer`. |
-| `model` | The requested profile key, or `""`. |
-| `repo` | The requested repository key, or `""`. |
-| `parent_job` | The parent job ID, or `0`. |
-| `creator` | The creating agent's name, or `user`. |
-
-A hook may change `title`, `goal`, `model`, or `repo`; other fields are read
-only. Lua hooks edit the global `event` table in place. Command hooks print the
-replacement `data` object as JSON on stdout. The modified data then passes the
-normal server-side validation, so an invalid `repo` or `model` still fails the
-request.
-
-```lua
--- decorate.lua: prepend a house rule to every developer goal
-if event.data.role == "developer" then
-  event.data.goal = "Run `make lint` before every commit.\n\n" .. event.data.goal
-end
-```
-
-### `prompt_render` (mutable)
-
-Fires synchronously after a role prompt is fully rendered and before it is
-stored in `agents.ready_prompt` or returned by `omo ready`. This includes
-restored safe-shutdown handoffs and the special `branch_namer` prompt. Hooks
-run in dependency-first plugin order; independent plugins retain lexical
-installation-directory order. Each successful hook receives the preceding
-hook's text.
-
-| `event.data` field | Meaning |
-|---|---|
-| `role` | The role receiving the prompt. |
-| `agent` | The agent name receiving the prompt. |
-| `job_id` | The attached job ID, or `0`. |
-| `text` | The fully rendered prompt. |
-| `merge_target` | The effective completion policy: `automerge` or `asis`. |
-| `repo` | The trusted repository key, when the prompt has repository context. |
-| `branch` | The trusted job or integration branch, when present. |
-| `base_branch` | The trusted checkout or PM integration base branch, when present. |
-
-Only `text` is mutable. A hook must return a string. Each plugin may append at
-most 2 KiB in UTF-8 bytes across all of its `prompt_render` hooks for one
-prompt; the plugin's first input is the growth baseline. Invalid output or
-excess growth is logged as a plugin error and the last valid text continues
-through later hooks. Prompt contents are not included in plugin runtime
-metadata, audit events, or error messages. `PreviewPrompt` skips this event
-because hooks may mutate plugin state.
-
-### `agent_start`
-
-Fires after an agent process has been spawned.
-
-| `event.data` field | Meaning |
-|---|---|
-| `agent` | Agent name, such as `developer-ada`. |
-| `role` | Role key. |
-| `profile` | The model profile key used. |
-| `job_id` | The job ID, or `0`. |
-| `workdir` | The agent's working directory. |
-
-### `agent_log_line`
-
-Fires for every readable transcript line an agent produces. This is
-high-volume; keep hooks cheap and prefer Lua over spawning a process per line.
-
-| `event.data` field | Meaning |
-|---|---|
-| `agent`, `role`, `profile`, `job_id` | As for `agent_start`. |
-| `line` | The transcript line. |
-
-### `cron`
-
-Fires every `interval`, with the first run one interval after the office
-loads plugins. In addition to the timestamp fields, the snapshot includes:
-
-| Field | Meaning |
-|---|---|
-| `user_inbox` | Body-free unread user-mail metadata, each entry containing `id`, `from`, `subject`, `priority`, and `created_at_unix`. |
-| `ceo_activity_at_unix` | Unix timestamp of the latest observed CEO input or output, or `0` when none is available. |
-| `office_path` | Canonical absolute path of the office. |
-| `office_started_at_unix` | Unix timestamp for the current office session start. |
-| `shutdown_in_progress` | Boolean indicating that orderly or usage-triggered shutdown is already underway. |
-| `open_incidents` | Integer count of incidents whose state is `open`. |
-
-`event.data.agents` is a read-only lifecycle snapshot of every spawning,
-working, or waiting agent:
-
-| Agent field | Meaning |
-|---|---|
-| `name`, `role`, `state` | Identity and lifecycle state (`spawning`, `working`, `waiting`). |
-| `job_id`, `job_state`, `job_updated_at_unix` | The attached job, its state, and last transition time. |
-| `step`, `step_updated_at_unix` | The last `omo step` text and when it was published. |
-| `created_at_unix` | When the agent row was created. |
-| `unread_messages` | Count of unread mail addressed to the agent. |
-
-If the snapshot could not be built, `event.data.snapshot_error` holds the
-reason and `agents` is empty. A cron hook never overlaps with itself; a slow
-run delays its next tick.
-
-### `manual`
-
-Fires when you trigger the action from the CLI or the TUI. See
-[Manual actions](#manual-actions).
-
-| `event.data` field | Meaning |
-|---|---|
-| `plugin`, `action` | The manifest name and the action name. |
-| `args` | The argument list as an ordered string array (a one-based Lua table). Empty unless `manual_args` is true. |
-| `caller` | The concrete identity that triggered the action: `user` or the authenticated agent name. |
-| `caller_role` | The triggering identity's role: `user` or the authenticated agent role. |
-| `request_id` | Correlates the request with its audit events. |
-| `job_id`, `repo`, `branch`, `base_branch`, `worktree` | Trusted single-job metadata for an authenticated agent attached to a job; absent for user callers and agents without jobs. |
-| `integration_branches` | For a product manager manual event, the trusted repository-sorted list of as-is `{repo, branch, base_branch, worktree}` entries; absent for prompt events and other roles. |
-
-A manual hook may optionally return one JSON-compatible value no larger than
-64 KiB. Lua hooks return it as their final value, and command hooks write one
-JSON value to stdout; the value is returned to the synchronous CLI/socket
-caller. Pullrequest-style hooks may also set `event.data.result` to a legacy
-string no larger than 4 KiB. Hooks that do not return a value retain ordinary
-successful completion behavior. Result values and manual arguments are not
-written to request or outcome audit records.
-
-When trusted job context exists, a successful authenticated manual result that
-identifies a repository and contains an `http://` or `https://` URL is recorded
-as that job's pull-request result. Product-manager multi-repository results are
-recorded per repository as well. Results without trusted job context, unrelated
-results, malformed values, and user-ambiguous results are not recorded as
-pull-request records.
-
-## Lua hooks
-
-Lua hooks run in a [gopher-lua](https://github.com/yuin/gopher-lua)
-interpreter with the base, table, string, math, `io`, and `os` standard
-libraries. Lua `io` permits unrestricted direct file reads and writes with the
-user's permissions. `dofile` and `loadfile` are unavailable. Each hook
-invocation is a fresh interpreter with three globals:
-
-- `event`: the event table described above.
-- `config`: the plugin's configuration object from `omo.yaml`.
-- `omo`: the API below.
-
-| Function | Purpose |
-|---|---|
-| `omo.log(message)` | Record a log line. The latest line appears in the Plugins overview; the detail view shows timestamped history bounded by `plugins.log_lines`. |
-| `omo.local_get(key)` / `omo.local_set(key, value)` / `omo.local_delete(key)` | Durable key-value storage private to this plugin. Values survive restarts in SQLite. |
-| `omo.local_keys([prefix])` | Keys in lexical order, optionally filtered by prefix. Use it to reconcile stale state. |
-| `omo.global_get` / `omo.global_set` / `omo.global_delete` / `omo.global_keys` | The same API on a namespace shared by every plugin in the office. |
-| `omo.exec(command, arg, ...)` | Run an external command with the plugin directory as working directory. Returns `(combined_output, error_string)`; the error string is `""` on success. Arguments are passed literally, never through a shell. |
-| `omo.duration(value)` | Convert `"500ms"`, `"5m"`, or `"1h30m"` to seconds. Numbers are returned unchanged, so config values may be either form. |
-| `omo.mkdir_all(path)` | Create `path` and missing parents with private directory permissions. Returns `(success, error_string)`. |
-| `omo.write_file_exclusive(path, contents)` | Create a new private file without overwriting an existing file. A partial file is removed if writing or closing fails. Returns `(success, error_string)`. |
-| `omo.platform()` | Return `{os=<runtime GOOS>, arch=<runtime GOARCH>}` for the running omo process. |
-| `omo.path_is_absolute(path)` | Evaluate whether `path` is absolute on the current host. On Windows, drive-rooted and UNC paths are absolute; drive-relative paths and paths with only one leading slash or backslash are not. |
-
-These are trusted filesystem primitives, not a sandbox. They operate with the
-same user permissions as the plugin's other Lua `io` and `os` APIs.
-
-`omo.http` accepts an HTTP(S) request table and returns `(response, error)`. A successful
-response contains numeric `status`, string `body`, and a string-array
-`headers` table. Use exactly one of `form`, `json`, or string `body`; omitting
-all three sends an empty request body. The default timeout is 10 seconds, and
-the response body is capped at 1 MiB. Redirects are followed only when the
-destination has the same effective host and port. HTTPS uses Go's standard TLS
-defaults.
-
-```lua
-local response, err = omo.http{
-  method = "POST",
-  url = "https://api.example.test/report",
-  headers = { ["X-Request"] = "nightly" },
-  json = { status = "ready", count = 3 },
-  timeout = "5s"
-}
-if not response then
-  error(err) -- sanitized transport/timeout/redirect/body-limit error
-end
-if response.status >= 200 and response.status < 300 then
-  omo.log("report delivered: " .. response.body)
-end
-```
-
-Transport, timeout, redirect, and response-limit errors are sanitized and do
-not include request URLs, headers, or body contents. HTTP status responses are
-returned to the hook for status-specific handling.
-
-Raising a Lua error (`error("...")`) fails the hook; the message is recorded in
-the plugin log and, for manual actions, returned to the CLI caller.
-
-Storage values are stored as Lua values; numbers and strings round-trip. Read
-them back with `tonumber` when arithmetic is needed, as the nudge plugin does.
-
-## Command hooks
-
-A command hook runs the configured argv with the event as JSON on stdin:
-
-```json
-{"event": "agent_start", "data": {"agent": "developer-ada", "role": "developer", "...": "..."}}
-```
-
-The environment contains:
-
-| Variable | Value |
-|---|---|
-| `OMO_PLUGIN_NAME` | The manifest name. |
-| `OMO_PLUGIN_EVENT` | The event name. |
-| `OMO_PLUGIN_CONFIG` | The plugin configuration object as JSON. |
-| `OMO_OFFICE_DIR` | The office root, so a nested `omo` command addresses the running office. |
-
-Stdout is a protocol channel, not a log stream:
-
-- For the mutable `job_create` and `prompt_render` events, stdout must contain
-  one complete JSON object: the replacement `data`. It is capped at 64 KiB.
-- For a `manual` event, stdout may contain one complete JSON value as the
-  action result. It is capped at 64 KiB.
-- For every other event, stdout is discarded.
-
-Write diagnostics to **stderr**; `omo` records it as the plugin log through a
-bounded tail buffer. A non-zero exit fails the hook.
-
-Ordinary commands launched by hooks or `omo.exec` get one second after exit or
-cancellation for inherited output pipes to drain. Immutable lifecycle commands
-discard stdout and retain bounded stderr diagnostics; when cancellation occurs,
-their stderr readers close immediately so descendants retaining descriptors
-cannot extend a lifecycle timeout or block office shutdown.
-
-### Calling `omo` from a plugin
-
-Plugin subprocesses run under a reserved system identity. `omo send` from a
-plugin uses the `omo` sender and normal routing, and `omo type` is authorized
-for trusted plugins, which is how the nudge plugin delivers reminders without
-creating mail:
-
-```lua
-local output, err = omo.exec("omo", "type", agent, "Please run `omo inbox`.", "--key", "enter")
-if err ~= "" then
-  omo.log("nudge failed: " .. err)
-end
-```
-
-Management commands such as `omo office halt-spawns` are user-only. A manual
-action can run them as the triggering user by clearing the plugin marker, as
-the bundled `tools` plugin does:
-
-```lua
-local out, err = omo.exec("env", "OMO_PLUGIN_NAME=", "OMO_PLUGIN_EVENT=", "omo", "office", "halt-spawns")
-```
-
-## Plugin configuration
-
-Each installed plugin may have an arbitrary `config` object in `omo.yaml`:
+- An address is `http://` or `https://` and points at a plain file (no git; a
+  file in a GitHub repository works through its raw.githubusercontent.com
+  address), without user name, password or `#` part.
+- omo fetches each list when the Plugins page asks (at most 15 seconds, 64 KiB,
+  5 redirects), keeps it ten minutes (a failure one minute) and shows its
+  plugins under the list's address. A list that fails shows its error there;
+  the other lists are not affected.
+- Every plugin of an additional list is treated as `community`, whatever tag
+  the file gives.
+- A plugin whose name, or whose source, folder and ref, omo's own list or an
+  earlier list already has is not shown again; the list says so in a note.
+
+The file has the format of omo's own list, except that every entry needs its
+own `source`:
 
 ```yaml
 plugins:
-  installed:
-    example:
-      source: https://github.com/acme/omo-plugins.git
-      subpath: plugins/example
-      branch: stable
-      enabled: true
-      config:
-        check_interval: 10m
-        severity: warning
+  - name: standup-notes           # letters, digits, ".", "_" or "-"; at most 64
+    tag: community                # shown as community either way
+    description: Posts a stand-up summary every morning.   # one line, at most 200 characters
+    source: https://github.com/someone/omo-standup-notes.git   # https://, ssh:// or host:path
+    ref: v1.2.0                   # optional: a branch, tag or commit; empty is the default branch
+    path: plugin                  # optional: the plugin's folder in that repository
 ```
 
-Lua hooks receive it as the `config` table; command hooks as `OMO_PLUGIN_CONFIG`.
-A cron hook with `interval_config` reads its interval from the named top-level
-key. Restart the office after changing plugin config; `omo reload` applies
-scheduling and model changes but does not reload plugins.
+An entry that breaks a rule is left out with a note naming it; the rest of the
+list still shows.
 
-`default_config` seeds and maintains that object:
+## Writing a plugin
 
-- `omo plugin install` copies the defaults into `plugins.installed.<name>.config`.
-- Plugin updates, including startup updates and updates of disabled plugins,
-  recursively add missing object keys.
-- Existing values always win, including `false`, zero, empty strings, arrays,
-  and `null`. Arrays are never appended to and type conflicts are left intact.
-- An absent `config` receives the defaults; an explicit `config: null` stays null.
-- Defaults removed from a later manifest do not delete stored keys.
-- Unmanaged directories never have their defaults written automatically.
+A plugin is a folder with a `plugin.json` and the files its hooks name. Put it
+in a git repository, or develop it in a local folder and install that folder by
+its absolute path (press **Update** after each change).
 
-Config edits retain YAML comments, quoting, flow styles, and file permissions.
-Values inherited through YAML anchors remain user-owned, with new defaults
-added locally.
-
-## Manual actions
-
-Manual hooks make a plugin runnable on demand. Each needs a `name` (starting
-with a letter or digit, then letters, digits, `.`, `_`, or `-`) unique within
-the plugin and a non-empty `description`. Set `manual_args: true` on a hook to
-let it accept arguments. Set `roles` to allow the user or authenticated agents
-with the listed roles to trigger the action. The allowed role values are `user`
-plus every role in `config.AllRoles`; omitted `roles` is the exact default
-`["user"]`.
+### plugin.json
 
 ```json
 {
-  "name": "report",
+  "name": "standup-notes",
+  "version": "1.0.0",
+  "description": "Posts a stand-up summary every morning",
+  "default_config": { "webhook_url": "" },
   "hooks": [
-    {"event": "manual", "name": "weekly", "description": "Build a weekly report", "manual_args": true, "lua": "report.lua", "timeout": "30s"},
-    {"event": "manual", "name": "reset", "description": "Clear saved report state", "lua": "reset.lua"}
+    { "event": "timer", "interval": "1h", "lua": "standup.lua" },
+    { "event": "ticket_needs_attention", "command": ["./notify.sh"], "timeout": "45s" },
+    { "event": "manual", "name": "test", "description": "Send a test message", "scope": "global", "lua": "standup.lua" }
   ]
 }
 ```
 
-From another terminal in the running office directory:
+| Field | Rule |
+|---|---|
+| `name` | Letters, digits, `.`, `_` or `-`, starting with a letter or digit, at most 64 characters. |
+| `version`, `description` | Shown on the Plugins page; the description is at most 1,000 bytes. |
+| `default_config` | A JSON object: the configuration a fresh install starts with. You edit it on the plugin's page as **Configuration (JSON)**. |
+| `hooks` | At most 64. |
 
-```bash
-omo plugin actions                     # every enabled action
-omo plugin actions report              # one plugin
-omo plugin trigger report reset
-omo plugin trigger report weekly -- "two words" --verbose
-omo plugin trigger --global report weekly # no running office required
+Every hook has an `event` and exactly one of:
+
+- `lua`: a Lua file inside the plugin's folder (at most 64 KiB, no
+  precompiled Lua), run in omo's sandbox (see [Lua hooks](#lua-hooks)).
+- `command`: a program and its arguments as a list (at most 64 parts), started
+  without a shell in the plugin's folder.
+
+Optional fields:
+
+- `timeout`: the time limit of one run, `1s` to `5m`, default `30s`.
+- Timer hooks: `interval` (a duration of at least `1m`), or `interval_config`
+  naming the configuration key that holds it.
+- Manual hooks: `name` (the button's id), `description` (its text, at most 200
+  characters) and `scope`: `global` (a button on the plugin's page; the
+  default) or `ticket` (a button on every ticket).
+
+The manifest is read strictly: unknown fields are refused. Fields and events
+of plugins written for omo 0.11 (`requires`, `roles`, `manual_args`,
+`javascript`, `files`, `prompt_render`, `cron`, `startup` and the like) are
+refused with a message saying what to use instead.
+
+### Events
+
+A command hook gets the event as JSON on standard input,
+`{"event": "<name>", "at": "<RFC 3339 time>", "data": {...}}`; a Lua hook gets
+the same as the global table `event`.
+
+| Event | `data` |
+|---|---|
+| `ticket_created` | `ticket` |
+| `ticket_moved` | `ticket`, `from`, `to`, `action` |
+| `comment_written` | `ticket`, `comment` (author, body up to 4 KiB, question, to, mentions) |
+| `question_asked` | the same, for questions only |
+| `ticket_needs_attention` | `ticket`, `reason` |
+| `agent_started`, `agent_exited` | `ticket` (null for the CEO), `agent`; for exits also `reason`: `finished`, `stopped`, `crashed`, `usage` or `omo stopped` |
+| `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
+| `timer` | `at` |
+| `manual` | `action`, `ticket` (null for a global button) |
+
+A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
+`supervisor`, `attention` and `url` (the ticket's address on the board, without
+the login token). No event carries a session id, terminal id, environment
+value or file path. Text written by people or agents (titles, comments,
+attention texts) is only ever in `data`, never in arguments, environment values
+or file names.
+
+Plugins see the events from omo's start on, never older ones. A plugin's hooks
+run one at a time, in order. At most 60 events of one kind a minute run a
+plugin's hooks, and a full queue (256 events) drops events with a log line;
+this also keeps a hook that causes its own event (a `comment_written` hook that
+comments) from running for ever.
+
+### Command hooks
+
+A command gets omo's environment (without omo's own `OMO_*` variables) plus:
+
+| Variable | Value |
+|---|---|
+| `OMO_SOCKET` | omo's local socket; `omo ai` commands run from the hook reach the server through it |
+| `OMO_PLUGIN_NAME` | the plugin's name |
+| `OMO_PLUGIN_EVENT` | the event's name |
+| `OMO_PLUGIN_CONFIG` | the configuration as JSON |
+| `OMO_PLUGIN_DATA` | a data folder of the plugin's own |
+
+`omo ai` called from a plugin acts as you: omo cannot tell it from your own
+commands. Output beyond 1 MiB is cut.
+
+### Lua hooks
+
+A Lua hook's file is the body of a function: `return` ends it and gives its
+answer. It runs in a sandbox with the base functions (without loaders),
+`string`, `table`, `math`, `coroutine`, `os.time`, `os.date` and `os.clock`; there
+is no `io`, no other `os` function, no `require`, `load` or `dofile`, and no
+bytecode. `print` writes to the plugin's log. The globals:
+
+| Name | What it is |
+|---|---|
+| `event` | the event (see above) |
+| `config` | the plugin's configuration |
+| `omo.exec(program, args...)` | runs a program without a shell in the plugin's folder, with the environment of a command hook; returns its output (standard output and error, at most 1 MiB) and `""` or an error text |
+| `omo.http{method, url, headers, json \| form \| body, timeout}` | an HTTP request: https to any host, http only to localhost; at most 8 per run, bodies at most 1 MiB, 10 s by default and at most 30 s, redirects only to the same host. Returns `{status, body, headers}`, or `nil` and an error text |
+| `omo.sleep(seconds)` | waits at most 10 s, within the run's time limit |
+| `omo.store_get(key)`, `omo.store_set(key, value)`, `omo.store_delete(key)`, `omo.store_keys()` | the plugin's own storage in omo's database: keys of 1 to 200 bytes, values up to 64 KiB as JSON, at most 1,000 keys |
+| `omo.data_dir()` | the plugin's data folder |
+| `omo.agents()` | the agents running now, the CEO included: a list of tables with `terminal` (the id of its web terminal), `name`, `role`, `model`, `purpose`, `project` and `ticket` (`nil` for the CEO) |
+| `omo.send_to_agent(terminal, text)` | hands that agent a message the way omo's own notifications do: one line with `omo: ` in front (line breaks become spaces, at most 1,000 characters), submitted once nobody types in that terminal. Returns `true`, or `nil` and why |
+| `omo.json_decode`, `omo.json_encode`, `omo.sha256_hex`, `omo.nfc`, `omo.time_parse`, `omo.now`, `omo.log` | helpers |
+
+A run ends at the hook's time limit, and memory is watched. Every configuration
+string of six characters or more is replaced by `[redacted]` in the log, in
+error texts and in answers, and so are the header values the hook sent with
+`omo.http`.
+
+### Buttons (manual hooks)
+
+A manual hook with `scope: ticket` adds a button to every ticket; one with
+`scope: global` adds a button on the plugin's page. Only you press them. The
+hook's answer shows in a dialog over the ticket, or under the button on the
+plugin's page: from Lua a string or `{message = "…"}`, from a command its
+standard output (plain text, a JSON string or `{"message": "…"}`), at most 1,000
+characters. One button of a plugin runs at a time.
+
+### Example
+
+```lua
+-- notify.lua: post tickets that need attention to a webhook
+local t = event.data.ticket
+local res, err = omo.http{
+  method = "POST",
+  url = config.webhook_url,
+  json = { text = "#" .. t.number .. " " .. t.title .. ": " .. (event.data.reason or "") },
+}
+if not res then
+  omo.log("send failed: " .. err)
+elseif res.status >= 300 then
+  omo.log("the webhook answered " .. res.status)
+end
 ```
 
-In the TUI, open the plugin's detail view in the Plugins tab and press `r`.
-With several actions, choose one with `↑`/`↓` and `Enter`. When arguments are
-enabled, an argument entry opens: quotes group words, `Enter` submits (an empty
-list is allowed), and `Esc` cancels.
+Hooked to `ticket_needs_attention` with `"lua": "notify.lua"`, it runs each time
+a ticket is flagged.
 
-![Plugin detail view with the tools plugin's manual actions](../.github/assets/plugin_detail.png)
-
-Rules:
-
-- The server authenticates the caller from the live user or agent identity and
-  checks that identity's role against the action's roles. Plugin identities are
-  rejected, and read-only observers cannot trigger plugins. `omo plugin
-  actions` and the TUI action detail display the allowed roles so an operator
-  can see who may run each action.
-- Only the selected named hook runs, with its configured timeout. Disabled
-  plugins cannot be triggered.
-- A second action from the same plugin is rejected while its first run is
-  active; different plugins run independently.
-- Arguments are literal data. They are not appended to command hook argv and
-  not evaluated as shell commands; read them from `event.data.args`.
-- The CLI waits for completion and returns hook errors. The TUI runs actions
-  in the background and shows completion or failure in the detail view.
-
-A durable `plugin_manual_requested` event precedes execution, followed by
-`plugin_manual_completed` or `plugin_manual_failed`, linked by `request_id`.
-These audit records identify the plugin and action and the argument count,
-never argument contents; argument-free actions still record an argument count
-of zero. Office shutdown rejects new manual runs, cancels
-active hooks, and waits for their outcome audits before closing the database. A
-request interrupted by a process crash is not replayed after restart.
-
-The company dashboard receives the same manual-action metadata through each
-running office's in-memory heartbeat. It exposes only actions allowing the
-`user` role, with the description and whether arguments are accepted; actions
-restricted to agents remain available only through their authorized office
-paths. The dashboard's Triggers menu prompts for optional arguments, splits
-quoted and escaped text into literal argument values, and POSTs
-`{plugin,action,args}` to the owned instance. The company forwards that request
-as authenticated `plugin.trigger` with `async: true` and returns the durable
-`request_id` as soon as admission is recorded. A shell, stopped office, or
-unavailable socket has no dashboard actions and is rejected at the company
-boundary.
-
-`--global` loads only the global plugin scope and uses
-`OMO_HOME/plugins.db` for the same storage, log, and audit guarantees. It does
-not require a live office and is therefore suitable for commands launched by a
-company browser extension.
-
-## Dependencies
-
-`requires` lists plugins this one needs. Each dependency has a plugin `name`,
-Git `source`, optional repository `subpath`, optional Git `branch`, and an
-optional SemVer `version` constraint. Branches use Git branch spelling rules;
-leading `-`, `HEAD`, `refs/...`, embedded whitespace/control characters, and
-malformed ref names are rejected; surrounding whitespace is trimmed. A
-dependency is satisfied by an enabled local or global plugin matching either
-its installation name or its manifest name.
-
-Version constraints support these exact forms:
-
-- `1.2.3` — exact version.
-- `^1.2.3` — compatible versions below the next major (`^0.2.3` stays below `0.3.0`; `^0.0.3` stays below `0.0.4`).
-- `~1.2.3` — versions below the next minor.
-- `>=1.2.0`, `>1.2.0`, `<=1.2.0`, and `<1.2.0`; separate comparisons form a space-separated chain.
-- `1.x` and `1.2.x` — major or major/minor wildcards.
-
-Concrete versions require `major.minor.patch`; prerelease identifiers follow
-SemVer precedence and build metadata does not affect precedence. Invalid
-constraints and versions fail manifest loading. A non-empty constraint also
-fails when the resolved dependency manifest omits `version`. Version failures
-identify the dependency, required range, found version, and sorted requiring
-plugins. They stop startup; the actionable repair is normally
-`omo plugin update <installation-name>`.
-
-If an interactive office start finds a missing dependency, `omo` shows which
-plugins require it and asks before installing it into the office. A disabled
-local dependency can be enabled after confirmation. Headless starts and
-declined prompts fail with an explicit `omo plugin install` command, including
-`--branch` when the dependency declares one. Confirmed installation persists
-the dependency's branch in `plugins.installed.<name>.branch`.
-`--skip-startup-checks` does not bypass dependency enforcement, and conflicting
-sources declared for the same missing name are rejected instead of choosing
-one silently.
-
-## Distributing a plugin
-
-Publish the plugin directory in a Git repository, either at the root or under a
-subpath in a monorepo. Users install it with:
-
-```bash
-omo plugin install https://github.com/acme/omo-plugin.git
-omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lint --name lint
-omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lint --branch stable
-```
-
-- Missing `.git` URL suffixes are added automatically for GitHub, Gitea, and
-  other Git hosts.
-- `--branch` pins clone, startup updates, and explicit updates to one branch.
-  Changing the configured branch switches the managed checkout on its next
-  update.
-- Each managed plugin cache shallow-clones the whole source repository once per
-  cache name, even when `--subpath` activates one directory. The subpath reduces
-  activation size, not clone transfer size; large monorepos therefore cost more
-  to install than the selected plugin directory alone.
-- Startup fast-forwards each configured checkout when `plugins.update_on_start`
-  is true, previews the pending revisions, and atomically refreshes the active
-  copy. Failures are warnings and do not prevent the office from starting.
-- `omo plugin update [name]` does the same on demand.
-- `omo plugin disable <name>` keeps the configuration and files while
-  preventing hook loading.
-- Invalid manifests or staging failures leave the previous active plugin and
-  config untouched. If writing config fails after activation, the active copy
-  is rolled back; the Git cache may already contain the fetched revision.
-
-To offer an additional plugin in the interactive setup form, users add it to
-their [`known_plugins.json`](global-home.md#interactive-setup-form). Official
-entries are embedded in omo and follow the installed version; same-name local
-definitions are ignored with a warning. Do not copy official entries into the
-user catalog to add or override them. The omo-owned
-`known_plugins.example.json` is regenerated when its official contents change.
-
-## Official plugin catalog
-
-**`nudge`** is the default plugin and the reference Lua example. Its
-`agent_start` and `agent_log_line` hooks record activity in plugin-local
-storage; a cron hook reads the agent snapshot and types reminders into agent
-terminals for unread mail, stale work, forgotten `omo done`, and forgotten
-`omo wait`. The `firefighter_done` reminder defaults to 3m/10m, tells a
-firefighter immediately when it is waiting after all incidents resolve, and
-waits three minutes of working inactivity before sending that guidance. It
-explicitly excludes firefighters from generic reminders that recommend
-`omo wait`. It also reminds the CEO when a freelancer has remained waiting for
-five minutes, because retained freelancers must be explicitly ended when no
-longer needed. It never creates mail. All thresholds and repeat periods live
-under `plugins.installed.nudge.config`.
-
-The complete bundled and optional plugin inventory, installation guidance,
-configuration, and pullrequest multi-server behavior live in the
-[official plugin catalog](official-plugins.md). This page remains focused on
-plugin authoring, Lua APIs, hooks, and runtime guarantees.
-
-The optional official `pullrequest` plugin treats zero-diff branches as a
-successful no-change outcome and can reuse an open request by matching its head
-commit without editing a request owned by another branch or base. Its URL
-results use `created`, `updated`, or `existing`; no-change outcomes are omitted
-from the structured durable-record list. Supplied titles use a scoped
-Conventional Commits subject such as `fix(company): center sidebar resizer`, and
-the optional `## Jobs` section writes omo references as `job 123` or `123`,
-never `#123`. Full configuration and multi-server behavior are in the
-[official plugin catalog](official-plugins.md) and
-[`plugins/pullrequest/README.md`](../plugins/pullrequest/README.md).
-
-The optional official `bugreport` plugin writes anonymized omo-failure reports
-locally by default. It searches open GitHub issues and local Markdown reports
-before writing, and its user/CEO-only `publish` action creates a GitHub issue
-only after explicit user consent; `search`, `report`, `publish`, and `notice`
-syntax and role boundaries are documented in the [official plugin catalog](official-plugins.md).
-
-## Runtime guarantees
-
-- Hooks run in dependency-first order, with lexical installation-directory
-  order preserved for independent plugins, and manifest order within a plugin.
-  For mutable events, each hook sees the data as modified by earlier hooks.
-- Plugin state and log lines are stored durably per plugin. Log history is
-  pruned to `plugins.log_lines`.
-- Each running office uses its own snapshot of global plugin files, so a global
-  update never changes a running office's code.
-- `Manager.Close` on office shutdown waits for active hooks, runs reverse-order
-  immutable `unload` hooks, joins cron workers, and removes snapshots only after
-  unload completes. Lifecycle hook failures are logged without stopping later
-  hooks.
+The shipped plugins in [plugins/](../plugins/) are complete examples:
+`discord` escapes text for its target and retries, `pushover` keeps an hourly
+cap in its store, and `pause-notice` uses `omo.agents()` and
+`omo.send_to_agent()`.
