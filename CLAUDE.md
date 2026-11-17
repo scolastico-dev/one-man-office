@@ -6,7 +6,7 @@ Fast technical orientation for agents modifying `one-man-office` (`omo`). Read [
 
 `omo` is one global server per user (per `OMO_HOME`). It keeps tickets in SQLite, enforces the board's data rules, and serves one HTTP API with an event stream, on a TCP port for the browser and on a local Unix socket (Windows named pipe) for `omo ai`. The server runs the agent engine (`internal/engine`) and serves the board, a Vue app built from `web/` and embedded in the binary.
 
-The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. The settings are edited in the browser (see Settings below). Usage scripts with smart assignment, skill sets, plugins and export are part of the server (see Extensions below). The `wiki/` folder describes the earlier office-based design and is outdated.
+The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. The settings are edited in the browser (see Settings below). Usage scripts with smart assignment, skill sets, plugins and export are part of the server (see Extensions below), and so is an MCP endpoint (`/mcp`, packages `mcpserver`, `mcprelay`, `mcpauth`, `mcpbridge`, `mcpclients`). The user manual is the `wiki/` folder; `README.md` is a short overview that links into it.
 
 The supported targets are Linux, macOS and Windows on amd64 and arm64. `go.mod` is authoritative for the Go version. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -29,7 +29,7 @@ Focused runs: `go test ./internal/board -count=1`. The smoke test in `cmd/omo` b
 
 ```text
 cmd/omo
-  -> internal/cli         Cobra commands: omo, -d, stop, config, autostart, update, ai
+  -> internal/cli         Cobra commands: omo, -d, stop, config, autostart, update, ai, mcp
        -> internal/service     run lock, detached start, authenticated stop, login autostart
        -> internal/server      HTTP API, auth, socket, event stream, the embedded board (web/)
             -> internal/engine      starts and supervises agents, merges, exports, cleans up
@@ -124,7 +124,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 
 ## Settings
 
-Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, Environment, Limits, Review, Plugins, General) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
+Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
 
 Routes, all in `registerRoutes` tables (`internal/server/settings.go`, `setup.go`, `discovery.go`): `/api/settings` (GET, PUT whole, PATCH by key; `POST /api/settings/branch-preview`), `/api/profiles` (+ `/{name}/catalog-models`, which adds the catalog models a profile lacks), `/api/roles`, `/api/prompts` (+ `/preview`), `/api/projects` (+ `/scan`, `/rescan`, and `POST /batch` with `{ids, action: remove|disable|enable}`, answered per id: `{results: [{id, done, error?}]}`; 422 for a bad action, no or more than 1000 ids or a repeated id), `/api/folders`, `/api/agent-setup/detect`, `/api/settings/agent-env/check`. Who may call: only the user may call all of them, except `GET /api/projects` and `GET /api/models`, which agents may call (models: only the selectable ones). Every other settings route answers an agent session 403, because prompts, environments, profile commands and arguments are code that runs as the user. A route cannot be added without a rule (`userOnly`, `agentRead` for GET, `agentWrite` for a write agents may make within the board's rules: the image upload and the removal of a project from a ticket): `registerRoutes` panics on a row without one, and `TestNoGuardedRouteOutsideTable`, `TestSettingsRouteTableAccess` (which walks every row, the image rows with paths inside each role's scope), `TestImageRoutesInTable` and `TestAgentReadsNoCodeExecutionSettings` pin it.
 
@@ -194,6 +194,7 @@ images/<uuid>.<ext>   uploaded images (the record and the original name are in o
 images/terminal/<uuid>.<ext>   images dropped into terminals (no record; deleted keep_days_after_done days after upload)
 usage/<name>.lua  skillsets/<name>.yaml  plugins/<name>.yaml (+ plugins/<name>/ the installed plugin)
 skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/export/
+mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  files an import or an MCP registration replaced
 ```
 
 `server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
@@ -237,5 +238,5 @@ The container entrypoint (`docker/entrypoint.sh`) runs `omo config set host 0.0.
 1. Read the owning package and its tests; check `git status` and preserve unrelated work.
 2. Add or update the narrowest useful test, run it, then run `make check`.
 3. Run `git diff --check` and inspect the final diff.
-4. Update `README.md` and this guide when user-visible behavior, commands, the home layout or release assets change.
+4. Update the `wiki/` pages (and `README.md` when its short overview changes) and this guide when user-visible behavior, commands, the home layout or release assets change.
 5. Document only current behavior; git history is the record of old behavior.
