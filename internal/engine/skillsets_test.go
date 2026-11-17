@@ -8,6 +8,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
 // TestEveryRoleGetsOnlyItsSkillSets: the prompt of every role (CEO and
@@ -41,6 +42,11 @@ func TestEveryRoleGetsOnlyItsSkillSets(t *testing.T) {
 	put(api.SkillSet{Name: "talk", Roles: []string{"ceo"}, Paths: []string{"skills/grill-me"}})
 	put(api.SkillSet{Name: "code", Roles: []string{"developer", "reviewer"}, Paths: []string{"skills/tdd"}})
 	put(api.SkillSet{Name: "all"})
+	for _, name := range []string{"talk", "code", "all"} {
+		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), "/srv/skills.git", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	task, dev := h.readyDeveloper("one")
 	actors := map[string]board.Actor{

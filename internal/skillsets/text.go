@@ -23,7 +23,8 @@ const MaxText = 64 << 10
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // Text returns the skill set blocks for role: one block per set that
-// reaches the role (see ForRole), has a checkout and has something to say
+// reaches the role (see ForRole), has a checkout fetched from the set's
+// repository and ref (see RecordSource) and has something to say
 // to the role (a text or at least one skill), sorted by name, separated by
 // a blank line, "" when there is none. A block is
 //
@@ -53,7 +54,7 @@ func Text(role string, sets []api.SkillSet, checkout func(name string) (path str
 			continue
 		}
 		path, ok := checkout(k.Name)
-		if !ok {
+		if !ok || !fromSource(path, k) {
 			continue
 		}
 		text := clean(k.Instructions[role])

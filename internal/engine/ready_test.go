@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
 func TestReadyRendersRestartNoteForFreshSession(t *testing.T) {
@@ -224,7 +224,7 @@ func TestRolePromptHasSkillSetBlocks(t *testing.T) {
 	put("off", false, map[string]string{"developer": "disabled", "reviewer": "disabled"})
 	put("unfetched", true, map[string]string{"developer": "no checkout"})
 	for _, name := range []string{"sp", "off"} {
-		if err := os.MkdirAll(filepath.Join(h.layout.Skills, name), 0o700); err != nil {
+		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), "/srv/skills.git", ""); err != nil {
 			t.Fatal(err)
 		}
 	}

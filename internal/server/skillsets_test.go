@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
 // isolateGit keeps the server's git, and the test's, away from the
@@ -195,7 +196,7 @@ func TestPreviewShowsSkillSets(t *testing.T) {
 		t.Fatalf("a set without checkout is in the preview:\n%s", p.Text)
 	}
 	checkout := filepath.Join(s.opts.Layout.Skills, "sp")
-	if err := os.MkdirAll(checkout, 0o700); err != nil {
+	if err := skillsets.RecordSource(checkout, "/srv/skills.git", ""); err != nil {
 		t.Fatal(err)
 	}
 	block := "Skill set sp (checked out at " + checkout + "; read-only, omo updates it):\nRead SKILLS.md first."

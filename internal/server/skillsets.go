@@ -103,8 +103,8 @@ func (s *Server) listSkillSets(w http.ResponseWriter, r *http.Request) {
 }
 
 // putSkillSet creates or replaces a skill set. A new set, or a changed
-// repository or ref of a set that updates at start, is fetched in the
-// background; the answer does not wait for it.
+// repository or ref of any set, is fetched in the background; the answer
+// does not wait for it.
 func (s *Server) putSkillSet(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {

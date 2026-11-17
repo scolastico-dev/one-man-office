@@ -10,15 +10,20 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
 
-func fakeCheckout(names ...string) func(string) (string, bool) {
-	return func(name string) (string, bool) {
-		for _, n := range names {
-			if n == name {
-				return "/home/you/.local/omo/skills/" + name, true
-			}
+// skillsDir is the skills folder of fakeCheckout.
+var skillsDir string
+
+// fakeCheckout makes checkouts of names (fetched from no repository, as
+// the sets of these tests name none) in a new skills folder, skillsDir.
+func fakeCheckout(t *testing.T, names ...string) func(string) (string, bool) {
+	t.Helper()
+	skillsDir = t.TempDir()
+	for _, n := range names {
+		if err := RecordSource(filepath.Join(skillsDir, n), "", ""); err != nil {
+			t.Fatal(err)
 		}
-		return "", false
 	}
+	return CheckoutIn(skillsDir)
 }
 
 func TestTextOnlyEnabledCheckedOutWithText(t *testing.T) {
@@ -29,23 +34,23 @@ func TestTextOnlyEnabledCheckedOutWithText(t *testing.T) {
 		{Name: "nocheckout", Enabled: true, Instructions: map[string]string{"developer": "not fetched"}},
 		{Name: "blank", Enabled: true, Instructions: map[string]string{"developer": " \n "}},
 	}
-	got := Text("developer", sets, fakeCheckout("zeta", "alpha", "off", "blank"))
-	want := "Skill set alpha (checked out at /home/you/.local/omo/skills/alpha; read-only, omo updates it):\nRead SKILLS.md first.\n\n" +
-		"Skill set zeta (checked out at /home/you/.local/omo/skills/zeta; read-only, omo updates it):\nUse zeta."
+	got := Text("developer", sets, fakeCheckout(t, "zeta", "alpha", "off", "blank"))
+	want := "Skill set alpha (checked out at " + filepath.Join(skillsDir, "alpha") + "; read-only, omo updates it):\nRead SKILLS.md first.\n\n" +
+		"Skill set zeta (checked out at " + filepath.Join(skillsDir, "zeta") + "; read-only, omo updates it):\nUse zeta."
 	if got != want {
 		t.Fatalf("Text =\n%s\nwant\n%s", got, want)
 	}
-	if got := Text("pm", sets, fakeCheckout("zeta", "alpha")); got != "" {
+	if got := Text("pm", sets, fakeCheckout(t, "zeta", "alpha")); got != "" {
 		t.Fatalf("a role without text got %q", got)
 	}
-	if got := Text("developer", nil, fakeCheckout()); got != "" {
+	if got := Text("developer", nil, fakeCheckout(t)); got != "" {
 		t.Fatalf("no sets gave %q", got)
 	}
 }
 
 func TestTextRemovesHiddenCharacters(t *testing.T) {
 	sets := []api.SkillSet{{Name: "s", Enabled: true, Instructions: map[string]string{"developer": "a‮b​c\x1b[31m\r\n\tindented"}}}
-	got := Text("developer", sets, fakeCheckout("s"))
+	got := Text("developer", sets, fakeCheckout(t, "s"))
 	if !strings.HasSuffix(got, "\nabc[31m\n\tindented") {
 		t.Fatalf("Text = %q", got)
 	}
@@ -56,7 +61,7 @@ func TestTextIsBounded(t *testing.T) {
 	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
 		sets = append(sets, api.SkillSet{Name: n, Enabled: true, Instructions: map[string]string{"developer": strings.Repeat("x", 16<<10)}})
 	}
-	got := Text("developer", sets, fakeCheckout("a", "b", "c", "d", "e", "f"))
+	got := Text("developer", sets, fakeCheckout(t, "a", "b", "c", "d", "e", "f"))
 	if len(got) > MaxText+200 {
 		t.Fatalf("Text is %d bytes", len(got))
 	}
@@ -69,12 +74,12 @@ func TestTextIsBounded(t *testing.T) {
 func TestTextIsNotATemplate(t *testing.T) {
 	sets := []api.SkillSet{{Name: "s", Enabled: true, Instructions: map[string]string{"developer": "{{.Nope}} {{template \"x\"}}"}}}
 	d := prompts.SampleData("developer")
-	d.Instructions = Join("Be brief.", Text("developer", sets, fakeCheckout("s")))
+	d.Instructions = Join("Be brief.", Text("developer", sets, fakeCheckout(t, "s")))
 	out, err := prompts.RenderBounded("developer", prompts.Defaults()["developer"], d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out, "Be brief.\n\nSkill set s (checked out at /home/you/.local/omo/skills/s; read-only, omo updates it):\n{{.Nope}} {{template \"x\"}}") {
+	if !strings.HasSuffix(out, "Be brief.\n\nSkill set s (checked out at "+filepath.Join(skillsDir, "s")+"; read-only, omo updates it):\n{{.Nope}} {{template \"x\"}}") {
 		t.Fatalf("prompt ends:\n%s", out[len(out)-300:])
 	}
 }
@@ -143,7 +148,12 @@ func skillTree(t *testing.T) string {
 	return root
 }
 
+// at is the checkout lookup of the set s at root, fetched from no
+// repository as the sets of these tests name none.
 func at(root string) func(string) (string, bool) {
+	if err := RecordSource(root, "", ""); err != nil {
+		panic(err)
+	}
 	return func(name string) (string, bool) { return root, name == "s" }
 }
 
@@ -271,5 +281,33 @@ func writeTestFile(t *testing.T, path, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A checkout is the set's only while it was fetched from the set's
+// repository and ref: after a change of either it gives agents nothing.
+func TestTextLeavesOutACheckoutOfAnotherSource(t *testing.T) {
+	root := skillTree(t)
+	if err := RecordSource(root, "https://example.invalid/a.git", "main"); err != nil {
+		t.Fatal(err)
+	}
+	look := func(string) (string, bool) { return root, true }
+	set := api.SkillSet{Name: "s", Enabled: true, Repository: "https://example.invalid/a.git", Ref: "main"}
+	if got := Text("ceo", []api.SkillSet{set}, look); !strings.Contains(got, "- tdd") {
+		t.Fatalf("the set's own checkout gave %q", got)
+	}
+	for _, k := range []api.SkillSet{
+		{Name: "s", Enabled: true, Repository: "https://example.invalid/b.git", Ref: "main"},
+		{Name: "s", Enabled: true, Repository: "https://example.invalid/a.git", Ref: "v2"},
+	} {
+		if got := Text("ceo", []api.SkillSet{k}, look); got != "" {
+			t.Errorf("%s at %s got the old checkout: %q", k.Repository, k.Ref, got)
+		}
+	}
+	if err := os.Remove(filepath.Join(root, ".git", sourceFile)); err != nil {
+		t.Fatal(err)
+	}
+	if got := Text("ceo", []api.SkillSet{set}, look); got != "" {
+		t.Errorf("a checkout without its source got %q", got)
 	}
 }

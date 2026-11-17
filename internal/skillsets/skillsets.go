@@ -175,15 +175,21 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// Checkout returns the checkout folder of the set name when it exists.
+// Checkout returns the checkout folder of the set name when it exists and
+// was fetched from the set's repository and ref as the settings name them.
 func (m *Manager) Checkout(name string) (string, bool) {
-	return CheckoutIn(m.o.Dir)(name)
+	k, ok := m.o.Store.SkillSet(name)
+	if !ok {
+		return "", false
+	}
+	return checkoutOf(m.o.Dir, k)
 }
 
 // Reconcile compares the settings with the checkouts: a new set without
-// checkout is fetched; a set whose repository or ref changed is fetched
-// when its update is at_start or it has no checkout (a pinned set keeps its
-// checkout until Update); the checkout of a set whose file is gone is
+// checkout is fetched; a set whose repository or ref changed is fetched at
+// once whatever its update (pinned means not following the branch, not
+// keeping another source; until the fetch succeeds agents get nothing of
+// the old checkout); the checkout of a set whose file is gone is
 // removed. A set whose fetch failed is not fetched again until its source
 // changes or Update is asked for.
 func (m *Manager) Reconcile() {
@@ -199,11 +205,11 @@ func (m *Manager) Reconcile() {
 		src := source{k.Repository, k.Ref}
 		prev, known := m.seen[k.Name]
 		m.seen[k.Name] = src
-		_, has := CheckoutIn(m.o.Dir)(k.Name)
+		_, has := checkoutOf(m.o.Dir, k)
 		switch {
 		case !known && !has:
 			fetch = append(fetch, k.Name)
-		case known && prev != src && (k.Update == api.SkillSetAtStart || !has):
+		case known && prev != src:
 			fetch = append(fetch, k.Name)
 		}
 	}
@@ -431,7 +437,11 @@ func (m *Manager) fetchOnce(ctx context.Context, name string, j *job) {
 		m.seen[name] = source{k.Repository, k.Ref}
 	}
 	m.mu.Unlock()
-	commit, err := m.o.Git.FetchSource(ctx, k.Repository, k.Ref, filepath.Join(m.o.Dir, name))
+	path := filepath.Join(m.o.Dir, name)
+	commit, err := m.o.Git.FetchSource(ctx, k.Repository, k.Ref, path)
+	if err == nil {
+		err = RecordSource(path, k.Repository, k.Ref)
+	}
 	if err != nil && ctx.Err() == nil {
 		m.o.Log.Printf("skill set %s: %s", name, Message(err))
 	}

@@ -324,7 +324,10 @@ func TestSkillSetFailureKeepsLastCheckout(t *testing.T) {
 	if good.State != StateOK {
 		t.Fatalf("first update = %+v", good)
 	}
-	e.put("s", filepath.Join(t.TempDir(), "gone.git"), "", api.SkillSetPinned, nil)
+	// The repository goes away: the update of the same source fails.
+	if err := os.Rename(u.bare, u.bare+".gone"); err != nil {
+		t.Fatal(err)
+	}
 	st := m.Update(context.Background(), "s")
 	if st.State != StateFailed || st.Commit != good.Commit || st.Message == "" {
 		t.Fatalf("failed update = %+v, want the old commit %s kept", st, good.Commit)
@@ -453,12 +456,47 @@ func TestSkillSetSourceChange(t *testing.T) {
 	m.Start(context.Background())
 	waitState(t, m, "auto", StateOK)
 	waitState(t, m, "pin", StateOK)
+	if st := m.State("pin"); st.Commit != first {
+		t.Fatalf("pinned set = %+v, want %s", st, first)
+	}
 	e.put("auto", u.bare, "next", api.SkillSetAtStart, nil)
 	e.put("pin", u.bare, "next", api.SkillSetPinned, nil)
 	m.Reconcile()
+	// A changed source is fetched whatever the update: pinned means not
+	// following the branch, not keeping another source's checkout.
 	waitCommit(t, m, "auto", second)
-	if st := m.State("pin"); st.Commit != first {
-		t.Fatalf("pinned set after a ref change = %+v, want %s until Update", st, first)
+	waitCommit(t, m, "pin", second)
+}
+
+// Until a changed source is fetched, agents get nothing of the old
+// checkout, and the state does not show it as the set's: a failing fetch
+// of the new source leaves the set without skills.
+func TestSkillSetOldCheckoutIsNotGivenAfterASourceChange(t *testing.T) {
+	u := newUpstream(t, map[string]string{"SKILLS.md": "one\n"})
+	e := newEnv(t)
+	e.put("s", u.bare, "main", api.SkillSetPinned, map[string]string{"developer": "Use them."})
+	m := e.manager()
+	m.Start(context.Background())
+	waitState(t, m, "s", StateOK)
+	text := func() string { return Text("developer", e.store.SkillSets(), CheckoutIn(e.dir)) }
+	if !strings.Contains(text(), "Use them.") {
+		t.Fatalf("text before the change: %q", text())
+	}
+	e.store.PutSkillSetIf(e.store.Revision(settings.SectionSkillSets, "s"), api.SkillSet{Name: "s", Repository: u.bare, Ref: "no-such-branch",
+		Update: api.SkillSetPinned, Enabled: true, Instructions: map[string]string{"developer": "Use them."}})
+	if got := text(); got != "" {
+		t.Fatalf("text right after the change: %q", got)
+	}
+	m.Reconcile()
+	st := waitState(t, m, "s", StateFailed)
+	if st.Commit != "" {
+		t.Fatalf("the state shows the old checkout as the set's: %+v", st)
+	}
+	if got := text(); got != "" {
+		t.Fatalf("text after the failed fetch: %q", got)
+	}
+	if _, ok := m.Checkout("s"); ok {
+		t.Fatal("the old checkout counts as the set's")
 	}
 }
 
