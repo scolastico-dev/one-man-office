@@ -22,7 +22,8 @@ type Queryer interface {
 }
 
 // OpenReadOnly opens an existing omo database without schema creation or
-// migrations. SQLite itself enforces the observer's no-write contract.
+// migrations; SQLite itself refuses every write. Open uses it to read the
+// schema version of a database before it changes anything.
 func OpenReadOnly(path string) (*sql.DB, error) {
 	dsn := "file:" + path + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	d, err := sql.Open("sqlite", dsn)
