@@ -27,8 +27,9 @@ you, for all your repositories at once.
   <img alt="Install and set up" src=".github/assets/header-install-light.svg">
 </picture>
 
-You need Linux, macOS or Windows, git 2.38 or newer, and at least one agent
-program installed and signed in (`claude`, `codex`, `agy` or `gemini`).
+You need Linux, macOS, or Windows, git 2.38 or newer, and at least one agent program installed and
+signed in. While claude, codex, agy, and gemini work out of the box, any program is theoretically
+supported with minimal manual configuration.
 
 ```bash
 # Linux and macOS
