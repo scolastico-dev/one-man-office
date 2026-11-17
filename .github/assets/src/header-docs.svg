@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="3" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: Learn more. -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: An open book. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <path class="icon" d="M32 14 C24 8 14 8 6 10 V54 C14 52 24 52 32 58 C40 52 50 52 58 54 V10 C50 8 40 8 32 14 Z M32 14 V58"/>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">Learn more</text>
+  <text class="muted" x="198" y="142" font-size="22">concepts, agents, settings and plugins</text>
+
+  <!-- The snail, leaving a trail. -->
+  <image href="logo" x="1096" y="52" width="104" height="104"/>
+  <path class="trail" d="M 1206 136 H 1246"/>
+</svg>

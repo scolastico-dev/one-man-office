@@ -8,7 +8,8 @@
     "typecheck": "vue-tsc -b --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "screenshots": "node scripts/screenshots.ts"
+    "screenshots": "node scripts/screenshots.ts",
+    "readme-art": "node scripts/readme-art.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

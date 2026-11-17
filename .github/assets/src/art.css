@@ -1,0 +1,33 @@
+/*
+ * The classes of the README graphics in src/. The colours are the web app's
+ * own tokens (web/src/styles/tokens.css), loaded before this file, so each
+ * graphic is drawn once and rendered in the dark and the light theme.
+ * Square corners and thin lines, as in the app.
+ */
+svg {
+  font-family: var(--omo-font);
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+.frame { fill: var(--omo-bg); stroke: var(--omo-line); stroke-width: 2; }
+.panel { fill: var(--omo-surface); stroke: var(--omo-line); stroke-width: 1.5; }
+.card { fill: var(--omo-raised); }
+.card-sel { fill: var(--omo-select); stroke: var(--omo-select-line); stroke-width: 1.5; }
+.bar { fill: color-mix(in srgb, var(--omo-line-strong) 60%, var(--omo-raised)); }
+.bar-sel { fill: color-mix(in srgb, var(--omo-line-strong) 60%, var(--omo-select)); }
+.bar-soft { fill: color-mix(in srgb, var(--omo-line-strong) 35%, var(--omo-raised)); }
+.rule { stroke: var(--omo-line); stroke-width: 1.5; fill: none; }
+.trail { stroke: var(--omo-line-strong); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 12; fill: none; }
+.edge-accent { fill: var(--omo-accent); }
+.edge-ok { fill: var(--omo-ok); }
+.edge-warn { fill: var(--omo-warn); }
+.fg { fill: var(--omo-fg); }
+.muted { fill: var(--omo-muted); }
+.faint { fill: var(--omo-line-strong); }
+.accent { fill: var(--omo-accent); }
+.ok { fill: var(--omo-ok); }
+.warn { fill: var(--omo-warn); }
+.tile { fill: var(--omo-accent-soft); stroke: var(--omo-select-line); stroke-width: 1.5; }
+.icon { fill: none; stroke: var(--omo-accent); stroke-width: 4; stroke-linecap: square; stroke-linejoin: miter; }
+.icon-fill { fill: var(--omo-accent); }
+.bold { font-weight: 700; }
