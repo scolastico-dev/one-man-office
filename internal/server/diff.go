@@ -143,6 +143,9 @@ func (s *Server) diffTargets(r *http.Request, n int64) ([]diffTarget, error) {
 // inDiffSlot runs fn when one of the diffSlots is free, with the time limit
 // of a diff. Waiting for a slot ends with ctx.
 func (s *Server) inDiffSlot(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.diffQueued != nil {
+		s.diffQueued()
+	}
 	select {
 	case s.diffSem <- struct{}{}:
 	case <-ctx.Done():

@@ -393,10 +393,14 @@ type slotGate struct {
 	release chan struct{}
 	seen    chan struct{}
 	ctxEnd  atomic.Int32
+	// queued gets a value for each request that is about to wait for a
+	// slot.
+	queued chan struct{}
 }
 
 func newSlotGate(s *Server) *slotGate {
-	g := &slotGate{release: make(chan struct{}), seen: make(chan struct{}, 64)}
+	g := &slotGate{release: make(chan struct{}), seen: make(chan struct{}, 64), queued: make(chan struct{}, 64)}
+	s.diffQueued = func() { g.queued <- struct{}{} }
 	s.diffHook = func(ctx context.Context) {
 		g.entered.Add(1)
 		g.seen <- struct{}{}
@@ -447,7 +451,13 @@ func TestDiffRouteSemaphore(t *testing.T) {
 	}
 	fifthCtx, leave := context.WithCancel(context.Background())
 	send(fifthCtx)
-	time.Sleep(300 * time.Millisecond)
+	for range 5 {
+		select {
+		case <-g.queued:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the fifth request did not reach the slots")
+		}
+	}
 	if n := g.entered.Load(); n != 4 {
 		t.Fatalf("%d diffs run at once, want 4", n)
 	}

@@ -104,9 +104,11 @@ type Server struct {
 	beforeHandIn func()
 	branchSem    chan struct{}
 	// diffSem bounds the diffs read from git at once, server-wide; diffHook,
-	// when set, runs in the slot before git does (tests).
+	// when set, runs in the slot before git does, diffQueued before a
+	// request waits for a slot (tests).
 	diffSem      chan struct{}
 	diffHook     func(ctx context.Context)
+	diffQueued   func()
 	readBranches func(ctx context.Context, path string) (current, def string)
 	events       *broker
 	// engine runs the agents; nil without Options.Runner. engineStarted is

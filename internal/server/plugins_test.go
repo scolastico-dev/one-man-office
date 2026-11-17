@@ -164,6 +164,27 @@ func waitLines(t *testing.T, path string, n int) []string {
 	}
 }
 
+// waitTicketRecorded waits until events.jsonl at path records the creation
+// of ticket n. A plugin handles events in order, so every event before it
+// was handled too.
+func waitTicketRecorded(t *testing.T, path string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		for _, ev := range recordedEvents(t, readLines(t, path)) {
+			data, _ := ev["data"].(map[string]any)
+			ticket, _ := data["ticket"].(map[string]any)
+			if ev["event"] == plugins.EventTicketCreated && ticket["number"] == float64(n) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s does not record the creation of #%d", path, n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // recordedEvents decodes the lines of events.jsonl.
 func recordedEvents(t *testing.T, lines []string) []map[string]any {
 	t.Helper()
@@ -561,7 +582,8 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 		sessions[role] = liveSession(t, s, role).ID
 	}
 	s.waitSettingsEvents(context.Background())
-	time.Sleep(300 * time.Millisecond) // the sessions' own events reach the plugin first
+	// The sessions' own events reach the plugin before the marker ticket's.
+	waitTicketRecorded(t, events, newTicketMaker(t, s).create())
 	repo := pluginRepo(t, recordManifest("evil", allBoardEvents...))
 	cur, _ := s.settings.Plugin("rec")
 	changed := cur
