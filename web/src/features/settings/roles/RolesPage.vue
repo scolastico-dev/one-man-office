@@ -82,6 +82,9 @@ void readModels()
 
 <template>
   <SettingsPage :title="def.label" :description="def.description">
+    <Callout tone="info" data-roles-note>
+      <p>A model listed twice is picked twice as often.</p>
+    </Callout>
     <SetupReport />
     <Callout v-if="failure" tone="danger" live="assertive" data-models-error>
       <p>{{ failure }}</p>

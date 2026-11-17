@@ -49,8 +49,28 @@ test('the models are shown in the stored order, repeats as weights', async () =>
   expect(shown(w)).toEqual(['claude/sonnet', 'claude/opus', 'claude/sonnet'])
   expect(w.findAll('.role-model__weight').map((x) => x.text())).toEqual(['×2', '×2'])
   expect(w.text()).toContain('Everyday')
-  expect(w.text()).toContain('A model listed twice is picked twice as often.')
   expect(w.text()).toContain('How it picks: at random')
+})
+
+const NOTE = 'A model listed twice is picked twice as often.'
+
+test('the note on repeated models is shown once, above every role card and in none, in every assignment mode', async () => {
+  for (const mode of ['round_robin', 'random']) {
+    const { page } = await open(['claude/sonnet', 'claude/sonnet'], mode)
+    const notes = page.findAll('[data-roles-note]')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text()).toContain(NOTE)
+    expect(page.text().split(NOTE)).toHaveLength(2)
+    const cards = page.findAll('[data-role-editor]')
+    expect(cards).toHaveLength(4)
+    for (const card of cards) {
+      expect(card.element.contains(notes[0]!.element)).toBe(false)
+      expect(card.text()).not.toContain(NOTE)
+      expect(notes[0]!.element.compareDocumentPosition(card.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    page.unmount()
+    mounted = null
+  }
 })
 
 test('add, move and remove send the list in the shown order, with the revision the form was built on', async () => {

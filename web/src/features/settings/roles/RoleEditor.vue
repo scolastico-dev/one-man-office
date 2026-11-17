@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // One role's models and assignment mode, as a form over its settings item
 // (the page owns it, so one Save bar saves every role). The list is the
-// order of use; a model listed twice is picked twice as often by the random
-// mode. A model no profile defines any more stays in the list, marked, until
+// order of use (the page says what a repeat means). A model no profile
+// defines any more stays in the list, marked, until
 // the user removes it; the server refuses a save that still names it and
 // says which entry. A refusal, a message without a field and a change made
 // elsewhere ("Use the new value" or "Keep mine") show here, under this role.
@@ -160,7 +160,6 @@ function add() {
           data-assignment
           @update:model-value="draft.assignment = $event"
         />
-        <Callout v-if="draft.assignment === 'random'" tone="info"><p>A model listed twice is picked twice as often.</p></Callout>
       </template>
     </FormSection>
   </div>

@@ -19,6 +19,9 @@ const profile = (models: Record<string, string>) => ({
 })
 const PROFILE = profile({ sonnet: 'Everyday development', opus: 'Strongest', haiku: 'Quick and cheap' })
 
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
+const NOTE = 'A model listed twice is picked twice as often.'
+
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
 const editor = (page: Page, role: string) => page.locator(`[data-role-editor="${role}"]`)
@@ -74,7 +77,7 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   await expect(models(dev)).toHaveText([/claude\/sonnet\s*×2/, /claude\/haiku/, /claude\/sonnet\s*×2/])
   await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Unsaved changes')
   await dev.getByLabel('Assignment').selectOption('random')
-  await expect(dev).toContainText('A model listed twice is picked twice as often.')
+  await expect(dev).not.toContainText(NOTE)
   await saveAll(page)
   expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet', 'claude/haiku', 'claude/sonnet'], assignment: 'random' })
 
@@ -266,4 +269,27 @@ for (const scheme of ['dark', 'light'] as const) {
       })
     })
   }
+}
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`the note on repeated models is one line above the first role card, in no card, ${colorScheme} theme`, async ({ page, omo }) => {
+    await omo.api('PUT', '/api/profiles/claude', PROFILE)
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+    await openBoard(page, omo)
+    await openRoles(page)
+    await editor(page, 'developer').getByLabel('Assignment').selectOption('random')
+    await expect(page.getByText(NOTE, { exact: true })).toHaveCount(1)
+    const note = page.locator('[data-roles-note]')
+    await expect(note).toContainText(NOTE)
+    for (const role of ['ceo', 'pm', 'developer', 'reviewer']) {
+      await expect(editor(page, role).locator('[data-roles-note]')).toHaveCount(0)
+      await expect(editor(page, role)).not.toContainText(NOTE)
+    }
+    const above = (await note.boundingBox())!.y + (await note.boundingBox())!.height
+    expect(above).toBeLessThanOrEqual((await editor(page, 'ceo').boundingBox())!.y)
+    if (SHOTS !== '') {
+      mkdirSync(SHOTS, { recursive: true })
+      await page.screenshot({ path: join(SHOTS, `fix7-roles-note-${colorScheme}.png`) })
+    }
+  })
 }
