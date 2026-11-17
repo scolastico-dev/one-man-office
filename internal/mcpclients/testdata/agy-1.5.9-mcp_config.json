@@ -1,0 +1,41 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/notes"],
+      "env": {
+        "LOG_LEVEL": "info"
+      }
+    },
+    "drive": {
+      "serverUrl": "https://drive.example.invalid/mcp",
+      "authProviderType": "google_credentials"
+    },
+    "boards": {
+      "serverUrl": "https://boards.example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer agy-boards-secret-b0a7"
+      },
+      "disabled": true,
+      "timeoutSeconds": 300,
+      "enabledTools": ["list_boards"],
+      "tools": {
+        "list_boards": {
+          "eager": true
+        }
+      }
+    },
+    "maps": {
+      "url": "https://maps.example.invalid/mcp",
+      "oauth": {
+        "clientId": "agy-maps-client",
+        "clientSecret": "agy-maps-secret-3c3c"
+      }
+    },
+    "local": {
+      "command": "local-mcp",
+      "cwd": "/srv/local",
+      "disabledTools": ["wipe"]
+    }
+  }
+}

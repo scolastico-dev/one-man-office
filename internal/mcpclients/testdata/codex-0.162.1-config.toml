@@ -1,0 +1,54 @@
+# Invented configuration in the shape of codex-cli 0.162.1.
+model = "gpt-5.5"
+approval_policy = "on-request"
+mcp_oauth_credentials_store = "keyring"
+
+[projects."/home/someone/src/app"]
+trust_level = "trusted"
+
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/srv/notes"]
+env = { LOG_LEVEL = "info" }
+
+[mcp_servers.search]
+command = "search-mcp"
+args = ["--index", "/srv/index"]
+env = { SEARCH_TOKEN = "codex-search-secret-5e11" }
+env_vars = ["SEARCH_REGION"]
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+enabled_tools = ["query", "suggest"]
+
+[mcp_servers.tracker]
+url = "https://tracker.example.invalid/mcp/"
+bearer_token_env_var = "TRACKER_TOKEN"
+
+[mcp_servers.issues]
+url = "https://issues.example.invalid/mcp"
+http_headers = { "X-Team" = "platform-codex-secret-1b1b" }
+env_http_headers = { "X-Api-Key" = "ISSUES_API_KEY" }
+disabled_tools = ["delete_issue"]
+enabled = false
+
+[mcp_servers.calendar_work]
+url = "https://calendar.example.invalid/mcp"
+scopes = ["calendar.read"]
+oauth_resource = "https://calendar.example.invalid"
+
+[mcp_servers.calendar_work.oauth]
+client_id = "codex-calendar-client"
+client_secret = "codex-calendar-secret-aa42"
+
+[mcp_servers.docs]
+url = "https://docs2.example.invalid/mcp"
+http_headers = { "X-Docs" = "codex-docs-secret-d0c5" }
+
+[mcp_servers.Work_Notes]
+command = "notes-mcp"
+cwd = "/srv/notes"
+required = true
+some_future_key = "kept"
+
+[mcp_servers."-x"]
+command = "dash-mcp"

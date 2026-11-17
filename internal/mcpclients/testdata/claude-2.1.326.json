@@ -1,0 +1,103 @@
+{
+  "numStartups": 42,
+  "installMethod": "native",
+  "autoUpdates": true,
+  "tipsHistory": {
+    "new-user-warmup": 3
+  },
+  "oauthAccount": {
+    "emailAddress": "someone@example.invalid",
+    "accountUuid": "00000000-0000-4000-8000-000000000001"
+  },
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/notes"],
+      "env": {
+        "LOG_LEVEL": "info"
+      }
+    },
+    "tracker": {
+      "type": "http",
+      "url": "https://tracker.example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer claude-tracker-secret-7f3a"
+      }
+    },
+    "wiki": {
+      "type": "http",
+      "url": "https://wiki.example.invalid/mcp/?team=claude-wiki-secret-4d2e",
+      "headers": {
+        "X-Api-Key": "${WIKI_API_KEY}"
+      }
+    },
+    "events": {
+      "type": "sse",
+      "url": "https://events.example.invalid/sse",
+      "headers": {
+        "Authorization": "Bearer claude-events-secret-91bc"
+      }
+    },
+    "chat": {
+      "type": "ws",
+      "url": "wss://chat.example.invalid/mcp"
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://docs.example.invalid/mcp"
+    },
+    "calendar": {
+      "type": "http",
+      "url": "https://calendar.example.invalid/mcp",
+      "oauth": {
+        "clientId": "claude-calendar-client",
+        "callbackPort": 43117,
+        "scopes": "calendar.read calendar.write"
+      }
+    },
+    "rotating": {
+      "type": "http",
+      "url": "https://rotating.example.invalid/mcp",
+      "headersHelper": "/usr/local/bin/print-rotating-headers"
+    },
+    "Search Index": {
+      "command": "search-mcp",
+      "args": ["--index", "/srv/index"],
+      "env": {
+        "SEARCH_TOKEN": "claude-search-secret-c0de"
+      }
+    },
+    "omo": {
+      "type": "stdio",
+      "command": "/opt/omo/bin/omo",
+      "args": ["mcp", "stdio"],
+      "env": {}
+    },
+    "future": {
+      "type": "stdio",
+      "command": "future-mcp",
+      "args": [],
+      "env": {},
+      "someNewKey": {
+        "nested": true
+      }
+    }
+  },
+  "projects": {
+    "/home/someone/src/app": {
+      "allowedTools": [],
+      "hasTrustDialogAccepted": true,
+      "mcpServers": {
+        "app-db": {
+          "type": "stdio",
+          "command": "db-mcp",
+          "args": ["--dsn", "postgres://app@localhost/app"],
+          "env": {
+            "DB_PASSWORD": "claude-db-secret-77aa"
+          }
+        }
+      }
+    }
+  }
+}
