@@ -4,13 +4,18 @@
 // through mcp.changed; programs reach their tools on /mcp with a personal
 // access token, and the scripted fake agent through omo's bridge. Signing
 // in at an OAuth upstream (Connect) is not covered here: it needs an
-// authorization server, which the Go tests of the relay fake.
-import { readdirSync, readFileSync } from 'node:fs'
+// authorization server, which the Go tests of the relay fake. With
+// OMO_SCREENSHOTS=<folder> the first test also writes
+// mcp-relay-running.png and mcp-relay-tokens.png there.
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { openBoard } from './support/board'
 import { expect, FAKE_MCP_BINARY, test, type Omo } from './support/omo'
 import { expectTerminalText, terminalIn } from './support/terminal'
+
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
 /** Marks every fake MCP server process of one test (its value is the test's home); omo hands no OMO_ variable to the servers it starts. */
 const MARK = 'FAKEMCP_E2E_MARK'
@@ -169,6 +174,13 @@ test('a stdio server made through the form is tested, goes live for a token, log
   await expect(log).toContainText(`started`)
   await expect(log).toContainText(`with ${FAKE_TOOLS.length} tools`)
   await expect(log).not.toContainText(omo.home)
+  if (SHOTS !== '') {
+    mkdirSync(SHOTS, { recursive: true })
+    await ed.locator('[data-mcp-server-status]').evaluate((el) => el.scrollIntoView({ block: 'start' }))
+    await page.screenshot({ path: join(SHOTS, 'mcp-relay-running.png') })
+    await page.locator('[data-mcp-tokens]').evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    await page.screenshot({ path: join(SHOTS, 'mcp-relay-tokens.png') })
+  }
 
   // Restart stops the process; the next use starts it again.
   await ed.locator('[data-mcp-restart]').click()

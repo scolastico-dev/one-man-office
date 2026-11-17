@@ -276,6 +276,17 @@ for (const width of [1440, 390] as const) {
         expect(await violations(page), 'page').toEqual([])
         expect(await pageScrollsSideways(page)).toBe(false)
 
+        // The token form's fields and button sit on one line.
+        if (width === 1440) {
+          const access = section(page, 'access')
+          const tops = await Promise.all(
+            [access.getByLabel('Name', { exact: true }), access.getByLabel('Valid'), access.getByRole('button', { name: 'Create token' })].map(async (l) => {
+              const b = (await l.boundingBox())!
+              return Math.round(b.y + b.height)
+            }),
+          )
+          expect(new Set(tops).size, `bottoms of the token form ${tops.join(', ')}`).toBe(1)
+        }
         await row(page, 'docs').locator('[data-mcp-server-toggle]').click()
         await expect(editor(page, 'docs')).toBeVisible()
         await editor(page, 'docs').getByLabel('Client id').fill('unsaved')
@@ -293,6 +304,13 @@ for (const width of [1440, 390] as const) {
         await section(page, 'programs').locator('[data-mcp-client-action="install"]').click()
         await expect(page.locator('[data-mcp-plan]')).toBeVisible()
         expect(await violations(page), 'plan').toEqual([])
+        // The command and the entries wrap: nothing of them is cut off at the side.
+        for (const box of await page.locator('[data-mcp-plan] pre').all()) {
+          expect(await box.evaluate((el) => el.scrollWidth <= el.clientWidth), await box.getAttribute('aria-label') ?? 'pre').toBe(true)
+        }
+        // The two entries start at the same height, under their labels.
+        const tops = await page.locator('[data-mcp-plan] pre').evaluateAll((els) => els.slice(1).map((el) => Math.round(el.getBoundingClientRect().top)))
+        if (width === 1440) expect(new Set(tops).size, 'the entries now and after start at the same height').toBe(1)
         if (SHOTS !== '') await page.screenshot({ path: join(SHOTS, `mcp-plan-${colorScheme}-${width}.png`) })
       })
     })
