@@ -168,7 +168,7 @@ project.`,
 	create.Flags().StringArray("project", nil, "project id; repeat for several projects")
 	create.Flags().Bool("no-project", false, "create a task without a project (research, an investigation, a local experiment)")
 	create.Flags().Int("story", 0, "the story a task belongs to")
-	create.Flags().String("model", "", "model id for the agent that works on it")
+	create.Flags().String("model", "", "model id for its agent; leave unset so omo uses the role's configured models, set it only on request or for a reason you state on the ticket")
 	create.Flags().IntSlice("depends-on", nil, "ticket number this one depends on; repeat for several")
 	_ = create.MarkFlagRequired("type")
 	_ = create.MarkFlagRequired("title")
@@ -179,7 +179,8 @@ project.`,
 		Short: "Change a ticket's title, description, model or projects",
 		Long: `Change the given fields of ticket N and print it as #N type column title.
 The description comes from a file, or from standard input with
---description-file -. --model "" returns to the default model.
+--description-file -. --model "" returns to the models configured for the
+role.
 --base-version N (the "description version:" of ticket show) refuses the new
 description if someone changed it since you read version N. The description
 is stored first; if the other changes are then refused, the error says so.
@@ -187,7 +188,7 @@ is stored first; if the other changes are then refused, the error says so.
 project that has one is taken off with omo ai ticket remove-project.
 --no-project makes a task one without a project, under the same rule; once
 work on a task without a project started, its projects stay as they are.`,
-		Example: `  omo ai ticket update 12 --title "Add retry to uploads" --model fast
+		Example: `  omo ai ticket update 12 --title "Add retry to uploads"
   omo ai ticket update 12 --base-version 3 --description-file - <<'EOF'
   Retry failed uploads three times.
   EOF`,
@@ -268,7 +269,7 @@ work on a task without a project started, its projects stay as they are.`,
 	update.Flags().String("title", "", "new title")
 	update.Flags().String("description-file", "", "read the new description from FILE, or from standard input with -")
 	update.Flags().Int("base-version", 0, "the description version you last read; a newer one refuses the change")
-	update.Flags().String("model", "", "model id (empty: default model)")
+	update.Flags().String("model", "", "model id for its agent (\"\": the role's configured models); set it only on request or for a reason you state on the ticket")
 	update.Flags().StringArray("project", nil, "replace the projects; repeat for several")
 	update.Flags().Bool("no-project", false, "make the task one without a project")
 	ticket.AddCommand(update)

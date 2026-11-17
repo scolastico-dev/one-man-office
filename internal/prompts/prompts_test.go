@@ -354,6 +354,38 @@ func TestCEOChangesSettingsOnTheUsersWord(t *testing.T) {
 	}
 }
 
+// The CEO and the product manager leave a ticket's model to omo (the models
+// the user configured per role): they set one only on request or for a
+// reason they write into the ticket, and the CEO asks the user when in
+// doubt. No sentence invites them to pick a fitting model on their own.
+func TestTicketModelIsLeftToTheUsersConfiguration(t *testing.T) {
+	for label, want := range map[string][]string{
+		"ceo may approve": {
+			"Leave a ticket's model unset (no `--model`)",
+			"only when the user asked for it or you have a concrete reason",
+			"when in doubt, ask the user first",
+			"write the reason into the ticket's description or a comment",
+		},
+		"pm agents release": {
+			"Leave a task's model unset (no `--model`)",
+			"only when your story's description or your supervisor asks for it, or for a concrete reason",
+			"write that reason into a comment on the task",
+		},
+	} {
+		out := renderCase(t, label)
+		for _, s := range want {
+			if !strings.Contains(out, s) {
+				t.Errorf("%s: the prompt lacks %q", label, s)
+			}
+		}
+		for _, s := range []string{"offers a fitting model, choose it", "Optional model per task", "the models you may choose; pass"} {
+			if strings.Contains(out, s) {
+				t.Errorf("%s: the prompt still says %q", label, s)
+			}
+		}
+	}
+}
+
 func TestRestartNoteRendersAtTop(t *testing.T) {
 	note, err := Render("restart", Defaults()["restart"], Data{})
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/server"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
+	"github.com/spf13/cobra"
 )
 
 type stubEnv struct{}
@@ -695,4 +696,27 @@ func TestAILoneDashReadsStandardInput(t *testing.T) {
 	}
 	// A dash inside the words is text.
 	e.must("", "comment", "1", "a", "-", "b")
+}
+
+// The --model flags say in one line what the CEO and PM prompts say: leave
+// the model to the role's configured models unless asked or with a stated
+// reason.
+func TestModelFlagsLeaveTheChoiceToTheConfiguration(t *testing.T) {
+	root := &cobra.Command{Use: "omo"}
+	addAICommand(root)
+	for _, path := range [][]string{{"ai", "ticket", "create"}, {"ai", "ticket", "update"}} {
+		cmd, _, err := root.Find(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		usage := cmd.Flags().Lookup("model").Usage
+		for _, s := range []string{"configured models", "only on request or for a reason you state on the ticket"} {
+			if !strings.Contains(usage, s) {
+				t.Errorf("%v --model: %q lacks %q", path, usage, s)
+			}
+		}
+		if strings.Contains(cmd.Example, "--model") {
+			t.Errorf("%v: the example sets a model", path)
+		}
+	}
 }
