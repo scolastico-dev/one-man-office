@@ -67,6 +67,9 @@ func init() {
 		"create-tasks":     {1, 2, "COUNT[|chain]", checkCreateTasks, opCreateTasks},
 		"release-all":      {0, 0, "no fields", nil, opReleaseAll},
 		"until-tasks-done": {1, 1, "DURATION", duration(0), opUntilTasksDone},
+		// The CEO.
+		"create-ticket":   {3, 3, "story|task|PROJECT|TITLE (PROJECT - for none)", oneOf(0, "story", "task"), opCreateTicket},
+		"release-created": {0, 0, "no fields (moves what create-ticket made to ready, says refusals)", nil, opReleaseCreated},
 		// Waiting and handing over.
 		"handoff-on-stop": {0, 1, "[DURATION]", optDuration(0), opHandoffOnStop},
 		"wait-loop":       {1, 2, "DURATION[|ANSWER]", duration(0), opWaitLoop},
@@ -532,6 +535,43 @@ func opReleaseAll(ctx context.Context, r *runner, _ Step) error {
 			return err
 		}
 		r.say("fake: released #%d", t.Number)
+	}
+	return nil
+}
+
+// opCreateTicket creates a story or a standalone task as the agent (the
+// CEO), in project PROJECT or, for a task, in none ("-").
+func opCreateTicket(ctx context.Context, r *runner, s Step) error {
+	c, err := r.api()
+	if err != nil {
+		return err
+	}
+	req := api.CreateTicket{Type: api.TicketType(s.Args[0]), Title: s.Args[2]}
+	if p := strings.TrimSpace(s.Args[1]); p != "-" {
+		req.Projects = []string{p}
+	}
+	t, err := c.CreateTicket(ctx, req)
+	if err != nil {
+		return err
+	}
+	r.created = append(r.created, t.Number)
+	r.say("fake: created #%d %s", t.Number, t.Title)
+	return nil
+}
+
+// opReleaseCreated moves every ticket create-ticket made to ready, as `omo
+// ai ticket move N ready` does, and prints each refusal instead of failing.
+func opReleaseCreated(ctx context.Context, r *runner, _ Step) error {
+	c, err := r.api()
+	if err != nil {
+		return err
+	}
+	for _, n := range r.created {
+		if _, err := c.Move(ctx, n, api.MoveRequest{Column: api.ColumnReady}); err != nil {
+			r.say("fake: #%d not released: %v", n, err)
+			continue
+		}
+		r.say("fake: released #%d", n)
 	}
 	return nil
 }

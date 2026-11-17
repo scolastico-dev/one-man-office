@@ -154,6 +154,7 @@ type runner struct {
 	reason  string // last answer of wait
 	output  string // last line the last sh-block printed
 	others  string // the ticket's other projects
+	created []int  // the tickets create-ticket made
 }
 
 // say prints one line to the transcript.

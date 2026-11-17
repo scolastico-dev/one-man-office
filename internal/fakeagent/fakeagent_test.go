@@ -283,6 +283,8 @@ func TestBadFieldsFailBeforeAnythingRuns(t *testing.T) {
 		"exit|x":                     "script line 1: op exit: \"x\" is not a number",
 		"create-tasks|0":             "script line 1: op create-tasks:",
 		"create-tasks|2|loop":        "only chain is known",
+		"create-ticket|epic|-|x":     "script line 1: op create-ticket: \"epic\" is not one of story, task",
+		"release-created|now":        "script line 1: op release-created takes no fields",
 		"ready|extra":                "script line 1: op ready takes no fields",
 		"await-prompt|sideways":      "is not one of any, arg, typed",
 		"print|first\n\n  unknown  ": "script line 3: unknown op \"unknown\"",
