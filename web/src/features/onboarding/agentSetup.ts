@@ -62,7 +62,7 @@ export interface SetupReport {
 }
 
 export const MODES: Record<string, string> = {
-  round_robin: 'one after the other, in turn',
+  round_robin: 'one after the other, in turn; a model listed twice is picked twice as often',
   random: 'at random; a model listed twice is picked twice as often',
   failover: 'the first one, and the next only when it cannot be used',
   smart: 'the one with the most capacity left',

@@ -122,7 +122,8 @@ one:
 | **Failover** | the first that can start; the next only when it cannot |
 | **Smart** | the model with the most capacity left, by the usage readings; without readings like round robin |
 
-A model listed twice is picked twice as often (round robin, random). Export
+With round robin and random, a model listed twice is picked twice as often;
+with failover and smart it counts once. Export
 jobs use the developer's models. A ticket can name a model of its own
 (**Model** in its details, or `--model`); otherwise its role's list applies.
 The top of the Roles page says whether every role has a usable model. The

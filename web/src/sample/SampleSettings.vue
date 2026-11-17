@@ -333,7 +333,7 @@ const save = computed(() => {
                 <UiButton class="sample-path__browse">Add</UiButton>
               </div>
               <SelectField v-model="developerMode" label="Assignment" :options="MODE_OPTIONS" />
-              <Callout tone="info"><p>A model listed twice is picked twice as often.</p></Callout>
+              <Callout tone="info"><p>With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.</p></Callout>
             </FormSection>
             <FormSection legend="Reviewer">
               <ReorderList

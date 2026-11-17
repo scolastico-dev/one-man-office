@@ -83,7 +83,7 @@ void readModels()
 <template>
   <SettingsPage :title="def.label" :description="def.description">
     <Callout tone="info" data-roles-note>
-      <p>A model listed twice is picked twice as often.</p>
+      <p>With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.</p>
     </Callout>
     <SetupReport />
     <Callout v-if="failure" tone="danger" live="assertive" data-models-error>

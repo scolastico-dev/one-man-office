@@ -52,7 +52,7 @@ test('the models are shown in the stored order, repeats as weights', async () =>
   expect(w.text()).toContain('How it picks: at random')
 })
 
-const NOTE = 'A model listed twice is picked twice as often.'
+const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.'
 
 test('the note on repeated models is shown once, above every role card and in none, in every assignment mode', async () => {
   for (const mode of ['round_robin', 'random']) {
