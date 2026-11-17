@@ -167,7 +167,7 @@ func TestHelpShowsOnlyHumanCommands(t *testing.T) {
 			visible = append(visible, c.Name())
 		}
 	}
-	want := map[string]bool{"ai": true, "autostart": true, "config": true, "stop": true, "update": true}
+	want := map[string]bool{"ai": true, "autostart": true, "config": true, "mcp": true, "stop": true, "update": true}
 	for _, name := range visible {
 		if !want[name] {
 			t.Errorf("unexpected command %q in the command list", name)

@@ -36,5 +36,6 @@ func Root(version string) *cobra.Command {
 	addAutostartCommands(cmd)
 	addUpdateCommand(cmd, version)
 	addAICommand(cmd)
+	addMCPCommand(cmd)
 	return cmd
 }
