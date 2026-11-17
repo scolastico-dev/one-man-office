@@ -403,9 +403,11 @@ type OAuthConsent struct {
 	ClientID   string `json:"client_id"`
 	ClientKind string `json:"client_kind"`
 	// RedirectHost is where the browser goes after the decision.
-	RedirectHost  string `json:"redirect_host"`
-	LocalhostOnly bool   `json:"localhost_only"`
-	Resource      string `json:"resource"`
+	RedirectHost string `json:"redirect_host"`
+	// LocalhostRedirect says that redirect is a localhost address: the
+	// answer goes to whatever program listens there.
+	LocalhostRedirect bool   `json:"localhost_redirect"`
+	Resource          string `json:"resource"`
 }
 
 // OAuthDecision is the payload of POST /api/oauth/consent: the query of the

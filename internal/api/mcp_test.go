@@ -55,7 +55,7 @@ func TestMCPTypesWireNames(t *testing.T) {
 		{MCPTakeoverReport{Results: []MCPTakeoverResult{}, Backups: []string{}}, []string{"results", "backups"}},
 		{MCPTakeoverResult{Removed: []MCPTakeoverRemoval{}}, []string{"name", "stored", "error", "removed", "needs_login"}},
 		{MCPTakeoverRemoval{}, []string{"target", "done", "error"}},
-		{OAuthConsent{}, []string{"client_name", "client_id", "client_kind", "redirect_host", "localhost_only", "resource"}},
+		{OAuthConsent{}, []string{"client_name", "client_id", "client_kind", "redirect_host", "localhost_redirect", "resource"}},
 		{OAuthDecision{}, []string{"query", "approve"}},
 		{OAuthRedirect{}, []string{"redirect"}},
 	}

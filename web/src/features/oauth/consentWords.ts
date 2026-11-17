@@ -16,10 +16,10 @@ export function clientKindWords(c: Pick<OAuthConsent, 'client_kind'>): string {
 }
 
 /** The warnings of a request, empty when there is none to give. */
-export function consentWarnings(c: Pick<OAuthConsent, 'client_kind' | 'localhost_only'>): string[] {
+export function consentWarnings(c: Pick<OAuthConsent, 'client_kind' | 'localhost_redirect'>): string[] {
   const out: string[] = []
   if (c.client_kind === 'registered') out.push('The name above is what the program says about itself; any program can register under any name. Approve only if you just started this sign-in yourself.')
-  if (c.localhost_only)
+  if (c.localhost_redirect)
     out.push('The answer goes to a program on the computer of the browser (a localhost address). Any program running there could have asked; approve only if you started this sign-in yourself.')
   return out
 }

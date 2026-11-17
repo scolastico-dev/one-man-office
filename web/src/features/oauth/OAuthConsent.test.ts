@@ -18,7 +18,7 @@ const consent = (o: Partial<Consent> = {}): Consent => ({
   client_id: 'omo_dcr_abc',
   client_kind: 'registered',
   redirect_host: '127.0.0.1:33418',
-  localhost_only: true,
+  localhost_redirect: true,
   resource: 'http://omo.localhost:8090/mcp',
   ...o,
 })
@@ -58,7 +58,7 @@ test('the page shows who asks, where the browser goes, the warnings and exactly 
 })
 
 test('a client with its own https document and an https return address gets no warning', async () => {
-  const { w } = await open(() => consent({ client_kind: 'cimd', localhost_only: false, redirect_host: 'app.example.invalid' }))
+  const { w } = await open(() => consent({ client_kind: 'cimd', localhost_redirect: false, redirect_host: 'app.example.invalid' }))
   expect(w.findAll('[data-oauth-warning]')).toHaveLength(0)
   expect(w.get('[data-oauth-kind]').text()).toContain('https address')
 })

@@ -116,7 +116,7 @@ func TestMCPOAuthFlowThroughServer(t *testing.T) {
 	resp = b.do(http.MethodGet, "/api/oauth/consent?"+authURL.RawQuery, nil, bearer(s))
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	consent := decodeBody[api.OAuthConsent](t, resp.Body)
-	if consent.ClientName != "Claude Code" || consent.RedirectHost != "localhost:5555" || consent.Resource != resource || !consent.LocalhostOnly {
+	if consent.ClientName != "Claude Code" || consent.RedirectHost != "localhost:5555" || consent.Resource != resource || !consent.LocalhostRedirect {
 		t.Fatalf("consent = %+v", consent)
 	}
 	resp = b.do(http.MethodPost, "/api/oauth/consent", api.OAuthDecision{Query: authURL.RawQuery, Approve: true}, bearer(s))

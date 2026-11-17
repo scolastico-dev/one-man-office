@@ -1661,7 +1661,7 @@ export interface OAuthConsent {
   client_id: string
   client_kind: 'cimd' | 'registered'
   redirect_host: string
-  localhost_only: boolean
+  localhost_redirect: boolean
   resource: string
 }
 

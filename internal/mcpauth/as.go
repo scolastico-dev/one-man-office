@@ -342,17 +342,13 @@ func (a *AS) Consent(ctx context.Context, q url.Values, issuer string, resources
 		return api.OAuthConsent{}, err
 	}
 	u, _ := url.Parse(req.redirect)
-	local := true
-	for _, r := range req.client.Redirects {
-		local = local && loopbackRedirect(r)
-	}
 	return api.OAuthConsent{
-		ClientName:    req.client.Name,
-		ClientID:      req.client.ID,
-		ClientKind:    req.client.Kind,
-		RedirectHost:  u.Host,
-		LocalhostOnly: local,
-		Resource:      req.resource,
+		ClientName:        req.client.Name,
+		ClientID:          req.client.ID,
+		ClientKind:        req.client.Kind,
+		RedirectHost:      u.Host,
+		LocalhostRedirect: loopbackRedirect(req.redirect),
+		Resource:          req.resource,
 	}, nil
 }
 

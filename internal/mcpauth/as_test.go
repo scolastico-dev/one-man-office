@@ -159,7 +159,7 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := api.OAuthConsent{ClientName: "Claude Code", ClientID: id, ClientKind: api.OAuthClientRegistered,
-		RedirectHost: "127.0.0.1:33418", LocalhostOnly: true, Resource: testResource}
+		RedirectHost: "127.0.0.1:33418", LocalhostRedirect: true, Resource: testResource}
 	if consent != want {
 		t.Fatalf("consent = %+v\nwant %+v", consent, want)
 	}
@@ -492,7 +492,7 @@ func TestClientIDMetadataDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ClientKind != api.OAuthClientCIMD || c.ClientName != "Antigravity" || c.ClientID != id || c.RedirectHost != "app.example" || c.LocalhostOnly {
+	if c.ClientKind != api.OAuthClientCIMD || c.ClientName != "Antigravity" || c.ClientID != id || c.RedirectHost != "app.example" || c.LocalhostRedirect {
 		t.Fatalf("consent = %+v", c)
 	}
 	// Cached: the decision does not fetch again.
@@ -613,6 +613,25 @@ func assertNoSecrets(t *testing.T, logText string, secrets ...string) {
 	for _, s := range secrets {
 		if s != "" && strings.Contains(logText, s) {
 			t.Fatalf("the log contains a secret: %q", logText)
+		}
+	}
+}
+
+// The localhost warning follows the redirect the request uses, not the
+// client's other registered redirects.
+func TestConsentWarnsAboutTheLocalhostRedirectInUse(t *testing.T) {
+	f := newASFixture(t, nil)
+	ctx := context.Background()
+	id := f.registerClient(t, "Mixed", testRedirect, "https://app.example/cb")
+	for redirect, want := range map[string]bool{testRedirect: true, "https://app.example/cb": false} {
+		cfg := f.config(id)
+		cfg.RedirectURL = redirect
+		consent, err := f.as.Consent(ctx, authorizeQuery(t, cfg, oauth2.GenerateVerifier()), testIssuer, testResources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if consent.LocalhostRedirect != want {
+			t.Errorf("redirect %s: localhost warning %v", redirect, consent.LocalhostRedirect)
 		}
 	}
 }
