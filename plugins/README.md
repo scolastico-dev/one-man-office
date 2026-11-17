@@ -43,7 +43,3 @@ Open a pull request that adds an entry to `index.yaml`:
 omo refuses the whole list when one entry is wrong (an unknown key or tag, a
 repeated name, an address omo does not fetch from, a description of more than
 one line), so check it before the pull request.
-
-`bugreport` is kept here but not listed: it is written for the earlier engine
-(prompt hooks, roles and arguments of manual actions) and does not load in
-this omo.

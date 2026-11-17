@@ -52,7 +52,10 @@ Choose 1, 2 or 3 [3]:
   In the listed offices it switches the update check at start off
   (`startup.check_self_update: false`), so they stop offering this version.
   Other offices still offer it: answer no there. When you want this version
-  later, run 0.11's `omo self-update`.
+  later, run 0.11's `omo self-update`. Once this version is published, omo
+  0.11's plugin catalogue is no longer maintained: plugins already installed
+  from it stay as they are and keep working, but 0.11 can no longer install
+  or update them and warns at each start that their update failed.
 - **3 Quit**, also what a bare Enter does, changes nothing and exits.
 
 Offices you never trusted are not in the old list, so omo does not find them:
