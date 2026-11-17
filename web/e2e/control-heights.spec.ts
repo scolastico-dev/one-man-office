@@ -233,6 +233,9 @@ for (const width of [1440, 390]) {
     await settings(w, 'general', 'General')
     await check(w, 'general')
 
+    await settings(w, 'backup', 'Backup')
+    await check(w, 'backup')
+
     // A terminal in a window of its own: its title line.
     writeFileSync(join(omo.home, '.zshrc'), '')
     const shell = await omo.api<{ id: string }>('POST', '/api/terminals', { home: true })

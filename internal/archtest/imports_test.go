@@ -24,7 +24,7 @@ var guarded = []string{
 	"engine", "agents", "prompts", "fakeagent", "gitops", "names", "session",
 	"usage", "luabox", "skillsets", "forge", "plugins", "pluginmanager",
 	"codexauth", "discover", "agentsetup", "folderlist", "textsafe", "userterm",
-	"claudetrust", "agentcli", "homefile", "childenv", "branchname",
+	"claudetrust", "agentcli", "homefile", "childenv", "branchname", "homezip",
 }
 
 var forbidden = []string{

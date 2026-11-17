@@ -74,6 +74,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     component: () => import('./plugins/PluginsPage.vue').then(page),
   },
   { id: 'general', label: 'General', description: 'The CEO, merge defaults, this server and the theme', component: () => import('./general/GeneralPage.vue').then(page) },
+  {
+    id: 'backup',
+    label: 'Backup',
+    description: 'Export the settings to a zip file and import them again',
+    component: () => import('./backup/BackupPage.vue').then(page),
+  },
 ]
 
 /** The section `id`. */

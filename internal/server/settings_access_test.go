@@ -203,6 +203,9 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 					} else if path == "/api/terminal-images" {
 						// A raw upload as well, refused to every agent.
 						rec = terminalUpload(t, s, "x.png", testPNG(t), sessions[role])
+					} else if path == "/api/settings/import" {
+						// The settings zip of an import, refused to every agent.
+						rec = rawSocket(t, s, path, []byte("PK"), sessions[role])
 					} else {
 						rec = socketDo(t, s, method, path, body, sessions[role])
 					}

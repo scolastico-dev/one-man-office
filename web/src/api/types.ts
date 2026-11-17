@@ -1348,3 +1348,49 @@ export interface ImageEventData {
   name: string
   size: number
 }
+
+/** manifest.json of a settings zip: which omo wrote it, for which database schema, when, and whether the database is inside. */
+export interface BackupManifest {
+  format: number
+  omo_version: string
+  schema_version: number
+  created_at: string
+  database: boolean
+}
+
+/** What an import does to one file. */
+export type ImportChange = 'add' | 'replace' | 'same'
+
+/** One file of an import plan, by its path below the omo home. */
+export interface ImportFile {
+  path: string
+  change: ImportChange
+}
+
+/** `POST /api/settings/import`: the zip passed every check and waits under `id`; nothing changed yet. */
+export interface ImportPlan {
+  id: string
+  manifest: BackupManifest
+  /** The settings files, server.yaml left out. */
+  files: ImportFile[]
+  /** What writing server.yaml would do; '' when the zip has none. */
+  server: ImportChange | ''
+  database: boolean
+  agents_running: number
+}
+
+/** Body of `POST /api/settings/import/apply`. */
+export interface ImportApply {
+  id: string
+  server: boolean
+  database: boolean
+}
+
+/** Answer of `POST /api/settings/import/apply`. */
+export interface ImportResult {
+  written: string[]
+  /** Absolute folder with the replaced files; '' when none was replaced. */
+  backup: string
+  database_pending: boolean
+  restart_needed: boolean
+}

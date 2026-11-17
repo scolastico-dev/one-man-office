@@ -17,7 +17,7 @@ import (
 const nextStartNote = "A running omo applies this at the next start."
 
 func addConfigCommand(root *cobra.Command) {
-	config := &cobra.Command{Use: "config", Short: "Read and change the server start options"}
+	config := &cobra.Command{Use: "config", Short: "Read and change the server start options; export and import the settings"}
 	config.AddCommand(
 		&cobra.Command{
 			Use:   "list",
@@ -136,6 +136,7 @@ that address, nothing else. An empty value or config unset removes it.`,
 			},
 		},
 	)
+	addBackupCommands(config)
 	root.AddCommand(config)
 }
 

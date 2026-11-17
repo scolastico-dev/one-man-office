@@ -29,6 +29,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/homezip"
 	"github.com/scolastico-dev/one-man-office/internal/images"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
@@ -207,6 +208,13 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		if s.token, err = serverconfig.LoadOrCreateToken(o.Layout.Token); err != nil {
 			return nil, fmt.Errorf("load login token: %w", err)
 		}
+	}
+	// A database an import placed next to omo.db replaces it now, before
+	// anything opens it.
+	if moved, err := homezip.SwapPendingDatabase(o.Layout, time.Now()); err != nil {
+		return nil, fmt.Errorf("put the imported database in place: %w", err)
+	} else if moved != "" {
+		s.log.Printf("the imported database replaced the old one, which is kept in %s", moved)
 	}
 	if s.db, err = db.Open(o.Layout.DB); err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

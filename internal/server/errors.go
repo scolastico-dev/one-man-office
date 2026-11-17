@@ -119,8 +119,8 @@ func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 const rawUploadType = "application/octet-stream"
 
 // rawUploadPath matches the routes whose body is raw bytes instead of JSON:
-// the image uploads.
-var rawUploadPath = regexp.MustCompile(`^/api/(tickets/[0-9]+/images|terminal-images)$`)
+// the image uploads and the settings zip of an import.
+var rawUploadPath = regexp.MustCompile(`^/api/(tickets/[0-9]+/images|terminal-images|settings/import)$`)
 
 // rawUpload reports whether r is a request to a raw upload route; such a
 // request must carry Content-Type application/octet-stream and nothing else.

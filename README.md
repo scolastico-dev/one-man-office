@@ -168,6 +168,12 @@ A save is refused, with the reason under the field, when the file changed on dis
 
 Prompts, the environment and the profiles are commands that run as you, so only you can read or change them through the API; an agent can only list the projects and the models it may choose. This is a guard rail and not a security boundary: agents run as your user, can talk to the socket without their session header and can write the files in `OMO_HOME`. Do not run an agent you do not trust.
 
+### Backup
+
+Settings, Backup exports omo's settings to a zip file (`omo-settings-<date>.zip`): `settings.yaml`, `server.yaml`, the projects, agent profiles, roles, prompts, usage scripts, skill sets and plugin settings, with a `manifest.json` (omo version, database schema, date, whether the database is inside). "Include the database" adds a consistent copy of `omo.db` (tickets, comments, history), taken while omo runs. The file contains your tokens and environment values; keep it private. Not in the zip: the login token, logs, worktrees, working folders, images, skill set checkouts and installed plugin files (install them again on the Plugins page).
+
+"Import settings…" checks a zip completely before anything changes (a manifest of an omo that is not newer, only the files listed above, no links or paths leaving the home, size limits, every file loading as a save would) and shows what it replaces. On confirmation it writes them all at once and keeps the replaced files in `OMO_HOME/backups/<time>-import/`; settings the zip does not hold stay as they are. `server.yaml` is written only with "Also apply server settings" and applies at the next start. "Also replace the database" replaces all tickets: it is refused while agents run, pauses omo, and the database is put in place at the next start of omo (the old one moves to `OMO_HOME/backups/<time>-database/`). `omo config export FILE [--with-db]` and `omo config import FILE [--server] [--with-db] [--yes]` do the same from the command line while omo runs.
+
 ### Usage and limits
 
 A usage script is a Lua file, `OMO_HOME/usage/<name>.lua`, that reports how full an account's usage windows are. A profile names its script (`usage_script`) and each of its models lists the windows it counts (`usage_windows`). omo runs each script once per account at start, on an interval (5 minutes by default) and on Refresh, and keeps the last readings in `run/usage.json`. Profiles with the same script, account folder and environment are one account. A profile without a script is unmetered.
@@ -272,13 +278,14 @@ Agents run as you. The guards in these settings keep an agent that goes through 
 | `omo stop` | stop the running server after the agents' handoff (a second `omo stop` skips the wait) |
 | `omo config list\|get\|set\|unset` | start options: `host`, `port`, `auth` (`token`, `basic`, `none`), `basic_auth`, `origin_check`, `allowed_hosts`, `public_url` (the address omo advertises, such as `https://omo.example.com/`: printed at the start, shown in Settings, General and used in links to the board; it does not change where omo listens, and omo accepts the Host and Origin of that address only); changes apply at the next start |
 | `omo config rotate-token` | replace the login token (applies at the next start) |
+| `omo config export\|import FILE` | write the settings to a zip or check and apply one (see Backup) |
 | `omo autostart register\|unregister` | start omo at user login |
 | `omo update [--check] [--version TAG]` | install a verified release |
 | `omo ai ...` | board commands for agents: `ticket`, `link`, `comment`, `comments`, `ask`, `image add`, `done`, `whoami`, `project`, `model`, `ready`, `wait` |
 
 ### Where state lives
 
-Everything is in `OMO_HOME` (default `~/.local/omo`, `%APPDATA%\omo` on Windows; an absolute `OMO_HOME` overrides): `omo.db` (tickets), `server.yaml`, `token`, `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`, `usage/` (usage scripts), `skillsets/` and `skills/` (skill set settings and their checkouts), `plugins/` (plugin settings and installed plugins), `run/` (lock, log, socket, last usage readings, export folders), `worktrees/` (the agents' worktrees), `workdirs/` (the working folders of tasks without a project), `ceo/` (the CEO agent's folder), `logs/` (agent transcripts) and `images/` (uploaded images; `images/terminal/` holds the images dropped into terminals). Nothing is written into your projects. If `OMO_HOME` holds an installation of an older omo, this version refuses to use it; set `OMO_HOME` to another folder.
+Everything is in `OMO_HOME` (default `~/.local/omo`, `%APPDATA%\omo` on Windows; an absolute `OMO_HOME` overrides): `omo.db` (tickets), `server.yaml`, `token`, `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`, `usage/` (usage scripts), `skillsets/` and `skills/` (skill set settings and their checkouts), `plugins/` (plugin settings and installed plugins), `run/` (lock, log, socket, last usage readings, export folders), `worktrees/` (the agents' worktrees), `workdirs/` (the working folders of tasks without a project), `ceo/` (the CEO agent's folder), `logs/` (agent transcripts) and `images/` (uploaded images; `images/terminal/` holds the images dropped into terminals) and `backups/` (files a settings import replaced). Nothing is written into your projects. If `OMO_HOME` holds an installation of an older omo, this version refuses to use it; set `OMO_HOME` to another folder.
 
 ## Documentation
 

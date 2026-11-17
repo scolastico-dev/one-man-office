@@ -24,6 +24,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerTickets(mux)
 	s.registerDiff(mux)
 	s.registerSettings(mux)
+	s.registerBackup(mux)
 	s.registerDiscovery(mux)
 	s.registerSetup(mux)
 	s.registerEvents(mux)

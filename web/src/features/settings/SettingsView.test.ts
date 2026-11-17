@@ -61,7 +61,7 @@ test('sections load lazily and the nav marks the current one', async () => {
   const { w, router } = await mountSettings('/settings/limits?project=demo&q=x')
   expect(w.get('nav').attributes('aria-labelledby')).toBeTruthy()
   expect(w.get(`#${w.get('nav').attributes('aria-labelledby')}`).text()).toBe('Settings')
-  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Usage', 'Prompts', 'Skill sets', 'Environment', 'Limits', 'Review', 'Plugins', 'General'])
+  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Usage', 'Prompts', 'Skill sets', 'Environment', 'Limits', 'Review', 'Plugins', 'General', 'Backup'])
   expect(links(w)[2]!.attributes('href')).toBe('/settings/roles?project=demo&q=x')
   expect(current(w)).toEqual(['limits'])
   expect(title(w)).toBe('Limits')

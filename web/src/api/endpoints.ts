@@ -1,6 +1,9 @@
 import type { ApiClient, ApiResult, Query } from './client'
 import type {
   AgentEnvCheck,
+  ImportApply,
+  ImportPlan,
+  ImportResult,
   AgentEnvReport,
   AgentSession,
   ApproveRequest,
@@ -540,4 +543,19 @@ export function getImageBytes(c: ApiClient, id: string): Promise<Blob> {
 
 export function deleteImage(c: ApiClient, id: string): R<unknown> {
   return c.send('DELETE', `/api/images/${encodeURIComponent(id)}`)
+}
+
+/** The settings zip as bytes; with `database` a consistent copy of the database is inside. The user's only. */
+export function exportSettings(c: ApiClient, database: boolean): Promise<Blob> {
+  return c.getBlob(database ? '/api/settings/export?database=true' : '/api/settings/export')
+}
+
+/** Uploads a settings zip; the answer says what applying it would change. Nothing changes yet. */
+export function stageImport(c: ApiClient, file: Blob): R<ImportPlan> {
+  return c.upload('/api/settings/import', file, {})
+}
+
+/** Applies the uploaded zip `body.id`. */
+export function applyImport(c: ApiClient, body: ImportApply): R<ImportResult> {
+  return c.send('POST', '/api/settings/import/apply', body)
 }

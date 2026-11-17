@@ -160,7 +160,7 @@ test.describe('the document never scrolls', () => {
 })
 
 /** Every section of the settings, as the address names it. */
-const SETTINGS = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general'] as const
+const SETTINGS = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'] as const
 
 test.describe('every full-height view', () => {
   test.use({ omoOptions: { agents: { developer: script('ready', ...Array.from({ length: 200 }, (_, i) => `print|line ${i + 1} of the developer`), 'hang') } } })

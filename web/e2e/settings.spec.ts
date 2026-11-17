@@ -15,6 +15,7 @@ const SECTIONS = [
   ['review', 'Review'],
   ['plugins', 'Plugins'],
   ['general', 'General'],
+  ['backup', 'Backup'],
 ] as const
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Settings' })
