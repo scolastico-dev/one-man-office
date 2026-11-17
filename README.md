@@ -1,6 +1,9 @@
 # one-man-office (omo)
 
-![one-man-office header](.github/assets/header.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.svg">
+  <img alt="one-man-office: a browser-first kanban board where AI agents work your tickets" src=".github/assets/hero-light.svg">
+</picture>
 
 A local board for running AI CLI agents on your Git repositories. `omo` is a single self-contained Go binary: one server per user that keeps tickets (stories and tasks) in SQLite and serves them through an HTTP API, an event stream, and the `omo ai` command for agents.
 
@@ -11,8 +14,6 @@ A local board for running AI CLI agents on your Git repositories. `omo` is a sin
 > The address `omo` prints grants command execution with your permissions. By default the server listens on localhost only and requires the login token. Keep it that way unless you control who can reach the port.
 
 ## Install
-
-![Installation overview](.github/assets/installation.jpg)
 
 ### Linux and macOS
 
