@@ -149,6 +149,23 @@ test('a posted comment shows once, from the answer or the stream, whichever is f
   expect(ids(f.thread)).toEqual(['c1001', 'c1010', 'c1011'])
 })
 
+test('a post reads the log again only while the stream is not live', async () => {
+  const f = await setup({ events: [created(1001)], more: false })
+  f.hn.omo.stream!.onState('live')
+  await flushPromises()
+  const asked = f.asked.length
+  f.hn.write.fn = () => ok({ comment: comment(1010, { author: { role: 'user' } }), unreachable: [] }, 1010)
+  await f.thread.post({ body: 'c1010', question: false })
+  await flushPromises()
+  expect(f.asked).toHaveLength(asked)
+  // While the stream is away, the log is the only way the comment's place is known.
+  f.hn.omo.stream!.onState('retrying', 3000)
+  f.hn.write.fn = () => ok({ comment: comment(1011, { author: { role: 'user' } }), unreachable: [] }, 1011)
+  await f.thread.post({ body: 'c1011', question: false })
+  await flushPromises()
+  expect(f.asked).toHaveLength(asked + 1)
+})
+
 test('a lost answer rejects with the network error and reads the thread again', async () => {
   const f = await setup({ events: [created(1001)], more: false })
   f.hn.write.fn = () => {

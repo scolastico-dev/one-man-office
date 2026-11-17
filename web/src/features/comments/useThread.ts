@@ -171,8 +171,9 @@ export function useThread(n: number): Thread {
     const c = result.data.comment
     const known = events.value.some((ev) => ev.kind === 'comment.created' && (ev.data as { comment: Comment }).comment.id === c.id)
     if (!known && !pending.value.some((p) => p.id === c.id)) pending.value = [...pending.value, c]
-    // The stream normally brings the comment; reading the log makes sure it shows either way.
-    void refresh()
+    // A live stream brings the comment (and a stream that comes back reads the
+    // log again); only while it is not live is the log read for it.
+    if (store.connection.value !== 'live') void refresh()
     return result.data.unreachable
   }
 
