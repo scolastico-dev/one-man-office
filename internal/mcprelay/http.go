@@ -35,7 +35,7 @@ func (i *instance) httpTransport() (mcp.Transport, error) {
 		return nil, errors.New("the server's address is not an http or https URL")
 	}
 	if i.usesOAuth() {
-		ts, err := i.pool.tokenSource(i.cfg, i.st)
+		ts, err := i.pool.tokenSource(i.cfg, i.st, i.test)
 		if err != nil {
 			i.authFailed.Store(true)
 			return nil, err
@@ -72,7 +72,7 @@ func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		(req.Body == nil || req.GetBody != nil) {
 		// The command's headers may have expired: run it again once.
 		drain(resp)
-		i.pool.forgetHeaders(i.cfg.Name)
+		i.pool.forgetHeaders(i.st)
 		retry := req.Clone(req.Context())
 		if req.GetBody != nil {
 			if retry.Body, err = req.GetBody(); err != nil {
@@ -86,7 +86,11 @@ func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if i.usesOAuth() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden && insufficientScope(resp)) {
 		drain(resp)
 		i.authFailed.Store(true)
-		go i.pool.loginLost(i)
+		if !i.test {
+			// A Test only reports the refusal; the saved server keeps its
+			// sign-in.
+			go i.pool.loginLost(i)
+		}
 		return nil, errNeedsLogin
 	}
 	if req.Method == http.MethodPost {
@@ -184,12 +188,12 @@ func (p *Pool) headers(ctx context.Context, s api.MCPServer, st *serverState) (m
 	return out, nil
 }
 
-func (p *Pool) forgetHeaders(server string) {
+// forgetHeaders drops the cached output of the header command of st (the
+// instance's own state, so a test never touches the saved server's).
+func (p *Pool) forgetHeaders(st *serverState) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if st := p.servers[server]; st != nil {
-		st.headers = nil
-	}
+	st.headers = nil
 }
 
 // runHeadersCommand runs the header command of s, which prints a JSON

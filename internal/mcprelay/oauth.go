@@ -616,7 +616,8 @@ func (p *Pool) loadAuth(s api.MCPServer, st *serverState) {
 
 // tokenSource returns the refreshing token source of the stored sign-in of
 // s, when it was given for s's settings; every refreshed token is stored.
-func (p *Pool) tokenSource(s api.MCPServer, st *serverState) (oauth2.TokenSource, error) {
+// A test's source never marks the sign-in as lost.
+func (p *Pool) tokenSource(s api.MCPServer, st *serverState, test bool) (oauth2.TokenSource, error) {
 	a, ok, err := p.loadBound(context.Background(), s)
 	if err != nil {
 		return nil, fmt.Errorf("reading the sign-in: %w", err)
@@ -637,24 +638,26 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState) (oauth2.TokenSource
 		Scopes:       a.Scopes,
 	}
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: oauthHTTPTimeout, Transport: p.base})
-	return &persistedSource{p: p, auth: a, src: conf.TokenSource(ctx, a.Token), last: a.Token.AccessToken}, nil
+	return &persistedSource{p: p, auth: a, src: conf.TokenSource(ctx, a.Token), last: a.Token.AccessToken, test: test}, nil
 }
 
-// persistedSource stores every token its source refreshes, and turns a
-// refused refresh into the needs_login state.
+// persistedSource stores every token its source refreshes (a rotated
+// refresh token must be kept, also by a test), and turns a refused refresh
+// into the needs_login state unless it serves a test.
 type persistedSource struct {
 	p    *Pool
 	mu   sync.Mutex
 	auth mcpauth.UpstreamAuth
 	src  oauth2.TokenSource
 	last string
+	test bool
 }
 
 func (s *persistedSource) Token() (*oauth2.Token, error) {
 	tok, err := s.src.Token()
 	if err != nil {
 		var re *oauth2.RetrieveError
-		if errors.As(err, &re) && (re.ErrorCode == "invalid_grant" || re.Response != nil && re.Response.StatusCode == http.StatusUnauthorized) {
+		if !s.test && errors.As(err, &re) && (re.ErrorCode == "invalid_grant" || re.Response != nil && re.Response.StatusCode == http.StatusUnauthorized) {
 			go s.p.markNeedsLogin(s.auth.Server, "the authorization server refused to refresh the sign-in")
 		}
 		return nil, err

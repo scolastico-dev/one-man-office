@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
@@ -180,5 +181,31 @@ func TestTestingADraftAtAnotherAddressUsesNoSignIn(t *testing.T) {
 	res, err = f.pool.Test(context.Background(), oauthServer("remote", as.url()))
 	if err != nil || res.Error != "" || !slices.Contains(res.Tools, "remote__echo") {
 		t.Fatalf("test of the saved settings: %+v %v", res, err)
+	}
+}
+
+// A Test whose server refuses the stored token reports it, but leaves the
+// saved server's sign-in and connections alone.
+func TestARefusedTestKeepsTheSignIn(t *testing.T) {
+	as := newFakeAS(t)
+	f := newFixture(t, nil, oauthServer("remote", as.url()))
+	f.signIn("remote")
+	token := f.storedToken("remote")
+	as.mu.Lock()
+	delete(as.access, token)
+	as.mu.Unlock()
+	res, err := f.pool.Test(context.Background(), oauthServer("remote", as.url()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Error, "needs a sign-in") {
+		t.Fatalf("test result %+v", res)
+	}
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if f.storedToken("remote") != token || f.state("remote").Auth.State != api.MCPAuthStateConnected {
+			t.Fatalf("the test signed the saved server out: %+v", f.state("remote"))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
