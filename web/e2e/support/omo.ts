@@ -16,6 +16,8 @@ export const REPO_DIR = resolve(WEB_DIR, '..')
 export const BINARY = process.env.OMO_E2E_BIN ? resolve(process.env.OMO_E2E_BIN) : join(REPO_DIR, 'bin', process.platform === 'win32' ? 'omo.exe' : 'omo')
 export const SEED_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'seed.exe' : 'seed')
 export const FAKE_AGENT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakeagent.exe' : 'fakeagent')
+/** The scripted MCP server (stdio) a test lets omo relay; it runs only with FAKEMCP_SERVER=1 in its environment. */
+export const FAKE_MCP_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakemcp.exe' : 'fakemcp')
 
 /** The roles an agent script can be given. */
 export type AgentRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'

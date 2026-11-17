@@ -1,7 +1,6 @@
 // The MCP section of the settings against the real settings, token, agent
-// program and take-over routes. This omo runs no relay of MCP servers, so
-// the page shows "relay not available" once a server is stored. The agent
-// programs are fakes: a `claude` script first on PATH that edits the
+// program and take-over routes (the relayed servers at work are in
+// mcp-relay.spec.ts). The agent programs are fakes: a `claude` script first on PATH that edits the
 // `.claude.json` of the test's temporary home, as the real program's
 // `mcp add-json` and `mcp remove` would. With OMO_SCREENSHOTS=<folder> the
 // axe tests also write mcp-<section>-<theme>-<width>.png there.
@@ -105,7 +104,7 @@ test.afterAll(() => rmSync(FAKE.dir, { recursive: true, force: true }))
 
 const claudeJson = (omo: Omo) => JSON.parse(readFileSync(join(omo.home, '.claude.json'), 'utf8')) as typeof CLAUDE_FIXTURE & { mcpServers: Record<string, unknown> }
 
-test('without a relay: create a server through the form, edit it, make it global and delete it', async ({ page, omo }) => {
+test('create a server through the form, edit it, make it global and delete it', async ({ page, omo }) => {
   await openMcp(page, omo)
   await expect(page.locator('[data-no-mcp-servers]')).toBeVisible()
 
@@ -121,9 +120,11 @@ test('without a relay: create a server through the form, edit it, make it global
   await expect(saveBar(page, 'files').locator('[data-save-state]')).toHaveText('Saved')
   expect(existsSync(serverFile(omo, 'files'))).toBe(true)
 
-  // No relay runs in this omo: the page says so, and offers no relay actions.
-  await expect(page.locator('[data-mcp-no-relay]')).toContainText('Relay not available')
-  await expect(ed.locator('[data-mcp-test]')).toHaveCount(0)
+  // The relay tells its state at once; nothing started it yet.
+  await expect(row(page, 'files').locator('[data-mcp-server-state]')).toHaveText('not running')
+  await expect(ed.locator('[data-mcp-server-status]')).toContainText('State: not running')
+  await expect(ed.locator('[data-mcp-test]')).toBeVisible()
+  await expect(page.locator('[data-mcp-off]')).toHaveCount(0)
   await expect(row(page, 'files')).toContainText("stdio · npx · for every role · only omo's sessions")
 
   // Edit: a description, a role and "also available without an omo session".
@@ -268,7 +269,8 @@ for (const width of [1440, 390] as const) {
         await addServer(omo, 'files', { global: true, roles: ['developer', 'reviewer'], description: 'Files of the session' })
         await addServer(omo, 'docs', { transport: 'http', command: '', args: [], env: {}, url: 'https://docs.example.invalid/mcp', auth: 'oauth' })
         await openMcp(page, omo)
-        await expect(page.locator('[data-mcp-no-relay]')).toBeVisible()
+        await expect(row(page, 'files').locator('[data-mcp-server-state]')).toHaveText('not running')
+        await expect(row(page, 'docs').locator('[data-mcp-server-state]')).toHaveText('needs login')
         await expect(section(page, 'programs').locator('[data-mcp-client="claude"]')).toBeVisible()
         await expect(section(page, 'takeover').locator('[data-mcp-candidate]').first()).toBeVisible()
         expect(await violations(page), 'page').toEqual([])

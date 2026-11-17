@@ -91,6 +91,7 @@ test('the page shows the client and what it gets; Approve sends back a code that
   await expect(page.locator('[data-oauth-servers]')).toHaveText('docs')
   await expect(grant).toContainText('No board or ticket actions')
 
+  const days = Number(/(\d+) days/.exec(await grant.innerText())?.[1])
   await page.locator('[data-oauth-approve]').click()
   const q = await arrived()
   expect(q.get('state')).toBe(req.state)
@@ -106,6 +107,11 @@ test('the page shows the client and what it gets; Approve sends back a code that
   })
   expect(token.status).toBe(200)
   expect(((await token.json()) as { access_token: string }).access_token).toMatch(/^omo_at_/)
+
+  // The lifetime the page names is the one omo gives the grant.
+  const grants = await omo.api<{ kind: string; name: string; created_at: string; refresh_expires_at: string }[]>('GET', '/api/mcp/tokens')
+  const g = grants.find((x) => x.kind === 'oauth' && x.name === 'E2E Client')!
+  expect((Date.parse(g.refresh_expires_at) - Date.parse(g.created_at)) / 86_400_000).toBe(days)
 })
 
 test('Deny sends the browser back with access_denied and grants nothing', async ({ page, omo }) => {
