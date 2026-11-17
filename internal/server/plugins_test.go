@@ -120,7 +120,10 @@ func dataFile(s *Server, name, file string) string {
 	return filepath.Join(s.opts.Layout.Plugins, ".data", name, file)
 }
 
-// readLines reads the non-empty lines of path ("" lines for a missing file).
+// readLines reads the complete non-empty lines of path (none for a missing
+// file). A line counts once its newline is written: the recorder appends
+// the event and then the newline, and a hook stopped in between (the
+// runtime closed) leaves a record that the next one continues.
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -130,8 +133,14 @@ func readLines(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return completeLines(string(raw))
+}
+
+// completeLines are the non-empty lines of text that end in a newline.
+func completeLines(text string) []string {
+	text = text[:strings.LastIndexByte(text, '\n')+1]
 	var out []string
-	for _, l := range strings.Split(string(raw), "\n") {
+	for _, l := range strings.Split(text, "\n") {
 		if strings.TrimSpace(l) != "" {
 			out = append(out, l)
 		}
@@ -741,5 +750,14 @@ func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(s.opts.Layout.Plugins, ".old-rec-*")); len(left) != 0 {
 		t.Fatalf("left over: %v", left)
+	}
+}
+
+// A record without its newline yet is not counted.
+func TestCompleteLinesLeaveAnUnfinishedRecord(t *testing.T) {
+	for text, want := range map[string]int{"": 0, "{}": 0, "{}\n": 1, "{}\n{": 1, "{}\n\n{}\n": 2} {
+		if got := len(completeLines(text)); got != want {
+			t.Errorf("%q: %d lines, want %d", text, got, want)
+		}
 	}
 }
