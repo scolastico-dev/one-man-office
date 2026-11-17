@@ -287,9 +287,11 @@ func TestAmplifyingFunctionsCapped(t *testing.T) {
 }
 
 func TestPatternBlowUpBounded(t *testing.T) {
+	// The step bound, not the 30 s timeout, ends the search, well before it
+	// (four times later under the race detector, still below the timeout).
 	start := time.Now()
 	msg, _ := run(t, Limits{Timeout: 30 * time.Second}, `string.find(("a"):rep(5000), ".-.-.-.-.-b")`)
-	if msg == "" || time.Since(start) > 5*time.Second {
+	if msg == "" || time.Since(start) > raceSlowdown*5*time.Second {
 		t.Fatalf("error %q after %v", msg, time.Since(start))
 	}
 	if !strings.Contains(msg, "pattern too complex") {
