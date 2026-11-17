@@ -116,4 +116,5 @@ Questions, bug reports and suggestions are welcome on the
 
 Copyright (C) 2026 Joschua Becker EDV.
 
-Licensed under the [GNU Affero General Public License, version 3](LICENSE).
+Licensed under the [GNU Affero General Public License](LICENSE), version 3 or (at your option) any later version
+(SPDX `AGPL-3.0-or-later`); see [NOTICE](NOTICE).
