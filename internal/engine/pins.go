@@ -42,10 +42,12 @@ type pinData struct {
 	// to when its merge failed for that reason: a retry while the branch is
 	// still there merges the reviewed commit and leaves the rest.
 	Moved map[string]string `json:"moved,omitempty"`
-	// Pushed maps "ticket/project" to what omo pushed for the ticket's
-	// current export of the project: the export job's prompt and the check
-	// of the pull request address it reports go by it, not by the
-	// project's remote as it is configured at that time.
+	// Pushed maps "ticket/project" to what omo pushed last for an export
+	// of the project: the export job's prompt and the check of the pull
+	// request address it reports go by it, not by the project's remote as
+	// it is configured at that time, and a later export of the ticket (in
+	// a later review round too) may move the remote branch on from it. It
+	// is kept until the ticket is done.
 	Pushed map[string]pushRecord `json:"pushed,omitempty"`
 	// Approved maps "ticket/project" to the commit the project's last
 	// approving verdict holds for (see carry.go).
@@ -400,11 +402,10 @@ func (s *pinStore) dropProjects(gone func(ticket int64, project string) bool) bo
 
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
-// next, which a hand-in records before the board moves it), the pushes of
-// tickets no longer exporting (and why an export failed), what was left
-// out of the exports of a round no longer current, the approvals of done
-// tickets, and
-// everything of tickets the snapshot no longer holds.
+// next, which a hand-in records before the board moves it), why an export
+// failed of tickets no longer exporting, what was left out of the exports
+// of a round no longer current, the pushes and approvals of done tickets,
+// and everything of tickets the snapshot no longer holds.
 func (s *pinStore) prune(snap board.EngineSnapshot) error {
 	byID := make(map[int64]board.EngineTicket, len(snap.Tickets))
 	for _, t := range snap.Tickets {
@@ -433,8 +434,10 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 		}
 	}
 	for key := range s.data.Pushed {
-		t, ok := byID[ticketOfKey(key)]
-		if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
+		// A later round's export moves the branch on from what omo pushed
+		// before (gitops.PushCommit's lease), so the record outlives the
+		// export stage and its round.
+		if t, ok := byID[ticketOfKey(key)]; !ok || t.Column == api.ColumnDone {
 			delete(s.data.Pushed, key)
 			changed = true
 		}

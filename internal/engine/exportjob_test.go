@@ -510,3 +510,100 @@ func TestExportPushAnnouncedOnceAcrossRestart(t *testing.T) {
 		t.Fatalf("%d push comments after a restart:\n%s", c, strings.Join(h.comments(n), "\n---\n"))
 	}
 }
+
+// An export whose job failed after the push, a rejection and a new round:
+// the next export moves the remote branch omo pushed in the earlier round
+// on to the new reviewed commit (leased against what omo pushed), and its
+// job is told to update the pull request that exists for the branch. A
+// remote branch someone else moved meanwhile is still refused.
+func TestExportAgainAfterRejectionUpdatesItsBranch(t *testing.T) {
+	h := gitHarness(t)
+	bare := h.origin(h.project)
+	// The remote looks like GitHub; git is sent to the bare repository.
+	const address = "https://github.com/you/app.git"
+	gitRun(t, h.repo, "remote", "set-url", "origin", address)
+	g := h.st.General()
+	g.AgentEnv["GIT_CONFIG_COUNT"] = "1"
+	g.AgentEnv["GIT_CONFIG_KEY_0"] = "url." + bare + ".insteadOf"
+	g.AgentEnv["GIT_CONFIG_VALUE_0"] = address
+	if err := h.st.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	h.e.syncGitEnvironment()
+	old := lookPath
+	lookPath = func(name string) (string, error) {
+		if name == "gh" {
+			return "/usr/bin/gh", nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { lookPath = old })
+
+	n, branch, first := h.reviewedTask("Export me", "")
+	h.exportNow(n)
+	if got := remoteHead(t, bare, branch); got != first {
+		t.Fatalf("the first export pushed %q, want %s", got, first)
+	}
+	job, ok := h.exportSession(n)
+	if !ok {
+		t.Fatal("no export job in the first round")
+	}
+	// The job opened its pull request, then failed.
+	failed := api.DoneRequest{Error: "the forge answered 502"}
+	if err := h.e.CheckHandIn(h.ctx, h.actor(job.ID), failed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.b.Done(h.ctx, h.actor(job.ID), failed); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(3)
+	if tk := h.ticket(n); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman {
+		t.Fatalf("ticket is %s/%s after the failed job", tk.Column, tk.ReviewStage)
+	}
+
+	if _, err := h.b.Reject(h.ctx, board.User, n, api.RejectRequest{Comment: "one more thing"}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	second := commit(t, h.worktree(h.project, n), "more.txt", "more\n")
+	h.handIn(n)
+	h.steps(2)
+	if tk := h.ticket(n); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman {
+		t.Fatalf("ticket is %s/%s after the second hand-in", tk.Column, tk.ReviewStage)
+	}
+
+	// Someone else moves the remote branch: omo does not push over it.
+	other := gitRun(t, h.repo, "commit-tree", "-p", first, "-m", "someone else", first+"^{tree}")
+	gitRun(t, h.repo, "push", "-q", "-f", bare, other+":refs/heads/"+branch)
+	h.exportNow(n)
+	if got := remoteHead(t, bare, branch); got != other {
+		t.Fatalf("the remote branch moved from someone else's commit to %q", got)
+	}
+	if h.commentsWith(n, "the remote has a branch of that name that omo did not push") != 1 {
+		t.Fatalf("comments:\n%s", strings.Join(h.comments(n), "\n---\n"))
+	}
+	if _, ok := h.exportSession(n); ok {
+		t.Fatal("an export job started after a refused push")
+	}
+
+	// Back at what omo pushed in the first round, the export updates it.
+	gitRun(t, h.repo, "push", "-q", "-f", bare, first+":refs/heads/"+branch)
+	h.exportNow(n)
+	if got := remoteHead(t, bare, branch); got != second {
+		t.Fatalf("the export after the rejection left the remote at %q, want %s", got, second)
+	}
+	if c := h.commentsWith(n, "Pushed `"+second[:12]+"`"); c != 1 {
+		t.Fatalf("%d push comments of the new commit:\n%s", c, strings.Join(h.comments(n), "\n---\n"))
+	}
+	job, ok = h.exportSession(n)
+	if !ok {
+		t.Fatal("no export job after the rejection")
+	}
+	prompt, err := h.e.Ready(h.ctx, h.actor(job.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "gh pr edit '" + branch + "' --repo='you/app'"; !strings.Contains(prompt, want) || !strings.Contains(prompt, second) {
+		t.Fatalf("the prompt lacks %q or the new commit:\n%s", want, prompt)
+	}
+}

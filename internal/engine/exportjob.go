@@ -184,8 +184,9 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		err = e.checkOwnBranch(ctx, t, projectOf(t, project), x.repo, x.branch)
 	}
 	if err == nil {
-		// A push again after a failed job may move the branch from the
-		// commit omo pushed before; any other commit there is not omo's.
+		// A push again after a failed job, or in a later review round,
+		// may move the branch from the commit omo pushed before; any other
+		// commit there is not omo's.
 		before := ""
 		// exact: both names are omo's own records of this ticket.
 		if prev.Branch == x.branch && prev.Address == x.remote.Address() {
@@ -211,7 +212,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	}
 	// The push is announced once per ticket, project, commit, remote and
 	// branch, also across a restart of omo: the record is kept with the
-	// pins until the ticket no longer exports.
+	// pins until the ticket is done.
 	if prev != rec {
 		msg := fmt.Sprintf("Pushed %s to %s (%s) as %s.", codeSpan(short(x.commit)), codeSpan(x.remote.Name),
 			codeSpan(x.remote.Address()), codeSpan(x.branch))
@@ -344,8 +345,7 @@ func writeExportFolder(folder string, tx exportTexts, src textSource) error {
 }
 
 // removeExportFolders removes the folders of export jobs whose ticket is
-// no longer exporting (the pins forget their pushes, so a later export
-// announces its push again). A link (or anything else that is not a
+// no longer exporting. A link (or anything else that is not a
 // folder) at <run>/export is removed, never followed.
 func (e *Engine) removeExportFolders(snap board.EngineSnapshot) {
 	exporting := map[string]bool{}
