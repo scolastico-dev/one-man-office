@@ -33,7 +33,9 @@ test('stop all agents asks first and reports the server answer in words', async 
   await openBoard(page, omo)
   await page.getByRole('button', { name: 'Stop all agents' }).click()
   const dialog = page.getByRole('dialog', { name: 'Stop every running agent?' })
-  await expect(dialog).toContainText('The CEO keeps running')
+  // No CEO runs on a fresh home, so the dialog says nothing of one.
+  await expect(dialog).toContainText('pauses and ends every running agent')
+  await expect(dialog).not.toContainText('CEO')
   await dialog.getByRole('button', { name: 'Stop all agents' }).click()
   await expect(page.getByText('All agents stopped')).toBeVisible()
   await expect(dialog).toBeHidden()

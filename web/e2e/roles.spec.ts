@@ -20,7 +20,7 @@ const profile = (models: Record<string, string>) => ({
 const PROFILE = profile({ sonnet: 'Everyday development', opus: 'Strongest', haiku: 'Quick and cheap' })
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
-const NOTE = 'A model listed twice is picked twice as often.'
+const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.'
 
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
