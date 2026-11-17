@@ -306,7 +306,11 @@ func TestProgressIsHandedToTheCaller(t *testing.T) {
 	f := newFixture(t, nil, stdioServer("fake", nil))
 	var mu sync.Mutex
 	var steps []float64
-	_, err := f.pool.Call(context.Background(), agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":30,"steps":3}`), func(done, total float64, msg string) {
+	// The fake reports each step after its sleep, the last one right before
+	// its result. The SDK hands notifications over concurrently, so that
+	// last one may arrive after the call has ended, when nobody waits for
+	// it any more; the steps reported while the call runs must arrive.
+	_, err := f.pool.Call(context.Background(), agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":300,"steps":3}`), func(done, total float64, msg string) {
 		mu.Lock()
 		steps = append(steps, done)
 		mu.Unlock()
@@ -317,11 +321,16 @@ func TestProgressIsHandedToTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "three progress notifications", func() bool {
+	eventually(t, "the progress notifications of the running call", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(steps) == 3
+		return len(steps) >= 2
 	})
+	mu.Lock()
+	defer mu.Unlock()
+	if steps[0] != 1 || steps[1] != 2 {
+		t.Fatalf("progress %v", steps)
+	}
 }
 
 func TestUpstreamErrorsAreToolErrors(t *testing.T) {
