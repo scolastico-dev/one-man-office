@@ -48,3 +48,12 @@ test('a save sends both limits under limits', async () => {
   expect(body.limits).toEqual({ tasks: 6, stories: 3 })
   expect(body).not.toHaveProperty('max_running_agents')
 })
+
+test('the hints say what the engine does: who is told to investigate, what is reminded and flagged, what is rescanned', async () => {
+  await mountPage()
+  const text = w!.text()
+  expect(text).toContain('before the waiting agent is told to find out why nothing happens')
+  expect(text).not.toContain('the product manager looks into it')
+  expect(text).toContain('A question to an agent is reminded to it then and flagged on the ticket after twice this time.')
+  expect(text).toContain('the exported pull requests are checked for a merge')
+})

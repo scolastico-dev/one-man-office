@@ -70,7 +70,7 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
         <DurationField
           v-model="draft.health.question_unanswered_after"
           label="Question unanswered after"
-          hint="A question to you this old rings the bell again."
+          hint="A question to you this old rings the bell again. A question to an agent is reminded to it then and flagged on the ticket after twice this time."
           :error="err('health.question_unanswered_after')"
           data-field="health.question_unanswered_after"
         />
@@ -82,7 +82,7 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
           required
           :error="err('waiting.timeouts_before_investigate')"
           data-field="waiting.timeouts_before_investigate"
-          hint="Waits that ran out before the product manager looks into it."
+          hint="Waits in a row that ran out before the waiting agent is told to find out why nothing happens."
         />
       </FormSection>
       <FormSection legend="Stop and scan">
@@ -96,7 +96,7 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
         <DurationField
           v-model="draft.rescan_interval"
           label="Rescan interval"
-          hint="How often the workspace folders are searched."
+          hint="How often the workspace folders are searched and the exported pull requests are checked for a merge."
           :error="err('rescan_interval')"
           data-field="rescan_interval"
         />
