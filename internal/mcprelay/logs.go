@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/secreturl"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
@@ -34,10 +35,31 @@ const minSecret = 8
 
 // redactor hides the secret values of a server: its env and header values,
 // as written and as expanded, the output of its header command, its OAuth
-// client secret and tokens.
+// client secret and tokens, and the secrets of its address, which is shown
+// as secreturl.Display renders it.
 type redactor struct {
 	mu      sync.RWMutex
 	secrets []string
+	// addresses are the forms of an address with secrets, each replaced
+	// by its display form before the secrets are.
+	addresses []addressForm
+}
+
+type addressForm struct{ form, display string }
+
+// addAddress learns the address raw: its forms are shown as Display
+// renders it, and its secret parts are hidden wherever they appear.
+func (r *redactor) addAddress(raw string) {
+	display := secreturl.Display(raw)
+	r.mu.Lock()
+	for _, f := range secreturl.Forms(raw) {
+		if !slices.Contains(r.addresses, addressForm{f, display}) {
+			r.addresses = append(r.addresses, addressForm{f, display})
+		}
+	}
+	slices.SortFunc(r.addresses, func(a, b addressForm) int { return len(b.form) - len(a.form) })
+	r.mu.Unlock()
+	r.add(secreturl.Values(raw)...)
 }
 
 func (r *redactor) add(values ...string) {
@@ -61,6 +83,9 @@ func (r *redactor) redact(s string) string {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	for _, a := range r.addresses {
+		s = strings.ReplaceAll(s, a.form, a.display)
+	}
 	for _, v := range r.secrets {
 		if strings.Contains(s, v) {
 			s = strings.ReplaceAll(s, v, redacted)

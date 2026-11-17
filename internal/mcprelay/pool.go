@@ -402,7 +402,7 @@ func (p *Pool) failure(server string, err error) *mcp.CallToolResult {
 	p.mu.Lock()
 	r := p.state(server).redact
 	p.mu.Unlock()
-	return errorResult(r.redact(describeStartError(server, err)))
+	return errorResult(describeStartError(server, err, r))
 }
 
 func errorResult(text string) *mcp.CallToolResult {
@@ -417,7 +417,7 @@ var (
 	errClosed     = errors.New("omo is stopping")
 )
 
-func describeStartError(server string, err error) string {
+func describeStartError(server string, err error, r *redactor) string {
 	switch {
 	case errors.Is(err, errTooMany):
 		return fmt.Sprintf("omo runs too many MCP server processes (%d); try again later", MaxProcesses)
@@ -430,13 +430,15 @@ func describeStartError(server string, err error) string {
 	case errors.Is(err, errClosed):
 		return "omo is stopping"
 	}
-	return fmt.Sprintf("server %s is not reachable: %s", server, shortReason(err))
+	return fmt.Sprintf("server %s is not reachable: %s", server, shortReason(r, err))
 }
 
-// shortReason is the first line of err, bounded.
-func shortReason(err error) string {
+// shortReason is the first line of err, redacted with r (nil redacts
+// nothing) before it is bounded, so that a cut never leaves part of a
+// secret behind.
+func shortReason(r *redactor, err error) string {
 	msg, _, _ := strings.Cut(err.Error(), "\n")
-	return cleanLine(shortName(msg))
+	return cleanLine(shortName(r.redact(msg)))
 }
 
 // acquire returns a started instance of s for id, starting it when needed.
@@ -519,7 +521,7 @@ func (p *Pool) recordFailure(server string, st *serverState, err error) {
 	cut := now.Add(-p.t.failureWindow)
 	st.failures = slices.DeleteFunc(st.failures, func(t time.Time) bool { return t.Before(cut) })
 	st.failures = append(st.failures, now)
-	st.lastError = st.redact.redact(shortReason(err))
+	st.lastError = shortReason(st.redact, err)
 	n := len(st.failures)
 	if n >= p.t.maxFailures {
 		st.failed = true
@@ -788,7 +790,7 @@ func (p *Pool) Test(ctx context.Context, s api.MCPServer) (api.MCPTestResult, er
 	if s.Auth == api.MCPAuthOAuth && s.Transport != api.MCPTransportStdio {
 		p.loadAuth(s, st)
 		if st.auth.State != api.MCPAuthStateConnected {
-			res.Error = describeStartError(s.Name, errNeedsLogin)
+			res.Error = describeStartError(s.Name, errNeedsLogin, st.redact)
 			res.Millis = time.Since(began).Milliseconds()
 			return res, nil
 		}
@@ -803,13 +805,13 @@ func (p *Pool) Test(ctx context.Context, s api.MCPServer) (api.MCPTestResult, er
 	case <-inst.ready:
 	case <-sctx.Done():
 		inst.stop("test ended")
-		res.Error = describeStartError(s.Name, sctx.Err())
+		res.Error = describeStartError(s.Name, sctx.Err(), st.redact)
 		res.Millis = time.Since(began).Milliseconds()
 		return res, nil
 	}
 	defer inst.stop("test ended")
 	if inst.err != nil {
-		res.Error = st.redact.redact(describeStartError(s.Name, inst.err))
+		res.Error = describeStartError(s.Name, inst.err, st.redact)
 	} else {
 		res.Tools = inst.tools.names()
 		res.Omitted = append(res.Omitted, inst.tools.omitted...)

@@ -73,23 +73,25 @@ func newInstance(p *Pool, cfg api.MCPServer, key, dir string, st *serverState) *
 		lastUsed: time.Now(),
 		progress: map[string]func(float64, float64, string){},
 	}
-	inst.learnSecrets()
+	learnSecrets(st.redact, cfg, p.o.Env())
 	return inst
 }
 
-// learnSecrets adds the server's values to its redactor.
-func (i *instance) learnSecrets() {
-	env := i.pool.o.Env()
-	for _, v := range i.cfg.Env {
-		i.st.redact.add(v, expand(v, env))
+// learnSecrets adds the values of the settings s to r: env and header
+// values, as written and as expanded with env, the OAuth client secret and
+// the secrets of the address.
+func learnSecrets(r *redactor, s api.MCPServer, env []string) {
+	for _, v := range s.Env {
+		r.add(v, expand(v, env))
 	}
-	for _, v := range i.cfg.Headers {
-		i.st.redact.add(v, expand(v, env))
+	for _, v := range s.Headers {
+		r.add(v, expand(v, env))
 		if _, after, ok := cutBearer(expand(v, env)); ok {
-			i.st.redact.add(after)
+			r.add(after)
 		}
 	}
-	i.st.redact.add(i.cfg.OAuth.ClientSecret)
+	r.add(s.OAuth.ClientSecret)
+	r.addAddress(s.URL)
 }
 
 // release ends a use of the instance.
@@ -172,7 +174,7 @@ func (i *instance) start() {
 		}
 		p.mu.Unlock()
 		if !stopping {
-			i.st.log.printf("start failed: %s", shortReason(err))
+			i.st.log.printf("start failed: %s", shortReason(i.st.redact, err))
 		}
 		i.closeConn()
 		close(i.ready)
@@ -353,7 +355,7 @@ func (i *instance) relist() {
 	defer cancel()
 	set, err := i.list(ctx)
 	if err != nil {
-		i.st.log.printf("listing the changed tools failed: %s", shortReason(err))
+		i.st.log.printf("listing the changed tools failed: %s", shortReason(i.st.redact, err))
 		return
 	}
 	i.mu.Lock()
@@ -383,7 +385,7 @@ func (i *instance) watch() {
 	}
 	reason := "the connection ended"
 	if err != nil {
-		reason = shortReason(err)
+		reason = shortReason(i.st.redact, err)
 	}
 	if i.proc != nil {
 		select {
@@ -498,10 +500,10 @@ func (i *instance) call(ctx context.Context, tool string, args json.RawMessage, 
 	default:
 		var rpc *jsonrpc.Error
 		if errors.As(err, &rpc) {
-			msg := i.st.redact.redact(cleanLine(shortName(rpc.Message)))
+			msg := cleanLine(shortName(i.st.redact.redact(rpc.Message)))
 			return errorResult(fmt.Sprintf("server %s: %s (%d)", name, msg, rpc.Code)), nil
 		}
-		reason := i.st.redact.redact(shortReason(err))
+		reason := shortReason(i.st.redact, err)
 		i.st.log.printf("call of %s failed: %s", shortName(tool), reason)
 		return errorResult(fmt.Sprintf("server %s is not reachable: %s", name, reason)), nil
 	}

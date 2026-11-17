@@ -3,16 +3,16 @@ package mcpclients
 import (
 	"encoding/json"
 	"maps"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/secreturl"
 )
 
 // Masked replaces a value omo read from a program's file in a preview.
-const Masked = "***"
+const Masked = secreturl.Mask
 
 // schemePrefix keeps the scheme word of an Authorization value visible.
 var schemePrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]* `)
@@ -55,30 +55,6 @@ func maskMap(m map[string]string) map[string]string {
 	return out
 }
 
-// maskURL hides a password and the query values of an address.
-func maskURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return Masked
-	}
-	if u.User != nil {
-		if _, ok := u.User.Password(); ok {
-			u.User = url.UserPassword(u.User.Username(), "x")
-		}
-	}
-	if u.RawQuery != "" {
-		q := u.Query()
-		for k := range q {
-			q[k] = []string{"x"}
-		}
-		u.RawQuery = q.Encode()
-	}
-	out := u.String()
-	out = strings.ReplaceAll(out, ":x@", ":"+Masked+"@")
-	out = strings.ReplaceAll(out, "=x", "="+Masked)
-	return out
-}
-
 // MaskServer returns s with its environment and header values, client
 // secret and address secrets masked; the keys stay visible.
 func MaskServer(s api.MCPServer) api.MCPServer {
@@ -88,7 +64,7 @@ func MaskServer(s api.MCPServer) api.MCPServer {
 		s.OAuth.ClientSecret = Masked
 	}
 	if s.URL != "" {
-		s.URL = maskURL(s.URL)
+		s.URL = secreturl.Display(s.URL)
 	}
 	return s
 }
@@ -164,7 +140,7 @@ func maskAny(v any) any {
 				out[k] = Masked
 			case k == "url" || k == "serverUrl" || k == "httpUrl":
 				s, _ := x.(string)
-				out[k] = maskURL(s)
+				out[k] = secreturl.Display(s)
 			default:
 				out[k] = maskAny(x)
 			}
@@ -194,16 +170,9 @@ func (r *redactor) add(s api.MCPServer) {
 			}
 		}
 	}
-	if u, err := url.Parse(s.URL); err == nil {
-		if p, ok := u.User.Password(); ok && len(p) >= 4 {
-			r.values = append(r.values, p)
-		}
-		for _, vs := range u.Query() {
-			for _, v := range vs {
-				if len(v) >= 4 {
-					r.values = append(r.values, v)
-				}
-			}
+	for _, v := range secreturl.Values(s.URL) {
+		if len(v) >= 4 {
+			r.values = append(r.values, v)
 		}
 	}
 }

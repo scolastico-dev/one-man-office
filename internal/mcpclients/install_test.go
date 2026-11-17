@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/secreturl"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -462,7 +463,7 @@ func TestMaskValue(t *testing.T) {
 			t.Errorf("maskValue(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := maskURL("https://user:pw-secret@h.example.invalid/mcp?key=q-secret&x=1"); strings.Contains(got, "secret") || !strings.Contains(got, "h.example.invalid/mcp") {
-		t.Errorf("maskURL: %s", got)
+	if got := secreturl.Display("https://user:pw-secret@h.example.invalid/mcp?key=q-secret&x=1"); strings.Contains(got, "secret") || !strings.Contains(got, "h.example.invalid/mcp") {
+		t.Errorf("secreturl.Display: %s", got)
 	}
 }

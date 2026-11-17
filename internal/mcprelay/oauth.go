@@ -386,9 +386,13 @@ func (p *Pool) Connect(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("server %s: %w", name, err)
 	}
+	env := p.o.Env()
+	p.mu.Lock()
+	learnSecrets(p.state(name).redact, s, env)
+	p.mu.Unlock()
 	req, resp, err := p.probe(ctx, s)
 	if err != nil {
-		return "", fmt.Errorf("server %s is not reachable: %s", name, shortReason(err))
+		return "", fmt.Errorf("server %s is not reachable: %s", name, p.cleanAuthError(name, err))
 	}
 	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
 		drain(resp)
@@ -431,7 +435,7 @@ func (p *Pool) cleanAuthError(name string, err error) string {
 	p.mu.Lock()
 	r := p.state(name).redact
 	p.mu.Unlock()
-	return r.redact(shortReason(err))
+	return shortReason(r, err)
 }
 
 // probe sends a request without credentials to the server so that it
@@ -673,7 +677,7 @@ func (s *persistedSource) Token() (*oauth2.Token, error) {
 			s.p.mu.Lock()
 			st := s.p.state(s.auth.Server)
 			s.p.mu.Unlock()
-			st.log.printf("storing the refreshed sign-in failed: %s", shortReason(err))
+			st.log.printf("storing the refreshed sign-in failed: %s", shortReason(st.redact, err))
 		}
 	}
 	return tok, nil
@@ -778,7 +782,7 @@ func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth, 
 		if err != nil {
 			r := &redactor{}
 			r.add(a.ClientSecret, a.Token.AccessToken, a.Token.RefreshToken)
-			logf("revoking the sign-in of %s failed: %s", name, r.redact(shortReason(err)))
+			logf("revoking the sign-in of %s failed: %s", name, shortReason(r, err))
 			return
 		}
 		drain(resp)
