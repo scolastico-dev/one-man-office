@@ -27,3 +27,27 @@ func TestCEOPromptSaysItsTicketsWaitForTheUser(t *testing.T) {
 		}
 	}
 }
+
+// TestCEOPromptReleasesStandaloneTasksOnlyWhereThatApplies: the line that
+// lets the CEO release a standalone task it created is absent while its
+// tickets wait for the user's approval, as it could never apply then.
+func TestCEOPromptReleasesStandaloneTasksOnlyWhereThatApplies(t *testing.T) {
+	const release = "You may release a standalone task you created"
+	for _, c := range []struct {
+		release string
+		need    bool
+		want    bool
+	}{{"agents", false, true}, {"agents", true, false}, {"user", false, false}, {"user", true, false}} {
+		d := Data{Name: "Cleo", Role: "ceo", TaskRelease: c.release, CEOMayApprove: true, CEOTicketsNeedApproval: c.need}
+		out, err := Render("ceo", Defaults()["ceo"], d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out, release) != c.want {
+			t.Errorf("release %s, approval switch %v: line shown %v", c.release, c.need, !c.want)
+		}
+		if strings.Contains(out, "\n\n\n") || strings.Contains(out, "{{") {
+			t.Errorf("broken layout:\n%s", out)
+		}
+	}
+}
