@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-order="1" width="1280" height="200" viewBox="0 0 1280 200">
+  <!-- README section header: What is this? -->
+  <rect class="frame" x="1" y="1" width="1278" height="198"/>
+
+  <!-- Icon: An information mark in a circle. -->
+  <rect class="tile" x="40" y="40" width="120" height="120"/>
+  <g transform="translate(68 68)">
+    <circle class="icon" cx="32" cy="32" r="26"/>
+    <path class="icon" d="M32 28 V46"/>
+    <rect class="icon-fill" x="29.5" y="16" width="5" height="6"/>
+  </g>
+
+  <text class="fg bold" x="196" y="98" font-size="52">What is this?</text>
+  <text class="muted" x="198" y="142" font-size="22">a kanban board your AI agents work on</text>
+
+  <!-- The snail, leaving a trail. -->
+  <image href="logo" x="1096" y="52" width="104" height="104"/>
+  <path class="trail" d="M 1206 136 H 1246"/>
+</svg>

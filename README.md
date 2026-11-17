@@ -5,6 +5,11 @@
   <img alt="one-man-office: a browser-first kanban board where AI agents work your tickets" src=".github/assets/hero-light.svg">
 </picture>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-what-dark.svg">
+  <img alt="What is this?" src=".github/assets/header-what-light.svg">
+</picture>
+
 A local board for running AI CLI agents on your Git repositories. `omo` is a single self-contained Go binary: one server per user that keeps tickets (stories and tasks) in SQLite and serves them through an HTTP API, an event stream, and the `omo ai` command for agents.
 
 > [!NOTE]
@@ -13,7 +18,10 @@ A local board for running AI CLI agents on your Git repositories. `omo` is a sin
 > [!WARNING]
 > The address `omo` prints grants command execution with your permissions. By default the server listens on localhost only and requires the login token. Keep it that way unless you control who can reach the port.
 
-## Install
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-install-dark.svg">
+  <img alt="Install and set up" src=".github/assets/header-install-light.svg">
+</picture>
 
 ### Linux and macOS
 
@@ -67,7 +75,10 @@ $env:OMO_INSTALL_DIR = "$HOME\bin"
 - **Docker**: multi-architecture images, see `Dockerfile` and `compose.yml`. The container listens on port 8090.
 - **Later updates**: `omo update` (`omo update --check` only reports).
 
-## Quick start
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-start-dark.svg">
+  <img alt="Start using it" src=".github/assets/header-start-light.svg">
+</picture>
 
 ```bash
 omo -d             # start in the background; prints the address, the login token and the log path
@@ -288,11 +299,24 @@ Agents run as you. The guards in these settings keep an agent that goes through 
 
 Everything is in `OMO_HOME` (default `~/.local/omo`, `%APPDATA%\omo` on Windows; an absolute `OMO_HOME` overrides): `omo.db` (tickets), `server.yaml`, `token`, `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`, `usage/` (usage scripts), `skillsets/` and `skills/` (skill set settings and their checkouts), `plugins/` (plugin settings and installed plugins), `run/` (lock, log, socket, last usage readings, export folders), `worktrees/` (the agents' worktrees), `workdirs/` (the working folders of tasks without a project), `ceo/` (the CEO agent's folder), `logs/` (agent transcripts) and `images/` (uploaded images; `images/terminal/` holds the images dropped into terminals) and `backups/` (files a settings import replaced). Nothing is written into your projects. If `OMO_HOME` holds an installation of an older omo, this version refuses to use it; set `OMO_HOME` to another folder.
 
-## Documentation
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-docs-dark.svg">
+  <img alt="Learn more" src=".github/assets/header-docs-light.svg">
+</picture>
 
 The [wiki](wiki/README.md) documents the earlier office-based design and is outdated; it is being rewritten. [CLAUDE.md](CLAUDE.md) describes the current architecture for contributors.
 
-## License
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-help-dark.svg">
+  <img alt="Questions and bugs" src=".github/assets/header-help-light.svg">
+</picture>
+
+Questions, bug reports and suggestions are welcome on the [issues page](https://github.com/scolastico-dev/one-man-office/issues).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-license-dark.svg">
+  <img alt="License" src=".github/assets/header-license-light.svg">
+</picture>
 
 Copyright (C) 2026 Joschua Becker EDV.
 
