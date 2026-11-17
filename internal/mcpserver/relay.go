@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -42,12 +41,6 @@ type Options struct {
 	// Seen records a request of an agent session.
 	Seen func(session string)
 	Log  *log.Logger
-}
-
-// NewHandler returns the Streamable HTTP handler of /mcp. It expects the
-// request's Identity in its context.
-func NewHandler(o Options) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "the MCP endpoint is not available yet", http.StatusNotImplemented)
-	})
+	// Version is omo's version, sent as the server's version.
+	Version string
 }
