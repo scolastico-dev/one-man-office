@@ -44,7 +44,7 @@ export const general: General = {
   usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 }
 
-export const project = (id: string, name = id): Project => ({ id, name, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, story_merge: 'merge' })
+export const project = (id: string, name = id): Project => ({ id, name, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' } })
 
 /** localStorage stand-in. */
 export class MemoryStorage implements Storage {

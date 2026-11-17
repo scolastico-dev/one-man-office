@@ -308,8 +308,6 @@ export interface Project {
   merge: ProjectMergeModes
   /** The merge modes in effect: the project's own, else the general default. */
   effective_merge: MergeModes
-  /** @deprecated `effective_merge.story`, kept for older clients; use `merge` and `effective_merge`. */
-  story_merge: string
   /** The branch checked out in the folder; absent when unknown (detached HEAD, missing folder). */
   current_branch?: string
   /** The repository's default branch; absent when none can be found. */
@@ -326,8 +324,6 @@ export interface UpdateProject {
   enabled?: boolean | null
   /** Sets the project's own merge mode of each kind named; '' goes back to the general default. Kinds left out stay. */
   merge?: MergeModesUpdate
-  /** @deprecated sets `merge.story`; use `merge`. */
-  story_merge?: string | null
 }
 
 /**

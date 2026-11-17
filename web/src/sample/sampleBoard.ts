@@ -16,7 +16,6 @@ function project(id: string, name: string): Project {
     root: '',
     merge: { story: '', task: '', story_task: '' },
     effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' },
-    story_merge: 'merge',
   }
 }
 

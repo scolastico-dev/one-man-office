@@ -19,8 +19,8 @@ import (
 )
 
 // Project is a registered project. Missing is computed on every read: the
-// folder is absent, not a folder, or has no .git. So are EffectiveMerge and
-// StoryMerge, from the project's own merge modes and the general defaults.
+// folder is absent, not a folder, or has no .git. So is EffectiveMerge, from
+// the project's own merge modes and the general defaults.
 type Project = api.Project
 
 // ProjectUpdate changes a project; nil fields stay unchanged. The merge
@@ -59,8 +59,8 @@ func validMergeMode(v string, empty bool) bool {
 	return (empty && v == "") || slices.Contains(mergeModes, v)
 }
 
-// withEffective fills p's EffectiveMerge (its own modes, else the general
-// defaults d) and the older StoryMerge.
+// withEffective fills p's EffectiveMerge: its own modes, else the general
+// defaults d.
 func withEffective(p Project, d api.MergeModes) Project {
 	pick := func(own, def string) string {
 		if own != "" {
@@ -73,7 +73,6 @@ func withEffective(p Project, d api.MergeModes) Project {
 		Task:      pick(p.Merge.Task, d.Task),
 		StoryTask: pick(p.Merge.StoryTask, d.StoryTask),
 	}
-	p.StoryMerge = p.EffectiveMerge.Story
 	return p
 }
 
@@ -552,7 +551,7 @@ func (s *Store) saveProject(p Project) error {
 		return err
 	}
 	p.Missing = false
-	p.EffectiveMerge, p.StoryMerge = api.MergeModes{}, ""
+	p.EffectiveMerge = api.MergeModes{}
 	s.projects[p.ID] = p
 	return nil
 }

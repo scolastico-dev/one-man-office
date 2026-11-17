@@ -45,7 +45,7 @@ func TestAddProjectGeneratesStableID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "github.com-not-three-ui" || !a.Enabled || a.StoryMerge != "merge" || a.Merge != (api.MergeModes{}) || a.Root != "" {
+	if a.ID != "github.com-not-three-ui" || !a.Enabled || a.EffectiveMerge.Story != "merge" || a.Merge != (api.MergeModes{}) || a.Root != "" {
 		t.Fatalf("project = %+v", a)
 	}
 	b, err := s.AddProject(newRepo(t, ws, "ui2"), "github.com/not-three/ui")
@@ -187,7 +187,7 @@ func TestHandAddedProjectFileIsPickedUp(t *testing.T) {
 		t.Fatalf("OnChange got %+v", got)
 	}
 	p, ok := s.Project("x")
-	if !ok || p.Path != repo || !p.Enabled || p.StoryMerge != "merge" {
+	if !ok || p.Path != repo || !p.Enabled || p.EffectiveMerge.Story != "merge" {
 		t.Fatalf("project = %+v %v", p, ok)
 	}
 	os.Remove(filepath.Join(home, "projects", "x.yaml"))
@@ -211,7 +211,7 @@ func TestBrokenProjectEditKeepsProject(t *testing.T) {
 	if len(changes) != 1 || changes[0].Err == nil || changes[0].Name != p.ID {
 		t.Fatalf("changes = %+v", changes)
 	}
-	if got, ok := s.Project(p.ID); !ok || got.StoryMerge != "merge" {
+	if got, ok := s.Project(p.ID); !ok || got.EffectiveMerge.Story != "merge" {
 		t.Fatalf("project = %+v %v", got, ok)
 	}
 	// Fixing it through the store clears the error.

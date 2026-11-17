@@ -474,10 +474,6 @@ type Project struct {
 	// modes in effect: the project's own, else the general default.
 	Merge          MergeModes `json:"merge"`
 	EffectiveMerge MergeModes `json:"effective_merge"`
-	// StoryMerge is EffectiveMerge.Story, kept for older clients.
-	//
-	// Deprecated: use Merge and EffectiveMerge.
-	StoryMerge string `json:"story_merge"`
 	// CurrentBranch is the branch checked out in the project folder and
 	// DefaultBranch the repository's default branch, both read from git when
 	// the project is listed; each is omitted when unknown (a detached HEAD,
@@ -497,10 +493,6 @@ type UpdateProject struct {
 	Name    Optional[string]           `json:"name,omitzero"`
 	Enabled Optional[bool]             `json:"enabled,omitzero"`
 	Merge   Optional[MergeModesUpdate] `json:"merge,omitzero"`
-	// StoryMerge sets Merge.Story, kept for older clients.
-	//
-	// Deprecated: use Merge.
-	StoryMerge Optional[string] `json:"story_merge,omitzero"`
 }
 
 // Model is a selectable agent model.

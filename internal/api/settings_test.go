@@ -53,10 +53,13 @@ func TestMergeModesAndBatchKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(marshal(Project{})), &p); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"merge", "effective_merge", "story_merge"} {
+	for _, k := range []string{"merge", "effective_merge"} {
 		if _, ok := p[k]; !ok {
 			t.Errorf("Project lacks %q", k)
 		}
+	}
+	if _, ok := p["story_merge"]; ok {
+		t.Error("Project has story_merge")
 	}
 	if ProjectBatchDisable != "disable" || ProjectBatchEnable != "enable" || MergeModeMerge != "merge" {
 		t.Error("values")

@@ -68,7 +68,7 @@ const general = (max: number): General => ({
   usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 })
 
-const project = (id: string): Project => ({ id, name: id, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, story_merge: 'merge' })
+const project = (id: string): Project => ({ id, name: id, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' } })
 
 function ev(id: number, kind: string, data: unknown, ticket: number | null = null): ApiEvent {
   return { id, kind, ticket, actor: { role: 'user' }, at: '2026-11-15T10:00:00.000Z', data }

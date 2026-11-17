@@ -629,8 +629,6 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 		{"merge.story", req.Merge.Value.Story.Set, req.Merge.Value.Story.Null, func() { u.MergeStory = &req.Merge.Value.Story.Value }},
 		{"merge.task", req.Merge.Value.Task.Set, req.Merge.Value.Task.Null, func() { u.MergeTask = &req.Merge.Value.Task.Value }},
 		{"merge.story_task", req.Merge.Value.StoryTask.Set, req.Merge.Value.StoryTask.Null, func() { u.MergeStoryTask = &req.Merge.Value.StoryTask.Value }},
-		// The older key for merge.story.
-		{"story_merge", req.StoryMerge.Set, req.StoryMerge.Null, func() { u.MergeStory = &req.StoryMerge.Value }},
 	} {
 		if !f.set {
 			continue
@@ -640,10 +638,6 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.fn()
-	}
-	if req.StoryMerge.Set && req.Merge.Value.Story.Set {
-		writeError(w, r, api.Errorf(api.CodeBadRequest, "story_merge and merge.story cannot both be set; use merge.story"))
-		return
 	}
 	p, err := s.settings.UpdateProject(r.PathValue("id"), u)
 	if err != nil {

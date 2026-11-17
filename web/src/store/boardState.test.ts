@@ -48,7 +48,7 @@ function summary(n: number, over: Partial<TicketSummary> = {}): TicketSummary {
 }
 
 function project(id: string, over: Partial<Project> = {}): Project {
-  return { id, name: id, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, story_merge: 'merge', ...over }
+  return { id, name: id, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, ...over }
 }
 
 const stamp = (i: number) => `2026-11-15T10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000000000Z`

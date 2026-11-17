@@ -23,17 +23,16 @@ func TestPatchProjectMergeModes(t *testing.T) {
 		t.Fatalf("project %+v", p)
 	}
 	p = okJSON[api.Project](t, u, 200, "PATCH", path, map[string]any{"merge": map[string]any{"story": squash}})
-	if p.Merge != (api.MergeModes{Story: squash, Task: squash}) || p.StoryMerge != squash {
+	if p.Merge != (api.MergeModes{Story: squash, Task: squash}) || p.EffectiveMerge.Story != squash {
 		t.Fatalf("a second key changed the first: %+v", p)
 	}
 	p = okJSON[api.Project](t, u, 200, "PATCH", path, map[string]any{"merge": map[string]any{"task": ""}})
 	if p.Merge.Task != "" || p.EffectiveMerge.Task != merge {
 		t.Fatalf("back to the default: %+v", p)
 	}
-	// The older key sets the story mode.
-	p = okJSON[api.Project](t, u, 200, "PATCH", path, map[string]any{"story_merge": merge})
+	p = okJSON[api.Project](t, u, 200, "PATCH", path, map[string]any{"merge": map[string]any{"story": merge}})
 	if p.Merge.Story != merge {
-		t.Fatalf("story_merge: %+v", p)
+		t.Fatalf("merge.story: %+v", p)
 	}
 
 	resp := asUser(newBrowser(t, s), s, "PATCH", path, map[string]any{"merge": map[string]any{"story_task": "rebase"}})
@@ -45,7 +44,8 @@ func TestPatchProjectMergeModes(t *testing.T) {
 		{"merge": nil},
 		{"merge": map[string]any{"task": nil}},
 		{"merge": map[string]any{"fast": "x"}},
-		{"story_merge": squash, "merge": map[string]any{"story": squash}},
+		// The story's mode has one key only.
+		{"story_merge": squash},
 	} {
 		u.fails(http.StatusBadRequest, api.CodeBadRequest, "PATCH", path, b)
 	}

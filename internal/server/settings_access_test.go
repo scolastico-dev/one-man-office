@@ -410,7 +410,7 @@ func TestAgentReadsNoCodeExecutionSettings(t *testing.T) {
 			keys []string
 		}{
 			{"/api/models", []string{"id", "profile", "name", "cli", "description", "selectable"}},
-			{"/api/projects", []string{"id", "name", "path", "enabled", "missing", "root", "merge", "effective_merge", "story_merge", "current_branch", "default_branch"}},
+			{"/api/projects", []string{"id", "name", "path", "enabled", "missing", "root", "merge", "effective_merge", "current_branch", "default_branch"}},
 		} {
 			rec := socketDo(t, s, "GET", c.path, nil, sess.ID)
 			wantStatus(t, rec.Code, http.StatusOK)

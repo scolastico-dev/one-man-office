@@ -99,7 +99,7 @@ func TestProjectMergeModesOverrideTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := api.MergeModes{Story: squash, Task: mergeMode}
-	if got.Merge != want || got.EffectiveMerge != (api.MergeModes{Story: squash, Task: mergeMode, StoryTask: api.MergeModeMerge}) || got.StoryMerge != squash {
+	if got.Merge != want || got.EffectiveMerge != (api.MergeModes{Story: squash, Task: mergeMode, StoryTask: api.MergeModeMerge}) {
 		t.Fatalf("after the update: %+v", got)
 	}
 	if list := s.Projects(true); len(list) != 1 || list[0].EffectiveMerge != got.EffectiveMerge {
