@@ -18,6 +18,7 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, wat
 import { useRoute, useRouter } from 'vue-router'
 import { ticketPageLocation } from '../../locations'
 import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
+import { closeDialog, showModal } from '../../components/ui/modalLayer'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import TicketActions from './TicketActions.vue'
@@ -67,7 +68,7 @@ const modal = ref(media?.matches ?? false)
 let shownModal = false
 function present(el: HTMLDialogElement) {
   shownModal = modal.value
-  if (shownModal) el.showModal()
+  if (shownModal) showModal(el)
   else el.show()
 }
 
@@ -81,7 +82,7 @@ function onMedia() {
   if (!el?.open || shownModal === modal.value) return
   const at = document.activeElement
   reshowing = true
-  el.close()
+  closeDialog(el)
   present(el)
   reshowing = false
   if (at instanceof HTMLElement && el.contains(at)) at.focus()
@@ -99,7 +100,7 @@ if (suspended) {
     if (!el) return
     if (s && el.open) {
       parked = true
-      el.close()
+      closeDialog(el)
     } else if (!s && parked) {
       parked = false
       if (el.isConnected && !el.open) present(el)
@@ -125,7 +126,7 @@ onBeforeUnmount(() => {
   media?.removeEventListener('change', onMedia)
   unmounting = true
   const el = dialog.value
-  if (el?.open) el.close()
+  if (el?.open) closeDialog(el)
   const back = opener
   const n = props.number
   // Focus goes back where the user came from, else to the ticket's card (none when the page took over).

@@ -85,6 +85,36 @@ test.describe('with a project', () => {
     await expectCardIn(page, 1, 'Planning')
   })
 
+  test('with Create another, the toast\'s Open is reachable by keyboard and pointer while the dialog stays open', async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await openCreate(page)
+    const dialog = createDialog(page)
+    await dialog.getByText('Create another').click()
+    await dialog.getByLabel('Title').fill('First of many')
+    await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+    const toast = page.locator('[data-toast]').filter({ hasText: '#1 created' })
+    await expect(toast).toBeVisible()
+    await expect(dialog).toBeVisible()
+    const open = toast.getByRole('button', { name: 'Open' })
+    // Still in its corner of the window, not placed by the dialog.
+    const box = (await toast.boundingBox())!
+    const view = page.viewportSize()!
+    expect(view.width - (box.x + box.width)).toBeLessThan(40)
+    expect(view.height - (box.y + box.height)).toBeLessThan(40)
+
+    // Tab reaches the toast's action from inside the open dialog.
+    let reached = false
+    for (let i = 0; i < 40 && !reached; i++) {
+      await page.keyboard.press('Tab')
+      reached = await open.evaluate((el) => el === document.activeElement)
+    }
+    expect(reached).toBe(true)
+
+    // The pointer reaches it too, and it opens the ticket.
+    await open.click()
+    await expect(page).toHaveURL(/\/1(\?|$)/)
+  })
+
   test('c opens the dialog; Escape closes it at once when empty and asks before discarding typed text', async ({ page, omo }) => {
     await openBoard(page, omo)
     await page.keyboard.press('c')

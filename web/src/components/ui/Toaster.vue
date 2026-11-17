@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import IconButton from './IconButton.vue'
 import UiButton from './UiButton.vue'
+import { topModal } from './modalLayer'
 import { activeToasts, pauseToast, resumeToast, useToast, type Toast } from './useToast'
 
 const { dismiss } = useToast()
@@ -19,6 +20,9 @@ function runAction(toast: Toast) {
 </script>
 
 <template>
+  <!-- An open modal dialog makes everything outside it inert: the toasts then live inside the topmost one, so
+       their actions can still be reached by keyboard and pointer. -->
+  <Teleport :to="topModal ?? 'body'" :disabled="!topModal">
   <div class="toaster">
     <!-- Both live regions always exist, so screen readers announce what is added to them. -->
     <div v-for="group in groups" :key="group.role" :role="group.role" class="toaster__region">
@@ -48,6 +52,7 @@ function runAction(toast: Toast) {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>

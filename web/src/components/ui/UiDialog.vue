@@ -2,6 +2,7 @@
 import { inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { BOARD_SUSPENDED, DIALOGS_IN_PLACE } from './dialogHost'
 import IconButton from './IconButton.vue'
+import { closeDialog, showModal } from './modalLayer'
 
 // The root is a teleport: attributes (data hooks such as data-question) go on the dialog itself.
 defineOptions({ inheritAttrs: false })
@@ -50,13 +51,13 @@ function show() {
     return
   }
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  el.showModal()
+  showModal(el)
   void nextTick(focusInitial)
 }
 
 function hide() {
   const el = dialog.value
-  if (el?.open) el.close()
+  if (el?.open) closeDialog(el)
   const back = opener
   opener = null
   if (back?.isConnected) back.focus()
@@ -76,7 +77,7 @@ if (suspended) {
     if (!el) return
     if (s && el.open) {
       parked = true
-      el.close()
+      closeDialog(el)
     } else if (!s && parked) {
       parked = false
       if (props.open) show()
