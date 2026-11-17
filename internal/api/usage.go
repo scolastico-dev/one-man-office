@@ -6,7 +6,9 @@ import "time"
 // agents off a model that is near a limit of its account and when it stops
 // them. Percentages are of a usage window, 0 to 100.
 type UsageSettings struct {
-	// SoftPercent is the fill from which a model is used last.
+	// SoftPercent is the fill from which a model is no longer eligible for a
+	// new start: its role picks among its other models, a start without one
+	// waits for usage, and agents already running on it go on.
 	SoftPercent float64 `yaml:"soft_percent" json:"soft_percent"`
 	// HardPercent is the fill from which a model is not used and its
 	// running agents are stopped.
