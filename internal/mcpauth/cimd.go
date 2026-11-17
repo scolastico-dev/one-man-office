@@ -176,6 +176,14 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// PublicOnly is a dialer's Control that refuses every address that is not
+// public (loopback, private, link-local, multicast, unspecified, shared),
+// as SafeClient does: it runs after name resolution, for the address
+// actually connected to.
+func PublicOnly(network, address string, c syscall.RawConn) error {
+	return refuseNonPublic(network, address, c)
+}
+
 // refuseNonPublic is the dialer's Control: it runs after name resolution,
 // for the address actually connected to.
 func refuseNonPublic(network, address string, _ syscall.RawConn) error {

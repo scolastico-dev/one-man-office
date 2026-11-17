@@ -234,8 +234,9 @@ func (l *login) fetch(f *authFlows, wait time.Duration) auth.AuthorizationCodeFe
 // client omo registered before for the same callback address is reused,
 // and else omo registers one.
 func (p *Pool) newAuthorizer(s api.MCPServer, prior mcpauth.UpstreamAuth, hasPrior bool, l *login) (authorizer, error) {
-	meta := &metaRecorder{base: p.base, l: l}
-	client := &http.Client{Timeout: oauthHTTPTimeout, Transport: &resourceOverride{base: meta, resource: s.OAuth.Resource}}
+	meta := &metaRecorder{base: guardedTransport(s.URL), l: l}
+	client := &http.Client{Timeout: oauthHTTPTimeout, Transport: &resourceOverride{base: meta, resource: s.OAuth.Resource},
+		CheckRedirect: sameOriginRedirect}
 	cfg := &auth.AuthorizationCodeHandlerConfig{
 		RedirectURL:              l.redirect,
 		AuthorizationCodeFetcher: l.fetch(&p.auth, p.t.loginWait),
@@ -641,7 +642,8 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState, test bool) (oauth2.
 		RedirectURL:  a.RedirectURI,
 		Scopes:       a.Scopes,
 	}
-	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: oauthHTTPTimeout, Transport: p.base})
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: oauthHTTPTimeout,
+		Transport: guardedTransport(s.URL), CheckRedirect: sameOriginRedirect})
 	return &persistedSource{p: p, auth: a, src: conf.TokenSource(ctx, a.Token), last: a.Token.AccessToken, test: test}, nil
 }
 
@@ -765,6 +767,7 @@ func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	transport := guardedTransport(reg.ServerURL)
 	for _, tok := range []struct{ value, hint string }{{a.Token.RefreshToken, "refresh_token"}, {a.Token.AccessToken, "access_token"}} {
 		if tok.value == "" {
 			continue
@@ -778,7 +781,7 @@ func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth, 
 			return
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, err := p.base.RoundTrip(req)
+		resp, err := transport.RoundTrip(req)
 		if err != nil {
 			r := &redactor{}
 			r.add(a.ClientSecret, a.Token.AccessToken, a.Token.RefreshToken)

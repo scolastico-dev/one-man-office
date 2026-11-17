@@ -39,6 +39,8 @@ type fakeAS struct {
 	revoked    []string
 	expiresIn  int
 	issued     []string
+	// requests are the host and path of every request.
+	requests []string
 }
 
 type fakeCode struct {
@@ -73,6 +75,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (a *fakeAS) serve(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	a.requests = append(a.requests, r.Host+r.URL.Path)
+	a.mu.Unlock()
 	base := a.srv.URL
 	switch r.URL.Path {
 	case "/.well-known/oauth-protected-resource/mcp":
