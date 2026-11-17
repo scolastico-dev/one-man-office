@@ -102,6 +102,6 @@ for (const theme of ['dark', 'light'] as const) {
     await expectOneRule(tabsIn(page.locator('[data-ticket-page]'), `Activity on #${story}`), 'the ticket page')
     await page.goto(omo.url('/'))
     await page.getByRole('button', { name: 'Sidebar' }).click()
-    await expectOneRule(tabsIn(page.getByRole('dialog', { name: 'Sidebar' }), 'Sidebar'), "the sidebar's sheet")
+    await expectOneRule(tabsIn(page.getByRole('dialog', { name: 'Agents and terminals' }), 'Sidebar'), "the sidebar's sheet")
   })
 }

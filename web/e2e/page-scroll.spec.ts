@@ -237,7 +237,7 @@ test.describe('every full-height view', () => {
       // The sidebar with a shell in it (on a phone the sidebar is a sheet).
       await page.goto(omo.url('/'))
       await expect(page.locator('[data-card-link]').first()).toBeVisible()
-      const side = size.width < 768 ? page.getByRole('dialog', { name: 'Sidebar' }) : page.locator('[data-sidebar]')
+      const side = size.width < 768 ? page.getByRole('dialog', { name: 'Agents and terminals' }) : page.locator('[data-sidebar]')
       if (size.width < 768) await page.getByRole('button', { name: 'Sidebar' }).click()
       await side.getByRole('tab', { name: /^Terminals/ }).click()
       await side.locator(`[data-terminal="${shell.id}"]`).click()

@@ -148,7 +148,7 @@ test('on a narrow window the column is gone and the sheet shows the same tabs', 
   useSidebar().show()
   await flushPromises()
   const dialog = document.body.querySelector('dialog[open], dialog')!
-  expect(dialog.querySelector('h2')!.textContent).toBe('Sidebar')
+  expect(dialog.querySelector('h2')!.textContent).toBe('Agents and terminals')
   expect([...dialog.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Agents 1', 'Terminals 0'])
   expect(dialog.querySelectorAll('[data-agent-row]')).toHaveLength(1)
 })

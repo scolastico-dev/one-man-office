@@ -375,7 +375,7 @@ for (const width of [1440, 390] as const) {
         let root: Locator
         if (width === 390) {
           await page.getByRole('button', { name: 'Sidebar' }).click()
-          root = page.getByRole('dialog', { name: 'Sidebar' })
+          root = page.getByRole('dialog', { name: 'Agents and terminals' })
           await root.getByRole('tab', { name: /^Terminals/ }).click()
         } else {
           await openTerminalsTab(page)
@@ -407,7 +407,7 @@ test.describe('on a phone', () => {
     try {
       await openBoard(page, omo)
       await page.getByRole('button', { name: 'Sidebar' }).click()
-      const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+      const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
       await sheet.getByRole('tab', { name: /^Terminals/ }).click()
       await newTerminal(sheet)
       const terminal = terminalIn(sheet)
@@ -434,7 +434,7 @@ test.describe('on a phone', () => {
     try {
       await openBoard(page, omo)
       await page.getByRole('button', { name: 'Sidebar' }).click()
-      const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+      const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
       await sheet.getByRole('tab', { name: /^Terminals/ }).click()
       await newTerminal(sheet)
       const terminal = terminalIn(sheet)

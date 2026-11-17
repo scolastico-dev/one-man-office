@@ -282,7 +282,7 @@ for (const theme of ['dark', 'light'] as const) {
         await openBoard(page, omo)
         if (width === 390) {
           await page.getByRole('button', { name: 'Sidebar' }).click()
-          const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+          const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
           await sheet.locator(`[data-terminal="${shell}"]`).click()
           await expectTerminalText(terminalIn(sheet), /\S/)
           await sheet.locator('.dialog__close').click()

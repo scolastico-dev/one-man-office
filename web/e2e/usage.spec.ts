@@ -102,7 +102,7 @@ async function openUsage(page: Page, omo: Omo, narrow = false) {
   let root = sidebar(page)
   if (narrow) {
     await page.getByRole('button', { name: 'Sidebar' }).click()
-    root = page.getByRole('dialog', { name: 'Sidebar' })
+    root = page.getByRole('dialog', { name: 'Agents and terminals' })
     await root.getByRole('tab', { name: /^Agents/ }).click()
   } else {
     await root.getByRole('tab', { name: /^Agents/ }).click()

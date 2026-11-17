@@ -108,7 +108,7 @@ for (const width of [1440, 390]) {
     // The sidebar's tabs.
     if (narrow) await page.getByRole('button', { name: 'Sidebar', exact: true }).click()
     else await page.getByRole('button', { name: 'Expand sidebar' }).click()
-    const side = narrow ? page.getByRole('dialog', { name: 'Sidebar' }) : page.locator('[data-sidebar]')
+    const side = narrow ? page.getByRole('dialog', { name: 'Agents and terminals' }) : page.locator('[data-sidebar]')
     for (const tab of [/^CEO/, /^Agents/, /^Terminals/]) {
       await side.getByRole('tab', { name: tab }).click()
       await check(w, `sidebar ${tab.source.slice(1)}`)

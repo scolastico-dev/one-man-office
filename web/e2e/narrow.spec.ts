@@ -179,7 +179,7 @@ test.describe('with a running agent', () => {
     await expect(page.locator('[data-sidebar]')).toHaveCount(0)
     const open = page.getByRole('button', { name: 'Sidebar' })
     await open.click()
-    const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+    const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
     await expect(sheet).toBeVisible()
     await expect(sheet.getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
     await expect(sheet.locator('[data-slots]')).toContainText('1 of 4 tasks')

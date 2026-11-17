@@ -1,4 +1,6 @@
-// Keys of the terminal that a CLI reads differently from what xterm.js sends.
+// Keys of the terminal that a CLI reads differently from what xterm.js sends,
+// and the global screen reader setting (Settings, General). With
+// OMO_SCREENSHOTS=<folder>: fix6-sidebar-title-*.png, fix6-screenreader-setting-*.png.
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -6,6 +8,7 @@ import { expect, test, type Omo } from './support/omo'
 import { openBoard } from './support/board'
 import { expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
 
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 const seed = { seed: { projects: [{ path: '{{repo}}', name: 'demo' }] } }
 const sidebar = (page: Page) => page.locator('[data-sidebar]')
 
@@ -51,4 +54,19 @@ test.describe('keys', () => {
       await closeShells(omo)
     }
   })
+})
+
+test.describe('mobile sidebar title', () => {
+  test.use({ viewport: { width: 390, height: 800 }, omoOptions: seed })
+
+  for (const scheme of ['dark', 'light'] as const) {
+    test(`the sheet is titled ${scheme}`, async ({ page, omo }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await openBoard(page, omo)
+      await page.getByRole('button', { name: 'Sidebar' }).click()
+      const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
+      await expect(sheet.getByRole('heading', { name: 'Agents and terminals' })).toBeVisible()
+      if (SHOTS) await page.screenshot({ path: join(SHOTS, `fix6-sidebar-title-${scheme}.png`) })
+    })
+  }
 })

@@ -404,7 +404,7 @@ test.describe('at 390 px', () => {
     try {
       await openBoard(page, omo)
       await page.getByRole('button', { name: 'Sidebar' }).click()
-      const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+      const sheet = page.getByRole('dialog', { name: 'Agents and terminals' })
       await sheet.getByRole('tab', { name: /^Terminals/ }).click()
       await sheet.getByRole('button', { name: 'New terminal' }).click()
       await sheet.getByRole('option', { name: /^Home folder/ }).click()

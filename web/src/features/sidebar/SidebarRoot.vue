@@ -147,7 +147,7 @@ watch(
     <Splitter v-if="sidebar.open.value" :model-value="width" :min="MIN_WIDTH" :max="maxWidth" label="Sidebar width" @update:model-value="sidebar.width.value = $event" />
   </aside>
 
-  <UiDialog v-if="sidebar.narrow.value" class="side-sheet" :open="sidebar.sheet.value" title="Sidebar" @close="sidebar.hide()">
+  <UiDialog v-if="sidebar.narrow.value" class="side-sheet" :open="sidebar.sheet.value" title="Agents and terminals" @close="sidebar.hide()">
     <!-- Only while shown: a hidden sheet keeps no terminal or socket open. -->
     <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" class="side-sheet__tabs" :model-value="tab" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
       <template #panel="{ active }">
