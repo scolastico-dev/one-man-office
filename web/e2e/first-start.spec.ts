@@ -18,11 +18,26 @@ function writeSetting(omo: Omo, file: string, text: string) {
   writeFileSync(join(omo.home, 'omo', file), text)
 }
 
+const SUPERPOWERS = 'Add the Superpowers skill set (recommended)'
+
 const PROFILE = 'cli: claude\ncommand: claude\nmodels:\n  sonnet:\n    args: ["--model", "sonnet"]\n'
 const roleFile = (model: string) => `models:\n  - ${model}\nassignment: round_robin\n`
 
+/**
+ * Opens the Roles page from the agent step. Without any profile (omo found
+ * no agent program) the step opens the Agents page to detect one; the Roles
+ * page is next to it in the settings.
+ */
 async function openSetup(page: Page) {
-  await step(page, 'Check the agent setup').getByRole('button', { name: 'Check the agent setup' }).click()
+  const agents = step(page, 'Check the agent setup')
+  if (await agents.getByText('omo found no agent program').isVisible()) {
+    await agents.getByRole('button', { name: 'Detect agent programs' }).click()
+    await expect(page).toHaveURL(/\/settings\/agents$/)
+    await expect(page.getByRole('button', { name: 'Detect agent programs' })).toBeVisible()
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Roles' }).click()
+  } else {
+    await agents.getByRole('button', { name: 'Check the agent setup' }).click()
+  }
   await expect(page).toHaveURL(/\/settings\/roles$/)
   await expect(setupPage(page)).toBeVisible()
 }
@@ -42,9 +57,24 @@ test('a fresh home shows four steps, none done, Superpowers first and recommende
   }
   await expect(page.getByText('a folder with a git repository on this machine')).toBeVisible()
   await expect(page.getByText('This list disappears once the board has a ticket.')).toBeVisible()
+  // No agent program on this PATH: the step says so and leads to the detection.
+  await expect(step(page, 'Check the agent setup')).toContainText('omo found no agent program (Claude Code, Codex, Antigravity or Gemini CLI) on its PATH')
+  await expect(step(page, 'Create a first ticket')).toContainText('It waits in Planning until you approve it')
 })
 
-const SUPERPOWERS = 'Add the Superpowers skill set (recommended)'
+test('a step can be dismissed and the list hidden; this browser remembers both', async ({ page, omo }) => {
+  await openBoard(page, omo)
+  await step(page, SUPERPOWERS).getByRole('button', { name: 'Dismiss step' }).click()
+  await expect(steps(page).getByRole('listitem')).toHaveCount(3)
+  await expect(step(page, SUPERPOWERS)).toHaveCount(0)
+  await page.reload()
+  await expect(steps(page).getByRole('listitem')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Hide these steps' }).click()
+  await expect(steps(page)).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('[data-board]')).toBeVisible()
+  await expect(steps(page)).toHaveCount(0)
+})
 
 /**
  * Stands in for omo's skill set routes, so no test fetches the real
@@ -146,7 +176,8 @@ test('with a project already on the board the Superpowers step stays first and o
   await expect(step(page, 'Add a project')).toContainText('done')
   await expect(step(page, SUPERPOWERS)).not.toContainText('done')
   await expect(step(page, SUPERPOWERS).getByRole('button', { name: 'Add Superpowers' })).not.toHaveClass(/omo-btn--primary/)
-  await expect(step(page, 'Check the agent setup').getByRole('button', { name: 'Check the agent setup' })).toHaveClass(/omo-btn--primary/)
+  // No agent program was found on this PATH: the main button leads to the detection.
+  await expect(step(page, 'Check the agent setup').getByRole('button', { name: 'Detect agent programs' })).toHaveClass(/omo-btn--primary/)
   await expect(step(page, 'Create a first ticket').getByRole('button', { name: 'Create first ticket' })).not.toHaveClass(/omo-btn--primary/)
 })
 

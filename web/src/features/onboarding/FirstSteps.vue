@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // The first steps shown on a board without any ticket: add the Superpowers
-// skill set (recommended, optional), add a project, check the agent setup,
-// create a first ticket. Each step ticks itself off from the live data and
-// has a button that does it; a refusal shows in its step.
-import { computed, reactive, ref } from 'vue'
+// skill set (recommended, optional), add a project, check the agent setup
+// (or, when omo found no agent program, detect one), register omo in
+// Antigravity (recommended; only with an Antigravity profile while MCP is
+// on), create a first ticket. Each step ticks itself off from the live data
+// and has a button that does it; a refusal shows in its step. The user can
+// dismiss a step or hide the list (remembered in this browser).
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { failureText } from '../../api/lostAnswer'
-import { getSkillSets } from '../../api/endpoints'
+import { getSkillSets, listMCPClients } from '../../api/endpoints'
 import type { ApiEvent, SettingsChangedData } from '../../api/types'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
@@ -16,8 +19,9 @@ import { hasSuperpowers } from '../skillsets/superpowers'
 import AddProjectDialog from '../projects/AddProjectDialog.vue'
 import { useSettingsDialogs } from '../topbar/settingsDialogs'
 import { useAgentSetup } from './agentSetup'
+import { useDismissed } from './dismissed'
 import FirstStepsPanel, { type FirstStep } from './FirstStepsPanel.vue'
-import { firstSteps } from './steps'
+import { firstSteps, forContext, type StepContext } from './steps'
 
 const store = useBoard()
 const setup = useAgentSetup()
@@ -35,37 +39,58 @@ const skills = liveRead({
   watches: (ev: ApiEvent) => ev.kind === 'skillset.changed' || (ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'skillsets'),
 })
 
+/** Whether a profile runs Antigravity while omo's MCP endpoint is on: then omo's entry in its configuration matters. */
+const agyNeedsEntry = computed(() => (store.state.general?.mcp.enabled ?? false) && (setup.report.value?.profiles.some((p) => p.cli === 'agy') ?? false))
+/** Whether omo's entry is in an Antigravity configuration; null until read (a failed read leaves the step open). */
+const agyRegistered = ref<boolean | null>(null)
+const agy = liveRead({
+  store,
+  read: async () => (agyNeedsEntry.value ? (await listMCPClients(session.client)).data : null),
+  apply: (r) => (agyRegistered.value = r === null ? null : (r ?? []).some((c) => c.target.cli === 'agy' && c.state === 'installed')),
+  watches: (ev: ApiEvent) => ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'mcp',
+})
+watch(agyNeedsEntry, (need) => need && void agy.reload())
+
+const dismissed = useDismissed()
+
 /** The step whose action runs, and the refusal each step got. */
 const running = ref<string | null>(null)
 const errors = reactive(new Map<string, string>())
 
 const steps = computed(() => firstSteps())
+const ctx = computed<StepContext>(() => ({
+  projects: store.state.projects.size,
+  tickets: store.state.tickets.size,
+  agentsReady: setup.ready.value,
+  hasProfiles: setup.report.value === null ? null : setup.report.value.hasProfiles,
+  ceoEnabled: store.state.general?.ceo.enabled ?? false,
+  ceoTicketsWait: store.state.general?.ceo.tickets_need_user_approval ?? false,
+  superpowers: superpowers.value,
+  agyNeedsEntry: agyNeedsEntry.value,
+  agyRegistered: agyRegistered.value,
+}))
 const view = computed<FirstStep[]>(() => {
-  const ctx = {
-    projects: store.state.projects.size,
-    tickets: store.state.tickets.size,
-    agentsReady: setup.ready.value,
-    ceoEnabled: store.state.general?.ceo.enabled ?? false,
-    superpowers: superpowers.value,
-  }
-  return steps.value.map((s) => ({
-    id: s.id,
-    title: s.title,
-    detail: s.text,
-    done: s.done(ctx),
-    action: s.action.label,
-    secondary: s.secondary && (s.secondary.visible?.(ctx) ?? true) ? s.secondary.label : undefined,
-    optional: s.optional === true,
-    busy: running.value === s.id,
-    error: errors.get(s.id),
-  }))
+  const c = ctx.value
+  return steps.value
+    .filter((s) => (s.shown?.(c) ?? true) && !dismissed.state.steps.includes(s.id))
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      detail: forContext(s.text, c),
+      done: s.done(c),
+      action: forContext(s.action.label, c),
+      secondary: s.secondary && (s.secondary.visible?.(c) ?? true) ? s.secondary.label : undefined,
+      optional: s.optional === true,
+      busy: running.value === s.id,
+      error: errors.get(s.id),
+    }))
 })
 
 async function run(id: string) {
   const step = steps.value.find((s) => s.id === id)
   if (!step || running.value !== null) return
   errors.delete(id)
-  const p = step.action.run(nav)
+  const p = step.action.run(nav, ctx.value)
   if (!p) return
   running.value = id
   try {
@@ -86,6 +111,14 @@ function runSecondary(id: string) {
 </script>
 
 <template>
-  <FirstStepsPanel :steps="view" footer="This list disappears once the board has a ticket." @action="run" @secondary="runSecondary" />
+  <FirstStepsPanel
+    v-if="!dismissed.state.hidden"
+    :steps="view"
+    footer="This list disappears once the board has a ticket."
+    @action="run"
+    @secondary="runSecondary"
+    @dismiss="dismissed.dismiss"
+    @hide="dismissed.hideAll()"
+  />
   <AddProjectDialog :open="dialogs.state.open === 'addProject'" @close="dialogs.close()" />
 </template>

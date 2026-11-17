@@ -55,7 +55,7 @@ export interface SetupReport {
   profileErrors: FileError[]
   /** Role files that cannot be read, not tied to one role. */
   otherRoleErrors: FileError[]
-  profiles: { name: string; program: string; models: string[] }[]
+  profiles: { name: string; program: string; cli: string; models: string[] }[]
   hasProfiles: boolean
   /** A model id that works, to build the example from; empty when none does. */
   example: string
@@ -114,7 +114,7 @@ export function describeSetup(d: SetupData): SetupReport {
     blocking: reports.filter((r) => r.needed && r.usable === 0),
     profileErrors: d.profileErrors,
     otherRoleErrors: d.roleErrors.filter((e) => !known.has(baseName(e.file))),
-    profiles: d.profiles.map((p) => ({ name: p.name, program: p.command || p.cli, models: Object.keys(p.models ?? {}).sort() })),
+    profiles: d.profiles.map((p) => ({ name: p.name, program: p.command || p.cli, cli: p.cli, models: Object.keys(p.models ?? {}).sort() })),
     hasProfiles: d.profiles.length > 0,
     example: d.models.find((m) => m.selectable)?.id ?? '',
   }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import IconButton from '../../components/ui/IconButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 
@@ -21,7 +22,7 @@ export interface FirstStep {
 }
 
 const props = defineProps<{ steps: FirstStep[]; footer?: string }>()
-const emit = defineEmits<{ action: [id: string]; secondary: [id: string] }>()
+const emit = defineEmits<{ action: [id: string]; secondary: [id: string]; dismiss: [id: string]; hide: [] }>()
 
 /** The main button: the first step that is needed and not done. */
 const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optional))
@@ -53,9 +54,17 @@ const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optio
             {{ step.busy ? `${step.action}…` : step.action }}
           </UiButton>
         </div>
+        <IconButton v-if="!step.done" label="Dismiss step" size="sm" class="step__dismiss" data-step-dismiss @click="emit('dismiss', step.id)">
+          <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+            <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+        </IconButton>
       </li>
     </ol>
-    <p v-if="footer" class="steps__footer">{{ footer }}</p>
+    <div class="steps__footer">
+      <p v-if="footer" class="steps__footer-text">{{ footer }}</p>
+      <UiButton size="sm" variant="ghost" data-steps-hide @click="emit('hide')">Hide these steps</UiButton>
+    </div>
   </Panel>
 </template>
 
@@ -78,14 +87,22 @@ const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optio
   list-style: none;
 }
 .steps__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--omo-space) * 2);
   margin: calc(var(--omo-space) * 3) 0 0;
+}
+.steps__footer-text {
+  margin: 0;
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
 }
 .step {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: start;
   gap: calc(var(--omo-space) * 3);
   padding: calc(var(--omo-space) * 2.5) calc(var(--omo-space) * 3);
@@ -129,6 +146,10 @@ const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optio
   line-height: var(--omo-text-xs-lh);
   overflow-wrap: anywhere;
 }
+.step__dismiss {
+  grid-column: 4;
+  align-self: start;
+}
 .step__actions {
   display: flex;
   flex-wrap: wrap;
@@ -139,7 +160,11 @@ const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optio
 }
 @media (max-width: 479.98px) {
   .step {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .step__dismiss {
+    grid-column: 3;
+    grid-row: 1;
   }
   .step__actions {
     grid-column: 2;

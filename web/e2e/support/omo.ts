@@ -55,6 +55,12 @@ export interface OmoOptions {
    * finds there never depends on the programs installed on this machine.
    */
   path?: string
+  /**
+   * A true first start: no settings file is written before the server
+   * starts, so omo looks for agent programs on its PATH and writes profiles
+   * for those it finds. Needs `path` (the test's own fake programs).
+   */
+  firstStart?: boolean
 }
 
 export interface CliResult {
@@ -474,7 +480,8 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     // never shows up in a test. (Written after the first command, which
     // creates the home; a file in an empty home before that is refused.)
     const settingsFile = join(home, 'omo', 'settings.yaml')
-    if (!existsSync(settingsFile)) writeFileSync(settingsFile, '# e2e: no agent detection at the first start\n')
+    if (opts.firstStart && opts.path === undefined) throw new Error('a first start needs a PATH of the test\'s own fake programs')
+    if (!opts.firstStart && !existsSync(settingsFile)) writeFileSync(settingsFile, '# e2e: no agent detection at the first start\n')
     if (auth === 'basic') {
       await mustCli(['config', 'set', 'basic_auth', `${BASIC.username}:${BASIC.password}`])
       await mustCli(['config', 'set', 'auth', 'basic'])

@@ -9,8 +9,9 @@ import { useCreateTicket } from '../create/useCreateTicket'
 import { resetSidebar, useSidebar } from '../sidebar/useSidebar'
 import { useSettingsDialogs } from '../topbar/settingsDialogs'
 import { describeSetup, type SetupData } from './agentSetup'
+import { FIRST_STEPS_KEY, resetDismissed } from './dismissed'
 import FirstSteps from './FirstSteps.vue'
-import { firstSteps, registerStep } from './steps'
+import { firstSteps, forContext, registerStep, type StepContext } from './steps'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -19,6 +20,8 @@ afterEach(() => {
   useCreateTicket().close()
   useSettingsDialogs().close()
   resetSidebar()
+  localStorage.clear()
+  resetDismissed()
 })
 
 const model = (id: string, selectable = true): Model => {
@@ -66,7 +69,8 @@ test('the first step offers Superpowers, recommended and optional; it is done on
 })
 
 test('step 1 ticks when a project exists; step 2 when every needed role has a known model', () => {
-  const [, project1, agents, create] = firstSteps()
+  const byId = (id: string) => firstSteps().find((s) => s.id === id)
+  const [project1, agents, create] = [byId('project'), byId('agents'), byId('ticket')]
   expect(project1!.done(ctx(0, 0, null))).toBe(false)
   expect(project1!.done(ctx(1, 0, null))).toBe(true)
   expect(agents!.done(ctx(0, 0, null))).toBe(false)
@@ -227,8 +231,100 @@ test("the server's refusal of Add Superpowers shows in its step", async () => {
   expect(stepText(w, 'superpowers')).not.toContain('done')
 })
 
+const memoryRouter = () => createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+
+test('without any agent profile the agent step says no program was found and opens the Agents page to detect one', async () => {
+  const agents = firstSteps().find((s) => s.id === 'agents')!
+  const none: StepContext = { ...ctx(0, 0, false), hasProfiles: false }
+  expect(forContext(agents.text, none)).toContain('omo found no agent program (Claude Code, Codex, Antigravity or Gemini CLI) on its PATH')
+  expect(forContext(agents.action.label, none)).toBe('Detect agent programs')
+  const router = memoryRouter()
+  agents.action.run({ router }, none)
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/settings/agents')
+  const some: StepContext = { ...ctx(0, 0, false), hasProfiles: true }
+  expect(forContext(agents.action.label, some)).toBe('Check the agent setup')
+  agents.action.run({ router }, some)
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/settings/roles')
+})
+
+test('the Antigravity step applies only to an Antigravity profile while MCP is on, is recommended, and ticks once omo is registered there', async () => {
+  const agy = firstSteps().find((s) => s.id === 'agy-mcp')!
+  expect(agy.optional).toBe(true)
+  expect(agy.shown!(ctx(0, 0, null))).toBe(false)
+  expect(agy.shown!({ ...ctx(0, 0, null), agyNeedsEntry: true })).toBe(true)
+  expect(agy.done({ ...ctx(0, 0, null), agyNeedsEntry: true, agyRegistered: false })).toBe(false)
+  expect(agy.done({ ...ctx(0, 0, null), agyNeedsEntry: true, agyRegistered: true })).toBe(true)
+  const router = memoryRouter()
+  agy.action.run({ router }, ctx(0, 0, null))
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/settings/mcp')
+})
+
+test("the ticket step says a new ticket waits in Planning for approval, and so do the CEO's while that switch is on", () => {
+  const create = firstSteps().find((s) => s.id === 'ticket')!
+  const plain = forContext(create.text, ctx(0, 0, null))
+  expect(plain).toContain('It waits in Planning until you approve it (Approve in the ticket, or drag it to Ready For Dev); then an agent starts.')
+  expect(plain).not.toContain('CEO')
+  expect(forContext(create.text, { ...ctx(0, 0, null, true), ceoTicketsWait: true })).toContain('So do tickets the CEO drafts.')
+  expect(forContext(create.text, { ...ctx(0, 0, null, true), ceoTicketsWait: false })).not.toContain('CEO')
+})
+
+test('an Antigravity profile shows the step, read from the agent programs; dismissing a step or hiding the list is remembered', async () => {
+  const h = await harness()
+  h.respond.profiles = { profiles: [{ ...profile('agy', ['flash']), cli: 'agy', command: 'agy' }], errors: [] }
+  h.omo.mcp.clients = [{ target: { id: 'agy', cli: 'agy', account: '', config_path: '/home/u/.gemini/antigravity/mcp_config.json' }, state: 'absent', entry: null, entries: [], error: '' }]
+  const w = await mountSteps(h)
+  await flushPromises()
+  const titles = () => w.findAll('li.step h3').map((x) => x.text())
+  expect(titles()).toContain('Register omo in Antigravity (recommended)')
+  const agyStep = () => w.findAll('li.step').find((x) => x.text().includes('Register omo in Antigravity'))
+  expect(agyStep()!.text()).not.toContain('done')
+
+  await agyStep()!.get('[data-step-dismiss]').trigger('click')
+  expect(titles()).not.toContain('Register omo in Antigravity (recommended)')
+  expect(JSON.parse(localStorage.getItem(FIRST_STEPS_KEY)!)).toEqual({ steps: ['agy-mcp'], hidden: false })
+  // Done steps cannot be dismissed (nothing left to do); open ones can.
+  expect(w.findAll('[data-step-dismiss]').length).toBe(w.findAll('li.step').filter((x) => !x.text().includes('done')).length)
+
+  await w.get('[data-steps-hide]').trigger('click')
+  expect(w.find('[aria-label="First steps"]').exists()).toBe(false)
+  expect(JSON.parse(localStorage.getItem(FIRST_STEPS_KEY)!)).toEqual({ steps: ['agy-mcp'], hidden: true })
+  // Another mount in this browser reads it back.
+  w.unmount()
+  mounted = null
+  resetDismissed()
+  const again = await mountSteps(h)
+  await flushPromises()
+  expect(again.find('[aria-label="First steps"]').exists()).toBe(false)
+})
+
+test('omo registered in Antigravity ticks the step', async () => {
+  const h = await harness()
+  h.respond.profiles = { profiles: [{ ...profile('agy', ['flash']), cli: 'agy', command: 'agy' }], errors: [] }
+  h.omo.mcp.clients = [{ target: { id: 'agy', cli: 'agy', account: '', config_path: '/home/u/.gemini/antigravity/mcp_config.json' }, state: 'installed', entry: {}, entries: [], error: '' }]
+  const w = await mountSteps(h)
+  await flushPromises()
+  expect(w.findAll('li.step').find((x) => x.text().includes('Register omo in Antigravity'))!.text()).toContain('done')
+})
+
+test('without an Antigravity profile the agent programs are not read', async () => {
+  const h = await harness()
+  const reads: string[] = []
+  const get = h.session.client.get.bind(h.session.client)
+  h.session.client.get = (<T,>(path: string, q?: never) => {
+    reads.push(path)
+    return get<T>(path, q)
+  }) as typeof h.session.client.get
+  const w = await mountSteps(h)
+  await flushPromises()
+  expect(w.findAll('li.step h3').map((x) => x.text())).not.toContain('Register omo in Antigravity (recommended)')
+  expect(reads).not.toContain('/api/mcp/clients')
+})
+
 // Last: the registry is module state.
 test('registered steps are placed after the one named', () => {
   registerStep({ id: 'extra', title: 'Extra', text: '', done: () => false, action: { label: 'Go', run: () => {} } }, 'project')
-  expect(firstSteps().map((s) => s.id)).toEqual(['superpowers', 'project', 'extra', 'agents', 'ticket'])
+  expect(firstSteps().map((s) => s.id)).toEqual(['superpowers', 'project', 'extra', 'agents', 'agy-mcp', 'ticket'])
 })
