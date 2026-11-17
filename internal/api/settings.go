@@ -87,6 +87,8 @@ type General struct {
 	// in the format of omo's own list, shown beside it on the Plugins page.
 	// Their plugins are always treated as community plugins.
 	PluginLists []string `yaml:"plugin_lists" json:"plugin_lists"`
+	// MCP holds the switches of omo's MCP endpoint.
+	MCP MCPSettings `yaml:"mcp" json:"mcp"`
 }
 
 // BranchSettings holds how omo names the branches it creates for tickets.

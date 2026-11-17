@@ -534,6 +534,8 @@ export interface General {
   branches: BranchSettings
   /** Addresses (http or https) of additional plugin list files; their plugins are always community plugins. */
   plugin_lists: string[]
+  /** Switches of omo's MCP endpoint. */
+  mcp: MCPSettings
 }
 
 /** The revision of a settings item that has no file. */

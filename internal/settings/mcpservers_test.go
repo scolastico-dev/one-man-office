@@ -259,3 +259,32 @@ func TestMCPServerRevisions(t *testing.T) {
 		t.Fatalf("errors = %+v", s.Errors())
 	}
 }
+
+func TestMCPGeneralSettings(t *testing.T) {
+	want := api.MCPSettings{Enabled: true, Inject: api.MCPInject{Claude: true, Codex: true}}
+	if got := Defaults().MCP; got != want {
+		t.Fatalf("default mcp = %+v", got)
+	}
+	s, home, _ := openTest(t)
+	if got := s.General().MCP; got != want {
+		t.Fatalf("mcp of a new home = %+v", got)
+	}
+	// A key the file leaves out keeps its default.
+	writeFile(t, filepath.Join(home, "settings.yaml"), "mcp:\n  inject:\n    codex: false\n")
+	s.Reload()
+	if got := s.General().MCP; got != (api.MCPSettings{Enabled: true, Inject: api.MCPInject{Claude: true}}) {
+		t.Fatalf("mcp = %+v", got)
+	}
+	g := s.General()
+	g.MCP.Enabled = false
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, "settings.yaml"))
+	if !strings.Contains(string(raw), "mcp:\n  enabled: false\n") {
+		t.Fatalf("settings.yaml:\n%s", raw)
+	}
+	if got := s.General().MCP; got.Enabled || !got.Inject.Claude || got.Inject.Codex {
+		t.Fatalf("mcp = %+v", got)
+	}
+}

@@ -66,6 +66,7 @@ func Defaults() General {
 		},
 		Branches:    api.BranchSettings{Template: branchname.Default},
 		PluginLists: []string{},
+		MCP:         api.MCPSettings{Enabled: true, Inject: api.MCPInject{Claude: true, Codex: true}},
 	}
 }
 

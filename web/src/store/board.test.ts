@@ -54,6 +54,7 @@ const general = (max: number): General => ({
   ui: { open_tickets_as_page: false, screen_reader_mode: false },
   branches: { template: 'omo/{slug}' },
   plugin_lists: [],
+  mcp: { enabled: true, inject: { claude: true, codex: true } },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
