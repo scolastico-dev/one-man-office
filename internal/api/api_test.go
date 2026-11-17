@@ -45,7 +45,7 @@ func TestErrorfStatus(t *testing.T) {
 	cases := map[string]int{
 		CodeDependencyCycle: 422, CodeFieldLocked: 409, CodeUnknownSession: 401,
 		CodeBadRequest: 400, CodeForbidden: 403, CodeNotFound: 404, CodeTooLarge: 413,
-		CodeInternal: 500, CodeNotImplemented: 501, CodeInUse: 409, CodeInvalidSettings: 422,
+		CodeInternal: 500, CodeInUse: 409, CodeInvalidSettings: 422,
 		CodeUnavailable: 503,
 	}
 	for code, want := range cases {

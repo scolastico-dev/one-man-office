@@ -2,12 +2,10 @@ package server
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
-	"github.com/scolastico-dev/one-man-office/internal/board"
 )
 
 // extensionRoute is one route of the usage, skill set and plugin API.
@@ -92,27 +90,6 @@ func TestExtensionRoutesAllRegistered(t *testing.T) {
 		if !s.registeredPattern(r.pattern) {
 			t.Errorf("%s is not registered", r.pattern)
 		}
-	}
-}
-
-// TestReservedRoutesGone checks that no extension path answers 501 any more.
-func TestReservedRoutesGone(t *testing.T) {
-	s := newTestServer(t)
-	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/tickets/1/export"},
-		{"GET", "/api/usage"},
-		{"GET", "/api/skillsets"},
-		{"GET", "/api/plugins/x"},
-	} {
-		req := withRequestContext(newRequest(t, c.method, "http://omo"+c.path, nil), board.User, s.log)
-		rec := httptest.NewRecorder()
-		s.mux.ServeHTTP(rec, req)
-		if rec.Code == http.StatusNotImplemented {
-			t.Errorf("%s %s still answers 501", c.method, c.path)
-		}
-	}
-	if len(reservedRoutes) != 0 {
-		t.Errorf("reservedRoutes = %v, want none", reservedRoutes)
 	}
 }
 

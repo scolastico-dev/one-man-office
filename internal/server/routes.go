@@ -8,19 +8,12 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/buildinfo"
 )
 
-// reservedRoutes are part of the API contract but not implemented yet; they
-// answer 501 not_implemented. None is reserved at the moment.
-var reservedRoutes = []string{}
-
 // routes builds the mux shared by both listeners.
 func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/server", s.getServer)
 	mux.HandleFunc("PUT /api/server/paused", s.putPaused)
 	mux.HandleFunc("GET /api/me", s.getMe)
-	for _, pattern := range reservedRoutes {
-		mux.HandleFunc(pattern, notImplemented)
-	}
 	s.registerTickets(mux)
 	s.registerDiff(mux)
 	s.registerSettings(mux)
@@ -42,10 +35,6 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("/api/", apiNotFound)
 	s.registerSPA(mux)
 	return mux
-}
-
-func notImplemented(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, api.Errorf(api.CodeNotImplemented, "%s %s is not implemented in this version", r.Method, r.URL.Path))
 }
 
 func apiNotFound(w http.ResponseWriter, r *http.Request) {

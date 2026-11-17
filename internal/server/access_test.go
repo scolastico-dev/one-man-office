@@ -128,7 +128,7 @@ func guarded(pattern string) bool {
 
 // TestNoGuardedRouteOutsideTable reads the package's source: every call of
 // HandleFunc or Handle outside registerRoutes must register a literal
-// pattern (or one of reservedRoutes), and none of them may lie below a
+// pattern, and none of them may lie below a
 // guarded prefix unless it is listed in registeredDirectly.
 func TestNoGuardedRouteOutsideTable(t *testing.T) {
 	files, err := filepath.Glob("*.go")
@@ -169,10 +169,6 @@ func TestNoGuardedRouteOutsideTable(t *testing.T) {
 				}
 				lit, ok := call.Args[0].(*ast.BasicLit)
 				if !ok || lit.Kind != token.STRING {
-					if fn.Name.Name == "routes" {
-						// The reserved routes, checked below.
-						return true
-					}
 					t.Errorf("%s: a route pattern that is not a literal cannot be checked; register it through registerRoutes", where)
 					return true
 				}
@@ -194,11 +190,6 @@ func TestNoGuardedRouteOutsideTable(t *testing.T) {
 	for _, p := range registeredDirectly {
 		if !direct[p] {
 			t.Errorf("%q is no longer registered directly: remove it from registeredDirectly", p)
-		}
-	}
-	for _, p := range reservedRoutes {
-		if guarded(p) {
-			t.Errorf("reserved route %q lies below a guarded prefix", p)
 		}
 	}
 }
