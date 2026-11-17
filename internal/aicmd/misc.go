@@ -64,8 +64,10 @@ func miscCommands() []Command {
 			"  omo ai whoami"),
 		// It blocks for up to a day: the command line only.
 		Def("wait", "Block until omo has something for you or the timeout passes, then print why", nil, wait).help("wait [--timeout DUR]",
-			`Wait for the next event meant for you (an answer, a review result, a released
-dependency). Prints the reason it returned. DUR is a duration such as 90s or 10m.`,
+			`Wait for the next notice meant for you: an answer to your question, a comment
+that mentions your role, a done task of your story (a product manager), or a
+line from omo itself such as a stop request. Prints the notice; when DUR passes
+first it prints a message saying so. DUR is a duration such as 90s or 10m.`,
 			"  omo ai wait --timeout 10m").commandLineOnly(),
 		Def("done", "Hand in your work on your ticket (reviewers give a verdict)", handsIn, done).help("done [--approve|--reject|--url URL|--failed MESSAGE|-] [--comment-file FILE|-] [TEXT...|-]",
 			`Report that your work is finished and print the ticket. Reviewers must pass

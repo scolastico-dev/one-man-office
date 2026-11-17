@@ -49,8 +49,8 @@ behind a mentioned role the comment is still stored and a line says so.`,
 		Def("ask", "Ask a question on ticket N; the answer arrives as a reply", everyone, ask).help("ask N [--to supervisor|pm|ceo|user] [--body-file FILE|-] [TEXT...|-]",
 			`Post a question on ticket N to your supervisor (default), the pm, the ceo or
 the user. The text is the words after N, or a file, or standard input with a
-lone - or --body-file -. The question stays open until the addressed role
-replies to it; read the answer with "omo ai comments N".`,
+lone - or --body-file -. The question stays open until the addressed role or
+the user replies to it; read the answer with "omo ai comments N".`,
 			`  omo ai ask 12 --to user "Should uploads over 2 GB be refused?"`),
 	}
 }

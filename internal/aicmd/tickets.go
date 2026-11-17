@@ -146,7 +146,8 @@ moves the board rules allow are accepted; a refusal says why.`,
 		Def("ticket retry", "Retry the failed step of ticket N and print it as #N type column title", everyone, ticketRetry).help("retry N",
 			`Start again the step of ticket N that stopped and needs a person: its agent
 start, an agent that ended without handing in, or its merge. The user retries
-every ticket, the CEO tickets it supervises.`,
+every ticket, the CEO the tickets it supervises, a product manager the tasks of
+its story.`,
 			"  omo ai ticket retry 12"),
 		Def("ticket cancel", "Cancel ticket N and print it as #N type column title", everyone, ticketCancel).help("cancel N [--delete-branch [--discard-uncommitted]]",
 			`Close ticket N as cancelled; cancelling a story also cancels its open tasks.
