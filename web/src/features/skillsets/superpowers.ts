@@ -23,7 +23,7 @@ export const SUPERPOWERS_SKILL_SET: Readonly<SkillSet> = Object.freeze({
   }) as Record<string, string>,
 })
 
-const sameAddress = (a: string, b: string) => {
+export const sameAddress = (a: string, b: string) => {
   const clean = (s: string) => s.trim().replace(/\/+$/, '').replace(/\.git$/, '').toLowerCase()
   return clean(a) === clean(b)
 }

@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import type { SkillSet } from '../../../api/types'
 import {
+  RECOMMENDATIONS,
   SKILL_ROLES,
   SUPERPOWERS_PRESET,
   blankSkillSet,
@@ -9,6 +10,7 @@ import {
   freeName,
   hasSuperpowers,
   isPlacedField,
+  presetOf,
   reachWords,
   rolesGetting,
   superpowersPreset,
@@ -85,6 +87,33 @@ test('a settings file belongs to the set it is named after', () => {
   expect(fileOfSkillSet('C:\\omo\\skillsets\\sp.yml')).toBe('sp')
   expect(fileOfSkillSet('/home/x/omo/roles/sp.yaml')).toBeNull()
   expect(errorsOfSkillSet([{ file: '/o/skillsets/a.yaml', message: 'm' }, { file: '/o/skillsets/b.yaml', message: 'n' }], 'b')).toEqual([{ file: '/o/skillsets/b.yaml', message: 'n' }])
+})
+
+test('grill-me is recommended for the CEO only, with its folder and the grilling skill it hands over to', () => {
+  const rec = RECOMMENDATIONS.find((r) => r.id === 'grill-me')!
+  const d = presetOf(rec, [])
+  expect(toSkillSet(d)).toEqual({
+    name: 'grill-me',
+    repository: 'https://github.com/mattpocock/skills.git',
+    ref: 'main',
+    update: 'at_start',
+    enabled: true,
+    paths: ['skills/productivity/grill-me', 'skills/productivity/grilling'],
+    roles: ['ceo'],
+    instructions: { ceo: 'When the user asks you to grill them on a plan or an idea, follow the grill-me skill.' },
+  })
+  // a copy under a free name
+  d.paths.push('x')
+  d.roles.push('pm')
+  expect(rec.preset.paths).toHaveLength(2)
+  expect(rec.preset.roles).toEqual(['ceo'])
+  expect(presetOf(rec, ['grill-me']).name).toBe('grill-me-2')
+  // offered until a set of that repository gives grill-me (the whole repository counts)
+  const mp = 'https://github.com/mattpocock/skills'
+  expect(rec.present([stored({ repository: mp, paths: ['skills/engineering/tdd'] })])).toBe(false)
+  expect(rec.present([stored({ repository: mp, paths: ['skills/productivity/grill-me'] })])).toBe(true)
+  expect(rec.present([stored({ repository: mp })])).toBe(true)
+  expect(RECOMMENDATIONS.map((r) => r.id)).toEqual(['superpowers', 'grill-me'])
 })
 
 test('roles: none chosen gives every role; texts go only to roles that get the set', () => {

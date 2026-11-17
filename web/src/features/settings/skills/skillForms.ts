@@ -6,6 +6,7 @@
 // that does not get the set.
 import type { FileError, SkillSet, SkillSetState, SkillSetUpdate } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
+import { GRILL_ME_SKILL_SET, hasGrillMe } from '../../skillsets/grillMe'
 import { hasSuperpowers, SUPERPOWERS_SKILL_SET } from '../../skillsets/superpowers'
 import { shortCommit } from '../extensionWords'
 import { freeName } from '../../skillsets/superpowers'
@@ -109,6 +110,7 @@ export interface Recommendation {
 /** The recommended skill sets, in the order of their buttons. */
 export const RECOMMENDATIONS: readonly Recommendation[] = [
   { id: 'superpowers', label: 'Superpowers', preset: SUPERPOWERS_PRESET, present: hasSuperpowers },
+  { id: 'grill-me', label: 'grill-me for the CEO', preset: Object.freeze(toDraft(GRILL_ME_SKILL_SET)), present: hasGrillMe },
 ]
 
 /** A recommendation as a new, unsaved set under a name no set has yet. */

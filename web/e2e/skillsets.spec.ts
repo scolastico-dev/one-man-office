@@ -332,6 +332,24 @@ test('a path that disappears from the source is named in the open set', async ({
   await expect(ed.locator('[data-skillset-missing]')).toContainText('Not in the checkout: skills/engineering/tdd.')
 })
 
+test('Add grill-me for the CEO opens a form with the grill-me folders, for the CEO only, stored only when saved', async ({ page, omo }) => {
+  await openSkills(page, omo)
+  await expect(page.locator('[data-add-recommended]')).toHaveText(['Add Superpowers', 'Add grill-me for the CEO'])
+  await page.getByRole('button', { name: 'Add grill-me for the CEO' }).click()
+  const ed = editor(page, 'grill-me')
+  await expect(ed).toContainText('(not saved yet)')
+  await expect(ed.getByLabel('Repository')).toHaveValue('https://github.com/mattpocock/skills.git')
+  await expect(ed.getByLabel('Branch or tag')).toHaveValue('main')
+  await expect(ed.locator('[data-skillset-role][aria-pressed="true"]')).toHaveText(['CEO'])
+  await expect(ed.getByRole('textbox', { name: 'Path 1', exact: true })).toHaveValue('skills/productivity/grill-me')
+  await expect(ed.getByRole('textbox', { name: 'Path 2', exact: true })).toHaveValue('skills/productivity/grilling')
+  await expect(ed.locator('[data-skillset-paths] [data-row]')).toHaveCount(2)
+  await expect(ed.locator('[data-skillset-text]')).toHaveCount(1)
+  await expect(ed.getByLabel('CEO', { exact: true })).toHaveValue(/grill-me/)
+  // Never saved here: saving would fetch from the network.
+  expect((await stored(omo)).skill_sets).toEqual([])
+})
+
 test('at 390 px the page does not scroll sideways', async ({ page, omo }) => {
   const src = makeSource(omo, 'skills')
   await page.setViewportSize({ width: 390, height: 844 })
