@@ -10,6 +10,7 @@ const SECTIONS = [
   ['usage', 'Usage'],
   ['prompts', 'Prompts'],
   ['skills', 'Skill sets'],
+  ['mcp', 'MCP'],
   ['environment', 'Environment'],
   ['limits', 'Limits'],
   ['review', 'Review'],

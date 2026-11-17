@@ -50,6 +50,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     component: () => import('./skills/SkillSetsPage.vue').then(page),
   },
   {
+    id: 'mcp',
+    label: 'MCP',
+    description: 'Servers omo relays to agents, the agent programs it is registered in and access for other programs',
+    component: () => import('./mcp/McpPage.vue').then(page),
+  },
+  {
     id: 'environment',
     label: 'Environment',
     description: 'Variables every agent starts with',
