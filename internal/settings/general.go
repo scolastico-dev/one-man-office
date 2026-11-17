@@ -2,6 +2,7 @@ package settings
 
 import (
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,7 +64,8 @@ func Defaults() General {
 			RefreshInterval: Duration(5 * time.Minute),
 			Windows:         map[string]api.UsageThreshold{},
 		},
-		Branches: api.BranchSettings{Template: branchname.Default},
+		Branches:    api.BranchSettings{Template: branchname.Default},
+		PluginLists: []string{},
 	}
 }
 
@@ -82,6 +84,10 @@ const (
 	minUsageRefresh   = time.Minute
 	maxUsageRefresh   = time.Hour
 	maxUsageOverrides = 32
+	// MaxPluginLists bounds plugin_lists; maxPluginListURL bounds one
+	// address.
+	MaxPluginLists   = 16
+	maxPluginListURL = 2048
 )
 
 // durationText writes d as settings files do ("1m", "168h").
@@ -186,7 +192,49 @@ func (g General) Validate() error {
 	if err := branchname.Check(g.Branches.Template); err != nil {
 		return fieldErr("branches.template", "%s", err.Error())
 	}
+	if err := validatePluginLists(g.PluginLists); err != nil {
+		return err
+	}
 	return validateEnv("agent_env", g.AgentEnv)
+}
+
+// validatePluginLists checks the addresses of the additional plugin lists:
+// at most MaxPluginLists, each an absolute http:// or https:// address with
+// a host, without user name, password or #fragment, of at most
+// maxPluginListURL characters without hidden characters, none twice. omo
+// fetches a list file from there as it is; no other transport is taken.
+func validatePluginLists(lists []string) error {
+	if len(lists) > MaxPluginLists {
+		return fieldErr("plugin_lists", "plugin_lists may hold at most %d addresses", MaxPluginLists)
+	}
+	first := map[string]int{}
+	for i, raw := range lists {
+		key := "plugin_lists." + strconv.Itoa(i)
+		if hasHidden(raw) {
+			return fieldErr(key, "%s must not hold control, invisible or direction characters", key)
+		}
+		if len(raw) > maxPluginListURL {
+			return fieldErr(key, "%s must be at most %d characters", key, maxPluginListURL)
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Opaque != "" {
+			return fieldErr(key, "%s must be an http:// or https:// address of a plugin list file", key)
+		}
+		if u.Host == "" || u.Hostname() == "" {
+			return fieldErr(key, "%s must name a host", key)
+		}
+		if u.User != nil {
+			return fieldErr(key, "%s must not hold a user name or password", key)
+		}
+		if u.Fragment != "" || strings.Contains(raw, "#") {
+			return fieldErr(key, "%s must not hold a # part", key)
+		}
+		if j, seen := first[raw]; seen {
+			return fieldErr(key, "%s repeats plugin_lists.%d", key, j)
+		}
+		first[raw] = i
+	}
+	return nil
 }
 
 // percentIn reports whether v lies in [min, 100]; NaN does not.
@@ -338,6 +386,10 @@ func (g General) normalize() General {
 		g.AgentEnv = map[string]string{}
 	}
 	g.Usage = cloneUsage(g.Usage)
+	g.PluginLists = slices.Clone(g.PluginLists)
+	if g.PluginLists == nil {
+		g.PluginLists = []string{}
+	}
 	return g
 }
 
@@ -351,6 +403,7 @@ func (g General) clone() General {
 	g.WorkspaceRoots = roots
 	g.AgentEnv = maps.Clone(g.AgentEnv)
 	g.Usage = cloneUsage(g.Usage)
+	g.PluginLists = slices.Clone(g.PluginLists)
 	return g
 }
 

@@ -115,8 +115,9 @@ type Catalog struct {
 	Plugins  []api.CatalogPlugin
 }
 
-// TagOf is the tag of the plugin at source, subpath and ref: the tag of the
-// listed plugin with exactly that source, folder and ref, else community.
+// TagOf is the tag of the plugin at source, subpath and ref: the tag
+// (TrustTag) of the listed plugin with exactly that source, folder and ref,
+// else community.
 func (c Catalog) TagOf(source, subpath, ref string) string {
 	sub, err := cleanSubpath(subpath)
 	if err != nil {
@@ -124,8 +125,24 @@ func (c Catalog) TagOf(source, subpath, ref string) string {
 	}
 	for _, p := range c.Plugins {
 		if p.Source == source && p.Subpath == sub && p.Ref == ref {
-			return p.Tag
+			return TrustTag(p)
 		}
+	}
+	return api.PluginCommunity
+}
+
+// TrustTag is the tag omo gives a listed plugin, and the only place that
+// decides it: the tag of omo's own list for a plugin of that list, and
+// community for a plugin of an additional list (List set), whatever that
+// list says. Whether an install needs the user's acknowledgement
+// (Acknowledged) and which tag the Plugins page shows follow from it.
+func TrustTag(p api.CatalogPlugin) string {
+	if p.List != "" {
+		return api.PluginCommunity
+	}
+	switch p.Tag {
+	case api.PluginOfficial, api.PluginRecommended:
+		return p.Tag
 	}
 	return api.PluginCommunity
 }
@@ -167,6 +184,39 @@ type catalogEntry struct {
 // source and ref. Any error refuses the whole list; its message names the
 // entry (by position) and the key, never a value.
 func ParseCatalog(raw []byte, at CatalogLocation) ([]api.CatalogPlugin, error) {
+	entries, err := decodeCatalog(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.CatalogPlugin, 0, len(entries))
+	names := map[string]bool{}
+	places := map[[3]string]bool{}
+	for i, e := range entries {
+		p, err := catalogPlugin(e, at)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %d of the list: %w", i+1, err)
+		}
+		folded := strings.ToLower(p.Name)
+		if names[folded] {
+			return nil, fmt.Errorf("plugin %d of the list: the name %s is listed twice", i+1, quote(p.Name))
+		}
+		names[folded] = true
+		place := placeOf(p)
+		if places[place] {
+			return nil, fmt.Errorf("plugin %d of the list: its source, folder and ref are listed twice", i+1)
+		}
+		places[place] = true
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// placeOf is what a plugin installs from: source, folder and ref.
+func placeOf(p api.CatalogPlugin) [3]string { return [3]string{p.Source, p.Subpath, p.Ref} }
+
+// decodeCatalog checks the file as a whole (size, UTF-8, one YAML document,
+// known keys, number of plugins) and answers its entries unchecked.
+func decodeCatalog(raw []byte) ([]catalogEntry, error) {
 	if len(raw) > MaxCatalogBytes {
 		return nil, fmt.Errorf("the plugin list is larger than %s", homefile.Size(MaxCatalogBytes))
 	}
@@ -189,27 +239,7 @@ func ParseCatalog(raw []byte, at CatalogLocation) ([]api.CatalogPlugin, error) {
 	if len(f.Plugins) > MaxCatalogPlugins {
 		return nil, fmt.Errorf("the plugin list names more than %d plugins", MaxCatalogPlugins)
 	}
-	out := make([]api.CatalogPlugin, 0, len(f.Plugins))
-	names := map[string]bool{}
-	places := map[[3]string]bool{}
-	for i, e := range f.Plugins {
-		p, err := catalogPlugin(e, at)
-		if err != nil {
-			return nil, fmt.Errorf("plugin %d of the list: %w", i+1, err)
-		}
-		folded := strings.ToLower(p.Name)
-		if names[folded] {
-			return nil, fmt.Errorf("plugin %d of the list: the name %s is listed twice", i+1, quote(p.Name))
-		}
-		names[folded] = true
-		place := [3]string{p.Source, p.Subpath, p.Ref}
-		if places[place] {
-			return nil, fmt.Errorf("plugin %d of the list: its source, folder and ref are listed twice", i+1)
-		}
-		places[place] = true
-		out = append(out, p)
-	}
-	return out, nil
+	return f.Plugins, nil
 }
 
 // catalogPlugin checks one entry and resolves its source.

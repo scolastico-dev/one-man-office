@@ -168,22 +168,44 @@ const (
 	PluginCommunity = "community"
 )
 
-// CatalogPlugin is one plugin of the list omo provides, with the source it
-// installs from (an official plugin's is the list's own repository and
-// branch).
+// CatalogPlugin is one plugin of the list omo provides or of an additional
+// list the user named (General.PluginLists), with the source it installs
+// from (an official plugin's is the list's own repository and branch).
 type CatalogPlugin struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Tag         string `json:"tag"`
-	Source      string `json:"source"`
-	Ref         string `json:"ref"`
-	Subpath     string `json:"subpath"`
+	// Tag is how far omo vouches for the plugin. A plugin of an additional
+	// list is always community, whatever that list says.
+	Tag     string `json:"tag"`
+	Source  string `json:"source"`
+	Ref     string `json:"ref"`
+	Subpath string `json:"subpath"`
+	// List is the address of the additional list the plugin comes from; ""
+	// for omo's own list. Origin is that list's host.
+	List   string `json:"list"`
+	Origin string `json:"origin"`
+}
+
+// PluginListState is how reading one additional plugin list went.
+type PluginListState struct {
+	// URL is the list's address as the settings name it; Origin its host.
+	URL    string `json:"url"`
+	Origin string `json:"origin"`
+	// Available is false when the list could not be fetched or read;
+	// Message then says why. Its plugins are in PluginCatalog.Plugins.
+	Available bool   `json:"available"`
+	Message   string `json:"message"`
+	// Notes name the entries of the list that are not shown, and why.
+	Notes []string `json:"notes"`
+	// FetchedAt is when the list (or the failure) was read.
+	FetchedAt *time.Time `json:"fetched_at"`
 }
 
 // PluginCatalog is the answer of GET /api/plugins/catalog: the plugin list
-// omo provides, or why it is not available.
+// omo provides, or why it is not available, and the plugins of the
+// additional lists with the state of each list.
 type PluginCatalog struct {
-	// Available is false when the list could not be fetched or read;
+	// Available is false when omo's own list could not be fetched or read;
 	// Message then says why.
 	Available bool   `json:"available"`
 	Message   string `json:"message"`
@@ -191,8 +213,13 @@ type PluginCatalog struct {
 	Source string `json:"source"`
 	Ref    string `json:"ref"`
 	// FetchedAt is when the list (or the failure) was read.
-	FetchedAt *time.Time      `json:"fetched_at"`
-	Plugins   []CatalogPlugin `json:"plugins"`
+	FetchedAt *time.Time `json:"fetched_at"`
+	// Plugins are the plugins of omo's own list (when it is available),
+	// then those of the additional lists, in the order of the settings.
+	Plugins []CatalogPlugin `json:"plugins"`
+	// Lists is the state of every additional list, in the order of the
+	// settings.
+	Lists []PluginListState `json:"lists"`
 }
 
 // PluginInstall is the body of POST /api/plugins and PUT

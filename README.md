@@ -212,6 +212,26 @@ A plugin is a folder with a `plugin.json` (name, version, description, `default_
 
 Settings, Plugins lists omo's plugin list under "Available plugins": the file `plugins/index.yaml` on the `release` branch of omo's repository, read when the page asks and kept for ten minutes (Retry reads it again; when it cannot be read the page says so and everything else works). Each plugin has a tag: `official` plugins are kept in omo's repository by its maintainers and install at once; `recommended` plugins are someone else's code the maintainers looked at, `community` plugins are listed but not reviewed, and for both omo asks first with a warning that names the source. A source you type under "Install plugin…" counts as community. omo decides the tag itself from its list: an install, a change of source or an update from a source other than the installed one is refused without the acknowledgement (`"acknowledge": "recommended"` or `"community"` in the request); an update from the same source needs none. [plugins/README.md](plugins/README.md) says how a plugin gets listed. `OMO_PLUGIN_CATALOG=<source>[#<ref>]` makes omo read the list from another repository and branch (a fork, a local folder); its official plugins then install from there too.
 
+You can add more plugin lists under "Additional plugin lists" on the same page, or in `settings.yaml`:
+
+```yaml
+plugin_lists:
+  - https://raw.githubusercontent.com/someone/omo-plugins/main/index.yaml
+  - https://example.org/omo/plugins.yaml
+```
+
+Each entry is an `http://` or `https://` address of a plain file (no Git; a file in a repository works through its raw.githubusercontent.com address), at most 16 lists, without user name, password or `#` part. omo fetches each one when the Plugins page asks (at most 15 seconds, 64 KiB, 5 redirects, only to http or https), keeps it ten minutes (a failure one minute; Retry reads every list again) and shows its plugins under the list's address. A list that cannot be fetched or read shows its error next to it; omo's own list and the other lists are not affected. Such a list is someone else's word: every plugin of it is shown and treated as `community`, whatever tag the file gives, so omo asks before installing it and the server refuses the install without `"acknowledge": "community"`. A plugin whose name or source, folder and ref omo's own list (or an earlier list) already has is not shown; the list says so in a note. The file has the format of omo's own list, but every entry needs its full `source` (a list has no repository of its own, so the official form with only a `path` does not work); an entry that breaks a rule is left out with a note naming it, the rest of the list still shows. A list file a third party can host:
+
+```yaml
+plugins:
+  - name: standup-notes           # letters, digits, ".", "_" or "-"; at most 64
+    tag: community                # official, recommended or community; omo shows community either way
+    description: Posts a stand-up summary every morning.   # one line, at most 200 characters
+    source: https://github.com/someone/omo-standup-notes.git   # https://, ssh://, host:path
+    ref: v1.2.0                   # optional: a branch, tag or commit; empty is the default branch
+    path: plugin                  # optional: the plugin's folder in that repository
+```
+
 A hook has an `event` and either a `command` (a list of arguments, started without a shell in the plugin's folder) or a `lua` file. The event is written as JSON (`{"event": ..., "at": ..., "data": ...}`) on standard input of a command and is the table `event` of a Lua hook. Text written by people or agents (titles, comments, attention texts) is in the data only; it is never put into arguments, environment values or file names. The events are:
 
 | Event | Data |

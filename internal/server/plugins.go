@@ -90,7 +90,23 @@ type pluginFeature struct {
 	catAt  time.Time
 	cat    pluginmanager.Catalog
 	catErr error
+
+	// The additional plugin lists (General.PluginLists), as last fetched,
+	// by address. listMu is held while they are fetched.
+	listMu sync.Mutex
+	lists  map[string]listRead
 }
+
+// listRead is one additional list as last fetched: the list or the failure
+// and when.
+type listRead struct {
+	at   time.Time
+	list pluginmanager.List
+	err  error
+}
+
+// listFetchBound bounds one fetch of an additional list; tests shorten it.
+var listFetchBound = pluginmanager.ListTimeout
 
 // registerPlugins registers the /api/plugins routes. Every one is the
 // user's alone: a plugin is code that runs as the user, and its settings,
@@ -676,20 +692,117 @@ func (s *Server) readCatalog(ctx context.Context, refresh bool) (pluginmanager.C
 // page keeps working with the installed plugins and typed sources.
 func (s *Server) pluginCatalog(w http.ResponseWriter, r *http.Request) {
 	refresh := r.URL.Query().Get("refresh") == "true"
+	// omo's own list and the additional lists are fetched side by side;
+	// neither waits for the other's failure.
+	addresses := s.settings.General().PluginLists
+	var reads []listRead
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reads = s.readLists(r.Context(), addresses, refresh)
+	}()
 	cat, at, err := s.readCatalog(r.Context(), refresh)
+	<-done
 	loc := s.opts.PluginCatalog
-	out := api.PluginCatalog{Source: gitops.HideCredentials(loc.Source), Ref: loc.Ref, Plugins: []api.CatalogPlugin{}}
+	out := api.PluginCatalog{Source: gitops.HideCredentials(loc.Source), Ref: loc.Ref, Plugins: []api.CatalogPlugin{},
+		Lists: make([]api.PluginListState, len(addresses))}
 	if !at.IsZero() {
-		at := at.UTC()
-		out.FetchedAt = &at
+		out.FetchedAt = utcPtr(at)
 	}
+	var own []api.CatalogPlugin
 	if err != nil {
 		out.Message = "omo could not read its plugin list: " + pluginMessage(err.Error())
 	} else {
 		out.Available = true
-		out.Plugins = append(out.Plugins, cat.Plugins...)
+		own = cat.Plugins
+	}
+	lists := make([]pluginmanager.List, 0, len(reads))
+	for i, rd := range reads {
+		st := api.PluginListState{URL: addresses[i], Origin: pluginmanager.ListOrigin(addresses[i]), Notes: []string{}}
+		if !rd.at.IsZero() {
+			st.FetchedAt = utcPtr(rd.at)
+		}
+		if rd.err != nil {
+			st.Message = "omo could not read this plugin list: " + pluginMessage(rd.err.Error())
+		} else {
+			st.Available = true
+			for _, n := range rd.list.Notes {
+				st.Notes = append(st.Notes, pluginMessage(n))
+			}
+			lists = append(lists, rd.list)
+		}
+		out.Lists[i] = st
+	}
+	plugins, notes := pluginmanager.Combine(own, lists)
+	out.Plugins = append(out.Plugins, plugins...)
+	k := 0
+	for i := range out.Lists {
+		if out.Lists[i].Available {
+			for _, n := range notes[k] {
+				out.Lists[i].Notes = append(out.Lists[i].Notes, pluginMessage(n))
+			}
+			k++
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func utcPtr(t time.Time) *time.Time {
+	t = t.UTC()
+	return &t
+}
+
+// readLists answers the additional lists at addresses, in their order: each
+// as fetched last while it is fresh (a failure while it is recent), else
+// fetched now, all of them side by side, each bounded by listFetchBound;
+// refresh fetches every one. Lists no longer named are forgotten. A fetch
+// cut short by ctx is not kept.
+func (s *Server) readLists(ctx context.Context, addresses []string, refresh bool) []listRead {
+	f := &s.plugins
+	f.listMu.Lock()
+	defer f.listMu.Unlock()
+	if f.lists == nil {
+		f.lists = map[string]listRead{}
+	}
+	named := map[string]bool{}
+	for _, a := range addresses {
+		named[a] = true
+	}
+	for a := range f.lists {
+		if !named[a] {
+			delete(f.lists, a)
+		}
+	}
+	out := make([]listRead, len(addresses))
+	fetched := make([]bool, len(addresses))
+	var wg sync.WaitGroup
+	for i, a := range addresses {
+		if rd, ok := f.lists[a]; ok && !refresh {
+			age := time.Since(rd.at)
+			if (rd.err == nil && age < catalogFresh) || (rd.err != nil && age < catalogRetry) {
+				out[i] = rd
+				continue
+			}
+		}
+		fetched[i] = true
+		wg.Go(func() {
+			fctx, cancel := context.WithTimeout(ctx, listFetchBound)
+			defer cancel()
+			l, err := pluginmanager.FetchList(fctx, a)
+			out[i] = listRead{at: time.Now(), list: l, err: err}
+		})
+	}
+	wg.Wait()
+	for i, a := range addresses {
+		if !fetched[i] || ctx.Err() != nil {
+			continue
+		}
+		f.lists[a] = out[i]
+		if err := out[i].err; err != nil {
+			s.log.Printf("plugins: read the plugin list %s: %s", pluginmanager.ListOrigin(a), pluginMessage(err.Error()))
+		}
+	}
+	return out
 }
 
 // deletePlugin removes a plugin in this order: the runtime is loaded

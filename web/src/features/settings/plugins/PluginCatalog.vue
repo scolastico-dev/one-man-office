@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // "Available plugins": omo's plugin list, read from the server (which
 // fetches it from the release branch of omo's repository and keeps it for a
-// while). Each plugin shows its tag, description and source; Install of an
-// official plugin installs at once, a recommended or community plugin asks
-// first with the warning of its tag (confirmInstall) and sends the
-// acknowledgement. The server decides the tag itself: when it asks for a
+// while), then the plugins of each additional list the user named, under
+// that list's address, with the list's error or notes. Each plugin shows its
+// tag (trustTagOf: every plugin of an additional list is community),
+// description and source; Install of an official plugin installs at once, a
+// recommended or community plugin asks first with the warning of its tag
+// (confirmInstall) and sends the acknowledgement. The server decides the tag itself: when it asks for a
 // stronger acknowledgement than the page knew (the list changed), the page
 // asks again with the server's tag. A list that could not be read says so,
 // with Retry; the rest of the page keeps working. Everything of the list is
@@ -12,16 +14,16 @@
 import { computed, onMounted, ref } from 'vue'
 import { getPluginCatalog, installPlugin } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { CatalogPlugin, PluginCatalog, PluginInfo, PluginSettings, PluginTag } from '../../../api/types'
+import type { CatalogPlugin, PluginCatalog, PluginInfo, PluginListState, PluginSettings, PluginTag } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
-import StatusBadge from '../../../components/ui/StatusBadge.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { confirmInstall } from './confirmInstall'
-import { TAG_WORDS, acknowledgementOf, confirmationOf, installedFrom, usePluginDialogs, whereFrom } from './pluginTrust'
+import CatalogRow from './CatalogRow.vue'
+import { acknowledgementOf, confirmationOf, installedFrom, trustTagOf, usePluginDialogs } from './pluginTrust'
 
 const props = defineProps<{
   /** The installed plugins' settings. */
@@ -57,7 +59,12 @@ async function load(refresh: boolean) {
 onMounted(() => void load(false))
 
 const unavailable = computed(() => (catalog.value !== null && !catalog.value.available ? catalog.value.message : loadError.value))
-const listed = computed(() => (catalog.value?.available ? catalog.value.plugins : []))
+/** omo's own plugins. */
+const listed = computed(() => (catalog.value?.available ? catalog.value.plugins.filter((p) => p.list === '') : []))
+/** Every additional list with its plugins. */
+const lists = computed(() =>
+  (catalog.value?.lists ?? []).map((state: PluginListState) => ({ state, plugins: (catalog.value?.plugins ?? []).filter((p) => p.list === state.url) })),
+)
 
 const busy = ref<string | null>(null)
 const rowError = ref<{ name: string; text: string } | null>(null)
@@ -72,7 +79,7 @@ async function agree(p: CatalogPlugin, tag: PluginTag): Promise<boolean> {
 async function install(p: CatalogPlugin) {
   if (busy.value !== null) return
   rowError.value = null
-  let tag: PluginTag = p.tag
+  let tag: PluginTag = trustTagOf(p)
   if (!(await agree(p, tag))) return
   busy.value = p.name
   try {
@@ -110,12 +117,15 @@ async function install(p: CatalogPlugin) {
 
 const installedOf = (p: CatalogPlugin) => installedFrom(p, props.settings)
 const nameTaken = (p: CatalogPlugin) => props.names.includes(p.name)
+const errorOf = (p: CatalogPlugin) => (rowError.value?.name === p.name ? rowError.value.text : '')
+
+defineExpose({ load })
 </script>
 
 <template>
   <FormSection
     legend="Available plugins"
-    description="omo's plugin list. Official plugins are kept in omo's repository by its maintainers and install at once. Recommended plugins are other people's code the maintainers looked at, community plugins are not reviewed: omo asks before it installs one of those."
+    description="omo's plugin list, then the lists you added below. Official plugins are kept in omo's repository by its maintainers and install at once. Recommended plugins are other people's code the maintainers looked at, community plugins are not reviewed: omo asks before it installs one of those."
     data-plugin-catalog
   >
     <p v-if="catalog === null && loadError === ''" class="catalog__note" data-catalog-loading>Reading omo's plugin list…</p>
@@ -130,32 +140,46 @@ const nameTaken = (p: CatalogPlugin) => props.names.includes(p.name)
     </Callout>
     <p v-else-if="listed.length === 0" class="catalog__note" data-catalog-empty>omo's plugin list names no plugin.</p>
     <ul v-else class="catalog">
-      <li v-for="p in listed" :key="p.name" class="catalog__row" :data-catalog-plugin="p.name" :data-tag="p.tag">
-        <div class="catalog__main">
-          <p class="catalog__name">
-            <span>{{ visibleText(p.name) }}</span>
-            <StatusBadge :tone="TAG_WORDS[p.tag].tone" :text="TAG_WORDS[p.tag].text" :title="TAG_WORDS[p.tag].meaning" data-catalog-tag />
-          </p>
-          <p class="catalog__desc" data-catalog-description>{{ visibleText(p.description) }}</p>
-          <p class="catalog__from" data-catalog-source>{{ visibleText(whereFrom(p)) }}</p>
-          <Callout v-if="rowError?.name === p.name" tone="danger" data-catalog-install-error>
-            <p>{{ visibleText(rowError.text) }}</p>
-          </Callout>
-        </div>
-        <p v-if="installedOf(p)" class="catalog__meta" data-catalog-installed>Installed</p>
-        <p v-else-if="nameTaken(p)" class="catalog__meta" data-catalog-name-taken>Another plugin has this name</p>
-        <UiButton
-          v-else
-          size="sm"
-          :disabled="busy !== null"
-          :aria-busy="busy === p.name ? 'true' : undefined"
-          data-catalog-install
-          @click="install(p)"
-        >
-          {{ busy === p.name ? 'Installing…' : 'Install' }}<span class="sr-only">{{ ' ' + visibleText(p.name) }}</span>
-        </UiButton>
-      </li>
+      <CatalogRow
+        v-for="p in listed"
+        :key="p.name"
+        :plugin="p"
+        :installed="installedOf(p)"
+        :name-taken="nameTaken(p)"
+        :busy="busy"
+        :error="errorOf(p)"
+        @install="install(p)"
+      />
     </ul>
+
+    <div v-for="l in lists" :key="l.state.url" role="group" :aria-label="`Plugin list from ${visibleText(l.state.origin)}`" class="catalog__list" :data-plugin-list="l.state.url">
+      <p class="catalog__list-title">From {{ visibleText(l.state.origin) }}, not reviewed by omo</p>
+      <p class="catalog__from">{{ visibleText(l.state.url) }}</p>
+      <Callout v-if="!l.state.available" tone="warn" title="This plugin list could not be loaded" data-plugin-list-error>
+        <p>{{ visibleText(l.state.message) }}</p>
+        <template #actions>
+          <UiButton size="sm" :disabled="loading" :aria-busy="loading ? 'true' : undefined" data-plugin-list-retry @click="load(true)">
+            {{ loading ? 'Trying again…' : 'Retry' }}
+          </UiButton>
+        </template>
+      </Callout>
+      <ul v-if="l.state.notes.length > 0" class="catalog__notes" data-plugin-list-notes>
+        <li v-for="(n, i) in l.state.notes" :key="i">{{ visibleText(n) }}</li>
+      </ul>
+      <p v-if="l.state.available && l.plugins.length === 0" class="catalog__note" data-plugin-list-empty>This list shows no plugin.</p>
+      <ul v-else-if="l.plugins.length > 0" class="catalog">
+        <CatalogRow
+          v-for="p in l.plugins"
+          :key="p.name"
+          :plugin="p"
+          :installed="installedOf(p)"
+          :name-taken="nameTaken(p)"
+          :busy="busy"
+          :error="errorOf(p)"
+          @install="install(p)"
+        />
+      </ul>
+    </div>
   </FormSection>
 </template>
 
@@ -172,48 +196,33 @@ const nameTaken = (p: CatalogPlugin) => props.names.includes(p.name)
   border-top: var(--omo-border) solid var(--omo-line);
   list-style: none;
 }
-.catalog__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--omo-space) * 3);
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
-  border-bottom: var(--omo-border) solid var(--omo-line);
-}
-.catalog__row > :deep(button) {
-  flex-shrink: 0;
-}
-.catalog__main {
+.catalog__list {
   display: grid;
-  gap: calc(var(--omo-space) * 0.5);
+  gap: calc(var(--omo-space) * 1.5);
   min-width: 0;
 }
-.catalog__main p {
+.catalog__list > p {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.catalog__name {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--omo-space) * 2);
+.catalog__list-title {
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
-}
-.catalog__desc {
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
+  font-weight: 700;
 }
 .catalog__from {
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
 }
-.catalog__meta {
-  flex-shrink: 0;
+.catalog__notes {
+  display: grid;
+  gap: calc(var(--omo-space) * 0.5);
   margin: 0;
+  padding-left: calc(var(--omo-space) * 4);
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
 }
 </style>

@@ -530,6 +530,8 @@ export interface General {
   usage: UsageSettings
   ui: UISettings
   branches: BranchSettings
+  /** Addresses (http or https) of additional plugin list files; their plugins are always community plugins. */
+  plugin_lists: string[]
 }
 
 /** The revision of a settings item that has no file. */
@@ -1240,6 +1242,23 @@ export interface CatalogPlugin {
   source: string
   ref: string
   subpath: string
+  /** The address of the additional list the plugin comes from; '' for omo's own list. */
+  list: string
+  /** That list's host; '' for omo's own list. */
+  origin: string
+}
+
+/** How reading one additional plugin list went. Its message and notes are about data from the network: shown as plain text. */
+export interface PluginListState {
+  /** The address as the settings name it. */
+  url: string
+  origin: string
+  /** False when the list could not be fetched or read; `message` says why. */
+  available: boolean
+  message: string
+  /** The entries of the list that are not shown, and why. */
+  notes: string[]
+  fetched_at: string | null
 }
 
 /** GET /api/plugins/catalog: the list, or (`available` false) why it could not be read. */
@@ -1250,7 +1269,10 @@ export interface PluginCatalog {
   source: string
   ref: string
   fetched_at: string | null
+  /** omo's own plugins (when its list is available), then those of the additional lists. */
   plugins: CatalogPlugin[]
+  /** The state of every additional list, in the order of the settings. */
+  lists: PluginListState[]
 }
 
 /** POST /api/plugins, PUT /api/plugins/{name}: the settings and the warning the user confirmed for a source that is not official. */

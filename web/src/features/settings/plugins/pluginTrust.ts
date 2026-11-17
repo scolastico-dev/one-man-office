@@ -17,6 +17,24 @@ export const TAG_WORDS: Readonly<Record<PluginTag, StateWords & { meaning: strin
   community: { tone: 'warn', text: 'community', meaning: "Listed, not reviewed by omo's maintainers." },
 }
 
+/**
+ * The tag omo gives a plugin of the list, the only place the page decides
+ * it: the tag of omo's own list, and community for a plugin of an additional
+ * list (`list` set), whatever that list says. The badge and the question
+ * before an install follow from it; the server decides the same
+ * (`pluginmanager.TrustTag`) and refuses an install without the
+ * acknowledgement.
+ */
+export function trustTagOf(p: Pick<CatalogPlugin, 'tag' | 'list'>): PluginTag {
+  if (p.list !== '') return 'community'
+  return p.tag === 'official' || p.tag === 'recommended' ? p.tag : 'community'
+}
+
+/** What adding an additional plugin list means, in one paragraph (the community warning's words). */
+export function listWarning(): string {
+  return `omo fetches each address and shows the plugins of that list as community plugins, whatever the list says: nobody reviewed them, and omo asks before it installs one. ${trustWarning('community').paragraphs[0]} Review a plugin before installing it.`
+}
+
 /** The acknowledgement an install of a plugin with `tag` sends: none for an official one. */
 export function acknowledgementOf(tag: PluginTag): Exclude<PluginTag, 'official'> | undefined {
   return tag === 'official' ? undefined : tag

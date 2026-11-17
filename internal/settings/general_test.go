@@ -414,3 +414,52 @@ func TestBranchTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginLists(t *testing.T) {
+	if got := Defaults().PluginLists; got == nil || len(got) != 0 {
+		t.Fatalf("default plugin_lists %#v", got)
+	}
+	s, _, _ := openTest(t)
+	good := []string{"https://raw.githubusercontent.com/someone/lists/main/omo.yaml", "http://127.0.0.1:8080/list.yaml?x=1"}
+	g := Defaults()
+	g.PluginLists = good
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.General().PluginLists; !reflect.DeepEqual(got, good) {
+		t.Fatalf("stored %v", got)
+	}
+	for _, c := range []struct {
+		lists []string
+		field string
+		want  string
+	}{
+		{[]string{"file:///etc/passwd"}, "plugin_lists.0", "http:// or https://"},
+		{[]string{"https://a.example/x", "ftp://a.example/x"}, "plugin_lists.1", "http:// or https://"},
+		{[]string{"git@github.com:a/b.git"}, "plugin_lists.0", "http:// or https://"},
+		{[]string{"/home/me/list.yaml"}, "plugin_lists.0", "http:// or https://"},
+		{[]string{"https:///x"}, "plugin_lists.0", "host"},
+		{[]string{"https://me:secret@a.example/x"}, "plugin_lists.0", "user name or password"},
+		{[]string{"https://a.example/x#top"}, "plugin_lists.0", "#"},
+		{[]string{""}, "plugin_lists.0", "http:// or https://"},
+		{[]string{"https://a.example/‮x"}, "plugin_lists.0", "control, invisible or direction"},
+		{[]string{"https://a.example/" + strings.Repeat("x", 2048)}, "plugin_lists.0", "2048"},
+		{[]string{"https://a.example/x", "https://a.example/x"}, "plugin_lists.1", "repeats plugin_lists.0"},
+		{make([]string, 17), "plugin_lists", "at most 16"},
+	} {
+		g := Defaults()
+		g.PluginLists = c.lists
+		err := s.SetGeneral(g)
+		var ae *api.Error
+		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, c.want) {
+			t.Errorf("%.40q: err = %v, want %q", c.lists, err, c.want)
+			continue
+		}
+		if d, ok := ae.Details.(api.FieldDetail); !ok || d.Field != c.field {
+			t.Errorf("%.40q: details %+v, want field %s", c.lists, ae.Details, c.field)
+		}
+	}
+	if got := s.General().PluginLists; !reflect.DeepEqual(got, good) {
+		t.Fatalf("a refused write changed the lists: %v", got)
+	}
+}

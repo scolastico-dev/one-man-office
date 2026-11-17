@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The Plugins section of the settings: the installed plugins with their
-// state, one open plugin at a time, "Install plugin…" (a typed source) and
-// omo's plugin list ("Available plugins", PluginCatalog). The page owns the
+// state, one open plugin at a time, "Install plugin…" (a typed source),
+// omo's plugin list and the additional lists ("Available plugins",
+// PluginCatalog) and the addresses of the additional lists (PluginLists). The page owns the
 // dialog scope in which installs and updates of plugins that are not
 // official ask first (confirmInstall). The list is the app's shared plugin list (the ticket panel's
 // plugin actions come from it too): read again when this page opens, kept
@@ -24,6 +25,7 @@ import InstallDialog from './InstallDialog.vue'
 import PluginCatalog from './PluginCatalog.vue'
 import PluginDetail from './PluginDetail.vue'
 import PluginList from './PluginList.vue'
+import PluginLists from './PluginLists.vue'
 import { fileOfPlugin } from './pluginForms'
 import { PLUGIN_DIALOGS } from './pluginTrust'
 
@@ -67,6 +69,7 @@ async function removed() {
   }
 }
 
+const catalog = ref<InstanceType<typeof PluginCatalog>>()
 const installing = ref(false)
 async function installed(info: PluginInfo) {
   list.take(info)
@@ -109,7 +112,8 @@ async function installed(info: PluginInfo) {
       />
     </FormSection>
 
-    <PluginCatalog :settings="settings" :names="names" @installed="installed" />
+    <PluginCatalog ref="catalog" :settings="settings" :names="names" @installed="installed" />
+    <PluginLists @saved="catalog?.load(false)" />
 
     <InstallDialog :open="installing" @close="installing = false" @installed="installed" />
     <DialogOutlet :scope="dialogs" />

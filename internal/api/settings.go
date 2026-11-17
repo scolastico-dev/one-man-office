@@ -83,6 +83,10 @@ type General struct {
 	Usage                UsageSettings        `yaml:"usage" json:"usage"`
 	UI                   UISettings           `yaml:"ui" json:"ui"`
 	Branches             BranchSettings       `yaml:"branches" json:"branches"`
+	// PluginLists are the addresses (http or https) of plugin list files
+	// in the format of omo's own list, shown beside it on the Plugins page.
+	// Their plugins are always treated as community plugins.
+	PluginLists []string `yaml:"plugin_lists" json:"plugin_lists"`
 }
 
 // BranchSettings holds how omo names the branches it creates for tickets.

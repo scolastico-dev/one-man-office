@@ -6,7 +6,7 @@ import type { CatalogPlugin, PluginCatalog as Catalog, PluginInfo, PluginSetting
 import { DialogOutlet, useDialogScope } from '../../../components/ui/mountDialog'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
 import PluginCatalog from './PluginCatalog.vue'
-import { PLUGIN_DIALOGS, acknowledgementOf, confirmationOf, installedFrom, whereFrom } from './pluginTrust'
+import { PLUGIN_DIALOGS, acknowledgementOf, confirmationOf, installedFrom, listWarning, trustTagOf, whereFrom } from './pluginTrust'
 import { ApiError } from '../../../api/client'
 
 let mounted: VueWrapper | null = null
@@ -23,6 +23,8 @@ const entry = (o: Partial<CatalogPlugin> = {}): CatalogPlugin => ({
   source: REPO,
   ref: 'release',
   subpath: 'plugins/pushover',
+  list: '',
+  origin: '',
   ...o,
 })
 const LIST: CatalogPlugin[] = [
@@ -30,7 +32,7 @@ const LIST: CatalogPlugin[] = [
   entry({ name: 'ticket-log', tag: 'recommended', description: 'Logs <b>tickets</b>', source: 'https://example.org/me/ticket-log.git', ref: 'v1.0.0', subpath: '' }),
   entry({ name: 'notes', tag: 'community', description: 'Notes ‮ here', source: 'git@example.org:me/notes.git', ref: '', subpath: 'plugin' }),
 ]
-const catalog = (o: Partial<Catalog> = {}): Catalog => ({ available: true, message: '', source: REPO, ref: 'release', fetched_at: '2026-11-16T09:00:00Z', plugins: LIST, ...o })
+const catalog = (o: Partial<Catalog> = {}): Catalog => ({ available: true, message: '', source: REPO, ref: 'release', fetched_at: '2026-11-16T09:00:00Z', plugins: LIST, lists: [], ...o })
 const info = (name: string): PluginInfo => ({ name, version: '1.0.0', description: '', state: 'ready', message: '', commit: 'a'.repeat(40), last_event: '', last_run_at: null, hooks: [] })
 
 /** Mounts the section with the page's dialog scope; `answers` answers each read of the list in turn (the last one repeats). */
@@ -163,4 +165,68 @@ test('the words and rules of tags', () => {
   expect(installedFrom(entry(), [{ source: REPO, subpath: 'plugins/pushover', ref: 'release' }])).toBe(true)
   expect(installedFrom(entry(), [{ source: REPO, subpath: 'plugins/pushover', ref: 'main' }])).toBe(false)
   expect(whereFrom(entry())).toBe(`${REPO}, branch or tag release, folder plugins/pushover`)
+})
+
+const LIST_URL = 'https://lists.example/omo/index.yaml'
+const BROKEN_URL = 'http://broken.example/list.yaml'
+const fromList = (o: Partial<CatalogPlugin> = {}): CatalogPlugin =>
+  entry({ name: 'claimer', tag: 'official', description: 'Says <i>official</i>', source: 'https://example.org/claimer.git', ref: '', subpath: '', list: LIST_URL, origin: 'lists.example', ...o })
+const withLists = (o: Partial<Catalog> = {}): Catalog =>
+  catalog({
+    plugins: [...LIST, fromList()],
+    lists: [
+      { url: BROKEN_URL, origin: 'broken.example', available: false, message: 'omo could not read this plugin list: the address answered 404 Not Found', notes: [], fetched_at: null },
+      { url: LIST_URL, origin: 'lists.example', available: true, message: '', notes: ['"pushover" is not shown: omo\'s own list has a plugin of this name'], fetched_at: null },
+    ],
+    ...o,
+  })
+
+test('a plugin of an additional list is shown as community under its list, whatever the list says, and asks before it installs', async () => {
+  const { w, hn, installed } = await open([withLists()])
+  // omo's own list still renders, next to the broken list's error.
+  expect(w.findAll('.catalog > [data-catalog-plugin]').map((r) => r.attributes('data-catalog-plugin'))).toEqual(['pushover', 'ticket-log', 'notes', 'claimer'])
+  const broken = w.get(`[data-plugin-list="${BROKEN_URL}"]`)
+  expect(broken.get('[data-plugin-list-error]').text()).toContain('answered 404 Not Found')
+  expect(broken.find('[data-catalog-plugin]').exists()).toBe(false)
+  const good = w.get(`[data-plugin-list="${LIST_URL}"]`)
+  expect(good.find('[data-plugin-list-error]').exists()).toBe(false)
+  expect(good.get('[data-plugin-list-notes]').text()).toContain('"pushover" is not shown')
+  const r = good.get('[data-catalog-plugin="claimer"]')
+  expect(r.attributes('data-tag')).toBe('community')
+  expect(r.get('[data-catalog-tag]').text()).toBe('community')
+  expect(r.get('[data-catalog-origin]').text()).toBe('Listed by lists.example, not by omo')
+  expect(r.get('[data-catalog-description]').text()).toBe('Says <i>official</i>')
+  expect(r.find('i').exists()).toBe(false)
+  expect(row(w, 'pushover').find('[data-catalog-origin]').exists()).toBe(false)
+
+  hn.respond.write = () => ok(info('claimer'))
+  await r.get('[data-catalog-install]').trigger('click')
+  await flushPromises()
+  const d = dialog()!
+  expect(d.getAttribute('data-trust-dialog')).toBe('community')
+  d.querySelector<HTMLElement>('[data-trust-confirm]')!.click()
+  await flushPromises()
+  expect(hn.sent.map((s) => (s.body as { acknowledge?: string }).acknowledge)).toEqual(['community'])
+  expect(installed.map((i) => i.name)).toEqual(['claimer'])
+})
+
+test("an additional list's Retry reads every list again", async () => {
+  const { w, reads } = await open([withLists()])
+  await w.get('[data-plugin-list-retry]').trigger('click')
+  await flushPromises()
+  expect(reads).toEqual([undefined, { refresh: 'true' }])
+})
+
+test('omo itself unreadable: the additional lists still show', async () => {
+  const { w } = await open([withLists({ available: false, message: 'omo could not read its plugin list: gone', plugins: [fromList()] })])
+  expect(w.find('[data-catalog-error]').exists()).toBe(true)
+  expect(w.get(`[data-plugin-list="${LIST_URL}"] [data-catalog-plugin="claimer"]`).attributes('data-tag')).toBe('community')
+})
+
+test('trustTagOf: only omo\'s own list grants a tag', () => {
+  expect(trustTagOf(entry())).toBe('official')
+  expect(trustTagOf(entry({ tag: 'recommended' }))).toBe('recommended')
+  for (const tag of ['official', 'recommended', 'community'] as const) expect(trustTagOf(fromList({ tag }))).toBe('community')
+  expect(listWarning()).toContain('run commands on this computer as you')
+  expect(listWarning()).toContain('community')
 })
