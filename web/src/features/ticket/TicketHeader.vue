@@ -51,7 +51,7 @@ const shownTitle = computed(() => {
   const a = awaiting.value
   return a !== null && store.state.lastEventId < a.eventId ? a.text : props.ticket.title
 })
-const changedMeanwhile = computed(() => editing.value && props.ticket.title !== base.value && !saving.value)
+const changedMeanwhile = computed(() => editing.value && shownTitle.value !== base.value && !saving.value)
 const length = computed(() => [...draft.value.trim()].length)
 const dirty = computed(() => editing.value && draft.value !== base.value)
 watch(dirty, (d) => emit('dirty', d))
@@ -84,8 +84,9 @@ const pullRequests = computed(() => {
 
 async function startEdit() {
   if (readonly.value) return
-  base.value = props.ticket.title
-  draft.value = props.ticket.title
+  // A title saved here a moment ago is shown before the stream delivers it: the edit starts from it.
+  base.value = shownTitle.value
+  draft.value = shownTitle.value
   error.value = ''
   editing.value = true
   await nextTick()
@@ -120,7 +121,7 @@ async function save() {
   const text = draft.value.trim()
   error.value = validate(text)
   if (error.value) return
-  if (text === props.ticket.title) {
+  if (text === shownTitle.value) {
     endEdit()
     return
   }
@@ -195,7 +196,7 @@ defineExpose({ discard: () => (editing.value = false) })
       <div :id="`${titleId}-help`" class="head__help">
         <p v-if="error" class="head__error" role="alert" data-title-error>{{ error }}</p>
         <p v-if="changedMeanwhile" class="head__note" data-title-changed>
-          Meanwhile the title was changed to “{{ ticket.title }}”. Saving replaces it with yours.
+          Meanwhile the title was changed to “{{ shownTitle }}”. Saving replaces it with yours.
         </p>
         <p class="head__note">Enter saves, Escape cancels. {{ length }} of {{ TITLE_MAX }} characters.</p>
       </div>

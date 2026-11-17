@@ -300,6 +300,25 @@ test('the title is edited in place: Enter saves only the title, Escape cancels, 
   expect(hn.session.store.view(4)?.title).toBe('Old')
 })
 
+test('editing the title again right after saving, before the stream delivers it, starts from the saved title', async () => {
+  const t = ticket({ number: 4, title: 'Old', projects: [demo] })
+  const hn = await panelHarness(seeded(t))
+  const { w } = await open(hn, 4)
+  await w.get('[data-edit-title]').trigger('click')
+  hn.write.fn = () => ok({ ...t, title: 'New', description: '' }, 77)
+  await w.get('[data-title-input]').setValue('New')
+  await w.get('[data-title-input]').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  await w.get('[data-edit-title]').trigger('click')
+  expect((w.get('[data-title-input]').element as HTMLTextAreaElement).value).toBe('New')
+  expect(w.find('[data-title-changed]').exists()).toBe(false)
+  // The stream delivers the own change: still nothing changed meanwhile.
+  hn.omo.change('ticket.updated', { ...t, title: 'New' })
+  await flushPromises()
+  expect(w.find('[data-title-changed]').exists()).toBe(false)
+  expect((w.get('[data-title-input]').element as HTMLTextAreaElement).value).toBe('New')
+})
+
 test('the description editor adds a chosen image at the caret and saves its reference; a refusal inserts nothing', async () => {
   const t = ticket({ number: 4, projects: [demo], description_version: 1 })
   const hn = await panelHarness(seeded(t))
