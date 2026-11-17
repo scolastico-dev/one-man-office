@@ -98,3 +98,18 @@ test('an empty list says no agent is running, and a failed read shows the server
   expect(wrapper.find('[data-agents-error]').exists()).toBe(false)
   expect(wrapper.get('[data-agents-empty]').text()).toBe('No agent is running.')
 })
+
+test('an agent that used omo’s MCP endpoint carries a small MCP chip; the others do not', async () => {
+  const hn = await sidebarHarness((omo) => {
+    omo.projects = [project('demo', 'Demo project')]
+    omo.tickets = [ticket({ number: 12, title: 'Fix login', column: 'in_progress' })]
+  })
+  hn.agents.list = [agent({ id: 'a', ticket: 12, name: 'Ada', state: 'running', mcp: 'connected' }), agent({ id: 'b', ticket: 12, name: 'Bo', state: 'running' })]
+  const { wrapper } = await mountSidebar(hn, AgentsTab)
+  mounted = wrapper
+  await flushPromises()
+  const rows = wrapper.findAll('[data-agent-row]')
+  expect(rows[0]!.get('[data-agent-mcp]').text()).toBe('MCP')
+  expect(rows[0]!.get('[data-agent-mcp]').attributes('title')).toBe("This agent uses omo's MCP tools")
+  expect(rows[1]!.find('[data-agent-mcp]').exists()).toBe(false)
+})

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // One live agent as a row: who it is and what state it is in, the ticket it
 // works on, its project and model, and how long it has been running. The row
-// is a button; choosing it asks to show the agent's terminal. Every name here
+// is a button; choosing it asks to show the agent's terminal. A small "MCP"
+// mark says the agent has used omo's MCP endpoint. Every name here
 // is free text from outside, shown as text.
 import { computed } from 'vue'
+import Chip from '../../components/ui/Chip.vue'
 import LiveDot from '../../components/ui/LiveDot.vue'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import { visibleText } from '../../components/ui/visibleText'
@@ -56,6 +58,7 @@ const meta = computed(() => {
         ><span aria-hidden="true"> · </span><span class="srow__name">{{ visibleText(session.name) }}</span></span
       >
       <span v-if="word" class="srow__word" aria-hidden="true">{{ word }}</span>
+      <Chip v-if="session.mcp === 'connected'" class="srow__mcp" label="MCP" title="This agent uses omo's MCP tools" data-agent-mcp />
       <RelativeTime class="srow__since" :at="session.started_at" />
     </span>
     <span v-if="!compact && ticket" class="srow__ticket"
@@ -116,6 +119,9 @@ const meta = computed(() => {
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+}
+.srow__mcp {
+  flex-shrink: 0;
 }
 .srow__since {
   flex-shrink: 0;
