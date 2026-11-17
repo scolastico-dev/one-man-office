@@ -27,7 +27,7 @@ import McpServerEditor from './McpServerEditor.vue'
 import McpServerList from './McpServerList.vue'
 import McpSwitches from './McpSwitches.vue'
 import McpTakeover from './McpTakeover.vue'
-import { blankServer, fileOfMCPServer, type McpDraft } from './mcpForms'
+import { blankServer, fileOfMCPServer, MCP_NAME_RULE, type McpDraft } from './mcpForms'
 
 const def = sectionDef('mcp')
 const session = useSession()
@@ -179,6 +179,7 @@ const naming = ref(false)
       eyebrow="MCP"
       thing="MCP server"
       confirm="Add"
+      :rule="MCP_NAME_RULE"
       @close="naming = false"
       @create="(n) => openNew(n, blankServer(n))"
     />

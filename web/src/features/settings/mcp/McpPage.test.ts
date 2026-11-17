@@ -84,3 +84,13 @@ test('a server taken over appears in the list', async () => {
   expect(h.omo.mcp.servers.map((s) => s.name)).toEqual(['github'])
   expect(w.find('[data-mcp-server="github"]').exists()).toBe(true)
 })
+
+test('the name dialog of a new server states the rule the server checks, not the usual one', async () => {
+  const { w } = await open(() => {})
+  await w.get('[data-new-mcp-server]').trigger('click')
+  await flushPromises()
+  const hint = w.get('[data-name-dialog]').text()
+  expect(hint).toContain('Lower-case letters, digits and "-", starting with a letter; at most 24 characters.')
+  expect(hint).not.toContain('dots')
+  expect(hint).not.toContain('underscores')
+})

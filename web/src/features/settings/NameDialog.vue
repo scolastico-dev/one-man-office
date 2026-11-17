@@ -24,8 +24,10 @@ const props = withDefaults(
     thing: string
     /** The button that creates it, e.g. "Create". */
     confirm: string
+    /** The rule of the name in the field's hint, when it is not the usual one. */
+    rule?: string
   }>(),
-  { taken: () => [] },
+  { taken: () => [], rule: 'Lowercase letters, digits, dots, dashes and underscores.' },
 )
 const emit = defineEmits<{ close: []; create: [name: string] }>()
 
@@ -67,7 +69,7 @@ function submit() {
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
-        hint="Lowercase letters, digits, dots, dashes and underscores. It is fixed once saved."
+        :hint="`${rule} It is fixed once saved.`"
         :error="error"
         autofocus
       />
