@@ -15,7 +15,7 @@ export CGO_ENABLED := 0
 
 # NO_WEB=1 builds the Go binary without the browser app (no Node.js needed).
 WEB_DEPS := $(if $(NO_WEB),,web)
-.PHONY: build cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
+.PHONY: build notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
 
 ## web: build the browser app into web/dist (needs Node.js 24 and npm)
 web:
@@ -46,6 +46,11 @@ build: $(WEB_DEPS)
 	@mkdir -p $(BUILD_DIR)
 	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe) $(PKG)
 	@echo "built $(BUILD_DIR)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe) ($(GOOS)/$(GOARCH), $(VERSION))"
+
+## notices: write bin/THIRD_PARTY_NOTICES, the licences of the Go modules and the bundled npm packages (NO_WEB=1 leaves the web app out)
+notices: $(WEB_DEPS)
+	@mkdir -p $(BUILD_DIR)
+	go run ./tools/notices -o $(BUILD_DIR)/THIRD_PARTY_NOTICES $(if $(NO_WEB),-web '')
 
 ## cross: build Linux, macOS and Windows for amd64 and arm64 (NO_WEB=1 skips the browser app)
 cross: cross-guard cross-linux cross-darwin cross-windows

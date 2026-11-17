@@ -52,20 +52,25 @@ jobs:
       - name: Build release binaries
         run: make cross VERSION="${{ github.event.release.tag_name }}"
 
+      - name: Collect the third-party notices
+        run: make notices
+
       - name: Package release binaries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist staging
+          cp LICENSE NOTICE bin/THIRD_PARTY_NOTICES staging/
 
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             cp "bin/omo-${platform}" staging/omo
-            tar -C staging -czf "dist/omo-${platform}.tar.gz" omo
+            tar -C staging -czf "dist/omo-${platform}.tar.gz" omo LICENSE NOTICE THIRD_PARTY_NOTICES
           done
+          rm staging/omo
 
           for platform in windows-amd64 windows-arm64; do
             cp "bin/omo-${platform}.exe" staging/omo.exe
-            (cd staging && zip -q "../dist/omo-${platform}.zip" omo.exe)
+            (cd staging && zip -q "../dist/omo-${platform}.zip" omo.exe LICENSE NOTICE THIRD_PARTY_NOTICES)
           done
 
           (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)

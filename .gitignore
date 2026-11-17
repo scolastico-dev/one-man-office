@@ -3,6 +3,7 @@ docs/superpowers/
 docker-data/
 web/node_modules/
 web/dist/*
+web/third-party-notices.txt
 !web/dist/.gitkeep
 web/test-results/
 web/playwright-report/
