@@ -56,7 +56,7 @@ func checkNotBusy(q db.Queryer, t ticketRow) error {
 func (b *Board) ClaimStart(ctx context.Context, n int64) error {
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
 		if t.Col != api.ColumnReady {
-			return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; omo starts work only on a ticket in ready", n, t.Col)
+			return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; omo starts work only on a ticket in Ready For Dev", n, columnWords(t.Col))
 		}
 		if t.Busy {
 			return checkNotBusy(tx, t)
@@ -71,7 +71,7 @@ func (b *Board) ClaimStart(ctx context.Context, n int64) error {
 			}
 			if story.Col != api.ColumnInProgress {
 				return api.Errorf(api.CodeInvalidTransition,
-					"#%d belongs to story #%d, which is in %s; its tasks start only while the story is in progress", n, story.ID, story.Col)
+					"#%d belongs to story #%d, which is in %s; its tasks start only while the story is In Progress", n, story.ID, columnWords(story.Col))
 			}
 		}
 		s, err := b.summary(tx, n)

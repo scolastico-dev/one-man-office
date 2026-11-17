@@ -30,7 +30,7 @@ func (b *Board) engineTransition(ctx context.Context, n int64, fn func(tx *sql.T
 // checkStage requires t to be in Review at stage.
 func checkStage(t ticketRow, stage api.ReviewStage) error {
 	if t.Col != api.ColumnReview || t.ReviewStage != stage {
-		return api.Errorf(api.CodeInvalidTransition, "#%d is not %s (column %s, review stage %q)", t.ID, stage, t.Col, t.ReviewStage)
+		return api.Errorf(api.CodeInvalidTransition, "#%d is not %s (in %s, review stage %q)", t.ID, stage, columnWords(t.Col), t.ReviewStage)
 	}
 	return nil
 }
@@ -41,7 +41,7 @@ func checkStage(t ticketRow, stage api.ReviewStage) error {
 func (b *Board) BeginWork(ctx context.Context, n int64) error {
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
 		if t.Col != api.ColumnReady {
-			return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; work begins only on a ticket in ready", n, t.Col)
+			return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; work begins only on a ticket in Ready For Dev", n, columnWords(t.Col))
 		}
 		if t.inStory() {
 			story, err := loadTicket(tx, t.StoryID)
@@ -50,7 +50,7 @@ func (b *Board) BeginWork(ctx context.Context, n int64) error {
 			}
 			if story.Col != api.ColumnInProgress {
 				return api.Errorf(api.CodeInvalidTransition,
-					"#%d belongs to story #%d, which is in %s; its tasks start only while the story is in progress", n, story.ID, story.Col)
+					"#%d belongs to story #%d, which is in %s; its tasks start only while the story is In Progress", n, story.ID, columnWords(story.Col))
 			}
 		}
 		s, err := b.summary(tx, n)

@@ -59,7 +59,7 @@ func (b *Board) CheckWorkdirRemoval(ctx context.Context, a Actor, n int64) (stri
 			return api.Errorf(api.CodeInvalidTransition, "#%d has no working folder", n)
 		case t.Col != api.ColumnDone:
 			return api.Errorf(api.CodeInvalidTransition,
-				"#%d is in %s; its working folder is removed once the ticket is done (cancel it first to stop the work)", n, t.Col)
+				"#%d is in %s; its working folder is removed once the ticket is done (cancel it first to stop the work)", n, columnWords(t.Col))
 		}
 		dir = t.Workdir
 		return nil

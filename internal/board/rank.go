@@ -52,7 +52,7 @@ func (b *Board) placeRank(tx *sql.Tx, a Actor, col api.Column, before *int, self
 		}
 		if next.Col != col {
 			return 0, false, api.Errorf(api.CodeValidation,
-				"before: #%d is in %s, not in %s; name a ticket of the target column or null for its end", n, next.Col, col)
+				"before: #%d is in %s, not in %s; name a ticket of the target column or null for its end", n, columnWords(next.Col), columnWords(col))
 		}
 		if n == self {
 			return 0, false, nil

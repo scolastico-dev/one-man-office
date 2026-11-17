@@ -97,7 +97,7 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 		return api.Errorf(api.CodeForbidden, "a %s does not hand in %s #%d", a.Role, t.Type, t.ID)
 	}
 	if t.Col != api.ColumnInProgress {
-		return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; only a ticket in in_progress can be handed in", t.ID, t.Col)
+		return api.Errorf(api.CodeInvalidTransition, "#%d is in %s; only a ticket in In Progress can be handed in", t.ID, columnWords(t.Col))
 	}
 	if t.isStory() {
 		if err := checkStoryComplete(tx, t.ID); err != nil {
@@ -293,8 +293,8 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 		return api.Errorf(api.CodeValidation, "a reviewer finishes with the verdict approve or reject, not %q", req.Verdict)
 	}
 	if t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent {
-		return api.Errorf(api.CodeInvalidTransition, "#%d is not waiting for an agent review (column %s, stage %q)",
-			t.ID, t.Col, t.ReviewStage)
+		return api.Errorf(api.CodeInvalidTransition, "#%d is not waiting for an agent review (in %s, stage %q)",
+			t.ID, columnWords(t.Col), t.ReviewStage)
 	}
 	ps, err := loadProjects(tx, t.ID)
 	if err != nil {
@@ -600,7 +600,7 @@ func (b *Board) approveReview(tx *sql.Tx, p Policy, a Actor, t ticketRow, export
 // checkHumanStage requires t to wait for the user's review.
 func checkHumanStage(t ticketRow) error {
 	if t.Col != api.ColumnReview {
-		return api.Errorf(api.CodeInvalidTransition, "#%d is in %s, not in review", t.ID, t.Col)
+		return api.Errorf(api.CodeInvalidTransition, "#%d is in %s, not in Review", t.ID, columnWords(t.Col))
 	}
 	switch t.ReviewStage {
 	case api.ReviewStageHuman:

@@ -151,7 +151,7 @@ func checkSessionBinding(q db.Queryer, s NewSession) error {
 	case s.Purpose == api.PurposeExport && t.inStory():
 		return api.Errorf(api.CodeValidation, "#%d is a task inside a story; it is merged into the story and never exported", s.Ticket)
 	case s.Purpose == api.PurposeExport && (t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting):
-		return api.Errorf(api.CodeValidation, "#%d is not being exported (column %s, review stage %q)", s.Ticket, t.Col, t.ReviewStage)
+		return api.Errorf(api.CodeValidation, "#%d is not being exported (in %s, review stage %q)", s.Ticket, columnWords(t.Col), t.ReviewStage)
 	case s.Role == api.RoleReviewer && s.ReviewRound != t.ReviewRound:
 		return api.Errorf(api.CodeValidation, "#%d is in review round %d; a reviewer session for round %d cannot start",
 			s.Ticket, t.ReviewRound, s.ReviewRound)

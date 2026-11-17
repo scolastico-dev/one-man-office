@@ -411,7 +411,7 @@ func TestUserCancelWithdrawStopTellPM(t *testing.T) {
 	if _, err := b.Move(ctx, User, int64(s), api.MoveRequest{Column: api.ColumnReady}); err != nil {
 		t.Fatal(err)
 	}
-	expect(s, "stop", "Task #"+itoa(s)+" stopped by the user and moved back to ready.")
+	expect(s, "stop", "Task #"+itoa(s)+" stopped by the user and moved back to Ready For Dev.")
 
 	// Cancel.
 	c := task(User)

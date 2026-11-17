@@ -29,7 +29,7 @@ func (b *Board) RecordCommits(ctx context.Context, n int64, project, start, end 
 	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
 		if t.Col != api.ColumnReview || (t.ReviewStage != api.ReviewStageMerging && t.ReviewStage != api.ReviewStageExporting) {
-			return api.Errorf(api.CodeInvalidTransition, "#%d is not being merged or exported (column %s, review stage %q)", n, t.Col, t.ReviewStage)
+			return api.Errorf(api.CodeInvalidTransition, "#%d is not being merged or exported (in %s, review stage %q)", n, columnWords(t.Col), t.ReviewStage)
 		}
 		res, err := tx.Exec(`UPDATE ticket_projects SET start_commit = ?, end_commit = ?, range_round = ?
 			WHERE ticket_id = ? AND project_id = ? AND branch <> ''`, start, end, t.ReviewRound, n, project)

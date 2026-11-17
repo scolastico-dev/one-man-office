@@ -78,7 +78,7 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 			if a.Role != api.RoleUser {
 				return api.Errorf(api.CodeForbidden, "only the user rejects a review by hand; a reviewer rejects with its verdict")
 			}
-			return api.Errorf(api.CodeValidation, "rejecting needs a comment; use /reject")
+			return api.Errorf(api.CodeValidation, "rejecting needs a comment: use Reject on the ticket and say what must change")
 		default:
 			return invalidMove(t, to)
 		}
@@ -96,19 +96,19 @@ func invalidMove(t ticketRow, to api.Column) error {
 	switch {
 	case to == api.ColumnInProgress:
 		return api.Errorf(api.CodeInvalidTransition,
-			"#%d cannot be moved to in_progress by hand: a ticket enters In Progress when its agent starts or when its review is rejected", t.ID)
+			"#%d cannot be moved to In Progress by hand: a ticket enters In Progress when its agent starts or when its review is rejected", t.ID)
 	case to == api.ColumnReview:
 		return api.Errorf(api.CodeInvalidTransition,
-			"#%d cannot be moved to review by hand: a ticket enters Review when its agent hands it in", t.ID)
+			"#%d cannot be moved to Review by hand: a ticket enters Review when its agent hands it in", t.ID)
 	case to == api.ColumnDone:
 		return api.Errorf(api.CodeInvalidTransition,
-			"#%d is in %s: only a review that waits for the user can be dragged to done; to close the ticket, cancel it", t.ID, t.Col)
+			"#%d is in %s: only a review that waits for the user can be dragged to Done; to close the ticket, cancel it", t.ID, columnWords(t.Col))
 	case t.Col == api.ColumnReview:
 		return api.Errorf(api.CodeInvalidTransition,
-			"#%d is in review: approve it, or reject it back to in_progress", t.ID)
+			"#%d is in Review: approve it, or reject it back to In Progress", t.ID)
 	}
 	return api.Errorf(api.CodeInvalidTransition,
-		"#%d cannot move from %s to %s: planning and ready swap by approve and withdraw, in_progress goes back by stopping", t.ID, t.Col, to)
+		"#%d cannot move from %s to %s: Planning and Ready For Dev swap by approving and withdrawing, In Progress goes back by stopping", t.ID, columnWords(t.Col), columnWords(to))
 }
 
 // Approve gives the green light to a ticket in Planning, or approves a
@@ -133,14 +133,14 @@ func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRe
 		switch t.Col {
 		case api.ColumnPlanning:
 			if req.Export || req.Merge {
-				return api.Errorf(api.CodeValidation, "export and merge apply when approving a review; #%d is in planning", n)
+				return api.Errorf(api.CodeValidation, "export and merge apply when approving a review; #%d is in Planning", n)
 			}
 			err = b.approve(tx, p, a, t, nil)
 		case api.ColumnReview:
 			err = b.approveReview(tx, p, a, t, req.Export, req.Merge)
 		default:
 			return api.Errorf(api.CodeInvalidTransition,
-				"#%d is in %s: approve gives the green light in planning or approves a review in review", n, t.Col)
+				"#%d is in %s: approve gives the green light in Planning or approves a review in Review", n, columnWords(t.Col))
 		}
 		if err != nil {
 			return err
@@ -235,7 +235,7 @@ func mayCancel(a Actor, t ticketRow) bool {
 // checkRelease applies the rule for who gives the green light to t and who
 // may withdraw it: the user always; the CEO never a ticket it created while
 // "The CEO's tickets wait for your approval" is on; otherwise the CEO a
-// story only while "CEO may approve stories" is on; the CEO a standalone
+// story only while "The CEO may approve stories" is on; the CEO a standalone
 // task it created and a pm a task it created in its story, both only while
 // the effective task release is agents.
 func checkRelease(q db.Queryer, p Policy, a Actor, t ticketRow) error {
@@ -251,7 +251,7 @@ func checkRelease(q db.Queryer, p Policy, a Actor, t ticketRow) error {
 		if t.isStory() {
 			if !p.CEOMayApproveStories {
 				return api.Errorf(api.CodeForbidden,
-					"the CEO may not approve stories: the setting \"CEO may approve stories\" is off; the user approves #%d", t.ID)
+					"the CEO may not approve stories: the setting \"The CEO may approve stories\" is off; the user approves #%d", t.ID)
 			}
 			return nil
 		}
@@ -259,7 +259,7 @@ func checkRelease(q db.Queryer, p Policy, a Actor, t ticketRow) error {
 			return api.Errorf(api.CodeForbidden, "the CEO releases only standalone tasks it created; #%d is not one", t.ID)
 		}
 		if effectiveTaskRelease(p, ticketRow{}) == api.TaskReleaseUser {
-			return api.Errorf(api.CodeForbidden, "tasks are released by the user (setting \"tasks require user release\"); the user releases #%d", t.ID)
+			return api.Errorf(api.CodeForbidden, "tasks are released by the user (Settings, Review: Tasks are released by is You); the user releases #%d", t.ID)
 		}
 		return nil
 	case api.RolePM:
@@ -271,7 +271,7 @@ func checkRelease(q db.Queryer, p Policy, a Actor, t ticketRow) error {
 			return err
 		}
 		if effectiveTaskRelease(p, story) == api.TaskReleaseUser {
-			return api.Errorf(api.CodeForbidden, "the tasks of story #%d are released by the user; the user releases #%d", story.ID, t.ID)
+			return api.Errorf(api.CodeForbidden, "the tasks of story #%d are released by the user (Tasks are released by is You for this story or in Settings, Review); the user releases #%d", story.ID, t.ID)
 		}
 		return nil
 	}
@@ -368,7 +368,7 @@ func (b *Board) stop(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before *in
 	if err := b.finish(tx, a, moves); err != nil {
 		return err
 	}
-	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d stopped by the user and moved back to %s.", t.ID, to))
+	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d stopped by the user and moved back to %s.", t.ID, columnWords(to)))
 }
 
 // reorder moves t within its column (user only).

@@ -369,7 +369,7 @@ func checkStoryTakesTasks(story ticketRow) error {
 		return nil
 	}
 	return api.Errorf(api.CodeInvalidTransition,
-		"story #%d is in %s and takes no new tasks; tasks join a story in planning, ready or in_progress", story.ID, story.Col)
+		"story #%d is in %s and takes no new tasks; tasks join a story in Planning, Ready For Dev or In Progress", story.ID, columnWords(story.Col))
 }
 
 // createSupervisor returns the requested supervisor (user only) or the
