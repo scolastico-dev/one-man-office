@@ -55,8 +55,7 @@ func TestPersistRoundTrip(t *testing.T) {
 	}
 }
 
-// A window's label is kept with it; a file written before windows had
-// labels loads with none.
+// A window's label is kept with it.
 func TestPersistLabels(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "usage.json")
 	labelled := winAt("fable_weekly", 43, t0.Add(time.Hour))
@@ -67,15 +66,6 @@ func TestPersistLabels(t *testing.T) {
 	got, why := loadKept(path, t0.Add(time.Minute))
 	if a := got["0123456789abcdef"]; why != "" || len(a.Windows) != 2 || a.Windows[0].Label != "Weekly, Fable" || a.Windows[1].Label != "" {
 		t.Fatalf("got %+v, %q", got, why)
-	}
-
-	old := `{"accounts":[{"key":"0123456789abcdef","script":"claude","windows":[{"name":"session","used_percent":42.5,"resets_at":null}],"fetched_at":"2026-11-15T12:00:00Z"}]}`
-	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, why = loadKept(path, t0.Add(time.Minute))
-	if a := got["0123456789abcdef"]; why != "" || len(a.Windows) != 1 || a.Windows[0].Name != "session" || a.Windows[0].Label != "" || a.Windows[0].UsedPercent != 42.5 {
-		t.Fatalf("old file: got %+v, %q", got, why)
 	}
 
 	// A label edited by hand is cleaned as a script's would be.

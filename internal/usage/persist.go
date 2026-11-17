@@ -79,8 +79,7 @@ func loadKept(path string, now time.Time) (map[string]keptAccount, string) {
 }
 
 // keptWindows checks the windows of a kept entry as a script's would be,
-// cleans their labels and drops those whose reset time has passed. A file
-// written before windows had labels gives windows without one.
+// cleans their labels and drops those whose reset time has passed.
 func keptWindows(ws []api.UsageWindow, now time.Time) ([]api.UsageWindow, bool) {
 	out := make([]api.UsageWindow, 0, len(ws))
 	seen := map[string]bool{}
