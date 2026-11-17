@@ -179,3 +179,25 @@ func TestEffectiveEnvSelectsTheSameClaudeAccountAsStart(t *testing.T) {
 		t.Fatal("trust written below HOME instead of the account folder")
 	}
 }
+
+// Finding the account to forget a folder's trust in runs none of the agent
+// environment's commands: a variable set by one is left out.
+func TestEffectiveEnvRunsNoCommand(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	marker := filepath.Join(t.TempDir(), "ran")
+	spec := Spec{SessionID: testSessionID, CLI: api.CLIClaude, Dir: t.TempDir(), AgentEnv: map[string]string{
+		"SECRET":  "`touch " + marker + "; echo s`",
+		"DERIVED": "x${SECRET}",
+		"PLAIN":   "plain",
+	}}
+	env, err := EffectiveEnv(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a command of the agent environment ran")
+	}
+	if _, ok := env["SECRET"]; ok || env["DERIVED"] != "x" || env["PLAIN"] != "plain" {
+		t.Fatalf("SECRET %q DERIVED %q PLAIN %q", env["SECRET"], env["DERIVED"], env["PLAIN"])
+	}
+}

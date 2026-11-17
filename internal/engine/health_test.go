@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -407,7 +408,7 @@ func (r *gitEnvRecorder) last() []string {
 
 func (h *harness) recordGitEnv(slow string, entered chan<- struct{}, release <-chan struct{}) *gitEnvRecorder {
 	r := &gitEnvRecorder{}
-	h.e.expandEnv = func(env map[string]string) ([]string, error) {
+	h.e.expandEnv = func(_ context.Context, env map[string]string) ([]string, error) {
 		r.mu.Lock()
 		r.expands++
 		fail := r.fail
@@ -447,42 +448,40 @@ func hasVar(env []string, kv string) bool {
 	return false
 }
 
+// gitEnvSettled waits until no background sync of the agent environment
+// runs.
+func (h *harness) gitEnvSettled() { h.e.gitEnv.done.Wait() }
+
 func TestSlowOlderGitEnvironmentNeverOverwritesNewer(t *testing.T) {
 	h := newHarness(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	r := h.recordGitEnv("Old", entered, release)
 	h.setAuthor("Old")
-	first := make(chan struct{})
-	go func() {
-		h.e.checkHealth(h.ctx, h.clock.Now()) // the health tick
-		close(first)
-	}()
+	// The health tick hands the expansion to the background and goes on.
+	h.e.checkHealth(h.ctx, h.clock.Now())
 	<-entered
-	// The settings change while the old environment is being expanded.
+	// The settings change while the old environment is being expanded;
+	// the settings feed is not held up either.
 	h.setAuthor("New")
-	second := make(chan struct{})
-	go func() {
-		h.e.SettingsChanged() // the settings worker
-		close(second)
-	}()
-	select {
-	case <-second:
-		t.Fatal("a second expansion ran while the first was still under way")
-	case <-time.After(50 * time.Millisecond):
+	h.e.SettingsChanged()
+	r.mu.Lock()
+	expands := r.expands
+	r.mu.Unlock()
+	if expands != 1 {
+		t.Fatalf("%d expansions while the first was still under way", expands)
 	}
 	close(release)
-	h.awaitClosed("the health check", first)
-	h.awaitClosed("the settings change", second)
+	h.gitEnvSettled()
 	h.e.recoverAtStart(h.ctx) // the start: nothing new to apply
 	if got := r.last(); !hasVar(got, "GIT_AUTHOR_NAME=New") {
 		t.Fatalf("git got %q last, want the newer environment", got)
 	}
 }
 
-func TestFailedGitEnvironmentIsRetriedAndLoggedOnce(t *testing.T) {
+func TestFailedGitEnvironmentIsRetriedLaterAndLoggedOnce(t *testing.T) {
 	h := newHarness(t)
 	r := h.recordGitEnv("", nil, nil)
-	h.e.syncGitEnvironment()
+	h.e.syncGitEnvironment(h.ctx)
 	if !hasVar(r.last(), "GIT_AUTHOR_NAME=Agent") {
 		t.Fatalf("git got %q", r.last())
 	}
@@ -490,26 +489,77 @@ func TestFailedGitEnvironmentIsRetriedAndLoggedOnce(t *testing.T) {
 	r.fail = errors.New("command `pass show git` timed out")
 	r.mu.Unlock()
 	h.setAuthor("Broken")
-	for range 3 {
+	expands := func() int {
+		h.gitEnvSettled()
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.expands
+	}
+	tick := func(d time.Duration) {
+		h.clock.Advance(d)
 		h.e.checkHealth(h.ctx, h.clock.Now())
+		h.gitEnvSettled()
+	}
+	for range 2 {
+		tick(DefaultHealthInterval)
+	}
+	if n := expands(); n != 2 {
+		t.Fatalf("%d expansions, want the failed one tried once within its pause", n)
+	}
+	// After the pause it is tried again, then the pause doubles.
+	tick(gitEnvRetry)
+	tick(gitEnvRetry)
+	if n := expands(); n != 3 {
+		t.Fatalf("%d expansions, want one more after the first pause and none within the second", n)
+	}
+	tick(gitEnvRetry)
+	if n := expands(); n != 4 {
+		t.Fatalf("%d expansions after the doubled pause", n)
 	}
 	if n := strings.Count(h.logs.String(), "agent environment for git"); n != 1 {
 		t.Fatalf("the failure was logged %d times, want once:\n%s", n, h.logs.String())
 	}
 	r.mu.Lock()
-	applied, expands := len(r.applied), r.expands
+	applied := len(r.applied)
 	r.fail = nil
 	r.mu.Unlock()
 	if applied != 1 || !hasVar(r.last(), "GIT_AUTHOR_NAME=Agent") {
 		t.Fatalf("git got %d environments, last %q; a failed expansion must keep the previous one", applied, r.last())
 	}
-	if expands != 4 {
-		t.Fatalf("%d expansions, want every health check to try again", expands)
+	// A changed environment is tried at once.
+	h.setAuthor("Fixed")
+	tick(0)
+	if !hasVar(r.last(), "GIT_AUTHOR_NAME=Fixed") {
+		t.Fatalf("git got %q after the environment changed", r.last())
 	}
-	// The cause went away: the next health check applies it.
+}
+
+// A command of the agent environment that hangs holds up neither the
+// health tick nor the engine's stop: the stop kills it.
+func TestHangingGitEnvironmentBlocksNeitherTickNorStop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	h := newHarness(t)
+	g := h.st.General()
+	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "`sleep 60`"}
+	if err := h.st.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
 	h.e.checkHealth(h.ctx, h.clock.Now())
-	if !hasVar(r.last(), "GIT_AUTHOR_NAME=Broken") {
-		t.Fatalf("git got %q after the cause went away", r.last())
+	h.e.SettingsChanged()
+	if d := time.Since(began); d > 2*time.Second {
+		t.Fatalf("the health tick waited %v for the command", d)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		h.e.halt(context.Background(), "test over")
+		close(stopped)
+	}()
+	h.awaitClosed("the stop", stopped)
+	if d := time.Since(began); d > 5*time.Second {
+		t.Fatalf("the stop waited %v for the command", d)
 	}
 }
 

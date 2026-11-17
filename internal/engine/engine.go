@@ -155,7 +155,7 @@ type Engine struct {
 	// syncGitEnvironment); expandEnv and setGitEnv are its steps, which
 	// tests replace.
 	gitEnv    gitEnvState
-	expandEnv func(map[string]string) ([]string, error)
+	expandEnv func(context.Context, map[string]string) ([]string, error)
 	setGitEnv func([]string)
 }
 
@@ -205,7 +205,9 @@ func New(o Options) *Engine {
 	// folders: commands in a worktree run only through its resolution from
 	// the project's records, and omo runs none in a working folder.
 	e.git.SetAgentFolders(o.Layout.Worktrees, o.Layout.Workdirs)
-	e.expandEnv = func(env map[string]string) ([]string, error) { return session.ExpandEnvironment(0, env) }
+	e.expandEnv = func(ctx context.Context, env map[string]string) ([]string, error) {
+		return session.ExpandEnvironmentContext(ctx, 0, env)
+	}
 	e.setGitEnv = e.git.SetEnvironment
 	exe := o.Executable
 	if exe == "" {
@@ -358,6 +360,7 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 		return
 	}
 	defer close(halted)
+	e.stopGitEnvironment()
 	e.workers.Wait()
 	var wg sync.WaitGroup
 	for _, id := range e.entryIDs() {

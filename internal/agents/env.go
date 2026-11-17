@@ -140,14 +140,23 @@ func sameKey(a, b string, windows bool) bool {
 	return a == b
 }
 
-// EffectiveEnv returns the complete environment an agent started from spec
+// EffectiveEnv returns the environment an agent started from spec
 // receives (omo's environment without its control credentials, overlaid
 // with BuildEnv and the CLI's launch variables), except OMO_AGENT_ID, which
-// the caller already has. Start trusts Claude Code folders in the account
-// this environment selects, so pass the same map to
-// claudetrust.ForgetForEnv when the folder goes away. Backtick commands in
-// spec.AgentEnv run again (see BuildEnv).
+// the caller already has, and without running a command: a variable of
+// spec.AgentEnv whose value holds a backtick command is left out, so a
+// reference to it reads omo's own environment. Start trusts Claude Code
+// folders in the account its environment selects; pass this map to
+// claudetrust.ForgetForEnv when the folder goes away. An account chosen by
+// a command (CLAUDE_CONFIG_DIR or HOME set by one) is not found this way.
 func EffectiveEnv(spec Spec) (map[string]string, error) {
+	literal := make(map[string]string, len(spec.AgentEnv))
+	for key, value := range spec.AgentEnv {
+		if !strings.Contains(value, "`") {
+			literal[key] = value
+		}
+	}
+	spec.AgentEnv = literal
 	env, err := BuildEnv(spec, prepareLaunch(spec).Env)
 	if err != nil {
 		return nil, err

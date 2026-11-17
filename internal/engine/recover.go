@@ -21,6 +21,8 @@ import "context"
 // acts, and an agent that cannot start or keeps crashing is flagged after
 // three attempts, so a restart costs at most three attempts per agent.
 func (e *Engine) recoverAtStart(ctx context.Context) {
-	e.syncGitEnvironment()
+	// Before the first pass, so its merges carry the agents' author; ctx
+	// ends a command that hangs when omo stops.
+	e.syncGitEnvironment(ctx)
 	e.checkExportsMerged(ctx)
 }

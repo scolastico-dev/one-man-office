@@ -529,7 +529,7 @@ func TestExportAgainAfterRejectionUpdatesItsBranch(t *testing.T) {
 	if err := h.st.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
-	h.e.syncGitEnvironment()
+	h.e.syncGitEnvironment(h.ctx)
 	old := lookPath
 	lookPath = func(name string) (string, error) {
 		if name == "gh" {

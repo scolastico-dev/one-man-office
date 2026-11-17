@@ -84,7 +84,7 @@ type questionFlag struct {
 //
 // It also hands a changed agent environment on to omo's git client.
 func (e *Engine) checkHealth(ctx context.Context, now time.Time) {
-	e.syncGitEnvironment()
+	e.requestGitEnvironment()
 	snap, err := e.b.EngineSnapshot(ctx)
 	if err != nil {
 		e.log.Printf("engine: read the board for health checks: %v", err)
@@ -428,6 +428,15 @@ func shortDuration(d time.Duration) string {
 
 // ---- git environment ----
 
+// gitEnvRetry is how long omo waits before it expands an agent
+// environment again that failed (a command that failed or hung); each
+// further failure of the same environment doubles the wait, up to
+// gitEnvRetryMax. A changed environment is tried at once.
+const (
+	gitEnvRetry    = time.Minute
+	gitEnvRetryMax = 30 * time.Minute
+)
+
 // gitEnvState is what syncGitEnvironment remembers. mu is held across
 // reading the settings, expanding and handing the result to git, so a slow
 // expansion of an older environment can never overwrite a newer one.
@@ -438,19 +447,32 @@ type gitEnvState struct {
 	applied map[string]string
 	set     bool
 	// failed is the error last logged for the environment failedEnv, so a
-	// failure that repeats on every health check is logged once.
+	// failure that repeats is logged once until it changes; failedEnv is
+	// not expanded again before retryAt, and wait is the pause after its
+	// last failure.
 	failed    string
 	failedEnv map[string]string
+	retryAt   time.Time
+	wait      time.Duration
+
+	// The background sync (see requestGitEnvironment): bg guards running
+	// (a sync goroutine runs), again (a request came while it ran) and
+	// cancel (ends its expansion); done counts the goroutine.
+	bg      sync.Mutex
+	running bool
+	again   bool
+	cancel  context.CancelFunc
+	done    sync.WaitGroup
 }
 
 // syncGitEnvironment gives omo's own git client the agent environment of
 // the general settings, so omo's merge commits carry the same author and
 // committer as the agents' commits: at start, and again whenever that
 // setting changed. An environment that cannot be expanded (a command that
-// fails or hangs) leaves git with the environment it had and is tried again
-// on the next call (the health check runs one on every tick); the failure
-// is logged once until it changes.
-func (e *Engine) syncGitEnvironment() {
+// fails or hangs) leaves git with the environment it had and is tried
+// again after a pause that grows with each failure (see gitEnvRetry); the
+// failure is logged once until it changes. An expansion ends with ctx.
+func (e *Engine) syncGitEnvironment(ctx context.Context) {
 	s := &e.gitEnv
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -458,15 +480,78 @@ func (e *Engine) syncGitEnvironment() {
 	if s.set && maps.Equal(env, s.applied) {
 		return
 	}
-	vars, err := e.expandEnv(env)
+	same := s.failedEnv != nil && maps.Equal(env, s.failedEnv)
+	if same && e.now().Before(s.retryAt) {
+		return
+	}
+	vars, err := e.expandEnv(ctx, env)
 	if err != nil {
-		if msg := err.Error(); msg != s.failed || !maps.Equal(env, s.failedEnv) {
-			s.failed, s.failedEnv = msg, maps.Clone(env)
-			e.log.Printf("engine: the agent environment for git: %v; git keeps its previous environment and omo tries again at the next health check", err)
+		if ctx.Err() != nil {
+			return // omo stops; nothing failed
 		}
+		if msg := err.Error(); msg != s.failed || !same {
+			s.failed = msg
+			e.log.Printf("engine: the agent environment for git: %v; git keeps its previous environment and omo tries again later", err)
+		}
+		if same {
+			s.wait = min(2*s.wait, gitEnvRetryMax)
+		} else {
+			s.failedEnv, s.wait = maps.Clone(env), gitEnvRetry
+		}
+		s.retryAt = e.now().Add(s.wait)
 		return
 	}
 	e.setGitEnv(session.ProcessEnvironment(vars))
 	s.applied, s.set = maps.Clone(env), true
-	s.failed, s.failedEnv = "", nil
+	s.failed, s.failedEnv, s.wait, s.retryAt = "", nil, 0, time.Time{}
+}
+
+// requestGitEnvironment runs syncGitEnvironment in the background, so a
+// command of the agent environment that hangs never holds up the caller
+// (the engine's loop, the settings feed): at most one runs at a time, and
+// a request while it runs makes it run once more afterwards. Nothing runs
+// once the engine stops; stopGitEnvironment ends a running one.
+func (e *Engine) requestGitEnvironment() {
+	s := &e.gitEnv
+	s.bg.Lock()
+	defer s.bg.Unlock()
+	// halt sets stopping before stopGitEnvironment takes bg: a request
+	// either sees it or its goroutine is cancelled and waited for.
+	if e.isStopping() {
+		return
+	}
+	if s.running {
+		s.again = true
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.running, s.cancel = true, cancel
+	s.done.Add(1)
+	go func() {
+		defer s.done.Done()
+		defer cancel()
+		for {
+			e.syncGitEnvironment(ctx)
+			s.bg.Lock()
+			if !s.again || ctx.Err() != nil {
+				s.running, s.again, s.cancel = false, false, nil
+				s.bg.Unlock()
+				return
+			}
+			s.again = false
+			s.bg.Unlock()
+		}
+	}()
+}
+
+// stopGitEnvironment ends a background sync of the agent environment (its
+// command is killed) and waits for it.
+func (e *Engine) stopGitEnvironment() {
+	s := &e.gitEnv
+	s.bg.Lock()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.bg.Unlock()
+	s.done.Wait()
 }
