@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type Component } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import type { ApiClient, ApiResult, ClientOptions, Query } from '../../api/client'
-import type { AgentSession, SchedulerState } from '../../api/types'
+import type { AgentSession, CEOState, Model, RoleSettings, SchedulerState } from '../../api/types'
 import { createTokenStore } from '../../auth/token'
 import { createSession, SESSION, type Session } from '../../session'
 import { provideBoard } from '../../store'
@@ -36,6 +36,8 @@ export interface SidebarHarness {
   /** What `GET /api/agents` answers. */
   agents: { list: AgentSession[]; fail: string }
   scheduler: { state: SchedulerState }
+  /** What `GET /api/ceo`, `GET /api/roles` and `GET /api/models` answer. */
+  ceo: { state: CEOState; roles: RoleSettings[]; models: Model[] }
   /** The paths read, in order. */
   reads: string[]
 }
@@ -45,6 +47,14 @@ export async function sidebarHarness(setup: (omo: FakeOmo) => void = () => {}): 
   setup(omo)
   const agents = { list: [] as AgentSession[], fail: '' }
   const scheduler = { state: { tasks: { in_work: 0, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false } as SchedulerState }
+  const ceo = {
+    state: { stopped: false } as CEOState,
+    roles: [{ name: 'ceo', models: ['fake/default'], assignment: 'round_robin', revision: 'r1' }] as RoleSettings[],
+    models: [
+      { id: 'fake/default', profile: 'fake', name: 'default', cli: 'custom', description: '', selectable: true },
+      { id: 'fake/strong', profile: 'fake', name: 'strong', cli: 'custom', description: 'the strong one', selectable: false },
+    ] as Model[],
+  }
   const reads: string[] = []
   const makeClient = (o: ClientOptions): ApiClient => {
     const base = omo.makeClient(o)
@@ -60,6 +70,16 @@ export async function sidebarHarness(setup: (omo: FakeOmo) => void = () => {}): 
           reads.push(path)
           return { data: { ...scheduler.state } as T, eventId: null }
         }
+        const fixed: Record<string, () => unknown> = {
+          '/api/ceo': () => ceo.state,
+          '/api/roles': () => ceo.roles,
+          '/api/models': () => ceo.models,
+        }
+        const answer = fixed[path]
+        if (answer) {
+          reads.push(path)
+          return { data: structuredClone(answer()) as T, eventId: null }
+        }
         return base.get<T>(path, query)
       },
     }
@@ -67,7 +87,7 @@ export async function sidebarHarness(setup: (omo: FakeOmo) => void = () => {}): 
   const session = createSession({ tokens: createTokenStore(() => new MemoryStorage()), makeClient, connect: omo.connect })
   session.start()
   await flushPromises()
-  return { omo, session, agents, scheduler, reads }
+  return { omo, session, agents, scheduler, ceo, reads }
 }
 
 /** Mounts a component with the session, the store and a router at `path`. */

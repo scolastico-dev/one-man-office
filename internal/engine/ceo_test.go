@@ -353,3 +353,75 @@ func TestCEOStartedDuringAPassIsKept(t *testing.T) {
 		t.Fatal("the CEO was ended by the next pass")
 	}
 }
+
+func TestStopCEOStaysStoppedUntilTheUserStartsIt(t *testing.T) {
+	h := newHarness(t)
+	if err := h.e.StopCEO(h.ctx); errCodeOf(err) != api.CodeConflict {
+		t.Fatalf("stop with no CEO = %v, want conflict", err)
+	}
+	if stopped, err := h.e.CEOStopped(h.ctx); err != nil || stopped {
+		t.Fatalf("stopped before any stop = %v, %v", stopped, err)
+	}
+	ceo, err := h.e.StartCEO(h.ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.StopCEO(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.waitEnded(ceo.ID); got.EndReason != ceoStopReason || !h.agent(ceo.ID).isKilled() {
+		t.Fatalf("stopped CEO ended with %q", got.EndReason)
+	}
+	if stopped, err := h.e.CEOStopped(h.ctx); err != nil || !stopped {
+		t.Fatalf("stopped after a stop = %v, %v", stopped, err)
+	}
+	h.notifyNow()
+
+	// An agent's mention does not start a stopped CEO, now or once the
+	// rate limit has passed; its line waits for the next session.
+	task, dev := h.readyDeveloper("one")
+	mention := h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "@ceo are you there"})
+	h.notifyNow()
+	h.e.settle()
+	h.clock.Advance(ceoStartEvery)
+	h.e.healthTick(h.ctx, h.clock.Now())
+	h.e.startDeferredCEO(h.ctx)
+	h.e.settle()
+	if n := len(h.ceoSessions()); n != 0 {
+		t.Fatalf("%d CEO sessions after an agent's mention of the stopped CEO", n)
+	}
+
+	// The user starts it again: the held line reaches it, and the stop is over.
+	again, err := h.e.StartCEO(h.ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := h.e.CEOStopped(h.ctx); err != nil || stopped {
+		t.Fatalf("stopped after the user's start = %v, %v", stopped, err)
+	}
+	p, err := h.e.Ready(h.ctx, h.actor(again.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p, fmt.Sprintf("comment %d by %s mentions @ceo", mention, dev.Name)) {
+		t.Fatalf("the held mention is not in the CEO's ready answer:\n%s", p)
+	}
+}
+
+func TestStoppedCEOStartsOnTheUsersMention(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	if _, err := h.e.StartCEO(h.ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.StopCEO(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.notifyNow()
+	h.comment(board.User, task, api.CommentRequest{Body: "@ceo please look"})
+	h.notifyNow()
+	h.e.settle()
+	if n := len(h.ceoSessions()); n != 1 {
+		t.Fatalf("%d CEO sessions after the user's mention", n)
+	}
+}

@@ -1,11 +1,20 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { defineComponent, h } from 'vue'
 import { ApiError } from '../../api/client'
 import type { AgentSession } from '../../api/types'
 import CeoTab from './CeoTab.vue'
 import { visibleTabs } from './sidebarTabs'
 import { agent, emitAgent, mountSidebar, sidebarHarness, type SidebarHarness } from './sidebarTesting'
 import { resetSidebar, useSidebar } from './useSidebar'
+
+// The emulator is not part of this test (it would open a socket): a stand-in that shows what it was given.
+vi.mock('../terminal/LazyTerminal', () => ({
+  LazyTerminal: defineComponent({
+    props: { src: { type: String, required: true }, label: { type: String, required: true } },
+    setup: (p) => () => h('div', { 'data-fake-terminal': p.src, 'aria-label': p.label }),
+  }),
+}))
 
 let mounted: VueWrapper | null = null
 beforeEach(() => {
@@ -27,9 +36,10 @@ interface Sent {
   body: unknown
 }
 
-async function open(how: 'user' | 'restored', live: AgentSession[] = []) {
+async function open(how: 'user' | 'restored', live: AgentSession[] = [], stopped = false) {
   const hn: SidebarHarness = await sidebarHarness()
   hn.agents.list = live
+  hn.ceo.state = { stopped }
   const sent: Sent[] = []
   const answers: {
     ceo: () => Promise<AgentSession>
@@ -43,6 +53,8 @@ async function open(how: 'user' | 'restored', live: AgentSession[] = []) {
   }
   client.send = async (method, path, body) => {
     sent.push({ method, path, body })
+    if (path === '/api/ceo/stop') return { data: { stopped: true }, eventId: null }
+    if (method === 'PUT' && path === '/api/roles/ceo') return { data: { ...(body as object), revision: 'r2' }, eventId: null }
     const run = path === '/api/ceo' ? answers.ceo : path === '/api/ceo/new-session' ? answers.fresh : null
     if (!run) throw new Error(`unexpected ${path}`)
     return { data: await run(), eventId: null }
@@ -202,4 +214,77 @@ test('declining New session sends nothing', async () => {
 test('the tab disappears when the CEO is switched off', () => {
   expect(visibleTabs({ ceoEnabled: true }).map((t) => t.id)).toContain('ceo')
   expect(visibleTabs({ ceoEnabled: false }).map((t) => t.id)).not.toContain('ceo')
+})
+
+const button = (w: VueWrapper, text: string) => w.findAll('button').find((b) => b.text() === text)!
+const dialogButton = (text: string) => [...document.querySelectorAll('dialog[open] button')].find((b) => b.textContent === text) as HTMLElement
+
+test('a stopped CEO is not started by a choice of the tab; its Start button starts it', async () => {
+  const { w, sent } = await open('user', [], true)
+  expect(sent).toEqual([])
+  expect(w.get('[data-ceo-stopped]').text()).toContain('The CEO is stopped.')
+  await button(w, 'Start the CEO').trigger('click')
+  await flushPromises()
+  expect(sent).toEqual([{ method: 'POST', path: '/api/ceo', body: {} }])
+  expect(w.find('[data-ceo-stopped]').exists()).toBe(false)
+  expect(w.find('[data-ceo-live]').exists()).toBe(true)
+})
+
+test('a restored tab says the CEO is stopped', async () => {
+  const { w, sent } = await open('restored', [], true)
+  expect(sent).toEqual([])
+  expect(w.find('[data-ceo-stopped]').exists()).toBe(true)
+})
+
+test('Stop asks first, then stops the CEO and shows it stopped; choosing the tab again starts nothing', async () => {
+  const { w, hn, sent } = await open('user', [ceo()])
+  await button(w, 'Stop…').trigger('click')
+  await flushPromises()
+  expect(sent).toEqual([])
+  dialogButton('Keep it running').click()
+  await flushPromises()
+  expect(sent).toEqual([])
+  await button(w, 'Stop…').trigger('click')
+  await flushPromises()
+  dialogButton('Stop the CEO').click()
+  emitAgent(hn.omo, 'agent.ended', ceo({ state: 'ended', end_reason: 'stopped by the user' }))
+  hn.ceo.state = { stopped: true }
+  await flushPromises()
+  expect(sent).toEqual([{ method: 'POST', path: '/api/ceo/stop', body: {} }])
+  expect(w.find('[data-ceo-stopped]').exists()).toBe(true)
+  expect(w.find('[data-ceo-live]').exists()).toBe(false)
+  useSidebar().setTab('agents', 'user')
+  useSidebar().setTab('ceo', 'user')
+  await flushPromises()
+  expect(sent).toHaveLength(1)
+})
+
+test('choosing a model saves it as the CEO role’s only model; a running CEO offers Restart now', async () => {
+  const { w, sent } = await open('user', [ceo({ model: 'fake/default' })])
+  const picker = w.get('[data-ceo-model] button')
+  expect(picker.text()).toBe('Model: fake/default')
+  await picker.trigger('click')
+  await flushPromises()
+  const option = w.findAll('[role="option"]').find((o) => o.text().includes('fake/strong'))!
+  await option.trigger('click')
+  await flushPromises()
+  expect(sent).toEqual([{ method: 'PUT', path: '/api/roles/ceo', body: { name: 'ceo', models: ['fake/strong'], assignment: 'round_robin' } }])
+  expect(w.get('[data-ceo-model] button').text()).toBe('Model: fake/strong')
+  expect(w.get('[data-ceo-model-next]').text()).toContain('The CEO runs fake/default; fake/strong takes effect at its next start.')
+  await button(w, 'Restart now').trigger('click')
+  await flushPromises()
+  expect(sent.map((s) => s.path)).toEqual(['/api/roles/ceo', '/api/ceo/new-session'])
+})
+
+test('without a running CEO a model choice says nothing about a restart', async () => {
+  const { w, sent } = await open('restored')
+  await w.get('[data-ceo-model] button').trigger('click')
+  await flushPromises()
+  await w
+    .findAll('[role="option"]')
+    .find((o) => o.text().includes('fake/strong'))!
+    .trigger('click')
+  await flushPromises()
+  expect(sent.map((s) => `${s.method} ${s.path}`)).toEqual(['PUT /api/roles/ceo'])
+  expect(w.find('[data-ceo-model-next]').exists()).toBe(false)
 })

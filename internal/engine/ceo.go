@@ -144,3 +144,81 @@ func (e *Engine) agentSession(ctx context.Context, id string) (api.AgentSession,
 func ceoUsageError() error {
 	return api.Errorf(api.CodeUnavailable, "every model of the ceo role is near its usage limit; start the CEO again once one is below its limits")
 }
+
+// ceoStopReason is the end reason of a CEO session the user stopped. The
+// newest CEO session ending with it is what makes the CEO stopped (see
+// CEOStopped), so a stop also holds across a restart of omo.
+const ceoStopReason = "stopped by the user"
+
+// StopCEO ends the CEO on the user's request, after a start under way is
+// over. A stopped CEO stays stopped: the mentions and questions of agents no
+// longer start it, their lines wait for its next session, until the user
+// starts it (from the CEO tab, a new session, or a mention of the user's
+// own). It answers conflict when no CEO runs or starts.
+func (e *Engine) StopCEO(ctx context.Context) error {
+	stopped := false
+	for {
+		nt := e.nt
+		nt.mu.Lock()
+		op := nt.ceoOp
+		nt.ceoDeferred = false
+		nt.mu.Unlock()
+		if op != nil {
+			select {
+			case <-op.done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+		snap, err := e.b.EngineSnapshot(ctx)
+		if err != nil {
+			return err
+		}
+		var live []string
+		for _, s := range snap.Sessions {
+			if s.Role == api.RoleCEO {
+				live = append(live, s.ID)
+			}
+		}
+		if len(live) == 0 {
+			if !stopped {
+				return api.Errorf(api.CodeConflict, "the CEO is not running")
+			}
+			return nil
+		}
+		// A start an agent's mention began while these end is waited for
+		// on the next round and ended too.
+		for _, id := range live {
+			e.end(ctx, id, ceoStopReason)
+		}
+		stopped = true
+	}
+}
+
+// CEOStopped reports whether the user stopped the CEO and has not started
+// it since: whether the newest CEO session ended with ceoStopReason.
+func (e *Engine) CEOStopped(ctx context.Context) (bool, error) {
+	all, err := e.b.AgentSessions(ctx, board.System, false)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range all { // newest first
+		if s.Role == api.RoleCEO {
+			return s.State == api.SessionEnded && s.EndReason == ceoStopReason, nil
+		}
+	}
+	return false, nil
+}
+
+// ceoHeld reports whether a start that the user did not ask for must leave
+// the CEO alone because the user stopped it. A board that cannot be read
+// holds it too: a start nobody asked for can wait.
+func (e *Engine) ceoHeld(ctx context.Context) bool {
+	stopped, err := e.CEOStopped(ctx)
+	if err != nil {
+		e.log.Printf("engine: read whether the CEO is stopped: %v", err)
+		return true
+	}
+	return stopped
+}

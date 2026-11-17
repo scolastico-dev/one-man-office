@@ -140,6 +140,8 @@ describe('endpoints', () => {
     await e.getScheduler(client)
     await e.openCEO(client)
     await e.newCEOSession(client)
+    await e.getCEO(client)
+    await e.stopCEO(client)
     await e.getSessionLog(client, 's/1')
     await e.getTicketDiff(client, 5)
     await e.getDiffFile(client, 5, { project: 'api', path: 'a b/c.go' })
@@ -160,6 +162,8 @@ describe('endpoints', () => {
       'GET /api/scheduler',
       'POST /api/ceo',
       'POST /api/ceo/new-session',
+      'GET /api/ceo',
+      'POST /api/ceo/stop',
       'GET /api/sessions/s%2F1/log',
       'GET /api/tickets/5/diff',
       'GET /api/tickets/5/diff/file',

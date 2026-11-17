@@ -26,7 +26,8 @@ const engineStartWait = 30 * time.Second
 //   - POST /api/ai/export-text: an export job, about its own pull request
 //     (the engine refuses everyone else);
 //   - GET /api/scheduler: the user, the CEO and a product manager;
-//   - POST /api/agents/stop-all, POST /api/ceo, POST /api/ceo/new-session,
+//   - POST /api/agents/stop-all, GET /api/ceo, POST /api/ceo,
+//     POST /api/ceo/new-session, POST /api/ceo/stop,
 //     GET /api/agents/{id}/terminal: the user only.
 func (s *Server) registerEngine(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/ai/ready", s.aiReady)
@@ -36,6 +37,8 @@ func (s *Server) registerEngine(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/stop-all", s.stopAllAgents)
 	mux.HandleFunc("POST /api/ceo", s.openCEO)
 	mux.HandleFunc("POST /api/ceo/new-session", s.newCEOSession)
+	mux.HandleFunc("POST /api/ceo/stop", s.stopCEO)
+	mux.HandleFunc("GET /api/ceo", s.getCEO)
 	mux.HandleFunc("GET /api/agents/{id}/terminal", s.agentTerminal)
 }
 
@@ -174,6 +177,33 @@ func (s *Server) startCEO(w http.ResponseWriter, r *http.Request, fresh bool) {
 	out := []api.AgentSession{sess}
 	s.addTerminalIDs(out)
 	writeJSON(w, http.StatusOK, out[0])
+}
+
+// getCEO answers whether the user stopped the CEO.
+func (s *Server) getCEO(w http.ResponseWriter, r *http.Request) {
+	if !requireUser(w, r) || !s.needEngine(w, r) {
+		return
+	}
+	stopped, err := s.engine.CEOStopped(r.Context())
+	reply(w, r, http.StatusOK, api.CEOState{Stopped: stopped}, err)
+}
+
+// stopCEO ends the CEO on the user's request; it stays stopped until the
+// user starts it again. A client that leaves does not cut the stop short.
+func (s *Server) stopCEO(w http.ResponseWriter, r *http.Request) {
+	if !requireUser(w, r) {
+		return
+	}
+	if err := decodeEmpty(w, r); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	ctx, cancel := s.detached(r, detachedBound)
+	defer cancel()
+	reply(w, r, http.StatusOK, api.CEOState{Stopped: true}, s.engine.StopCEO(ctx))
 }
 
 // awaitEngineStart waits until the engine finished its start (its first

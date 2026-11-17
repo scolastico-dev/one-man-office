@@ -379,6 +379,12 @@ export interface Model {
   selectable: boolean
 }
 
+/** The answer of `GET /api/ceo` and `POST /api/ceo/stop`. */
+export interface CEOState {
+  /** True once the user stopped the CEO, until the user starts it again; until then nothing else starts it. */
+  stopped: boolean
+}
+
 export interface ServerInfo {
   version: string
   paused: boolean

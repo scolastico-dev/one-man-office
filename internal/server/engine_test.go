@@ -372,6 +372,8 @@ func TestAgentRoutesWithoutEngineAre503(t *testing.T) {
 		{"POST", "/api/agents/stop-all", empty, ""},
 		{"POST", "/api/ceo", empty, ""},
 		{"POST", "/api/ceo/new-session", empty, ""},
+		{"POST", "/api/ceo/stop", empty, ""},
+		{"GET", "/api/ceo", nil, ""},
 		{"GET", "/api/agents/x/terminal", nil, ""},
 	} {
 		wantError(t, socketDo(t, s, c.method, c.path, c.body, c.session), http.StatusServiceUnavailable, api.CodeUnavailable)
@@ -646,9 +648,10 @@ func TestCEORoutes(t *testing.T) {
 	}
 	// The socket's user may open it too; agents, the CEO included, may not.
 	wantStatus(t, socketDo(t, s, "POST", "/api/ceo", empty, "").Code, http.StatusOK)
-	for _, path := range []string{"/api/ceo", "/api/ceo/new-session"} {
+	for _, path := range []string{"/api/ceo", "/api/ceo/new-session", "/api/ceo/stop"} {
 		wantError(t, socketDo(t, s, "POST", path, empty, first.ID), http.StatusForbidden, api.CodeForbidden)
 	}
+	wantError(t, socketDo(t, s, "GET", "/api/ceo", nil, first.ID), http.StatusForbidden, api.CodeForbidden)
 	browserError(t, asUser(b, s, "POST", "/api/ceo", nil), http.StatusBadRequest, api.CodeBadRequest)
 
 	resp = asUser(b, s, "POST", "/api/ceo/new-session", empty)
@@ -662,6 +665,28 @@ func TestCEORoutes(t *testing.T) {
 	}
 	if !r.agent(t, first.ID).isOver() {
 		t.Fatal("the old CEO's agent still runs")
+	}
+
+	// Stop ends it and leaves it stopped until the user starts it again.
+	if st := body[api.CEOState](t, asUser(b, s, "GET", "/api/ceo", nil)); st.Stopped {
+		t.Fatal("stopped before a stop")
+	}
+	browserError(t, asUser(b, s, "POST", "/api/ceo/stop", nil), http.StatusBadRequest, api.CodeBadRequest)
+	resp = asUser(b, s, "POST", "/api/ceo/stop", empty)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if st := body[api.CEOState](t, resp); !st.Stopped {
+		t.Fatal("the stop's answer is not stopped")
+	}
+	if got := sessionByID(t, s, fresh.ID); got.State != api.SessionEnded {
+		t.Fatalf("stopped CEO %s", got.State)
+	}
+	if st := body[api.CEOState](t, asUser(b, s, "GET", "/api/ceo", nil)); !st.Stopped {
+		t.Fatal("not stopped after a stop")
+	}
+	browserError(t, asUser(b, s, "POST", "/api/ceo/stop", empty), http.StatusConflict, api.CodeConflict)
+	fresh = body[api.AgentSession](t, asUser(b, s, "POST", "/api/ceo", empty))
+	if st := body[api.CEOState](t, asUser(b, s, "GET", "/api/ceo", nil)); st.Stopped {
+		t.Fatal("still stopped after the user's start")
 	}
 
 	// Switched off, the CEO does not open.

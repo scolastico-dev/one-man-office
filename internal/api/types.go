@@ -436,6 +436,13 @@ type AgentSession struct {
 	TerminalID string `json:"terminal_id,omitempty"`
 }
 
+// CEOState is the answer of GET /api/ceo and POST /api/ceo/stop.
+type CEOState struct {
+	// Stopped is true once the user stopped the CEO, until the user starts
+	// it again: until then nothing else starts it.
+	Stopped bool `json:"stopped"`
+}
+
 // Event is one entry of the event log and of the event stream.
 type Event struct {
 	ID     int64  `json:"id"`

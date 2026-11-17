@@ -5,6 +5,7 @@ import type {
   AgentSession,
   ApproveRequest,
   CatalogModelsAdded,
+  CEOState,
   Column,
   CommentRequest,
   CommentResult,
@@ -225,6 +226,16 @@ export function openCEO(c: ApiClient): R<AgentSession> {
 
 export function newCEOSession(c: ApiClient): R<AgentSession> {
   return c.send('POST', '/api/ceo/new-session', {})
+}
+
+/** Whether the user stopped the CEO (nothing else starts it until the user does). */
+export function getCEO(c: ApiClient): R<CEOState> {
+  return c.get('/api/ceo')
+}
+
+/** Ends the CEO; it stays stopped until the user starts it again. */
+export function stopCEO(c: ApiClient): R<CEOState> {
+  return c.send('POST', '/api/ceo/stop', {})
 }
 
 /** The readable transcript of a finished session; `truncated` when the server cut it to its newest part. */

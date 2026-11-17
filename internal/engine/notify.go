@@ -703,7 +703,7 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 			}
 		} else {
 			e.queueForCEO(r.ceo)
-			if r.startCEO && e.mayStartCEO(r.byUser) {
+			if r.startCEO && (r.byUser || !e.ceoHeld(ctx)) && e.mayStartCEO(r.byUser) {
 				e.ceoBegin(false)
 			}
 		}
@@ -750,8 +750,8 @@ func (e *Engine) mayStartCEO(byUser bool) bool {
 }
 
 // startDeferredCEO starts the CEO for lines whose start the limit held
-// back, once the limit allows it, while the CEO is switched on, omo is not
-// paused and lines still wait.
+// back, once the limit allows it, while the CEO is switched on and not
+// stopped by the user, omo is not paused and lines still wait.
 func (e *Engine) startDeferredCEO(ctx context.Context) {
 	nt := e.nt
 	nt.mu.Lock()
@@ -761,6 +761,13 @@ func (e *Engine) startDeferredCEO(ctx context.Context) {
 		return
 	}
 	if paused, err := e.b.Paused(ctx); err != nil || paused {
+		return
+	}
+	if e.ceoHeld(ctx) {
+		// The user stopped the CEO: the lines wait for the start the user makes.
+		nt.mu.Lock()
+		nt.ceoDeferred = false
+		nt.mu.Unlock()
 		return
 	}
 	if e.mayStartCEO(false) {
