@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -176,6 +177,24 @@ func TestHelpShowsOnlyHumanCommands(t *testing.T) {
 	}
 	for name := range want {
 		t.Errorf("command %q missing from the command list", name)
+	}
+	mcpWant := []string{"install", "status", "stdio", "token", "uninstall"}
+	for _, c := range cmd.Commands() {
+		if c.Name() != "mcp" {
+			continue
+		}
+		var got []string
+		for _, sub := range c.Commands() {
+			if !sub.Hidden {
+				got = append(got, sub.Name())
+				if sub.Short == "" || sub.Long == "" && sub.HasSubCommands() {
+					t.Errorf("omo mcp %s has no help text", sub.Name())
+				}
+			}
+		}
+		if !slices.Equal(got, mcpWant) {
+			t.Errorf("omo mcp commands %v, want %v", got, mcpWant)
+		}
 	}
 	out, err := execute(context.Background(), "--help")
 	if err != nil {
