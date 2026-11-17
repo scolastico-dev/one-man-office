@@ -222,7 +222,9 @@ func TestMCPServerActions(t *testing.T) {
 	empty := map[string]any{}
 	draft := api.MCPServer{Transport: api.MCPTransportStdio, Command: "srv"}
 
-	// Without a relay: the settings work, the actions answer 503.
+	// Without a relay: the settings work, the actions answer 503. The relay
+	// is swapped only once the worker that hands file changes to it is idle.
+	s.waitSettingsEvents(context.Background())
 	s.mcpConf.relay = nil
 	if list := body[api.MCPServersResponse](t, asUser(b, s, "GET", "/api/mcp/servers", nil)); len(list.Servers) != 2 || list.States == nil || len(list.States) != 0 {
 		t.Fatalf("list = %+v", list)
@@ -245,6 +247,7 @@ func TestMCPServerActions(t *testing.T) {
 
 	relay := &fakeRelay{}
 	tokens := &fakeTokens{}
+	s.waitSettingsEvents(context.Background())
 	s.mcpConf.relay, s.mcpConf.tokens = relay, tokens
 
 	// Test: a draft is validated, then handed to the relay; nothing is
