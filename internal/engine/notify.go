@@ -834,6 +834,25 @@ func (e *Engine) notify(sessionID, line string) {
 	e.deliver(sessionID, line, false)
 }
 
+// Notify delivers text from outside the engine (a plugin) to a session the
+// engine runs, the way the engine's own notifications go (see notify): it
+// is made one safe line with agents.NotificationLine, typed into the
+// agent's terminal and submitted after the grace period, or handed to a
+// parked omo ai wait, or kept for the omo ai ready of an agent that is
+// still starting. It reports false when the engine runs no agent for the
+// session or the text is empty.
+func (e *Engine) Notify(sessionID, text string) bool {
+	line := agents.NotificationLine(text)
+	if line == "" {
+		return false
+	}
+	if _, _, known := e.lookupAgent(sessionID); !known {
+		return false
+	}
+	e.deliver(sessionID, line, false)
+	return true
+}
+
 // deliver is notify; live says the session is known to be live on the
 // board, so a line for a session whose agent is still being set up is kept
 // for its omo ai ready.

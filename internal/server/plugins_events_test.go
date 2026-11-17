@@ -74,6 +74,9 @@ func TestPluginEventMapping(t *testing.T) {
 		{"settings", boardEvent(t, 18, api.KindSettingsChanged, api.SettingsChangedData{Section: "plugins"}), nil},
 		{"plugin changed", boardEvent(t, 19, api.KindPluginChanged, api.PluginInfo{Name: "x"}), nil},
 		{"description", boardEvent(t, 20, api.KindDescriptionChanged, api.DescriptionChangedData{Ticket: 7}), nil},
+		{"paused", boardEvent(t, 21, api.KindServerPaused, api.ServerPausedData{Paused: true}), []string{plugins.EventPaused}},
+		{"resumed", boardEvent(t, 22, api.KindServerPaused, api.ServerPausedData{Paused: false}), []string{plugins.EventResumed}},
+		{"broken pause", api.Event{ID: 23, Kind: api.KindServerPaused, At: "2026-11-15T10:00:00.123Z", Data: []byte(`{"paused":"yes"}`)}, nil},
 	}
 	for _, c := range cases {
 		got := pluginEvents(c.ev, att, ticket, "http://omo.localhost:1/#token")
@@ -86,6 +89,9 @@ func TestPluginEventMapping(t *testing.T) {
 		}
 		if !slices.Equal(names, c.want) {
 			t.Errorf("%s: %v, want %v", c.name, names, c.want)
+		}
+		if (c.name == "paused" || c.name == "resumed") && len(got[0].Data) != 0 {
+			t.Errorf("%s: data %v, want the empty object", c.name, got[0].Data)
 		}
 		if c.name == "agent exited" && got[0].Data["reason"] != plugins.ExitUsage {
 			t.Errorf("exit reason %v", got[0].Data["reason"])

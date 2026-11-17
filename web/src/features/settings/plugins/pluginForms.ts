@@ -16,6 +16,8 @@ const EVENT_WORDS: Record<string, string> = {
   ticket_needs_attention: 'When a ticket needs attention',
   agent_started: 'When an agent starts',
   agent_exited: 'When an agent ends',
+  omo_paused: 'When omo is paused',
+  omo_resumed: 'When the pause ends',
 }
 
 /** What a run was for, after "on". */
@@ -27,6 +29,8 @@ const EVENT_NOUNS: Record<string, string> = {
   ticket_needs_attention: 'a ticket that needs attention',
   agent_started: 'an agent start',
   agent_exited: 'an agent end',
+  omo_paused: 'the pause',
+  omo_resumed: 'the end of the pause',
   timer: 'its timer',
   manual: 'a button',
 }

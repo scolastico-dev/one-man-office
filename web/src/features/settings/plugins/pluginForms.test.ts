@@ -24,6 +24,10 @@ test('hooks described in words', () => {
   expect(hookWords(hook('something_new'))).toBe('On something_new')
   expect(eventNoun('ticket_moved')).toBe('a moved ticket')
   expect(eventNoun('manual')).toBe('a button')
+  expect(hookWords(hook('omo_paused'))).toBe('When omo is paused')
+  expect(hookWords(hook('omo_resumed'))).toBe('When the pause ends')
+  expect(eventNoun('omo_paused')).toBe('the pause')
+  expect(eventNoun('omo_resumed')).toBe('the end of the pause')
 })
 
 test('only installed, enabled and loaded plugins run hooks', () => {

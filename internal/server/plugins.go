@@ -132,6 +132,7 @@ func (s *Server) startPlugins(ctx context.Context) {
 		Socket:  s.socketEndpoint,
 		Log:     s.log,
 		Changed: s.pluginChanged,
+		Agents:  pluginAgents{s},
 	})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)
@@ -139,6 +140,69 @@ func (s *Server) startPlugins(ctx context.Context) {
 	s.background(s.writePluginEvents)
 	s.background(s.runPluginReloads)
 	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att, after) })
+}
+
+// pluginAgents is the plugins' view of the agents the engine runs
+// (omo.agents, omo.send_to_agent): each is named by its terminal id, never
+// by its session id.
+type pluginAgents struct{ s *Server }
+
+// running lists the live sessions whose agent runs with a terminal, with
+// TerminalID set.
+func (a pluginAgents) running(ctx context.Context) ([]api.AgentSession, error) {
+	if a.s.engine == nil {
+		return nil, nil
+	}
+	live, err := a.s.board.AgentSessions(ctx, board.User, true)
+	if err != nil {
+		return nil, err
+	}
+	a.s.addTerminalIDs(live)
+	out := live[:0]
+	for _, sess := range live {
+		if sess.TerminalID != "" {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
+}
+
+// RunningAgents lists the agents the engine runs, the CEO included.
+func (a pluginAgents) RunningAgents(ctx context.Context) ([]plugins.RunningAgent, error) {
+	live, err := a.running(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]plugins.RunningAgent, 0, len(live))
+	for _, sess := range live {
+		ra := plugins.RunningAgent{
+			Terminal: sess.TerminalID, Name: sess.Name, Role: string(sess.Role), Model: sess.Model,
+			Purpose: string(sess.Purpose), Project: sess.Project,
+		}
+		if sess.Ticket != nil {
+			ra.Ticket = *sess.Ticket
+		}
+		out = append(out, ra)
+	}
+	return out, nil
+}
+
+// SendToAgent hands text to the agent with terminal through the engine's
+// notification path (Engine.Notify).
+func (a pluginAgents) SendToAgent(ctx context.Context, terminal, text string) error {
+	live, err := a.running(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sess := range live {
+		if terminal != "" && sess.TerminalID == terminal {
+			if !a.s.engine.Notify(sess.ID, text) {
+				return plugins.ErrNoSuchAgent
+			}
+			return nil
+		}
+	}
+	return plugins.ErrNoSuchAgent
 }
 
 // stopPlugins stops the plugin runtime before the database is closed. The
@@ -918,6 +982,9 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 //   - ticket.moved that changes the column → ticket_moved
 //   - comment.created → comment_written, then question_asked for a question
 //   - agent.created → agent_started; agent.ended → agent_exited
+//   - server.paused → omo_paused when the pause was switched on (by the
+//     switch or by stopping all agents), omo_resumed when it was switched
+//     off; the board records it only when the state changes
 //   - ticket.created, ticket.updated or ticket.moved whose ticket has a
 //     non-empty attention text other than the last one seen for it →
 //     ticket_needs_attention, after the event's own (att keeps the texts
@@ -1009,6 +1076,16 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 			"ticket": ticketOf(d.Agent.Ticket), "agent": plugins.AgentPayload(d.Agent),
 			"reason": plugins.ExitReason(d.Agent.EndReason),
 		})
+	case api.KindServerPaused:
+		var d api.ServerPausedData
+		if json.Unmarshal(ev.Data, &d) != nil {
+			return nil
+		}
+		if d.Paused {
+			add(plugins.EventPaused, map[string]any{})
+		} else {
+			add(plugins.EventResumed, map[string]any{})
+		}
 	}
 	return out
 }

@@ -355,6 +355,11 @@ func notificationLine(text string) string {
 	return line[:cut] + "…"
 }
 
+// NotificationLine is the line Notify types for text: one line without
+// control characters, NotifyPrefix in front once, at most MaxNotifyLength
+// characters; "" for empty text.
+func NotificationLine(text string) string { return notificationLine(text) }
+
 // singleLine makes text safe to type as one line: everything a terminal or
 // a CLI may treat as a line break (CR, LF, VT, FF, NEL, the Unicode line
 // and paragraph separators) and tabs become spaces, the other characters

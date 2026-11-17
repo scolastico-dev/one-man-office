@@ -25,7 +25,10 @@
 //     bounded helper), omo.sleep (luabox's: at most 10 s, never past the
 //     run's time limit), omo.store_get/set/delete/keys (the plugin's own
 //     values in omo's database, bounded), omo.data_dir (the plugin's own
-//     folder below <root>/.data) and luabox's own helpers (json_decode,
+//     folder below <root>/.data), omo.agents (the running agents, named
+//     by their terminal id), omo.send_to_agent (one line typed into a
+//     running agent's terminal through omo's own notification path; see
+//     agents.go) and luabox's own helpers (json_decode,
 //     json_encode, sha256_hex, nfc, time_parse, now, log).
 //
 // Bounds: every run has its hook's time limit (30 s unless the manifest says
@@ -450,6 +453,9 @@ type Options struct {
 	// Changed, when set, is called with a plugin's info after its state
 	// changed. It must not block.
 	Changed func(api.PluginInfo)
+	// Agents is what omo.agents and omo.send_to_agent reach; nil makes
+	// both answer that omo runs no agents.
+	Agents AgentDesk
 }
 
 // Manager runs the loaded plugins. Its methods are safe for concurrent use.
