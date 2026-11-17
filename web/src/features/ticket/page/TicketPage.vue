@@ -27,7 +27,8 @@ import { provideTicketLayout } from '../ticketLayout'
 import TicketTabs from '../tabs/TicketTabs.vue'
 import { pageTabForPanel } from '../tabs/ticketTabs'
 import { useTicketView } from '../useTicketView'
-import { BACK_TO_BOARD_KEY, plainKey, SWITCH_VIEW_KEY } from '../viewKeys'
+import { BACK_TO_BOARD_KEY, SWITCH_VIEW_KEY } from '../viewKeys'
+import { modalOpen, plainKey } from '../../../components/ui/shortcuts'
 import { usePagePrefs } from './pagePrefs'
 
 /** The page is wide enough for the details column from this width on (px). */
@@ -90,7 +91,7 @@ watch(
 const suspended = inject(BOARD_SUSPENDED, null)
 
 function onWindowKeydown(e: KeyboardEvent) {
-  if (suspended?.value || confirmLeave.value || document.querySelector('dialog[open]')) return
+  if (suspended?.value || confirmLeave.value || modalOpen()) return
   if (plainKey(e, SWITCH_VIEW_KEY)) {
     e.preventDefault()
     void router.push(panelTarget.value)

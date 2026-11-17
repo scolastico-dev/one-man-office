@@ -4,22 +4,16 @@
 import { inject, onBeforeUnmount, onMounted } from 'vue'
 import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import UiButton from '../../components/ui/UiButton.vue'
+import { pageKey } from '../../components/ui/shortcuts'
 import { useCreateTicket } from '../create/useCreateTicket'
 
 const create = useCreateTicket()
 /** The board waits under the lock screen: its keys do nothing. */
 const suspended = inject(BOARD_SUSPENDED, null)
 
-/** Whether a key press belongs to something the user is typing in. */
-function typing(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-}
-
-// `c` opens the dialog, unless it is typed into a field or a dialog is open.
+// `c` opens the dialog (see shortcuts.ts for when it does nothing).
 function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'c' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-  if (event.defaultPrevented || event.isComposing || typing(event.target)) return
-  if (suspended?.value || document.querySelector('dialog[open]')) return
+  if (!pageKey(event, 'c') || suspended?.value) return
   event.preventDefault()
   create.open()
 }

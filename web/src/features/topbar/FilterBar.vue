@@ -9,6 +9,7 @@ import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useBoard } from '../../store'
+import { pageKey } from '../../components/ui/shortcuts'
 import FilterFields from '../filters/FilterFields.vue'
 import { useFilters } from '../filters/useFilters'
 
@@ -44,12 +45,9 @@ function removeStory() {
 const search = ref<HTMLInputElement>()
 const sheet = ref(false)
 
-/** `/` jumps to the search field unless the user is typing somewhere or a dialog is open. */
+/** `/` jumps to the search field (see shortcuts.ts for when it does nothing). */
 function onKey(e: KeyboardEvent) {
-  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
-  const el = document.activeElement
-  if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
-  if (suspended?.value || document.querySelector('dialog[open]')) return
+  if (!pageKey(e, '/') || suspended?.value) return
   e.preventDefault()
   search.value?.focus()
   search.value?.select()

@@ -29,7 +29,8 @@ import TicketLoadNotice from './TicketLoadNotice.vue'
 import TicketTabs from './tabs/TicketTabs.vue'
 import { panelTabOf } from './tabs/ticketTabs'
 import { useTicketView } from './useTicketView'
-import { plainKey, SWITCH_VIEW_KEY } from './viewKeys'
+import { SWITCH_VIEW_KEY } from './viewKeys'
+import { modalOpen, plainKey } from '../../components/ui/shortcuts'
 
 const props = defineProps<{ number: number }>()
 const emit = defineEmits<{ close: [] }>()
@@ -145,7 +146,7 @@ function openPage() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (plainKey(e, SWITCH_VIEW_KEY) && !confirmLeave.value && e.currentTarget === dialog.value && !document.querySelector('dialog[open]:not([data-ticket-panel])')) {
+  if (plainKey(e, SWITCH_VIEW_KEY) && !confirmLeave.value && e.currentTarget === dialog.value && !modalOpen(dialog.value)) {
     e.preventDefault()
     openPage()
     return

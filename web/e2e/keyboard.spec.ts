@@ -132,6 +132,30 @@ test.describe('without a seed', () => {
     await page.keyboard.press('Escape')
   })
 
+  test('c and / work while the ticket panel is open beside the board; a modal dialog stops them', async ({ page, omo }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const n = await omo.createTicket({ title: 'Open in the panel' })
+    await openBoard(page, omo)
+    await cardLink(page, n).click()
+    const panel = page.locator('dialog[data-ticket-panel]')
+    await expect(panel).toBeVisible()
+    await panel.getByRole('button', { name: /close/i }).first().focus()
+
+    await page.keyboard.press('/')
+    const search = page.getByRole('searchbox', { name: 'Search tickets' })
+    await expect(search).toBeFocused()
+
+    await panel.getByRole('button', { name: /close/i }).first().focus()
+    await page.keyboard.press('c')
+    const create = page.getByRole('dialog', { name: 'Create ticket' })
+    await expect(create).toBeVisible()
+    // The Create dialog is modal: / stays a character of its fields' text, never a jump.
+    await create.getByRole('button', { name: 'Cancel' }).focus()
+    await page.keyboard.press('/')
+    await expect(search).not.toBeFocused()
+    await expect(create).toBeVisible()
+  })
+
   test('reduced motion: cards and dialogs have no transitions', async ({ page, omo }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     const n = await omo.createTicket({ title: 'Still' })
