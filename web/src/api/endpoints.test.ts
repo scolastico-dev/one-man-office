@@ -181,11 +181,13 @@ describe('endpoints', () => {
     expect(seen[6]?.query).toEqual({ live: true })
     expect(seen[8]?.body).toEqual({})
     expect(seen[9]?.body).toEqual({})
-    expect(seen[12]?.query).toEqual({ project: 'api', path: 'a b/c.go', uncommitted: undefined })
-    expect(seen[13]?.query).toEqual({ project: 'api', path: 'x', uncommitted: true })
-    expect(seen[15]?.body).toEqual({ project: 'api', ticket: 5 })
-    expect(seen[16]?.hasBody).toBe(false)
-    expect(seen[18]?.body).toEqual({ through: 12 })
+    expect(seen[10]?.hasBody).toBe(false)
+    expect(seen[11]?.body).toEqual({})
+    expect(seen[14]?.query).toEqual({ project: 'api', path: 'a b/c.go', uncommitted: undefined })
+    expect(seen[15]?.query).toEqual({ project: 'api', path: 'x', uncommitted: true })
+    expect(seen[17]?.body).toEqual({ project: 'api', ticket: 5 })
+    expect(seen[18]?.hasBody).toBe(false)
+    expect(seen[20]?.body).toEqual({ through: 12 })
   })
 
   it('the diff routes send base only when asked', async () => {
