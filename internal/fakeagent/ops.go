@@ -3,6 +3,7 @@ package fakeagent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -63,6 +66,7 @@ func init() {
 		"image":        {2, 3, "TICKET|NAME[|TEXT]", nil, opImage},
 		"ask":          {1, 1, "TEXT", nil, opAsk},
 		"wait":         {1, 1, "DURATION", duration(0), opWait},
+		"mcp":          {1, 2, "TOOL[|JSON]", checkJSONObject(1), opMCP},
 		// A pm.
 		"create-tasks":     {1, 2, "COUNT[|chain]", checkCreateTasks, opCreateTasks},
 		"release-all":      {0, 0, "no fields", nil, opReleaseAll},
@@ -731,5 +735,60 @@ func opAwaitLine(ctx context.Context, r *runner, s Step) error {
 	if _, err := r.lines.next(ctx, func(l string) bool { return strings.Contains(l, want) }); err != nil {
 		return fmt.Errorf("no typed line containing %q: %w", want, err)
 	}
+	return nil
+}
+
+// checkJSONObject checks that field i, when given, is a JSON object.
+func checkJSONObject(i int) func([]string) error {
+	return func(args []string) error {
+		if i >= len(args) || args[i] == "" || strings.Contains(args[i], "$") {
+			return nil // placeholders are replaced when the op runs
+		}
+		var v map[string]any
+		if err := json.Unmarshal([]byte(args[i]), &v); err != nil {
+			return fmt.Errorf("%q is not a JSON object", args[i])
+		}
+		return nil
+	}
+}
+
+// opMCP calls TOOL with the arguments JSON (an object, {} when left out)
+// through omo's MCP bridge, the way an agent program does: it starts the
+// bridge as a stdio server with its own environment, so the bridge acts as
+// this agent's session. It prints the tool's text; a tool error fails the
+// op.
+func opMCP(ctx context.Context, r *runner, s Step) error {
+	args := map[string]any{}
+	if raw := strings.TrimSpace(arg(s, 1)); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			return fmt.Errorf("mcp %s: arguments %q are not a JSON object", s.Args[0], raw)
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, exe)
+	cmd.Env = append(os.Environ(), EnvEnable+"=1", EnvBridge+"=1")
+	c := mcp.NewClient(&mcp.Implementation{Name: "fake-agent", Version: "1"}, nil)
+	cs, err := c.Connect(ctx, &mcp.CommandTransport{Command: cmd}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	if err != nil {
+		return fmt.Errorf("mcp: start the bridge: %w", err)
+	}
+	defer cs.Close()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: s.Args[0], Arguments: args})
+	if err != nil {
+		return fmt.Errorf("mcp %s: %w", s.Args[0], err)
+	}
+	var text strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			text.WriteString(tc.Text)
+		}
+	}
+	if res.IsError {
+		return fmt.Errorf("mcp %s: %s", s.Args[0], text.String())
+	}
+	r.say("fake: mcp %s: %s", s.Args[0], text.String())
 	return nil
 }

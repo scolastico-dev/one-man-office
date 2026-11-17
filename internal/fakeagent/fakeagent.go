@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
+	"github.com/scolastico-dev/one-man-office/internal/mcpbridge"
 )
 
 // Environment variables the fake agent reads.
@@ -53,6 +55,9 @@ const (
 	// REVIEWER, EXPORT) holds the script of that role.
 	EnvScriptRolePrefix = "OMO_FAKE_SCRIPT_"
 	envAgentID          = "OMO_AGENT_ID"
+	// EnvBridge is "1" in a process the fake agent started as omo's MCP
+	// bridge (`omo mcp stdio`): its op mcp runs its own executable so.
+	EnvBridge = "OMO_FAKEAGENT_MCP_BRIDGE"
 )
 
 // Exit codes of Run besides the ones a script asks for.
@@ -72,6 +77,9 @@ func Enabled() bool { return os.Getenv(EnvEnable) == "1" }
 // With EnvSwallowEnters or EnvDeafFor set it reads its terminal like a
 // full-screen CLI with an input line (see composer).
 func Main() int {
+	if os.Getenv(EnvBridge) == "1" {
+		return bridgeMain()
+	}
 	var in io.Reader = os.Stdin
 	if swallow, deaf, ok := composerSettings(); ok {
 		if err := rawInput(os.Stdin); err != nil {
@@ -81,6 +89,20 @@ func Main() int {
 		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf))
 	}
 	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: in, Stdout: os.Stdout})
+}
+
+// bridgeMain runs the process as `omo mcp stdio` does.
+func bridgeMain() int {
+	session, dial, err := mcpbridge.Environment()
+	if err == nil {
+		err = mcpbridge.Run(context.Background(), mcpbridge.Options{Dial: dial, Session: session, In: os.Stdin, Out: os.Stdout,
+			Log: log.New(os.Stderr, "fake bridge: ", 0), Version: "fake"})
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake bridge: %v\n", err)
+		return ExitFailed
+	}
+	return 0
 }
 
 // Env returns the environment variables that make a process run script as the

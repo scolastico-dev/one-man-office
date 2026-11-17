@@ -530,6 +530,30 @@ func TestCommentAskAndVerdictOps(t *testing.T) {
 	}
 }
 
+// The mcp op calls omo's tools through the bridge, as the agent's session:
+// the comment lands on its own ticket with the agent as author.
+func TestMCPOpCallsAToolThroughTheBridge(t *testing.T) {
+	w := startWorld(t)
+	task := w.task("work", w.story("story"))
+	id := w.session(api.RoleDeveloper, task, "dev1")
+	res := runFake(t, Options{Script: "mcp|comment|{\"ticket\":$TICKET,\"body\":\"through the bridge\"}\nmcp|whoami"})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	contains(t, res.out, "fake: mcp whoami:")
+	contains(t, res.out, "dev1")
+	noSecret(t, res.out, id)
+	comments := agentComments(t, w, task)
+	if len(comments) != 1 || comments[0].Body != "through the bridge" || comments[0].Author.Name != "dev1" {
+		t.Fatalf("%+v", comments)
+	}
+	// A tool error fails the op.
+	res = runFake(t, Options{Script: "mcp|wait|{\"timeout\":\"1m\"}"})
+	if res.code != ExitFailed || !strings.Contains(res.out, "run `omo ai wait` in the terminal") {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+}
+
 func TestImageOpUploadsAndComments(t *testing.T) {
 	w := startWorld(t)
 	task := w.task("work", w.story("story"))
