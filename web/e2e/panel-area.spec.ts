@@ -4,7 +4,7 @@
 // back, and only the columns under it are inert. Escape closes it while the
 // focus is inside. Dialogs opened from it are still modal over everything; the
 // lock screen still covers everything. With OMO_SCREENSHOTS=<folder> it writes
-// fix4-overlay-<theme>-<width>.png there.
+// panel-overlay-<theme>-<width>.png there.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
@@ -321,7 +321,7 @@ for (const theme of ['dark', 'light'] as const) {
         if (SHOTS !== '') {
           mkdirSync(SHOTS, { recursive: true })
           await page.mouse.move(0, 0)
-          await page.screenshot({ path: join(SHOTS, `fix4-overlay-${theme}-${width}.png`) })
+          await page.screenshot({ path: join(SHOTS, `panel-overlay-${theme}-${width}.png`) })
         }
       })
     }

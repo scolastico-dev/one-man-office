@@ -13,7 +13,7 @@ import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
 // scripted fake agent (its built-in scripts), so detection writes the real
 // Claude Code profile and the roles use it, and no real program runs.
 //
-// OMO_SCREENSHOTS=<folder> also writes final-firststart-*.png there.
+// OMO_SCREENSHOTS=<folder> also writes first-run-*.png there.
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -50,7 +50,7 @@ const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
 
 async function shot(page: Page, name: string) {
-  if (SHOTS !== '') await page.screenshot({ path: join(SHOTS, `final-firststart-${name}.png`), fullPage: true })
+  if (SHOTS !== '') await page.screenshot({ path: join(SHOTS, `first-run-${name}.png`), fullPage: true })
 }
 
 test('a new user goes from the printed address to a first task done by an agent', async ({ page, omo, repo }) => {

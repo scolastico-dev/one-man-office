@@ -14,7 +14,7 @@ import { makePlugin, makePluginList, type PluginRepo } from './support/plugin'
 // plugins are installed without credentials, so they send nothing.
 //
 // OMO_SCREENSHOTS=<folder> the axe tests also write the screenshots
-// fix5-plugins-<theme>-<width>.png there.
+// plugins-<theme>-<width>.png there.
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -478,7 +478,7 @@ for (const width of [1440, 390] as const) {
         if (SHOTS !== '') {
           mkdirSync(SHOTS, { recursive: true })
           await page.locator('[data-plugin-catalog]').scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix5-plugins-${colorScheme}-${width}.png`), fullPage: false })
+          await page.screenshot({ path: join(SHOTS, `plugins-${colorScheme}-${width}.png`), fullPage: false })
         }
         await catalogRow(page, 'night-log').getByRole('button', { name: 'Install night-log' }).click()
         await expect(trustDialog(page)).toBeVisible()

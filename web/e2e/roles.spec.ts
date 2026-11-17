@@ -289,7 +289,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
     expect(above).toBeLessThanOrEqual((await editor(page, 'ceo').boundingBox())!.y)
     if (SHOTS !== '') {
       mkdirSync(SHOTS, { recursive: true })
-      await page.screenshot({ path: join(SHOTS, `fix7-roles-note-${colorScheme}.png`) })
+      await page.screenshot({ path: join(SHOTS, `roles-note-${colorScheme}.png`) })
     }
   })
 }

@@ -1,6 +1,6 @@
 // The CEO tab: starting, attaching, a new session, stopping and starting
 // again, and choosing the CEO's model. With OMO_SCREENSHOTS=<folder> the
-// model test writes fix6-ceo-menu-<state>-<theme>.png there.
+// model test writes ceo-menu-<state>-<theme>.png there.
 import AxeBuilder from '@axe-core/playwright'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,7 +27,7 @@ async function shoot(page: Page, state: string) {
   for (const theme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: theme })
     await page.evaluate('document.fonts.ready')
-    await page.screenshot({ path: join(SHOTS, `fix6-ceo-menu-${state}-${theme}.png`) })
+    await page.screenshot({ path: join(SHOTS, `ceo-menu-${state}-${theme}.png`) })
   }
   await page.emulateMedia({ colorScheme: null })
 }

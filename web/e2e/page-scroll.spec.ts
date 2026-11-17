@@ -4,7 +4,7 @@
 // tab, the settings pages, the sidebar with a terminal, the pop-out terminal
 // window) at two window sizes, and drives the Diff tab's file browser, which
 // once scrolled the whole document. With OMO_SCREENSHOTS=<folder> the diff
-// test writes fix2-pagescroll-after-<width>.png there.
+// test writes page-scroll-after-<width>.png there.
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -150,7 +150,7 @@ test.describe('the document never scrolls', () => {
       if (SHOTS !== '') {
         mkdirSync(SHOTS, { recursive: true })
         await page.emulateMedia({ colorScheme: 'dark' })
-        await page.screenshot({ path: join(SHOTS, `fix2-pagescroll-after-${size.width}.png`) })
+        await page.screenshot({ path: join(SHOTS, `page-scroll-after-${size.width}.png`) })
       }
 
       await omo.api('POST', '/api/agents/stop-all', {})

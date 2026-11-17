@@ -121,7 +121,7 @@ for (const width of [1440, 390] as const) {
       expect(await violations(page), 'page').toEqual([])
       if (SHOTS !== '') {
         mkdirSync(SHOTS, { recursive: true })
-        await page.screenshot({ path: join(SHOTS, `fix6-backup-${colorScheme}-${width}-page.png`) })
+        await page.screenshot({ path: join(SHOTS, `backup-${colorScheme}-${width}-page.png`) })
       }
       await page.getByLabel('Include the database (tickets, comments, history)').check()
       const zipped = await exportZip(page, dir)
@@ -135,7 +135,7 @@ for (const width of [1440, 390] as const) {
       await expect(dialog(page).locator('[data-import-database-warning]')).toBeVisible()
       expect(await violations(page), 'dialog').toEqual([])
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
-      if (SHOTS !== '') await page.screenshot({ path: join(SHOTS, `fix6-backup-${colorScheme}-${width}-dialog.png`) })
+      if (SHOTS !== '') await page.screenshot({ path: join(SHOTS, `backup-${colorScheme}-${width}-dialog.png`) })
     })
   }
 }

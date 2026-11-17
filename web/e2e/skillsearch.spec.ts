@@ -200,14 +200,14 @@ for (const width of [1440, 390] as const) {
         if (SHOTS !== '') {
           mkdirSync(SHOTS, { recursive: true })
           await search(page).scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix6-skillsearch-${colorScheme}-${width}-results.png`) })
+          await page.screenshot({ path: join(SHOTS, `skill-search-${colorScheme}-${width}-results.png`) })
         }
         await page.locator('[data-skill-result="mattpocock/skills/grill-me"] [data-skill-result-use]').click()
         await expect(editor(page, 'grill-me').locator('[data-skillset-found]')).toBeVisible()
         expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id), 'chosen').toEqual([])
         if (SHOTS !== '') {
           await editor(page, 'grill-me').locator('[data-skillset-found]').scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix6-skillsearch-${colorScheme}-${width}-chosen.png`) })
+          await page.screenshot({ path: join(SHOTS, `skill-search-${colorScheme}-${width}-chosen.png`) })
         }
       })
     })

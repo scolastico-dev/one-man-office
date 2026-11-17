@@ -1,7 +1,7 @@
 // A task the CEO creates waits in Planning for the user's approval: the
 // CEO's own move to Ready For Dev is refused with the reason, no agent
 // starts, and the user's approval through the card's Move menu starts the
-// work. With OMO_SCREENSHOTS=<folder> it writes fix8-ceo-approval-<theme>.png
+// work. With OMO_SCREENSHOTS=<folder> it writes ceo-approval-<theme>.png
 // there.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,7 +21,7 @@ async function shoot(page: Page) {
   for (const theme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: theme })
     await page.evaluate('document.fonts.ready')
-    await page.screenshot({ path: join(SHOTS, `fix8-ceo-approval-${theme}.png`) })
+    await page.screenshot({ path: join(SHOTS, `ceo-approval-${theme}.png`) })
   }
   await page.emulateMedia({ colorScheme: null })
 }

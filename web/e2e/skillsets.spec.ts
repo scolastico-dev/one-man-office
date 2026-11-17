@@ -400,7 +400,7 @@ for (const width of [1440, 390] as const) {
         if (SHOTS !== '') {
           mkdirSync(SHOTS, { recursive: true })
           await ed.locator('[data-skillset-roles]').scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix6-skills-${colorScheme}-${width}.png`) })
+          await page.screenshot({ path: join(SHOTS, `skill-sets-${colorScheme}-${width}.png`) })
         }
       })
     })

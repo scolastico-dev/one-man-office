@@ -2,7 +2,7 @@
 // last, and the whole file, read from the real server, on the ticket page and
 // in the panel, for committed and uncommitted files, at 390 px, in both
 // themes. With OMO_SCREENSHOTS=<folder> the page test writes
-// fix2-diffexpand-<theme>-<width>.png there.
+// diff-expand-<theme>-<width>.png there.
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -202,7 +202,7 @@ test.describe('hidden lines of a diff', () => {
         for (const theme of ['dark', 'light'] as const) {
           await page.emulateMedia({ colorScheme: theme })
           await page.evaluate('document.fonts.ready')
-          await page.screenshot({ path: join(SHOTS, `fix2-diffexpand-${theme}-${width}.png`) })
+          await page.screenshot({ path: join(SHOTS, `diff-expand-${theme}-${width}.png`) })
         }
       }
       await omo.api('POST', '/api/agents/stop-all', {})

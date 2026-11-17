@@ -4,7 +4,7 @@
 // that shows such text must break it inside its box: the element scrolls
 // neither sideways nor past its parent, and the page gets no sideways
 // scroll, at a desktop and at a phone width. With OMO_SCREENSHOTS=<folder>
-// the MCP log test also writes fix9-mcp-log-<theme>-<width>.png there.
+// the MCP log test also writes mcp-log-<theme>-<width>.png there.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
@@ -142,7 +142,7 @@ for (const colorScheme of ["dark", "light"] as const) {
           mkdirSync(SHOTS, { recursive: true });
           await log.evaluate((el) => el.scrollIntoView({ block: "center" }));
           await page.screenshot({
-            path: join(SHOTS, `fix9-mcp-log-${colorScheme}-${width}.png`),
+            path: join(SHOTS, `mcp-log-${colorScheme}-${width}.png`),
           });
         }
       });

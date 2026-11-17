@@ -5,7 +5,7 @@
 // Ctrl+V pastes. A dropped image is stored in omo's images folder and its
 // path is pasted into the program; any other file is refused. Chromium only:
 // the clipboard is read back with the clipboard permissions granted. With
-// OMO_SCREENSHOTS=<folder>: fix5-terminal-drop-dark-1440.png.
+// OMO_SCREENSHOTS=<folder>: terminal-drop-dark-1440.png.
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -130,7 +130,7 @@ test.describe('images dropped onto an agent terminal', () => {
       mkdirSync(SHOTS, { recursive: true })
       await page.emulateMedia({ colorScheme: 'dark' })
       await page.evaluate('document.fonts.ready')
-      await page.screenshot({ path: join(SHOTS, 'fix5-terminal-drop-dark-1440.png') })
+      await page.screenshot({ path: join(SHOTS, 'terminal-drop-dark-1440.png') })
       await terminal.evaluate((el) => el.dispatchEvent(new DragEvent('dragleave', { bubbles: true, dataTransfer: new DataTransfer() })))
     }
 

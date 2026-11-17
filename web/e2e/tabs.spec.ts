@@ -3,7 +3,7 @@
 // measures the drawn borders of the strips in the ticket panel, on the
 // ticket page, in the sidebar (open, collapsed and the phone's sheet) and the
 // diff's project switcher, in both themes. With OMO_SCREENSHOTS=<folder> it
-// writes fix4-tabs-<theme>-<width>.png there.
+// writes ticket-tabs-<theme>-<width>.png there.
 import { mkdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -70,7 +70,7 @@ for (const theme of ['dark', 'light'] as const) {
     if (SHOTS !== '') {
       mkdirSync(SHOTS, { recursive: true })
       await tabsIn(panel, `Activity on #${story}`).evaluate((el) => el.scrollIntoView({ block: 'center' }))
-      await page.screenshot({ path: join(SHOTS, `fix4-tabs-${theme}-1440.png`) })
+      await page.screenshot({ path: join(SHOTS, `ticket-tabs-${theme}-1440.png`) })
     }
     await panel.getByRole('tab', { name: 'Diff' }).click()
     await expectOneRule(tabsIn(panel, `Projects of #${story}`), "the panel diff's project switcher")
@@ -96,7 +96,7 @@ for (const theme of ['dark', 'light'] as const) {
     if (SHOTS !== '') {
       mkdirSync(SHOTS, { recursive: true })
       await tabsIn(panel, `Activity on #${story}`).evaluate((el) => el.scrollIntoView({ block: 'center' }))
-      await page.screenshot({ path: join(SHOTS, `fix4-tabs-${theme}-390.png`) })
+      await page.screenshot({ path: join(SHOTS, `ticket-tabs-${theme}-390.png`) })
     }
     await page.goto(omo.url(`/ticket/${story}`))
     await expectOneRule(tabsIn(page.locator('[data-ticket-page]'), `Activity on #${story}`), 'the ticket page')

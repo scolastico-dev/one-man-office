@@ -15,7 +15,7 @@ import { makePlugin, makePluginList } from './support/plugin'
 // cannot be read shows its error while omo's own list still renders.
 //
 // OMO_SCREENSHOTS=<folder> the theme tests also write the screenshots
-// fix6-pluginlists-<theme>-<width>.png there.
+// plugin-lists-<theme>-<width>.png there.
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -151,9 +151,9 @@ for (const colorScheme of ['dark', 'light'] as const) {
         if (SHOTS !== '') {
           mkdirSync(SHOTS, { recursive: true })
           await listBlock(page, lists.url('/broken.yaml')).scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix6-pluginlists-${colorScheme}-1440.png`), fullPage: false })
+          await page.screenshot({ path: join(SHOTS, `plugin-lists-${colorScheme}-1440.png`), fullPage: false })
           await listsForm(page).scrollIntoViewIfNeeded()
-          await page.screenshot({ path: join(SHOTS, `fix6-pluginlists-${colorScheme}-1440-form.png`), fullPage: false })
+          await page.screenshot({ path: join(SHOTS, `plugin-lists-${colorScheme}-1440-form.png`), fullPage: false })
         }
       } finally {
         lists.server.close()

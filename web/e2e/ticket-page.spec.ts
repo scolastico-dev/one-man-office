@@ -2,7 +2,7 @@
 // tabs at the top, the Diff tab's file browser, comments, a live agent
 // terminal, editing, a missing ticket, phones and accessibility. With
 // OMO_SCREENSHOTS=<folder> the layout tests also write the screenshots of
-// the page (fix1-page-<tab>-<theme>-<width>.png) there.
+// the page (ticket-page-<tab>-<theme>-<width>.png) there.
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -83,14 +83,14 @@ async function shoot(page: Page, name: string): Promise<void> {
   for (const theme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: theme })
     await page.evaluate('document.fonts.ready')
-    await page.screenshot({ path: join(SHOTS, `fix1-page-${name}-${theme}-${width}.png`) })
+    await page.screenshot({ path: join(SHOTS, `ticket-page-${name}-${theme}-${width}.png`) })
   }
 }
 
 // The Overview tab keeps its column at a readable width and stands it in the
 // middle of the tab (as the settings stand in the middle of their room); the
 // text inside stays aligned left. The other tabs use the tab's full width.
-// With OMO_SCREENSHOTS=<folder>: fix5-overview-<theme>-<width>.png.
+// With OMO_SCREENSHOTS=<folder>: ticket-overview-<theme>-<width>.png.
 test.describe('the Overview column stands in the middle of its tab', () => {
   for (const width of [1440, 2560] as const) {
     test(`at ${width} px the free space left and right of the Overview column is equal`, async ({ page, omo }) => {
@@ -124,7 +124,7 @@ test.describe('the Overview column stands in the middle of its tab', () => {
         for (const theme of ['dark', 'light'] as const) {
           await page.emulateMedia({ colorScheme: theme })
           await page.evaluate('document.fonts.ready')
-          await page.screenshot({ path: join(SHOTS, `fix5-overview-${theme}-${width}.png`) })
+          await page.screenshot({ path: join(SHOTS, `ticket-overview-${theme}-${width}.png`) })
         }
       }
 

@@ -177,7 +177,10 @@ test.describe('on a phone', () => {
   })
 })
 
-// With OMO_SCREENSHOTS=<folder>: the open story search, fix4-storypicker-<theme>-<width>.png.
+// With OMO_SCREENSHOTS=<folder>: the open story search, story-picker-<theme>-<width>.png.
+// These cases only take pictures for a person to look at (the story search's
+// behaviour is asserted by the tests above); without the folder there is
+// nothing to do, so they skip, as they do in CI.
 for (const theme of ['dark', 'light'] as const) {
   for (const width of [1440, 390] as const) {
     test(`the story search looks right (${theme}, ${width} px)`, async ({ page, omo }) => {
@@ -196,7 +199,7 @@ for (const theme of ['dark', 'light'] as const) {
       await root.getByRole('button', { name: 'Story: All stories' }).click()
       await root.getByRole('combobox', { name: 'Search stories' }).fill('o')
       mkdirSync(shots, { recursive: true })
-      await page.screenshot({ path: join(shots, `fix4-storypicker-${theme}-${width}.png`) })
+      await page.screenshot({ path: join(shots, `story-picker-${theme}-${width}.png`) })
     })
   }
 }

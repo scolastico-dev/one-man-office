@@ -10,7 +10,7 @@ import { expect, FAKE_AGENT_BINARY, test, type Omo } from './support/omo'
 // with its scrollbar at the window's edge. The list and the page keep their
 // widths; where the room is short the block sits where it always did. With
 // OMO_SCREENSHOTS=<folder> the test also writes the screenshots
-// (fix3-settings-centre-<state>-<width>-<closed|open>.png), with
+// (settings-centre-<state>-<width>-<closed|open>.png), with
 // MEASURE_REPORT=<file> every measurement is written there.
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
@@ -133,7 +133,7 @@ for (const width of [1920, 2560, 3440, 3840]) {
         mkdirSync(SHOTS, { recursive: true })
         await page.emulateMedia({ colorScheme: 'dark' })
         await show(page, omo, 'limits', 'Limits')
-        await page.screenshot({ path: join(SHOTS, `fix3-settings-centre-${STATE}-${width}-${sidebar}.png`) })
+        await page.screenshot({ path: join(SHOTS, `settings-centre-${STATE}-${width}-${sidebar}.png`) })
       }
       let sawBar = false
       await walk(page, omo, `${width} ${sidebar}`, (m, where) => {

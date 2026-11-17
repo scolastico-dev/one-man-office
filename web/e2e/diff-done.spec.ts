@@ -4,7 +4,7 @@
 // reaches. The Diff tab still shows the reviewed change from the commits
 // omo recorded when the ticket went to Done, and the Branch field names
 // them. With OMO_SCREENSHOTS=<folder> the test writes
-// fix6-range-{branch,diff}-<theme>-1440.png there.
+// diff-range-{branch,diff}-<theme>-1440.png there.
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -79,9 +79,9 @@ test('a done ticket shows its recorded diff after its worktree and branch are go
     if (SHOTS !== '') {
       mkdirSync(SHOTS, { recursive: true })
       await commits.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(SHOTS, `fix6-range-branch-${colorScheme}-1440.png`) })
+      await page.screenshot({ path: join(SHOTS, `diff-range-branch-${colorScheme}-1440.png`) })
       await heading.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(SHOTS, `fix6-range-diff-${colorScheme}-1440.png`) })
+      await page.screenshot({ path: join(SHOTS, `diff-range-diff-${colorScheme}-1440.png`) })
     }
   }
   await expectNoAgentProcesses(omo)
