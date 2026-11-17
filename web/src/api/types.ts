@@ -1009,6 +1009,9 @@ export interface EventDataByKind {
   'image.added': ImageEventData
   'image.deleted': ImageEventData
   'image.expired': ImageEventData
+  'mcp.changed': MCPServerState
+  /** No data: the tools omo offers over MCP changed. */
+  'mcp.tools_changed': Record<string, never>
 }
 
 export type KnownEventKind = keyof EventDataByKind
@@ -1393,4 +1396,275 @@ export interface ImportResult {
   backup: string
   database_pending: boolean
   restart_needed: boolean
+}
+
+export type MCPTransport = 'stdio' | 'http' | 'sse'
+export type MCPInstances = 'per_session' | 'shared'
+export type MCPAuth = 'none' | 'headers' | 'oauth'
+
+/** An upstream MCP server omo relays: `mcpservers/<name>.yaml`; values are stored and shown as they are. */
+export interface MCPServer {
+  name: string
+  enabled: boolean
+  description: string
+  transport: MCPTransport
+  command: string
+  args: string[]
+  /** Plain values; `${VAR}` and `${VAR:-default}` expand from omo's environment. */
+  env: Record<string, string>
+  /** '' is the folder of the instance. */
+  cwd: string
+  instances: MCPInstances | ''
+  url: string
+  headers: Record<string, string>
+  headers_command: string[]
+  auth: MCPAuth | ''
+  oauth: MCPOAuth
+  /** Agent roles (ceo, pm, developer, reviewer, export) whose sessions see the tools; empty: every role. */
+  roles: string[]
+  /** Also offered to connections not tied to an omo agent session. */
+  global: boolean
+  tools: MCPToolFilter
+  timeouts: MCPTimeouts
+  source: string
+  revision?: string
+}
+
+export interface MCPOAuth {
+  client_id: string
+  client_secret: string
+  scopes: string[]
+  resource: string
+}
+
+/** Upstream tool names; an empty allow list allows every tool, deny applies after allow. */
+export interface MCPToolFilter {
+  allow: string[]
+  deny: string[]
+}
+
+/** Zero ("0s") is omo's default. */
+export interface MCPTimeouts {
+  startup: Duration
+  call: Duration
+}
+
+export type MCPServerStateName = 'stopped' | 'starting' | 'running' | 'failed' | 'needs_login' | 'disabled'
+
+export interface MCPServerState {
+  name: string
+  state: MCPServerStateName
+  instances: number
+  tools: string[]
+  omitted: MCPOmittedTool[]
+  last_error: string
+  started_at: string | null
+  auth: MCPAuthState
+  offers_resources: boolean
+  offers_prompts: boolean
+}
+
+export interface MCPOmittedTool {
+  tool: string
+  reason: string
+}
+
+export interface MCPAuthState {
+  state: 'none' | 'connected' | 'needs_login' | 'error'
+  expires_at: string | null
+  scopes: string[]
+}
+
+/** Answer of `GET /api/mcp/servers`. */
+export interface MCPServersResponse {
+  servers: MCPServer[]
+  states: MCPServerState[]
+  errors: FileError[]
+}
+
+/** Answer of `POST /api/mcp/servers/test`. */
+export interface MCPTestResult {
+  tools: string[]
+  omitted: MCPOmittedTool[]
+  error: string
+  offers_resources: boolean
+  offers_prompts: boolean
+  millis: number
+}
+
+export interface MCPLogLine {
+  at: string
+  message: string
+}
+
+/** Answer of `POST /api/mcp/servers/{name}/connect`. */
+export interface MCPConnect {
+  authorize_url: string
+}
+
+/** The general MCP switches. */
+export interface MCPSettings {
+  enabled: boolean
+  inject: MCPInject
+}
+
+export interface MCPInject {
+  claude: boolean
+  codex: boolean
+}
+
+export interface MCPToken {
+  id: string
+  kind: 'pat' | 'oauth'
+  name: string
+  client_id: string
+  redirect_host: string
+  resource: string
+  scope: string
+  created_at: string
+  expires_at: string | null
+  refresh_expires_at: string | null
+  last_used_at: string | null
+}
+
+/** Body of `POST /api/mcp/tokens`. */
+export interface MCPTokenRequest {
+  name: string
+  expires_at?: string
+}
+
+/** Answer of `POST /api/mcp/tokens`; the secret is shown once. */
+export interface MCPTokenCreated {
+  token: MCPToken
+  secret: string
+}
+
+export interface MCPClientTarget {
+  id: string
+  cli: 'claude' | 'codex' | 'agy'
+  /** '' is the program's default file. */
+  account: string
+  config_path: string
+}
+
+export interface MCPClientState {
+  target: MCPClientTarget
+  state: 'absent' | 'installed' | 'outdated' | 'foreign'
+  /** The omo entry; null when there is none. */
+  entry: unknown
+  entries: MCPClientEntry[]
+  error: string
+}
+
+export interface MCPClientEntry {
+  name: string
+  server: MCPServer
+  notes: string[]
+  /** Why omo cannot take it over; '' when it can. */
+  reason: string
+}
+
+/** Body of `POST /api/mcp/clients/{target}/plan`. */
+export interface MCPClientPlanRequest {
+  action: 'install' | 'remove'
+}
+
+export interface MCPClientPlan {
+  target: MCPClientTarget
+  action: 'install' | 'remove'
+  file: string
+  commands: string[][]
+  before: unknown
+  after: unknown
+  message: string
+  hash: string
+}
+
+/** Body of `POST /api/mcp/clients/{target}/apply`. */
+export interface MCPClientApply {
+  plan: string
+}
+
+export interface MCPClientApplied {
+  state: MCPClientState
+  backup: string
+}
+
+/** Answer of `GET /api/mcp/takeover`. */
+export interface MCPTakeover {
+  candidates: MCPTakeoverCandidate[]
+  stays: MCPTakeoverStay[]
+}
+
+export interface MCPTakeoverCandidate {
+  key: string
+  name: string
+  server: MCPServer
+  sources: MCPTakeoverSource[]
+  notes: string[]
+  needs_login: boolean
+  /** Why it is not chosen by default; '' when it is. */
+  conflict: string
+}
+
+export interface MCPTakeoverSource {
+  target: string
+  entry_name: string
+}
+
+export interface MCPTakeoverStay {
+  target: string
+  entry_name: string
+  reason: string
+}
+
+/** Body of `POST /api/mcp/takeover/apply`. */
+export interface MCPTakeoverApply {
+  take: MCPTakeoverPick[]
+  remove_from_cli: boolean
+}
+
+export interface MCPTakeoverPick {
+  key: string
+  name: string
+}
+
+export interface MCPTakeoverReport {
+  results: MCPTakeoverResult[]
+  backups: string[]
+}
+
+export interface MCPTakeoverResult {
+  name: string
+  stored: boolean
+  error: string
+  removed: MCPTakeoverRemoval[]
+  needs_login: boolean
+}
+
+export interface MCPTakeoverRemoval {
+  target: string
+  done: boolean
+  error: string
+}
+
+/** Answer of `GET /api/oauth/consent`. */
+export interface OAuthConsent {
+  client_name: string
+  client_id: string
+  client_kind: 'cimd' | 'registered'
+  redirect_host: string
+  localhost_only: boolean
+  resource: string
+}
+
+/** Body of `POST /api/oauth/consent`. */
+export interface OAuthDecision {
+  query: string
+  approve: boolean
+}
+
+/** Answer of `POST /api/oauth/consent`. */
+export interface OAuthRedirect {
+  redirect: string
 }

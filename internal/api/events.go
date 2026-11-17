@@ -36,6 +36,10 @@ const (
 	KindImageAdded         = "image.added"      // data ImageEventData
 	KindImageDeleted       = "image.deleted"    // data ImageEventData
 	KindImageExpired       = "image.expired"    // data ImageEventData
+	KindMCPChanged         = "mcp.changed"      // data MCPServerState
+	// KindMCPToolsChanged has no data: the tools omo offers over MCP
+	// changed.
+	KindMCPToolsChanged = "mcp.tools_changed"
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.
@@ -149,6 +153,8 @@ const (
 	SectionUsage     = "usage"
 	SectionSkillSets = "skillsets"
 	SectionPlugins   = "plugins"
+	// SectionMCPServers names the files of the MCP servers omo relays.
+	SectionMCPServers = "mcpservers"
 )
 
 // Values of SettingsChangedData.Source.
