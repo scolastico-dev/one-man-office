@@ -136,6 +136,7 @@ type Server struct {
 	usage   usageFeature
 	skills  skillSetFeature
 	plugins pluginFeature
+	mcpAuth mcpAuthFeature // tokens and OAuth server of /mcp (mcp_auth.go)
 	// imageStore is the images folder; imageStray the number of files in it
 	// without a record the last sweep counted (images.go).
 	imageStore *images.Store
