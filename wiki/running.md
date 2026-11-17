@@ -1,217 +1,210 @@
-# Running an office
+# Running omo
+
+One omo server runs per user and omo home. This page covers starting and
+stopping it, who can reach it, and keeping it up to date.
+
+- [Starting and stopping](#starting-and-stopping)
+- [Start options](#start-options)
+- [Sign-in: the three modes](#sign-in-the-three-modes)
+- [Reaching omo from another machine](#reaching-omo-from-another-machine)
+- [Behind a reverse proxy](#behind-a-reverse-proxy)
+- [Start at login](#start-at-login)
+- [Updating](#updating)
+- [Docker](#docker)
+
+## Starting and stopping
 
 ```bash
-cd my-office
-omo                 # opens the TUI, starting on the CEO's screen
-omo --mock          # same org chart driven by scripted fake agents, no AI
-omo --no-tui        # headless, for CI; Ctrl+C stops it
-omo --safe-mode     # start only the CEO until spawning is resumed
-omo --read-only     # observe an existing office without locking or mutating it
+omo        # in the foreground; Ctrl+C stops it
+omo -d     # in the background; prints the address when the server is ready
+omo stop   # stops the running server
 ```
 
-`--mock` is the fastest way to see the whole machine work. It runs the full
-CEO -> PM -> developer -> reviewer -> merge chain with scripted fake agents and
-no model calls, using the first repository in your config.
-
-Every start requires the office location to be [trusted](global-home.md#office-trust).
-
-## Safe mode
-
-Start with `omo --safe-mode` to debug the office or provision new agent rules
-before normal work begins. The CEO starts with an explicit safe-mode
-instruction, while product managers, developers, reviewers, freelancers, smoke
-alarms, and firefighters are blocked from spawning. Queued work is preserved.
-No smoke-alarm round starts in safe mode. If its interval elapses before
-spawning resumes, a round starts promptly after resumption.
-
-After discussing the change with the CEO, either you (from the office
-directory) or the CEO can run `omo office resume-spawns` to exit safe mode and
-boot the full office.
-
-## Read-only observation
-
-`--read-only` opens a concurrent observer with Agents, Messages, Jobs,
-Incidents, Events, and persisted Statistics tabs. It does not claim the office
-lock, connect to the command socket, run recovery, spawn agents, mark messages
-read, or expose management actions. When no owner is running, lifecycle rows
-are an unmodified database snapshot and can therefore be stale. Read-only mode
-cannot be combined with `--mock`, `--no-tui`, `--safe-mode`, or
-`--trust-office`.
-
-## Startup checks
-
-Before an interactive start, `omo` checks for:
-
-- A newer release.
-- Prompt, message, or bundled-plugin defaults from a newer embedded generation.
-- Remote updates for managed Git plugins, local and global.
-
-Separately, every normal start installs or fast-forwards omo's shared
-Superpowers checkout.
-
-`omo` asks before downloading a checksum-verified release or replacing editable
-templates and bundled plugins with `omo setup --update`, then restarts itself.
-Before any accepted embedded-asset write, it lists every file that would
-change, including obsolete files removed by directory replacement. Managed
-plugin checks query remote revisions without changing their checkout, list each
-pending local or global plugin update, and only then perform the update.
-
-Non-interactive or headless starts only print availability. They never accept
-on your behalf.
-
-Disable individual checks under `startup` in `omo.yaml`, or use
-`--skip-startup-checks` for one invocation. Embedded-asset freshness uses
-`.omo/templates.sha256`, so local edits are not mistaken for an old generation.
-`--skip-startup-checks` never bypasses office trust or plugin dependency
-enforcement.
-
-## Finishing a firefighter incident
-
-A firefighter is durably associated with its incident before its process
-starts, and that association survives retries and restarts. It may use
-`omo wait` while its incident is open. After `omo incident resolve`, resolving
-the incident does not end the session: `omo wait` is rejected because a living
-firefighter suspends smoke-alarm rounds. The required next command is:
-
-```bash
-omo done "incident <id> resolved"
-```
-
-Coordinate with the CEO or other agents before resolving; after resolution,
-only this `omo done` command remains.
-
-The supervisor records the completion and then permits the next smoke-alarm
-round. A missing or already-resolved owned incident is treated as finished for
-wait enforcement; a firefighter with no durable incident ownership must also
-finish rather than park.
-
-## Manual self-update
-
-`omo self-update` works from any directory and never starts or restarts an
-office. It downloads and verifies the platform release asset before replacing
-the running executable.
-
-```bash
-omo self-update                    # install the latest release only when newer
-omo self-update --check            # report a newer release without writing
-omo self-update --version v1.2.3   # install this exact release, including a downgrade
-```
-
-`--check` and `--version` cannot be combined. An explicit version searches the
-current directory and its parents for `.omo/omo.yaml`; when found, it disables
-`startup.check_self_update` without rewriting the rest of the configuration,
-so the next office start does not immediately replace a deliberately selected
-version. Outside an office, the binary update still succeeds and reports that
-no office setting changed.
-
-## Single-instance lock and emergency stop
-
-While an office is live, `.omo/omo.lock` records its real socket or named-pipe
-endpoint. A second `omo` validates the endpoint and offers to emergency-stop
-the existing session before starting; stale locks are discarded. `omo estop`
-sends the same shutdown request directly from the office directory. The CEO
-and firefighter can issue the same command from their sessions.
-
-On Unix, the real socket is created under the system temporary directory and
-`.omo/omo.sock` links to it, avoiding the kernel's roughly 103-byte
-socket-path limit for deeply nested offices. Windows uses an office-specific
-named pipe and creates no socket file.
-
-## Safe shutdown
-
-`omo safe-shutdown [--reason "<text>"]` (or `s` in the TUI quit dialog) halts new
-work and smoke-alarm spawns, including scheduled smoke rounds. An active smoke
-round may finish. Shutdown broadcasts and injects a handoff request into every
-agent, and stops after every targeted agent finishes or checkpoints, or after a
-bounded deadline.
-Agents persist concise handoffs with `omo context save`; the next agent with
-the same role and job receives that handoff in its prompt and the stored row is
-then deleted. A reason is retained for the first in-progress request and is
-printed as `omo exited: <reason>` after the TUI returns control of the terminal.
-Repeated requests during shutdown are idempotent and do not replace that first
-reason.
-
-Safe shutdown also starts automatically when every configured Claude/Codex
-credential scope reaches `usage.safe_shutdown_percent`. See
-[usage limits](configuration.md#usage-limits).
-
-Normal, safe, and emergency shutdown all reap commands started by agent
-sessions. On Windows each session owns a kill-on-close Job Object. On Linux a
-per-session process marker also finds background commands that detached and were
-reparented after their agent exited; other Unix systems terminate the session's
-process groups and observed descendants. This cleanup is defense in depth, not
-a sandbox: a hostile process can deliberately escape user-level tracking, so
-agents must still not create unattended destructive loops.
-
-## Reloading configuration
-
-While the office is running, `omo reload` validates `.omo/omo.yaml` and
-atomically applies it to subsequent scheduling, spawning, and completion work
-without killing existing agents. It can be run by you from the office directory
-or by the CEO/firefighter inside their sessions. Existing processes keep the
-command line, environment, prompt, and worktree they started with.
-
-## Logs
-
-Each spawn gets its own transcript at:
+Both print the address with the login token:
 
 ```text
-.omo/logs/yyyy-mm-dd_hh-mm-<role>-<name>.log
+omo: http://omo.localhost:8090/#4f01f6c3…
+also: http://127.0.0.1:8090/#4f01f6c3…
 ```
 
-The directory therefore sorts chronologically.
+`omo -d` adds where the log goes (`OMO_HOME/run/omo.log`) and
+`Stop with: omo stop`. Starting omo again while it runs only prints
+`omo is already running: <address>`, so `omo -d` is also how to get the address
+back. Browsers resolve every `*.localhost` name to this machine, so
+`omo.localhost` needs no setup; the `127.0.0.1` address is the same server.
 
-`omo` interprets the full-screen terminal and writes changed screen lines, so
-logs are readable line-oriented text instead of concatenated cursor redraws.
-Recent lines are deduplicated even when the CLI moves them to a different row.
-Transient spinners, empty prompts, separators, and status-bar chrome are
-omitted.
+Stopping asks every working agent for a handoff comment and waits for them
+(`asking agents for a handoff (up to 2m0s)...`), then ends all agents. A second
+`omo stop`, or a second Ctrl+C, skips the wait. The time is **Settings →
+Limits** (`stop.handoff_timeout`). At the next start every ticket that was in
+work gets a fresh agent that reads the handoff (see
+[Restarts](concepts.md#restarts)).
 
-Large live sessions rotate into `.log.1`, `.log.2`, and so on.
+omo needs git 2.38 or newer; an older git stops the start with
+`omo needs git 2.38 or newer (found 2.34)`.
 
-You, the CEO, and the firefighter can inspect a living developer without
-opening its TUI session with `omo logs <developer-name> -n <lines>`.
+## Start options
 
-`logs.keep` counts completed session groups across the office. Living agents
-are excluded, so `keep: 10` can leave more than ten groups while agents are
-active.
-
-- Default: `50`
-- `0`: remove completed logs
-- `-1`: disable inactive log pruning
-
-Every rotated segment belonging to a retained session stays with that session.
-
-## Manual agent input
-
-You, the CEO, and the firefighter can answer an interactive confirmation or
-menu without restarting an agent and losing its context. Send literal text,
-named keys, or both in order:
+The start options live in `OMO_HOME/server.yaml`. Change them with
+`omo config`; a running omo applies them at its next start
+(`A running omo applies this at the next start.`).
 
 ```bash
-omo type developer-ada "yes" --key enter
-omo type developer-ada "1" --key enter
-omo type developer-ada --key down,down,enter
-omo type developer-ada --key ctrl+c
+omo config list              # every option; basic_auth is shown as ***
+omo config get port
+omo config set port 18090
+omo config unset port        # back to the default
+omo config rotate-token      # a new login token (the running omo keeps the old one until it restarts)
 ```
 
-Supported named keys are `enter`/`return`, `tab`, `space`, `escape`/`esc`,
-`backspace`, `delete`, arrow keys, `home`, `end`, page up/down aliases, and
-`ctrl+a` through `ctrl+z`. Inspect the agent output first and send only the
-minimum input required; arbitrary terminal input has the same power as typing
-directly into that agent in the TUI.
+| Option | Default | Meaning |
+|---|---|---|
+| `host` | `127.0.0.1` | The address omo listens on: an IP address or `localhost`. `0.0.0.0` listens on every interface. |
+| `port` | `8090` | The TCP port. |
+| `auth` | `token` | `token`, `basic` or `none` (see below). |
+| `basic_auth` | empty | `user:password` for `auth: basic`. |
+| `origin_check` | `true` | Refuse browser requests from other sites. Turn it off only behind a proxy that does its own access control. |
+| `allowed_hosts` | empty | Extra host names the browser may use to reach omo, comma-separated, each with an optional port: `omo.lan,omo.lan:8443`. |
+| `public_url` | empty | The address omo advertises, such as `https://omo.example.com/`. |
 
-Input targeting the agent you are currently typing into in a writable TUI peek
-waits for `notifications.input_debounce` or for that view to become
-non-writable. Queued requests keep their order and keep text separate from
-following special keys. The same path delivers mail notices and plugin nudges;
-a pending-input marker appears in the agent footer while input is waiting.
+The local socket that `omo ai` and agents use is separate from these options:
+it lives in `OMO_HOME/run/` and only processes of your user reach it.
 
-## Token usage
+## Sign-in: the three modes
 
-`omo` is effective, but it is not token-efficient. Running several agents can
-burn through tokens quickly. Usage depends on your chosen CLI, account, models,
-task, and concurrency. Configure `usage.safe_shutdown_percent` for orderly
-handoffs and `usage.weekly_limit_percent` for the hard ceiling, and use
-`assignment: smart` to prefer the eligible Claude/Codex profile with the most
-capacity left. See [Configuration](configuration.md#usage-limits).
+| `auth` | How the browser signs in |
+|---|---|
+| `token` | The address carries the login token after `#`. The board keeps it in that browser and sends it with every request; the token never goes to the server in an address. Lost it? `omo -d` prints it again, or read `OMO_HOME/token`. |
+| `basic` | The browser asks for user name and password (`basic_auth`). omo prints `WARNING: HTTP Basic authentication is intended only for networks you trust. It is not secure for exposing omo directly to the internet.` |
+| `none` | No sign-in. omo prints `WARNING: omo token authentication is disabled. Anyone who can reach this address can run commands with your user permissions.` |
+
+Whoever can use the board can run commands as you: agents run as your user,
+and the board opens shells. Keep `token` unless something else in front of omo
+decides who gets in. See [Security](security.md).
+
+When the board's token is missing or wrong, the board shows "omo is locked":
+open the address omo printed, or paste it (or the token) into the field and
+press **Unlock**.
+
+## Reaching omo from another machine
+
+The safe way is an SSH port forward with the same port on both sides; omo
+keeps listening on loopback:
+
+```bash
+ssh -L 8090:127.0.0.1:8090 you@server
+```
+
+Then open the address omo printed on the server in your local browser.
+
+To listen on the network instead, set `host` (for example
+`omo config set host 0.0.0.0`). omo then prints:
+
+```text
+WARNING: omo is exposed beyond loopback over plain HTTP. Anyone with its access URL can run commands with your user permissions. Prefer loopback with an SSH port-forward using the same local and remote port.
+```
+
+The board answers only to the host names it knows: `omo.localhost`,
+`localhost`, IP addresses, the entries of `allowed_hosts` and the host of
+`public_url`. Any other name is refused ("host or origin rejected"), which
+keeps other web pages from reaching omo through DNS tricks. omo prints the
+command to allow the machine's own name:
+
+```text
+To open omo as http://myhost:8090, run: omo config set allowed_hosts myhost
+```
+
+Over plain HTTP on a name other than `localhost` the browser treats the page
+as not secure: copying from a terminal then works only during a click or key
+press (see [Terminals](terminals.md#copy-and-paste)), and MCP clients may refuse
+to sign in with OAuth (see [MCP](mcp.md#oauth-and-plain-http)).
+
+## Behind a reverse proxy
+
+omo speaks plain HTTP. To give it an https address, put a proxy that holds the
+certificate in front of it and tell omo the address:
+
+```bash
+omo config set public_url https://omo.example.com/
+```
+
+`public_url` is printed first at the start, shown on **Settings → General**,
+and used in links to the board (plugins, notifications). It does not change
+where omo listens. omo accepts exactly the host and port of that address, and
+an `https` Origin for it. It must be an absolute `http://` or `https://`
+address without path, query, fragment or user name: omo cannot be served below
+a path prefix.
+
+The proxy must:
+
+- pass the `Host` header through unchanged;
+- pass websocket upgrades (the terminals use them);
+- not buffer `/api/events`, the board's live event stream (omo sends
+  `X-Accel-Buffering: no` for nginx).
+
+Keep `host` at `127.0.0.1` when the proxy runs on the same machine.
+
+`origin_check: false` turns the Origin check off and prints
+`WARNING: omo Origin verification is disabled. Use this only behind a trusted reverse proxy that enforces access control.`
+With `public_url` set it is not needed.
+
+## Start at login
+
+```bash
+omo autostart register     # omo autostart registered for next login.
+omo autostart unregister   # omo autostart unregistered.
+```
+
+`register` records the current `OMO_HOME`, `PATH` and folder in
+`OMO_HOME/run/autostart.json` and adds a login entry: an XDG autostart file
+(in `~/.config/autostart/`) on Linux, a LaunchAgent
+(in `~/Library/LaunchAgents/`) on macOS, and a Run entry of your user on
+Windows. At login omo starts in the background with that environment, so run
+`register` from a shell whose `PATH` finds the agent programs. On Linux the
+entry needs a desktop session that runs XDG autostart entries; a headless
+server needs its own service manager (run `omo` from it).
+
+`unregister` removes the entry and does not stop a running omo.
+
+## Updating
+
+```bash
+omo update --check            # only says whether a newer release exists
+omo update                    # download, verify and replace the binary
+omo update --version TAG      # install exactly this release, also an older one
+```
+
+`omo update` fetches the release for your system from GitHub, checks it
+against the release's `SHA256SUMS` and replaces the `omo` binary it was started
+from. It does not restart a running server: run `omo stop` and start it again.
+Running the installer again does the same.
+
+After an update, compare edited usage scripts with the new defaults (see
+[Usage scripts](agents.md#usage-scripts)): omo never overwrites a script you
+changed.
+
+## Docker
+
+The repository has a `Dockerfile` and a `compose.yml`. The image runs omo as
+a user `omo` (its uid and gid from `OMO_UID` and `OMO_GID`, default 1000), with
+your repositories mounted at `/workspace` and the user's home (agent logins
+and `~/.local/omo`) persisted in `./docker-data/home`. At each start the
+container installs the agent programs named in `OMO_AGENT_CLIS` (default
+`claude,codex,agy,gemini`) that are missing, runs the optional `INIT_SCRIPT` or
+`INIT_SCRIPT_PATH`, sets `host` to `0.0.0.0` inside the container and starts
+omo on port 8090. The compose file publishes it on `127.0.0.1` of the host only
+and adds a separate Docker-in-Docker service for agents that need Docker.
+
+```bash
+OMO_UID=$(id -u) OMO_GID=$(id -g) OMO_WORKSPACE=~/code docker compose up -d
+docker compose logs omo        # the address with the login token
+```
+
+Inside the container your repositories are below `/workspace`: add that folder
+on **Settings → Projects**.
+
+Sign the agent programs in once inside the container
+(`docker compose exec -u omo omo bash -l`, then `claude`, `codex` and so on);
+their logins stay in the persisted home. Because omo listens on `0.0.0.0`
+inside the container, it prints the warning about plain HTTP; the port
+mapping is what keeps it on the host's loopback.
