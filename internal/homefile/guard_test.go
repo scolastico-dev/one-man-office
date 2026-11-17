@@ -10,21 +10,27 @@ import (
 	"testing"
 )
 
-// homePackages are the packages that read files in the omo home. Every such
-// read goes through Open or Read.
+// homePackages are the packages that read or append to files in the omo
+// home. Every such read goes through Open or Read, every append through
+// Append.
 var homePackages = []string{"settings", "serverconfig", "globalhome", "service", "engine", "agents", "server", "session",
-	"usage", "plugins", "pluginmanager", "skillsets", "images", "homezip", "mcprelay"}
+	"usage", "plugins", "pluginmanager", "skillsets", "images", "homezip", "mcprelay", "mcpclients", "oldhome", "cli", "filelock", "db"}
 
 // notHome are reads in those packages of files outside the omo home, by file
 // and call.
 var notHome = map[string]string{
 	"agents/leftovers_unix.go os.ReadFile": "/proc/<pid>/stat",
 	"session/kill_linux.go os.ReadFile":    "/proc/<pid>/environ",
+	"mcpclients/clients.go os.Open":        "an agent program's own configuration file",
+	"cli/ai.go os.ReadFile":                "the file a user names with a flag",
+	"cli/backup.go os.Open":                "the settings zip a user names",
+	"filelock/lock.go os.OpenFile":         "the lock file, opened to be locked, never read",
 }
 
 // TestHomeFilesReadThroughHomefile is the guard: a file of the home packages
-// that opens or reads a file another way fails, unless notHome names it. A
-// file opened only for writing (no O_RDONLY or O_RDWR) passes.
+// that opens or reads a file another way, or opens one for appending, fails,
+// unless notHome names it. A file opened only for writing (no O_RDONLY or
+// O_RDWR) without O_APPEND passes.
 func TestHomeFilesReadThroughHomefile(t *testing.T) {
 	for _, pkg := range homePackages {
 		dir := filepath.Join("..", pkg)
@@ -64,6 +70,13 @@ func TestHomeFilesReadThroughHomefile(t *testing.T) {
 				switch sel.Sel.Name {
 				case "ReadFile", "Open":
 				case "OpenFile":
+					if len(call.Args) >= 2 && namesFlag(call.Args[1], "O_APPEND") {
+						key := pkg + "/" + name + " os.OpenFile"
+						if _, ok := notHome[key]; !ok {
+							t.Errorf("%s: os.OpenFile appends to a file without homefile.Append", fset.Position(call.Pos()))
+						}
+						return true
+					}
 					if len(call.Args) < 2 || !opensForReading(call.Args[1]) {
 						return true
 					}
@@ -78,6 +91,18 @@ func TestHomeFilesReadThroughHomefile(t *testing.T) {
 			})
 		}
 	}
+}
+
+// namesFlag reports whether the flags of os.OpenFile name flag.
+func namesFlag(flags ast.Expr, flag string) bool {
+	found := false
+	ast.Inspect(flags, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == flag {
+			found = true
+		}
+		return true
+	})
+	return found
 }
 
 // opensForReading reports whether the flags of os.OpenFile may open for
