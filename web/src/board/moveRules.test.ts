@@ -171,7 +171,7 @@ describe('dragTargets', () => {
   })
 
   test('busy refuses withdraw and stop with the busy reason (story: also a busy task); failed_step refuses nothing; absent fields refuse nothing', () => {
-    const busyReason = 'omo is starting work on or merging #1; try again in a moment.'
+    const busyReason = 'omo is starting work on, merging or exporting #1; try again in a moment.'
     const ready = dragTargets(ticket({ column: 'ready', busy: true }), noContext)
     expect(ready.planning).toMatchObject({ allowed: false, reason: busyReason })
     expect(ready.ready.allowed).toBe(true)

@@ -82,7 +82,7 @@ export function badgeFor(t: TicketSummary, slots?: SlotView | null): Badge | nul
 
 /** The short state text next to the badge. */
 export function captionFor(t: TicketSummary): string | undefined {
-  if (t.busy) return t.column === 'review' ? 'merging…' : 'starting…'
+  if (t.busy) return t.column !== 'review' ? 'starting…' : t.review_stage === 'exporting' ? 'exporting…' : 'merging…'
   if (t.column === 'review') {
     if (t.review_stage === 'agent') return 'agent review'
     if (t.review_stage === 'merging') return 'merging…'

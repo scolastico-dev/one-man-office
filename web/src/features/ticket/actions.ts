@@ -20,7 +20,7 @@ export type ActionDialog = 'approve' | 'export' | 'reject' | 'cancel'
 export interface ActionContext {
   /** What dropping the ticket on each column means, from the board's rules. */
   targets: Record<Column, Target>
-  /** omo is starting work on or merging the ticket (for a story: one of its tasks). */
+  /** omo is starting work on, merging or exporting the ticket (for a story: one of its tasks). */
   busy: boolean
   client: ApiClient
   store: BoardStore
@@ -51,7 +51,7 @@ export interface TicketAction {
 }
 
 export function busyReason(n: number): string {
-  return `omo is starting work on or merging #${n}; try again in a moment.`
+  return `omo is starting work on, merging or exporting #${n}; try again in a moment.`
 }
 
 export const STEP_LABEL: Record<Exclude<FailedStep, ''>, string> = { start: 'start', agent: 'agent', merge: 'merge' }

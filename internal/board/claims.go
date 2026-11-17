@@ -42,7 +42,7 @@ func checkNotBusy(q db.Queryer, t ticketRow) error {
 	}
 	what := "starting work on"
 	if col == api.ColumnReview {
-		what = "merging"
+		what = "merging or exporting"
 	}
 	return api.Errorf(api.CodeConflict, "omo is %s #%d; try again in a moment", what, id)
 }

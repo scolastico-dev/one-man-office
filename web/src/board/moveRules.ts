@@ -33,7 +33,7 @@ const REVIEW_BACK = 'Approve it, or reject it back to In Progress.'
 const STARTED = 'An agent has started on it.'
 
 function busyReason(n: number): string {
-  return `omo is starting work on or merging #${n}; try again in a moment.`
+  return `omo is starting work on, merging or exporting #${n}; try again in a moment.`
 }
 
 function refuse(column: Column, reason: string): Target {

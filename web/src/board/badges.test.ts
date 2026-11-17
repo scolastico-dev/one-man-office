@@ -112,10 +112,11 @@ describe('badgeFor', () => {
 })
 
 describe('captionFor', () => {
-  test('busy shows starting or merging instead of the stage', () => {
+  test('busy shows starting, merging or exporting instead of the stage', () => {
     expect(captionFor(t({ column: 'ready', busy: true }))).toBe('starting…')
     expect(captionFor(t({ column: 'review', review_stage: 'merging', busy: true }))).toBe('merging…')
     expect(captionFor(t({ column: 'review', review_stage: 'agent', busy: true }))).toBe('merging…')
+    expect(captionFor(t({ column: 'review', review_stage: 'exporting', busy: true }))).toBe('exporting…')
   })
   test('review stages and done resolutions', () => {
     expect(captionFor(t({ column: 'review', review_stage: 'agent' }))).toBe('agent review')

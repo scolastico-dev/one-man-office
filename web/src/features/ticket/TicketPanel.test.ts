@@ -195,11 +195,11 @@ test('Retry shows only with failed_step and is labelled with the step', async ()
   expect(w.get('[data-attention]').text()).toContain('Needs attention')
   expect(w.get('[data-attention]').text()).toContain('The base branch main does not exist.')
   // A refused retry shows the server's answer with the button.
-  hn.write.fn = () => refuse('conflict', 'omo is starting work on or merging #1; try again in a moment.', 409)
+  hn.write.fn = () => refuse('conflict', 'omo is starting work on, merging or exporting #1; try again in a moment.', 409)
   await action(w, 'retry').trigger('click')
   await flushPromises()
   expect(hn.sent[0]).toMatchObject({ method: 'POST', path: '/api/tickets/1/retry', body: {} })
-  expect(w.get('[data-action-error]').text()).toBe('omo is starting work on or merging #1; try again in a moment.')
+  expect(w.get('[data-action-error]').text()).toBe('omo is starting work on, merging or exporting #1; try again in a moment.')
   hn.write.fn = () => {
     throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
   }
@@ -227,7 +227,7 @@ test('Cancel and Retry are disabled with the busy reason while busy, also for a 
       ticket({ number: 6, story: 5, column: 'ready', busy: true, projects: [demo] }),
     ),
   )
-  const reason = (n: number) => `omo is starting work on or merging #${n}; try again in a moment.`
+  const reason = (n: number) => `omo is starting work on, merging or exporting #${n}; try again in a moment.`
   const { w } = await open(hn, 1)
   expect(w.get('[data-busy]').text()).toBe('omo is working on this: merging…')
   for (const id of ['retry', 'cancel']) {

@@ -203,7 +203,7 @@ describe('targets', () => {
   test('a busy card greys Planning and Ready For Dev as stop targets with the busy reason', async () => {
     await board([ticket({ number: 4, column: 'in_progress', busy: true, agents: [agent('dev')] })])
     await dragOver(4, at('planning'))
-    const reason = 'omo is starting work on or merging #4; try again in a moment.'
+    const reason = 'omo is starting work on, merging or exporting #4; try again in a moment.'
     for (const c of ['planning', 'ready'] as const) {
       expect(section(c).getAttribute('aria-disabled')).toBe('true')
       expect(section(c).querySelector('[data-reason]')!.textContent).toBe(reason)

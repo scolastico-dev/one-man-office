@@ -67,7 +67,7 @@ describe('the move menu', () => {
   test('a busy card names the busy reason; a Done card offers nothing and no reordering', async () => {
     const busy = ticket({ number: 4, column: 'in_progress', busy: true, agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] })
     const items = await open(menu(busy))
-    expect(items.find((i) => i.label === 'Planning')).toEqual({ label: 'Planning', disabled: true, hint: 'omo is starting work on or merging #4; try again in a moment.' })
+    expect(items.find((i) => i.label === 'Planning')).toEqual({ label: 'Planning', disabled: true, hint: 'omo is starting work on, merging or exporting #4; try again in a moment.' })
     mounted!.unmount()
 
     const done = ticket({ number: 2, column: 'done', resolution: 'completed', closed_at: '2026-11-15T10:00:00Z' })

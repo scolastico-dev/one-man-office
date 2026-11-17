@@ -46,11 +46,11 @@ test('cancel never sends discard_uncommitted and explains what happens to a dirt
   )
 
   // A refusal is shown in the dialog, which keeps the choice.
-  hn.write.fn = () => refuse('conflict', 'omo is starting work on or merging #1; try again in a moment.', 409)
+  hn.write.fn = () => refuse('conflict', 'omo is starting work on, merging or exporting #1; try again in a moment.', 409)
   await w.get('#cancel-form').trigger('submit')
   await flushPromises()
   expect(hn.sent[0]).toEqual({ method: 'POST', path: '/api/tickets/1/cancel', body: { delete_branch: true } })
-  expect(w.get('[data-cancel-dialog] [data-action-error]').text()).toBe('omo is starting work on or merging #1; try again in a moment.')
+  expect(w.get('[data-cancel-dialog] [data-action-error]').text()).toBe('omo is starting work on, merging or exporting #1; try again in a moment.')
   expect((w.get('input[value="delete"]').element as HTMLInputElement).checked).toBe(true)
 
   // A lost answer is not a refusal: the cancel may have happened.
