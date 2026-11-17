@@ -50,6 +50,10 @@ func (s *Server) BrowserHandler() http.Handler {
 			reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
 			return
 		}
+		if ownAuth(r.URL.Path) {
+			s.serveMCP(w, r, false)
+			return
+		}
 		switch s.opts.Config.Auth {
 		case "basic":
 			if !s.basicAuthorized(r) {

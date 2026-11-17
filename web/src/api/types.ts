@@ -283,6 +283,8 @@ export interface AgentSession {
   ended_at: string | null
   /** Only for a running agent. */
   terminal_id?: string
+  /** 'connected' once the session used omo's MCP endpoint; only the user is shown it. */
+  mcp?: 'connected'
 }
 
 export interface ApiEvent {

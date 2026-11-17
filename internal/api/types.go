@@ -434,7 +434,13 @@ type AgentSession struct {
 	// (GET /api/agents/{terminal_id}/terminal). Only the user is shown it,
 	// and only while the agent runs; it is unrelated to the session id.
 	TerminalID string `json:"terminal_id,omitempty"`
+	// MCP is MCPAgentConnected once the session used omo's MCP endpoint;
+	// only the user is shown it.
+	MCP string `json:"mcp,omitempty"`
 }
+
+// MCPAgentConnected marks an agent session that used omo's MCP endpoint.
+const MCPAgentConnected = "connected"
 
 // CEOState is the answer of GET /api/ceo and POST /api/ceo/stop.
 type CEOState struct {

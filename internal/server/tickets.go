@@ -376,6 +376,7 @@ func (s *Server) getTicketAgents(w http.ResponseWriter, r *http.Request) {
 	out, err := s.board.TicketSessions(r.Context(), a, n)
 	if err == nil && a.Role == api.RoleUser {
 		s.addTerminalIDs(out)
+		s.addMCPMarks(out)
 	}
 	reply(w, r, http.StatusOK, out, err)
 }
@@ -393,6 +394,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 	out, err := s.board.AgentSessions(r.Context(), a, live)
 	if err == nil && a.Role == api.RoleUser {
 		s.addTerminalIDs(out)
+		s.addMCPMarks(out)
 	}
 	reply(w, r, http.StatusOK, out, err)
 }

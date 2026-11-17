@@ -151,6 +151,7 @@ type Server struct {
 	token             string // login token; empty unless auth is token
 	startedAt         time.Time
 	mux               *http.ServeMux
+	mcp               mcpEndpoint // omo's MCP endpoint (mcp.go)
 
 	mu      sync.RWMutex
 	address string // primary access address without token, set by Run

@@ -44,6 +44,10 @@ func (s *Server) SocketHandler() http.Handler {
 			}
 			r = withRequestContext(r, actor, s.log)
 		}
+		if ownAuth(r.URL.Path) {
+			s.serveMCP(w, r, true)
+			return
+		}
 		if !requireJSON(w, r) {
 			return
 		}
