@@ -201,6 +201,9 @@ func TestStopWaitsForHandoffTimeout(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { stopServer = old })
+	oldRunning := serverRunning
+	serverRunning = func(context.Context) (string, bool, error) { return "http://omo.localhost:1/", true, nil }
+	t.Cleanup(func() { serverRunning = oldRunning })
 	start := time.Now()
 	out := mustExecute(t, "stop")
 	if left := deadline.Sub(start); left < 35*time.Second || left > 36*time.Second {

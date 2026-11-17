@@ -27,6 +27,9 @@ const stopGrace = 30 * time.Second
 // stopServer is the seam the stop command's tests replace.
 var stopServer = service.Stop
 
+// serverRunning is the seam that lets tests decide whether a server answers.
+var serverRunning = service.Running
+
 // detectAgentsAtFirstStart is the one switch for agent detection at a first
 // start. When true, the first start of omo on a home (no settings.yaml and no
 // profile yet) looks for claude, codex, agy and gemini on PATH and writes a
@@ -76,7 +79,11 @@ func addServerCommands(root *cobra.Command) {
 			handoff := time.Duration(settings.LoadGeneral(layout.Settings).Stop.HandoffTimeout)
 			ctx, cancel := context.WithTimeout(cmd.Context(), handoff+stopGrace)
 			defer cancel()
-			fmt.Fprintf(cmd.OutOrStdout(), "asking agents for a handoff (up to %s)...\n", handoff)
+			// Only a server that answers has agents to ask; a stop with
+			// nothing running just says so.
+			if _, running, _ := serverRunning(ctx); running {
+				fmt.Fprintf(cmd.OutOrStdout(), "asking agents for a handoff (up to %s)...\n", handoff)
+			}
 			err = stopServer(ctx)
 			if errors.Is(err, service.ErrNotRunning) {
 				fmt.Fprintln(cmd.OutOrStdout(), "omo is not running.")

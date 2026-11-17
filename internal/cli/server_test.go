@@ -43,7 +43,7 @@ func TestStopStopsServer(t *testing.T) {
 	if _, ok, _ := service.Running(context.Background()); ok {
 		t.Fatal("still running after stop")
 	}
-	if out := mustExecute(t, "stop"); !strings.Contains(out, "omo is not running.") {
+	if out := mustExecute(t, "stop"); !strings.Contains(out, "omo is not running.") || strings.Contains(out, "handoff") {
 		t.Fatalf("second stop output: %q", out)
 	}
 }
