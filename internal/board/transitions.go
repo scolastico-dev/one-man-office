@@ -296,7 +296,7 @@ func (b *Board) approve(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int)
 		}
 		if !t.inStory() && pr.base == "" {
 			return api.Errorf(api.CodeValidation,
-				"#%d has no base branch for project %q (the folder was on a detached HEAD); set one in base_branches before approving", t.ID, pr.id)
+				"#%d has no base branch for project %q (its folder was on a detached HEAD); the user sets one under Base branch in the ticket's details before approving", t.ID, pr.id)
 		}
 	}
 	if err := b.relocate(tx, a, t, api.ColumnReady, before, ActionApprove); err != nil {

@@ -16,7 +16,7 @@ func TestRefusalTextsNameNeitherColumnIdsNorRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := regexp.MustCompile(`in_progress`)
-	routes := regexp.MustCompile(`"[^"\n]*\buse /[a-z]`)
+	routes := regexp.MustCompile(`"[^"\n]*(\buse /[a-z]|\bin base_branches)`)
 	var bad []string
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {

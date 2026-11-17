@@ -277,7 +277,7 @@ func (u *update) placement() error {
 		for _, np := range u.newPs {
 			if np.base == "" {
 				return api.Errorf(api.CodeValidation,
-					"#%d is in %s and needs a base branch for project %q (the folder is on a detached HEAD); set one in base_branches",
+					"#%d is in %s and needs a base branch for project %q (its folder is on a detached HEAD); set one under Base branch in the ticket's details",
 					u.old.ID, columnWords(u.old.Col), np.id)
 			}
 		}

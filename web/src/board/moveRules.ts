@@ -51,7 +51,7 @@ function approveBlock(t: TicketSummary, ctx: RuleContext): string | undefined {
   // A task without a project needs none; a story does.
   if (t.projects.length === 0 && t.type === 'story') return 'Add a project to the story first.'
   // A task inside a story uses the story's base branch.
-  if (t.story === null && t.projects.some((p) => p.base_branch === '')) return 'Set a base branch first.'
+  if (t.story === null && t.projects.some((p) => p.base_branch === '')) return "Set the Base branch in the ticket's details first."
   for (const tp of t.projects) {
     const p = ctx.project(tp.project)
     if (p === undefined || p.missing) return `Project ${p?.name ?? tp.project} is missing.`

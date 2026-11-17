@@ -157,7 +157,7 @@ describe('dragTargets', () => {
     expect(planning.review.reason).toBe('A ticket enters Review when its agent hands it in.')
     expect(planning.done.reason).toBe('Only a review waiting for you can be dragged to Done. To close a ticket, cancel it.')
     const proj = [{ project: 'api', base_branch: '', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
-    expect(dragTargets(ticket({ projects: proj }), noContext).ready.reason).toBe('Set a base branch first.')
+    expect(dragTargets(ticket({ projects: proj }), noContext).ready.reason).toBe("Set the Base branch in the ticket's details first.")
     const withBranch = [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
     const gone: RuleContext = { ...noContext, project: () => project('missing') }
     expect(dragTargets(ticket({ projects: withBranch }), gone).ready.reason).toBe('Project api is missing.')
