@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,9 +27,13 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 )
+
+// gitOps runs every git command of the package.
+var gitOps = gitops.New()
 
 // LastRelease is the last release of the terminal omo: the one a downgrade
 // installs.
@@ -51,9 +54,9 @@ type Worktree struct {
 	Dirty bool
 	// Unknown: git could not read the worktree; it counts as dirty.
 	Unknown bool
-	// gitDir is the git folder of the repository the worktree belongs to;
-	// empty when the folder is no worktree git knows.
-	gitDir string
+	// repo is the repository the worktree belongs to; empty when the
+	// folder is no worktree git knows.
+	repo string
 }
 
 // Office is an office of the old omo that still has its .omo folder.
@@ -188,7 +191,7 @@ func findOffice(ctx context.Context, dir, data string) Office {
 		if !e.IsDir() {
 			continue
 		}
-		o.Worktrees = append(o.Worktrees, inspectWorktree(ctx, filepath.Join(data, "worktrees", e.Name())))
+		o.Worktrees = append(o.Worktrees, inspectWorktree(filepath.Join(data, "worktrees", e.Name())))
 	}
 	sort.Slice(o.Worktrees, func(i, j int) bool { return o.Worktrees[i].Path < o.Worktrees[j].Path })
 	return o
@@ -196,32 +199,31 @@ func findOffice(ctx context.Context, dir, data string) Office {
 
 // inspectWorktree reads whether git knows the folder as a worktree and
 // whether it has changes.
-func inspectWorktree(ctx context.Context, path string) Worktree {
+func inspectWorktree(path string) Worktree {
 	w := Worktree{Path: path}
 	if raw, err := homefile.Read(filepath.Join(path, ".git"), 4096); err == nil {
 		if gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir:"); ok {
-			w.gitDir = commonDir(strings.TrimSpace(gitdir))
+			w.repo = repoOf(strings.TrimSpace(gitdir))
 		}
 	}
-	if w.gitDir == "" {
+	if w.repo == "" {
 		// A plain folder: nothing of git to forget, but its files may be
 		// work nobody committed.
 		w.Dirty, w.Unknown = true, true
 		return w
 	}
-	// --no-optional-locks: reading never rewrites the worktree's index.
-	out, err := git(ctx, path, "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal")
+	files, err := gitOps.Status(w.repo, path)
 	if err != nil {
 		w.Dirty, w.Unknown = true, true
 		return w
 	}
-	w.Dirty = strings.TrimSpace(out) != ""
+	w.Dirty = len(files) > 0
 	return w
 }
 
-// commonDir turns the worktree's own git folder (.git/worktrees/<name> of
-// its repository) into the repository's git folder.
-func commonDir(gitdir string) string {
+// repoOf turns the worktree's own git folder (.git/worktrees/<name> of
+// its repository) into the repository's folder.
+func repoOf(gitdir string) string {
 	raw, err := homefile.Read(filepath.Join(gitdir, "commondir"), 4096)
 	if err != nil {
 		return ""
@@ -230,7 +232,11 @@ func commonDir(gitdir string) string {
 	if !filepath.IsAbs(common) {
 		common = filepath.Join(gitdir, common)
 	}
-	return filepath.Clean(common)
+	common = filepath.Clean(common)
+	if filepath.Base(common) == ".git" {
+		return filepath.Dir(common)
+	}
+	return common
 }
 
 // officeRunning: the old office wrote the address of its socket into
@@ -281,7 +287,7 @@ func (in Installation) Remove(ctx context.Context, say func(string)) error {
 	}
 	for _, o := range in.Offices {
 		for _, w := range o.Worktrees {
-			removeWorktree(ctx, w)
+			removeWorktree(w)
 			say("removed the worktree " + w.Path)
 		}
 		if err := os.RemoveAll(o.Data); err != nil {
@@ -308,27 +314,17 @@ func (in Installation) Remove(ctx context.Context, say func(string)) error {
 	return nil
 }
 
-// removeWorktree asks git to remove the worktree; when git cannot, the
-// folder is deleted and git told to forget worktrees whose folder is gone.
-func removeWorktree(ctx context.Context, w Worktree) {
-	if w.gitDir != "" {
-		if _, err := git(ctx, "", "--git-dir="+w.gitDir, "worktree", "remove", "--force", "--force", w.Path); err == nil {
-			return
-		}
+// removeWorktree asks git to remove the worktree (the branch stays); when
+// git refuses (a locked worktree), the folder is deleted and git told to
+// forget it.
+func removeWorktree(w Worktree) {
+	if w.repo != "" && gitOps.ForceRemoveWorktree(w.repo, w.Path) == nil {
+		return
 	}
 	_ = os.RemoveAll(w.Path)
-	if w.gitDir != "" {
-		_, _ = git(ctx, "", "--git-dir="+w.gitDir, "worktree", "prune")
+	if w.repo != "" {
+		_ = gitOps.ForceRemoveWorktree(w.repo, w.Path)
 	}
-}
-
-func git(ctx context.Context, dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	return string(out), err
 }
 
 // DisableUpdateCheck sets startup.check_self_update to false in an old
