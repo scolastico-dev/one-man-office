@@ -10,13 +10,16 @@ omo up once more, which takes a few minutes (see
 ## What happens if you just start it
 
 Both versions use the same home folder by default, `~/.local/omo`. The new omo
-refuses a home that 0.11 wrote and stops with:
+refuses a home that 0.11 wrote. Every command but a plain `omo` in a terminal
+stops with:
 
 ```text
-omo: omo: /home/you/.local/omo holds an installation of an older omo. This version cannot use it yet; set OMO_HOME to another folder.
+omo: /home/you/.local/omo holds the files of omo 0.11 or older. Start omo in a terminal to choose what happens to them, or set OMO_HOME to another folder
 ```
 
-It changes nothing in that folder.
+Without a terminal it changes nothing in that folder. Started in a terminal, it
+lists what the old omo left and lets you choose between deleting it and
+starting fresh, going back to the last terminal release, or quitting.
 
 ## Steps
 

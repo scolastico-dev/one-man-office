@@ -16,7 +16,7 @@ ended agent's log is also on the ticket's Agents tab (**Show log**).
 
 | Message | What to do |
 |---|---|
-| `omo: omo: /home/you/.local/omo holds an installation of an older omo. This version cannot use it yet; set OMO_HOME to another folder.` | The home belongs to omo 0.11. See [Upgrading from 0.11](upgrading-from-0.11.md). |
+| `omo: /home/you/.local/omo holds the files of omo 0.11 or older. Start omo in a terminal to choose what happens to them, or set OMO_HOME to another folder` | The home belongs to omo 0.11. See [Upgrading from 0.11](upgrading-from-0.11.md). |
 | `omo needs git 2.38 or newer (found 2.34)` | Update git. |
 | `listen on 127.0.0.1:8090: … address already in use` | Another program (or another omo home) uses the port: `omo config set port 18090`. |
 | `omo is already running: http://…` | Not an error: this home's omo runs already; open that address. |
