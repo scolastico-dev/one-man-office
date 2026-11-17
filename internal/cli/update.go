@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/scolastico-dev/one-man-office/internal/selfupdate"
+	"github.com/scolastico-dev/one-man-office/internal/service"
 )
 
 var (
@@ -86,5 +87,10 @@ func installUpdate(cmd *cobra.Command, currentVersion, requestedVersion string) 
 		return fmt.Errorf("update: %w", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "updated omo to %s\n", release.Tag)
+	// A running server keeps the program it started with, while its agents
+	// already call the new one by name.
+	if _, running, _ := service.Running(cmd.Context()); running {
+		fmt.Fprintln(cmd.OutOrStdout(), "omo is running with the version it started with: restart it (omo stop, then omo) to use the new one.")
+	}
 	return nil
 }

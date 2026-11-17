@@ -78,6 +78,23 @@ func TestUpdateInstallsNewerLatestRelease(t *testing.T) {
 	}
 }
 
+func TestUpdateWhileTheServerRunsSaysToRestartIt(t *testing.T) {
+	restoreUpdateHooks(t)
+	startRoot(t)
+	latestRelease = func(context.Context) (selfupdate.Release, error) {
+		return selfupdate.Release{Tag: "v1.1.0"}, nil
+	}
+	installRelease = func(context.Context, selfupdate.Release, string) error { return nil }
+	currentExecutable = func() (string, error) { return filepath.Join(t.TempDir(), "omo"), nil }
+	cmd, out := updateCommand("v1.0.0", "update")
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "restart it (omo stop, then omo)") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
 func TestUpdateRejectsCheckWithExplicitVersion(t *testing.T) {
 	cmd, _ := updateCommand("v1.0.0", "update", "--check", "--version", "v1.1.0")
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "none of the others") {
@@ -94,8 +111,11 @@ func updateCommand(version string, args ...string) (*cobra.Command, *bytes.Buffe
 	return cmd, out
 }
 
+// restoreUpdateHooks also gives the test a home of its own: an update looks
+// whether a server of the home runs.
 func restoreUpdateHooks(t *testing.T) {
 	t.Helper()
+	isolate(t)
 	oldLatest, oldByTag, oldInstall, oldExecutable := latestRelease, releaseByTag, installRelease, currentExecutable
 	t.Cleanup(func() {
 		latestRelease, releaseByTag, installRelease, currentExecutable = oldLatest, oldByTag, oldInstall, oldExecutable
