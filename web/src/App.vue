@@ -4,7 +4,8 @@
 // Once the board was shown, it stays mounted under the other screens, hidden
 // and inert, so a lock (a refused token, also in answer to a save) loses no
 // draft: after the unlock it is shown again as it was. A terminal's own
-// window (`/terminal/…`) is kept the same way in place of the board.
+// window (`/terminal/…`) and the OAuth consent page (`/oauth/authorize`) are
+// kept the same way in place of the board.
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { lazyComponent } from './components/ui/chunkFailure'
@@ -19,6 +20,8 @@ import { provideBoard } from './store'
 
 /** One terminal alone in its own window; fetched only there. */
 const TerminalWindow = lazyComponent(() => import('./features/terminal/TerminalWindow.vue'))
+/** The OAuth consent page of the MCP endpoint; fetched only there. */
+const OAuthConsent = lazyComponent(() => import('./features/oauth/OAuthConsent.vue'))
 
 /** How long the loading line waits, so a quick start shows no flash of it. */
 const LOADING_DELAY_MS = 400
@@ -30,6 +33,7 @@ const { phase, lockReason, problem } = session
 const route = useRoute()
 const sample = computed(() => route.name === 'sample')
 const terminalWindow = computed(() => route.name === 'terminal')
+const consentPage = computed(() => route.name === 'oauth-consent')
 watch(
   sample,
   (s) => {
@@ -88,6 +92,7 @@ onBeforeUnmount(() => {
       data-board-kept
     >
       <TerminalWindow v-if="terminalWindow" />
+      <OAuthConsent v-else-if="consentPage" />
       <LiveBoard v-else />
     </div>
     <template v-if="!boardShown">

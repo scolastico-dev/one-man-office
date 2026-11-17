@@ -17,7 +17,8 @@ export interface AppRouterOptions {
  * `/ticket/<n>` ticket #n on a page of its own in place of the board's columns,
  * `/settings/<section>` the settings in place of the board (`/settings` alone:
  * the section list), `/terminal/agent/<id>` and `/terminal/user/<id>` one
- * terminal alone (its own window), and, in development only, `/__sample` the sample board.
+ * terminal alone (its own window), `/oauth/authorize` the consent page of a
+ * program that asks for access to omo's MCP endpoint, and, in development only, `/__sample` the sample board.
  * Any other address shows the board, keeping its query. No address ever
  * carries the login token. Addresses are built in `locations.ts`.
  */
@@ -29,6 +30,8 @@ export function createAppRouter(o: AppRouterOptions = {}): Router {
     { path: '/settings/:section?', name: 'settings', component: lazyRoute(() => import('./features/settings/SettingsView.vue'), SettingsRouteFailed) },
     // One terminal in a window of its own; the app shows it in place of the board.
     { path: '/terminal/:kind(agent|user)/:id', name: 'terminal', component: Nothing },
+    // The OAuth consent page of omo's MCP endpoint; the app shows it in place of the board.
+    { path: '/oauth/authorize', name: 'oauth-consent', component: Nothing },
   ]
   if (import.meta.env.DEV) {
     routes.push({ path: '/__sample', name: 'sample', component: lazyRoute(() => import('./sample/SampleApp.vue')) })
