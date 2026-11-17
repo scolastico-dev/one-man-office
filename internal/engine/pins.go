@@ -146,15 +146,28 @@ func (s *pinStore) save() error {
 	return os.Rename(tmp, s.path)
 }
 
-// reviewed returns the commits handed in for round of ticket, by project;
-// nil when none are recorded.
+// reviewed returns a copy of the commits handed in for round of ticket, by
+// project; nil when none are recorded.
 func (s *pinStore) reviewed(ticket int64, round int) (map[string]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.load(); err != nil {
 		return nil, err
 	}
-	return s.data.Reviewed[reviewKey(ticket, round)], nil
+	return copyCommits(s.data.Reviewed[reviewKey(ticket, round)]), nil
+}
+
+// copyCommits returns a copy of commits, nil for nil: the store changes its
+// own maps under its lock, so none leaves it or is taken in as it is.
+func copyCommits(commits map[string]string) map[string]string {
+	if commits == nil {
+		return nil
+	}
+	out := make(map[string]string, len(commits))
+	for k, v := range commits {
+		out[k] = v
+	}
+	return out
 }
 
 // setReviewed records the commits handed in for round of ticket.
@@ -164,7 +177,7 @@ func (s *pinStore) setReviewed(ticket int64, round int, commits map[string]strin
 	if err := s.load(); err != nil {
 		return err
 	}
-	s.data.Reviewed[reviewKey(ticket, round)] = commits
+	s.data.Reviewed[reviewKey(ticket, round)] = copyCommits(commits)
 	return s.save()
 }
 

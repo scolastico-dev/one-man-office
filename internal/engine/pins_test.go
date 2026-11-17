@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -401,5 +402,34 @@ func TestCleanSubjectAndCodeSpan(t *testing.T) {
 		if got := showPath(in); got != want {
 			t.Errorf("showPath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// What the store hands out and takes in is a copy: the engine reads and
+// walks the commits of a round while another goroutine removes a project
+// from the same record.
+func TestPinStoreKeepsItsOwnCopyOfTheReviewedCommits(t *testing.T) {
+	s := &pinStore{path: filepath.Join(t.TempDir(), pinsFile)}
+	in := map[string]string{"a": "1", "b": "2"}
+	if err := s.setReviewed(7, 1, in); err != nil {
+		t.Fatal(err)
+	}
+	in["c"] = "3"
+	got, err := s.reviewed(7, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("a later change of the map handed in reached the store: %v", got)
+	}
+	got["a"] = "changed"
+	if err := s.forgetProject(7, "b"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["b"] != "2" {
+		t.Fatalf("a project removed from the store changed a map read before: %v", got)
+	}
+	if again, _ := s.reviewed(7, 1); len(again) != 1 || again["a"] != "1" {
+		t.Fatalf("a change of a map read before reached the store: %v", again)
 	}
 }
