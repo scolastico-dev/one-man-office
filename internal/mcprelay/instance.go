@@ -493,7 +493,12 @@ func (i *instance) closeProcess() {
 	case <-time.After(i.pool.t.stopWait):
 	}
 	i.proc.group.close()
-	<-i.proc.exited
+	select {
+	case <-i.proc.exited:
+	case <-time.After(i.pool.t.stopWait):
+		// Nothing could end the process; a stop must not hang on it.
+		i.st.log.printf("the process did not end after it was killed")
+	}
 	i.proc.stdout.Close()
 }
 
