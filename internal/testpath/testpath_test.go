@@ -43,6 +43,7 @@ func TestOnlyKnownTestsBuildAndStartOmo(t *testing.T) {
 	known := map[string]bool{
 		"cmd/omo/smoke_test.go":              true, // starts omo: uses testpath
 		"web/e2e/fakeagent/main_test.go":     true, // builds the scripted fake agent only
+		"web/e2e/fakemcp/main_test.go":       true, // builds the scripted fake MCP server only
 		"internal/testpath/testpath_test.go": true,
 	}
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
