@@ -28,7 +28,7 @@ const def = sectionDef('general')
 const form = useGeneralForm(['ceo', 'merge_defaults', 'ui', 'branches'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'branches.template', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'ui.screen_reader_mode', 'branches.template', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
 
 // The example name of the branch template, asked from the server while the user types, so it follows
@@ -124,6 +124,12 @@ function chooseTheme(choice: string) {
         />
         <p v-if="err('ui.open_tickets_as_page')" class="omo-field__error" data-field-error>
           {{ err('ui.open_tickets_as_page') }}
+        </p>
+      </FormSection>
+      <FormSection legend="Accessibility" description="For every terminal in every browser. Screen reader software gets a text copy of the terminal output; nothing changes visibly." data-accessibility-section>
+        <Toggle v-model="draft.ui.screen_reader_mode" label="Screen reader mode for terminals" data-field="ui.screen_reader_mode" />
+        <p v-if="err('ui.screen_reader_mode')" class="omo-field__error" data-field-error>
+          {{ err('ui.screen_reader_mode') }}
         </p>
       </FormSection>
       <FormSection legend="Branches" description="How omo names the branch it creates for a ticket. Branches that already exist keep their names." data-branches-section>

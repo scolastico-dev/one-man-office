@@ -56,6 +56,43 @@ test.describe('keys', () => {
   })
 })
 
+test.describe('screen reader setting', () => {
+  test.use({ viewport: { width: 1440, height: 900 }, omoOptions: seed })
+
+  test('the toolbar has no toggle; the setting switches xterm accessibility tree on in an open terminal', async ({ page, omo }) => {
+    writeFileSync(join(omo.home, '.zshrc'), '')
+    try {
+      await openBoard(page, omo)
+      const terminal = await openShell(page, sidebar(page))
+      await expect(sidebar(page).getByRole('switch', { name: 'Screen reader mode' })).toHaveCount(0)
+      await expect(terminal.locator('.xterm-accessibility')).toHaveCount(0)
+      const read = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/settings')
+      await omo.api('PATCH', '/api/settings', { ui: { screen_reader_mode: true } })
+      await read
+      await expect(terminal.locator('.xterm-accessibility')).toHaveCount(1)
+      await omo.api('PATCH', '/api/settings', { ui: { screen_reader_mode: false } })
+      await expect(terminal.locator('.xterm-accessibility')).toHaveCount(0)
+    } finally {
+      await closeShells(omo)
+    }
+  })
+
+  for (const scheme of ['dark', 'light'] as const) {
+    test(`the General page switches it (${scheme})`, async ({ page, omo }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await openBoard(page, omo)
+      await page.goto(omo.url('/settings/general'))
+      const sw = page.getByRole('switch', { name: 'Screen reader mode for terminals' })
+      await expect(sw).toHaveAttribute('aria-checked', 'false')
+      await sw.click()
+      await page.getByRole('button', { name: /^Save/ }).click()
+      await expect(sw).toHaveAttribute('aria-checked', 'true')
+      expect((await omo.api<{ settings: { ui: { screen_reader_mode: boolean } } }>('GET', '/api/settings')).settings.ui.screen_reader_mode).toBe(true)
+      if (SHOTS) await page.getByText('Accessibility').first().scrollIntoViewIfNeeded().then(() => page.screenshot({ path: join(SHOTS, `fix6-screenreader-setting-${scheme}.png`) }))
+    })
+  }
+})
+
 test.describe('mobile sidebar title', () => {
   test.use({ viewport: { width: 390, height: 800 }, omoOptions: seed })
 

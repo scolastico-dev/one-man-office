@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createTokenStore } from '../../auth/token'
 import { createSession, SESSION, type Session } from '../../session'
-import { FakeOmo } from '../../testing/fakeOmo'
+import { FakeOmo, general as FAKE_GENERAL } from '../../testing/fakeOmo'
 
 const h = vi.hoisted(() => ({
   terms: [] as any[],
@@ -290,19 +290,17 @@ describe('TerminalView', () => {
     expect(w.find('img').exists()).toBe(false)
   })
 
-  test('the screen reader toggle is remembered and reaches the emulator', async () => {
-    const w = view()
-    expect(term().options.screenReaderMode).toBe(false)
-    await w.find('[role="switch"]').trigger('click')
+  test('the global screen reader setting reaches the emulator and a change applies live; the toolbar has no toggle', async () => {
+    const session = sessionWith()
+    const general = (on: boolean) => ({ ...FAKE_GENERAL, ui: { ...FAKE_GENERAL.ui, screen_reader_mode: on } })
+    ;(session.store.state as { general: unknown }).general = general(true)
+    const w = view({}, session)
     expect(term().options.screenReaderMode).toBe(true)
-    expect(window.localStorage.getItem('omo.terminal.screenReader')).toBe('1')
     expect(w.find('[role="switch"]').exists()).toBe(false)
     ;(session.store.state as { general: unknown }).general = general(false)
     await nextTick()
     expect(term().options.screenReaderMode).toBe(false)
     expect(window.localStorage.getItem('omo.terminal.screenReader')).toBeNull()
-    expect(view().vm).toBeTruthy()
-    expect(term().options.screenReaderMode).toBe(true)
   })
 
   test('a size is sent on mount and the box resizing is debounced', async () => {
@@ -558,6 +556,24 @@ describe('clipboard', () => {
     allow = true
     expect(term().keyHandler(key({ key: 'b' }))).toBe(true)
     expect(copiedTexts).toEqual(['later', 'next key'])
+  })
+
+  test('Shift+Enter and Ctrl+Enter send ESC CR, once and without the plain CR; Enter and Alt+Enter stay with the emulator', () => {
+    view()
+    const send = h.conns[0].send
+    for (const mods of [{ shiftKey: true }, { ctrlKey: true }]) {
+      send.mockClear()
+      const down = key({ key: 'Enter', code: 'Enter', ...mods })
+      expect(term().keyHandler(down)).toBe(false)
+      expect(down.defaultPrevented).toBe(true)
+      // The keypress that follows must not reach the emulator either.
+      expect(term().keyHandler(new KeyboardEvent('keypress', { key: 'Enter', ...mods }))).toBe(false)
+      expect(send.mock.calls).toEqual([['\x1b\r']])
+    }
+    send.mockClear()
+    expect(term().keyHandler(key({ key: 'Enter', code: 'Enter' }))).toBe(true)
+    expect(term().keyHandler(key({ key: 'Enter', code: 'Enter', altKey: true }))).toBe(true)
+    expect(send).not.toHaveBeenCalled()
   })
 
   test('Ctrl+C with a selection copies it, clears it and does not interrupt; without one it is the interrupt', () => {

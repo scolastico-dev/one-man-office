@@ -435,6 +435,8 @@ export interface CEOSettings {
 export interface UISettings {
   /** A click on a ticket opens its page instead of the panel over the board. */
   open_tickets_as_page: boolean
+  /** Screen reader software gets a text copy of the output of every terminal. */
+  screen_reader_mode: boolean
 }
 
 export interface BranchSettings {

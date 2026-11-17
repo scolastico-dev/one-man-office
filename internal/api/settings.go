@@ -101,6 +101,9 @@ type UISettings struct {
 	// OpenTicketsAsPage makes a click on a ticket open its own page instead
 	// of the panel over the board.
 	OpenTicketsAsPage bool `yaml:"open_tickets_as_page" json:"open_tickets_as_page"`
+	// ScreenReaderMode gives screen reader software a text copy of the
+	// output of every terminal in the web app; nothing changes visibly.
+	ScreenReaderMode bool `yaml:"screen_reader_mode" json:"screen_reader_mode"`
 }
 
 // CEOSettings switches the CEO agent and its powers.

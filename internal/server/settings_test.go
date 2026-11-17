@@ -1279,6 +1279,25 @@ func TestPatchOpenTicketsAsPage(t *testing.T) {
 	}
 }
 
+func TestPatchScreenReaderMode(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	if got := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil)).Settings; got.UI.ScreenReaderMode {
+		t.Fatal("ui.screen_reader_mode is on in a fresh home")
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"ui": map[string]any{"screen_reader_mode": true}}).StatusCode, http.StatusOK)
+	if !s.settings.General().UI.ScreenReaderMode || s.settings.General().UI.OpenTicketsAsPage {
+		t.Fatal("the patch did not switch only the screen reader mode on")
+	}
+	if !strings.Contains(readFile(t, s, "settings.yaml"), "screen_reader_mode: true") {
+		t.Fatal("settings.yaml does not hold the key")
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"ui": map[string]any{"screen_reader_mode": "yes"}}).StatusCode, http.StatusBadRequest)
+	if !s.settings.General().UI.ScreenReaderMode {
+		t.Fatal("a refused patch changed the setting")
+	}
+}
+
 func TestPatchBranchTemplate(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)

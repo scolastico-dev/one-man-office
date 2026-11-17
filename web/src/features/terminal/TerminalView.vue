@@ -5,7 +5,6 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
-import Toggle from '../../components/ui/Toggle.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
@@ -16,8 +15,8 @@ import { uploadTerminalImage } from '../../api/endpoints'
 import { MAX_IMAGE_BYTES } from '../images/imageUploads'
 import { createLinkHandler, openLink } from './terminalLinks'
 import { cleanPaste, guardPaste } from './terminalPaste'
-import { lineBreakKey } from './terminalKeys'
 import { clipboardKey, execCopy, parseOsc52, writeClipboard } from './terminalClipboard'
+import { lineBreakKey } from './terminalKeys'
 import { isImageFile, pastedPaths } from './terminalImages'
 import { usePopouts } from './popout'
 import { targetOfSrc, windowPathOf, type WindowSizeKind } from './terminalTarget'
@@ -67,7 +66,6 @@ function popOut(): void {
 
 const emit = defineEmits<{ state: [state: ConnectionState] }>()
 
-const SCREEN_READER_KEY = 'omo.terminal.screenReader'
 const RESIZE_DEBOUNCE_MS = 100
 /**
  * A program may set the clipboard (OSC 52) only this long after the user's
@@ -87,7 +85,6 @@ const screen = ref<HTMLElement | null>(null)
 const state = ref<ConnectionState>('connecting')
 const retryMs = ref<number | undefined>(undefined)
 const inputError = ref('')
-const screenReader = ref(readScreenReader())
 /** The size last sent to the process, rows x columns (a hook for tests). */
 const sentSize = ref('')
 
@@ -171,14 +168,14 @@ function clipboardKeyPressed(t: Terminal, ev: KeyboardEvent): boolean | undefine
     }
     if (action === 'copy-clear') t.clearSelection()
   }
+  return false
+}
+
 /** Typed input on its way to the program. */
 function sendInput(data: string): void {
   if (props.readonly || state.value === 'ended' || replaying > 0) return
   inputError.value = ''
   connection?.send(data)
-}
-
-  return false
 }
 
 /** Images dropped or pasted into the terminal: stored by omo, their paths pasted. */
@@ -280,21 +277,10 @@ function openPendingLink(): void {
   if (link) openLink(link.url)
 }
 
-function readScreenReader(): boolean {
-  try {
-    return window.localStorage.getItem(SCREEN_READER_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
+/** The global setting: screen reader software gets a text copy of the output (settings, General). */
+const screenReader = computed(() => session.store.state.general?.ui.screen_reader_mode === true)
 watch(screenReader, (on) => {
   if (term) term.options.screenReaderMode = on
-  try {
-    window.localStorage.setItem(SCREEN_READER_KEY, on ? '1' : '0')
-  } catch {
-    // Not remembered; the toggle still works for this page.
-  }
 })
 
 const stateText = (): string => {
@@ -479,6 +465,17 @@ function start(el: HTMLElement): void {
     }
     const clip = clipboardKeyPressed(t, ev)
     if (clip !== undefined) return clip
+    const lineBreak = lineBreakKey(ev)
+    if (lineBreak !== null) {
+      // xterm would send a plain CR (a submit); the keypress that follows is
+      // swallowed as well.
+      if (ev.type === 'keydown') {
+        ev.preventDefault()
+        copyPendingNow()
+        sendInput(lineBreak)
+      }
+      return false
+    }
     if (ev.type === 'keydown') copyPendingNow()
     return true
   })

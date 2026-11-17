@@ -11,7 +11,7 @@ const general: General = {
   limits: { tasks: 4, stories: 2 },
   ceo: { enabled: false, may_approve_stories: false },
   tasks: { require_user_release: false },
-  ui: { open_tickets_as_page: false },
+  ui: { open_tickets_as_page: false, screen_reader_mode: false },
   branches: { template: 'omo/{slug}' },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },

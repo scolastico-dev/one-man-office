@@ -60,7 +60,7 @@ test('turning the CEO off asks first; turning it on does not', async () => {
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
-    ui: { open_tickets_as_page: false },
+    ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
   })
 })
@@ -75,7 +75,7 @@ test("turning the CEO on asks nothing and only sends the page's keys", async () 
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: true, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
-    ui: { open_tickets_as_page: false },
+    ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
   })
 })
@@ -102,7 +102,7 @@ test('the merge defaults are one group of three selects, saved with the page', a
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
-    ui: { open_tickets_as_page: false },
+    ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
   })
 })
@@ -132,9 +132,21 @@ test('opening tickets on their own page is a switch, off by default, saved with 
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
-    ui: { open_tickets_as_page: true },
+    ui: { open_tickets_as_page: true, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
   })
+})
+
+test('screen reader mode is a global switch, off by default, saved with the page', async () => {
+  const h = await mountPage(false)
+  const sw = w!.get('[data-field="ui.screen_reader_mode"]')
+  expect(sw.attributes('role')).toBe('switch')
+  expect(sw.attributes('aria-checked')).toBe('false')
+  expect(w!.get('[data-accessibility-section]').text()).toContain('text copy of the terminal output')
+  await sw.trigger('click')
+  await save().trigger('click')
+  await flushPromises()
+  expect((h.sent.find((s) => s.method === 'PATCH')!.body as { ui: unknown }).ui).toEqual({ open_tickets_as_page: false, screen_reader_mode: true })
 })
 
 const link = () => w!.find('[data-server-facts] a')
