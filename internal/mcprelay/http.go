@@ -42,7 +42,7 @@ func (i *instance) httpTransport() (mcp.Transport, error) {
 		}
 		i.ts = ts
 	}
-	hc := &http.Client{Transport: &upstreamTransport{inst: i, base: i.pool.base}}
+	hc := &http.Client{Transport: &upstreamTransport{inst: i, base: i.pool.base, origin: u}, CheckRedirect: sameOriginRedirect}
 	if i.cfg.Transport == api.MCPTransportSSE {
 		return &mcp.SSEClientTransport{Endpoint: i.cfg.URL, HTTPClient: hc, MaxEventSize: i.pool.t.maxMessage}, nil
 	}
@@ -57,13 +57,23 @@ func (i *instance) usesOAuth() bool {
 // expanded and the header command's output) and its OAuth access token on
 // every request. Whatever authorization the request carried is removed
 // first, so nothing of the client that reached omo can travel upstream.
+// A request to another origin than the server's address (an SSE server's
+// message endpoint elsewhere) is refused, so omo's credentials never
+// leave the server's host.
 type upstreamTransport struct {
-	inst *instance
-	base http.RoundTripper
+	inst   *instance
+	base   http.RoundTripper
+	origin *url.URL
 }
+
+// errOtherOrigin refuses a request the server sent to another host.
+var errOtherOrigin = errors.New("the server sent omo to another host or from https to http, which omo refuses")
 
 func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	i := t.inst
+	if !sameOrigin(t.origin, req.URL) {
+		return nil, errOtherOrigin
+	}
 	resp, err := t.send(req)
 	if err != nil {
 		return nil, err
