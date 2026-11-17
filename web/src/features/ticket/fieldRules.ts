@@ -106,7 +106,10 @@ export function supervisorOptions(t: TicketSummary, ctx: FieldContext): Role[] {
 export const SUPERVISOR_LABEL: Record<string, string> = { user: 'You', ceo: 'CEO', pm: 'Product manager', developer: 'Developer', reviewer: 'Reviewer', system: 'omo' }
 export const REVIEW_LABEL: Record<Review, string> = { skipped: 'Skipped', agent: 'Agent', human: 'Human', agent_then_human: 'Agent, then human' }
 export const WHEN_LABEL: Record<WhenApproved, string> = { merge: 'Merge locally', export: 'Export as a pull request' }
-export const RELEASE_LABEL: Record<TaskRelease, string> = { agents: 'Agents release tasks', user: 'You release tasks' }
+export const RELEASE_LABEL: Record<TaskRelease, string> = { agents: 'The product manager or the CEO', user: 'You' }
+
+/** Names of settings that the Create dialog, the ticket details and the settings pages all show. */
+export const SETTING_LABEL = { taskRelease: 'Tasks are released by', maxParallel: 'Max parallel tasks' } as const
 
 /** Shown for a story whose review does not run the full test suite. */
 export const FULL_SUITE_NOTE = 'No agent runs the full test suite for this story.'

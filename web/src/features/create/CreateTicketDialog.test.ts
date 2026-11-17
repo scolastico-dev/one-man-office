@@ -7,6 +7,7 @@ import { ticket } from '../board/testing'
 import CreateTicketDialog from './CreateTicketDialog.vue'
 import { harness, mountWith, ok, refuse, type Harness } from './dialogTesting'
 import { STORY_TEMPLATE } from './createRules'
+import { RELEASE_LABEL, REVIEW_LABEL, SETTING_LABEL, WHEN_LABEL } from '../ticket/fieldRules'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -150,16 +151,16 @@ test('a task in a story shows the default of tasks in a story, a standalone task
   }
 })
 
-test('an empty supervisor reads as the server default; Me sends user', async () => {
+test('an empty supervisor reads as the server default; You sends user', async () => {
   const h = await harness(TWO)
   h.respond.write = () => ok({ ...ticket({ number: 7 }), description: '' })
   const w = await open(h)
   const labels = () => w.findAll('select[name="supervisor"] option').map((o) => o.text())
-  expect(labels()).toEqual(['Default (Me)', 'Me'])
+  expect(labels()).toEqual(['Default (You)', 'You'])
   await input(w, 'title').setValue('Plain')
   await submit(w)
   expect(h.sent[0]?.body).not.toHaveProperty('supervisor')
-  // Me is an explicit choice, so a task in a story does not get the product manager.
+  // You is an explicit choice, so a task in a story does not get the product manager.
   await w.setProps({ open: false })
   await w.setProps({ open: true })
   await input(w, 'title').setValue('Mine')
@@ -178,7 +179,7 @@ test('the supervisor default of a task in a story is the product manager, and ev
     { id: 'claude/hidden', profile: 'claude', name: 'hidden', cli: 'claude', description: '', selectable: false },
   ]
   const w = await open(h, { initialStory: 1 })
-  expect(w.findAll('select[name="supervisor"] option').map((o) => o.text())).toEqual(['Default (Product manager)', 'Me', 'Product manager'])
+  expect(w.findAll('select[name="supervisor"] option').map((o) => o.text())).toEqual(['Default (Product manager)', 'You', 'Product manager'])
   expect(w.findAll('select[name="model"] option').map((o) => o.text())).toEqual([
     "Default (the role's model)",
     'claude/sonnet',
@@ -478,4 +479,16 @@ test('with eight projects or fewer there is no filter', async () => {
   const h = await harness(TWO)
   const w = await open(h)
   expect(w.find('[data-project-filter]').exists()).toBe(false)
+})
+
+test('the optional settings are worded as in the ticket details and the settings pages', async () => {
+  const h = await harness(TWO)
+  const w = await open(h)
+  const options = (name: string) => w.findAll(`select[name="${name}"] option`).map((o) => o.text())
+  expect(options('review').slice(1)).toEqual(Object.values(REVIEW_LABEL))
+  expect(options('when_approved').slice(1)).toEqual(Object.values(WHEN_LABEL))
+  expect(options('task_release').slice(1)).toEqual(Object.values(RELEASE_LABEL))
+  const label = (field: string) => w.get(`[data-field="${field}"] label`).text()
+  expect(label('task_release')).toBe(SETTING_LABEL.taskRelease)
+  expect(label('max_parallel')).toBe(SETTING_LABEL.maxParallel)
 })

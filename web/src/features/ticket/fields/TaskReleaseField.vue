@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TaskRelease, TicketSummary } from '../../../api/types'
-import { RELEASE_LABEL, type FieldState } from '../fieldRules'
+import { RELEASE_LABEL, SETTING_LABEL, type FieldState } from '../fieldRules'
 import ChoiceField from './ChoiceField.vue'
 import { useGeneral } from './useGeneral'
 
@@ -26,7 +26,7 @@ const defaultWords = computed(() => {
     :ticket="ticket"
     :state="state"
     field="task_release"
-    label="Tasks released by"
+    :label="SETTING_LABEL.taskRelease"
     patch-key="task_release"
     :current="ticket.task_release ?? ''"
     :default-words="defaultWords"

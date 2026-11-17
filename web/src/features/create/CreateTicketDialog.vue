@@ -7,6 +7,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { openTicketLocation } from '../ticket/openTicket'
+import { RELEASE_LABEL, REVIEW_LABEL, SETTING_LABEL, WHEN_LABEL } from '../ticket/fieldRules'
 import { createTicket, listModels } from '../../api/endpoints'
 import type { Model, Review, Role, TaskRelease, WhenApproved } from '../../api/types'
 import SelectField, { type SelectOption } from '../../components/ui/SelectField.vue'
@@ -162,9 +163,6 @@ const storyValue = computed({
   },
 })
 
-const REVIEW_LABEL: Record<Review, string> = { skipped: 'Skipped', agent: 'Agent', human: 'Human', agent_then_human: 'Agent then human' }
-const APPROVED_LABEL: Record<WhenApproved, string> = { merge: 'Merge locally', export: 'Export as pull request' }
-const RELEASE_LABEL: Record<TaskRelease, string> = { agents: 'Agents release tasks', user: 'I release tasks' }
 
 const reviewOptions = computed<SelectOption[]>(() => {
   const effective = general.value?.review_defaults[defaultKind({ type: form.type, story: isTask.value ? form.story : null })]
@@ -176,8 +174,8 @@ const reviewOptions = computed<SelectOption[]>(() => {
 const approvedOptions = computed<SelectOption[]>(() => {
   const effective = general.value?.when_approved_defaults[defaultKind({ type: form.type, story: isTask.value ? form.story : null })]
   return [
-    { value: '', label: effective ? `Default (${APPROVED_LABEL[effective]})` : 'Default' },
-    ...(Object.keys(APPROVED_LABEL) as WhenApproved[]).map((w) => ({ value: w, label: APPROVED_LABEL[w] })),
+    { value: '', label: effective ? `Default (${WHEN_LABEL[effective]})` : 'Default' },
+    ...(Object.keys(WHEN_LABEL) as WhenApproved[]).map((w) => ({ value: w, label: WHEN_LABEL[w] })),
   ]
 })
 const releaseOptions = computed<SelectOption[]>(() => {
@@ -190,8 +188,8 @@ const releaseOptions = computed<SelectOption[]>(() => {
 const supervisorOptions = computed<SelectOption[]>(() => {
   // Left empty the server picks: the story's product manager for a task in a story, otherwise the creator (you).
   const out: SelectOption[] = [
-    { value: '', label: `Default (${inStory(form) ? 'Product manager' : 'Me'})` },
-    { value: 'user', label: 'Me' },
+    { value: '', label: `Default (${inStory(form) ? 'Product manager' : 'You'})` },
+    { value: 'user', label: 'You' },
   ]
   if (general.value?.ceo.enabled) out.push({ value: 'ceo', label: 'CEO' })
   if (inStory(form)) out.push({ value: 'pm', label: 'Product manager' })
@@ -396,7 +394,7 @@ function keepEditing() {
               <div data-field="task_release">
                 <SelectField
                   :model-value="form.taskRelease"
-                  label="Task release"
+                  :label="SETTING_LABEL.taskRelease"
                   name="task_release"
                   :options="releaseOptions"
                   hint="Who sets the story's tasks to Ready For Dev."
@@ -407,7 +405,7 @@ function keepEditing() {
               <div data-field="max_parallel">
                 <TextField
                   v-model="form.maxParallel"
-                  label="Max parallel tasks"
+                  :label="SETTING_LABEL.maxParallel"
                   name="max_parallel"
                   inputmode="numeric"
                   autocomplete="off"

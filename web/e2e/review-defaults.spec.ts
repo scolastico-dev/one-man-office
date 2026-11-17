@@ -67,7 +67,7 @@ test('task review Human: a new task shows "Default (Human)" in its panel and res
   await page.keyboard.press('Escape')
   const story = await omo.createTicket({ title: 'A story', type: 'story' })
   await card(page, story).locator('[data-card-link]').click()
-  await expect(field(page, 'task_release')).toContainText('Default (You release tasks)')
+  await expect(field(page, 'task_release')).toContainText('Default (You)')
 })
 
 test('the story note shows for Skipped and Human and goes for Agent', async ({ page, omo }) => {

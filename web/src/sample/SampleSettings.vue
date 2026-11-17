@@ -141,11 +141,11 @@ const REVIEW_OPTIONS = [
   { value: 'skipped', label: 'Skipped' },
   { value: 'agent', label: 'Agent' },
   { value: 'human', label: 'Human' },
-  { value: 'agent_then_human', label: 'Agent then human' },
+  { value: 'agent_then_human', label: 'Agent, then human' },
 ]
 const APPROVED_OPTIONS = [
   { value: 'merge', label: 'Merge locally' },
-  { value: 'pull_request', label: 'Export as pull request' },
+  { value: 'pull_request', label: 'Export as a pull request' },
 ]
 const RELEASE_OPTIONS = [
   { value: 'agents', label: 'The product manager or the CEO' },

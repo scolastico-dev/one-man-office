@@ -4,11 +4,11 @@
 // tasks without a story and tasks in a story, and who releases a story's
 // tasks. A task in a story always merges into the story's branch.
 import { computed } from 'vue'
-import type { Review, WhenApproved } from '../../../api/types'
+import type { Review, TaskRelease, WhenApproved } from '../../../api/types'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
 import TextField from '../../../components/ui/TextField.vue'
-import { REVIEW_LABEL, WHEN_LABEL } from '../../ticket/fieldRules'
+import { RELEASE_LABEL, REVIEW_LABEL, SETTING_LABEL, WHEN_LABEL } from '../../ticket/fieldRules'
 import { useGeneralForm } from '../general/generalForms'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
@@ -38,10 +38,7 @@ const REVIEW_OPTIONS = (Object.keys(REVIEW_LABEL) as Review[]).map((value) => ({
   label: REVIEW_LABEL[value],
 }))
 const APPROVED_OPTIONS = (Object.keys(WHEN_LABEL) as WhenApproved[]).map((value) => ({ value, label: WHEN_LABEL[value] }))
-const RELEASE_OPTIONS = [
-  { value: 'agents', label: 'The product manager or the CEO' },
-  { value: 'user', label: 'You' },
-]
+const RELEASE_OPTIONS = (Object.keys(RELEASE_LABEL) as TaskRelease[]).map((value) => ({ value, label: RELEASE_LABEL[value] }))
 
 /** No agent runs the full test suite for a story whose review is Skipped or Human. */
 const STORY_NOTE = 'No agent runs the full test suite for stories.'
@@ -115,7 +112,7 @@ const release = computed({
         />
         <SelectField
           v-model="release"
-          label="Tasks are released by"
+          :label="SETTING_LABEL.taskRelease"
           :options="RELEASE_OPTIONS"
           :error="err('tasks.require_user_release')"
           data-field="tasks.require_user_release"

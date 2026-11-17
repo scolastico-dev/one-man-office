@@ -2,7 +2,7 @@
 import type { TicketSummary } from '../../../api/types'
 import { validParallel } from '../../create/createRules'
 import FieldRow from '../FieldRow.vue'
-import type { FieldState } from '../fieldRules'
+import { SETTING_LABEL, type FieldState } from '../fieldRules'
 import { useFieldEdit } from '../useFieldEdit'
 
 const props = defineProps<{ ticket: TicketSummary; state: FieldState }>()
@@ -14,7 +14,7 @@ const edit = useFieldEdit<string>({
   current: () => (props.ticket.max_parallel === null ? '' : String(props.ticket.max_parallel)),
   patch: (v) => ({ max_parallel: v.trim() === '' ? null : Number(v.trim()) }),
   text: words,
-  label: 'Tasks at once',
+  label: SETTING_LABEL.maxParallel,
   validate: (v) => (v.trim() === '' || validParallel(v) ? '' : 'Enter a whole number of at least 1, or leave it empty for no limit.'),
 })
 </script>
@@ -22,7 +22,7 @@ const edit = useFieldEdit<string>({
 <template>
   <FieldRow
     field="max_parallel"
-    label="Tasks at once"
+    :label="SETTING_LABEL.maxParallel"
     :editable="state.editable"
     :locked-reason="state.lockedReason"
     :editing="edit.editing.value"
