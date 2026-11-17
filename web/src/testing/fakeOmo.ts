@@ -8,7 +8,7 @@ import { compareDone } from '../store/boardState'
 
 export const general: General = {
   limits: { tasks: 4, stories: 2 },
-  ceo: { enabled: false, may_approve_stories: false },
+  ceo: { enabled: false, may_approve_stories: false, tickets_need_user_approval: true },
   tasks: { require_user_release: false },
   ui: { open_tickets_as_page: false, screen_reader_mode: false },
   branches: { template: 'omo/{slug}' },

@@ -58,7 +58,7 @@ test('turning the CEO off asks first; turning it on does not', async () => {
   await save().trigger('click')
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
-    ceo: { enabled: false, may_approve_stories: false },
+    ceo: { enabled: false, may_approve_stories: false, tickets_need_user_approval: true },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
@@ -73,7 +73,33 @@ test("turning the CEO on asks nothing and only sends the page's keys", async () 
   await save().trigger('click')
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
-    ceo: { enabled: true, may_approve_stories: false },
+    ceo: { enabled: true, may_approve_stories: false, tickets_need_user_approval: true },
+    merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+    ui: { open_tickets_as_page: false, screen_reader_mode: false },
+    branches: { template: 'omo/{slug}' },
+  })
+})
+
+test("the CEO's tickets wait for the user's approval by default; the switch says what it does and is saved with the page", async () => {
+  const h = await mountPage(true)
+  const sw = w!.get('[data-field="ceo.tickets_need_user_approval"]')
+  expect(sw.attributes('role')).toBe('switch')
+  expect(sw.attributes('aria-checked')).toBe('true')
+  expect(sw.text()).toBe("The CEO's tickets wait for your approval")
+  const hint = w!.get(`#${sw.attributes('aria-describedby')}`).text()
+  expect(hint).toContain('Stories and tasks the CEO creates stay in Planning until you approve them')
+  expect(hint).toContain('the CEO cannot approve or withdraw them, whatever the switch above or the task release setting says')
+  expect(hint).toContain('Tasks a product manager creates in a story you approved follow the task release setting')
+  const may = w!.get('[data-field="ceo.may_approve_stories"]')
+  expect(w!.get(`#${may.attributes('aria-describedby')}`).text()).toContain(
+    "While the CEO's tickets wait for your approval, this covers only the stories you created",
+  )
+  await sw.trigger('click')
+  expect(sw.attributes('aria-checked')).toBe('false')
+  await save().trigger('click')
+  await flushPromises()
+  expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
+    ceo: { enabled: true, may_approve_stories: false, tickets_need_user_approval: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
@@ -100,7 +126,7 @@ test('the merge defaults are one group of three selects, saved with the page', a
   await save().trigger('click')
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
-    ceo: { enabled: false, may_approve_stories: false },
+    ceo: { enabled: false, may_approve_stories: false, tickets_need_user_approval: true },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
     ui: { open_tickets_as_page: false, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },
@@ -130,7 +156,7 @@ test('opening tickets on their own page is a switch, off by default, saved with 
   await save().trigger('click')
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
-    ceo: { enabled: false, may_approve_stories: false },
+    ceo: { enabled: false, may_approve_stories: false, tickets_need_user_approval: true },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: true, screen_reader_mode: false },
     branches: { template: 'omo/{slug}' },

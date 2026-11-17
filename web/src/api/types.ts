@@ -437,7 +437,10 @@ export type Duration = string
 
 export interface CEOSettings {
   enabled: boolean
+  /** The CEO may approve stories; while tickets_need_user_approval is on, only the stories the user created. */
   may_approve_stories: boolean
+  /** Stories and tasks the CEO creates wait in Planning until the user approves them. */
+  tickets_need_user_approval: boolean
 }
 
 export interface UISettings {

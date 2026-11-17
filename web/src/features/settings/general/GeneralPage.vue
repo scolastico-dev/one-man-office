@@ -28,7 +28,7 @@ const def = sectionDef('general')
 const form = useGeneralForm(['ceo', 'merge_defaults', 'ui', 'branches'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'ui.screen_reader_mode', 'branches.template', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ceo.tickets_need_user_approval', 'ui.open_tickets_as_page', 'ui.screen_reader_mode', 'branches.template', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
 
 // The example name of the branch template, asked from the server while the user types, so it follows
@@ -111,9 +111,32 @@ function chooseTheme(choice: string) {
         <p v-if="err('ceo.enabled')" class="omo-field__error" data-field-error>
           {{ err('ceo.enabled') }}
         </p>
-        <Toggle v-model="draft.ceo.may_approve_stories" label="The CEO may approve stories" data-field="ceo.may_approve_stories" />
+        <Toggle
+          v-model="draft.ceo.may_approve_stories"
+          label="The CEO may approve stories"
+          aria-describedby="ceo-may-approve-hint"
+          data-field="ceo.may_approve_stories"
+        />
+        <p id="ceo-may-approve-hint" class="omo-field__hint">
+          The CEO moves a story to Ready For Dev once you agreed to it in its terminal. While the CEO's tickets wait for your approval, this covers
+          only the stories you created.
+        </p>
         <p v-if="err('ceo.may_approve_stories')" class="omo-field__error" data-field-error>
           {{ err('ceo.may_approve_stories') }}
+        </p>
+        <Toggle
+          v-model="draft.ceo.tickets_need_user_approval"
+          label="The CEO's tickets wait for your approval"
+          aria-describedby="ceo-approval-hint"
+          data-field="ceo.tickets_need_user_approval"
+        />
+        <p id="ceo-approval-hint" class="omo-field__hint">
+          Stories and tasks the CEO creates stay in Planning until you approve them, as you approve any story; the CEO cannot approve or withdraw
+          them, whatever the switch above or the task release setting says. Tasks a product manager creates in a story you approved follow the task
+          release setting.
+        </p>
+        <p v-if="err('ceo.tickets_need_user_approval')" class="omo-field__error" data-field-error>
+          {{ err('ceo.tickets_need_user_approval') }}
         </p>
       </FormSection>
       <FormSection legend="Tickets" description="A click on a ticket opens its page instead of the panel over the board. The panel stays reachable with 'Open in panel'." data-ui-section>
