@@ -471,6 +471,10 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       setBase(answer)
       conflict.value = null
       invalidSeen.value = new Map()
+      // The files a read found broken may be the one this save replaced; the
+      // save's own events are skipped (savedThrough), so only a new read
+      // tells which errors remain.
+      if (loadErrors.value.length > 0) rereadAfterSave = true
       // Edits made while the save ran stay; otherwise the form shows what was stored.
       if (draft.value !== null && eq(draft.value, sent)) draft.value = clone(answer.value)
       if (answer.eventId !== null) savedThrough = Math.max(savedThrough, answer.eventId)

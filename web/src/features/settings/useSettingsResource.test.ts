@@ -555,9 +555,18 @@ test('broken files come from the read and from settings.invalid; saving over the
   const done = r.save()
   await flushPromises()
   expect(saves).toHaveLength(1)
-  saves[0]!.answer.resolve(saved(limits(6), 'r2'))
+  saves[0]!.answer.resolve(saved(limits(6), 'r2', 9))
   expect(await done).toBe('saved')
-  expect(r.broken.value.map((e) => e.file)).toEqual(['settings.yaml'])
+  // The save replaced the broken file, and its own event is already in the
+  // answer: the files are read again, so the errors the read before it found
+  // do not stay.
+  s.setNextId(9)
+  s.emit('settings.changed', changed())
+  await flushPromises()
+  expect(loads).toHaveLength(3)
+  loads[2]!.resolve(loaded(limits(6), 'r2'))
+  await flushPromises()
+  expect(r.broken.value).toEqual([])
   expect(BROKEN_QUESTION.text).toBe('Saving replaces the file on disk, including the edit that cannot be read.')
 })
 
