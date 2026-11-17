@@ -184,7 +184,7 @@ func prepareLaunch(spec Spec) agentcli.Launch {
 	}
 	switch spec.CLI {
 	case api.CLIClaude, api.CLICodex, api.CLIGemini, api.CLIAgy:
-		return agentcli.Prepare(agentcli.Provider(spec.CLI), spec.Command, spec.Args, env, spec.Dir, spec.StartPrompt, true, spec.Delivery.Inject)
+		return agentcli.Prepare(agentcli.Provider(spec.CLI), spec.Command, spec.Args, env, spec.Dir, spec.StartPrompt, true, spec.Delivery.Inject, spec.MCPBridge)
 	}
 	// A custom CLI gets no adapter, even if its command is named like a
 	// supported one: only %prompt% is replaced; otherwise the prompt is typed.

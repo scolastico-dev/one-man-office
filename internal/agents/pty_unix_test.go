@@ -123,6 +123,14 @@ func TestMain(m *testing.M) {
 		slices.Sort(names)
 		fmt.Printf("IDEENV [%s] PATH-SET %v\n", strings.Join(names, ","), os.Getenv("PATH") != "")
 		blockForever()
+	case "mcpargs":
+		// An agent program that records the arguments it was started with.
+		if err := os.WriteFile(os.Getenv("OMO_TEST_ARGS_FILE"), []byte(strings.Join(os.Args[1:], "\n")), 0o600); err != nil {
+			fmt.Println("WRITE FAILED", err)
+			os.Exit(1)
+		}
+		fmt.Printf("ARGS RECORDED %v\n", os.Getenv("OMO_AGENT_ID") == os.Getenv("OMO_TEST_EXPECT_ID"))
+		blockForever()
 	case "identity":
 		ok := os.Getenv("OMO_AGENT_ID") != "" && os.Getenv("OMO_AGENT_ID") == os.Getenv("OMO_TEST_EXPECT_ID")
 		for _, arg := range os.Args {
@@ -390,6 +398,52 @@ func TestSessionIDOnlyInEnvironment(t *testing.T) {
 	bad := testSpec(t, "cat", "--session", testSessionID)
 	if _, err := NewPTYRunner().Start(bad); !errors.Is(err, ErrSessionIDExposed) {
 		t.Fatalf("spec with the id in an argument: %v", err)
+	}
+}
+
+// omo's MCP entry of a session names the bridge and nothing of the
+// session: the session id is in no argument, no configuration value and no
+// log of the agent program; the bridge learns it from OMO_AGENT_ID.
+func TestSessionIDNotInMCPArgs(t *testing.T) {
+	for _, tc := range []struct{ cli, entry string }{
+		{api.CLIClaude, "--mcp-config"},
+		{api.CLICodex, "mcp_servers.omo.env_vars"},
+	} {
+		t.Run(tc.cli, func(t *testing.T) {
+			isolate(t)
+			argsFile := filepath.Join(t.TempDir(), "args")
+			spec := testSpec(t, os.Args[0])
+			spec.CLI = tc.cli
+			spec.MCPBridge = "/opt/omo/bin/omo"
+			spec.ProfileEnv = map[string]string{helperEnv: "mcpargs", "OMO_TEST_ARGS_FILE": argsFile, "OMO_TEST_EXPECT_ID": testSessionID}
+			a := start(t, NewPTYRunner(), spec)
+			waitScreen(t, a, "ARGS RECORDED true")
+			args, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(args), tc.entry) || !strings.Contains(string(args), spec.MCPBridge) {
+				t.Fatalf("no MCP entry in the arguments:\n%s", args)
+			}
+			if strings.Contains(string(args), testSessionID) {
+				t.Fatal("the session id is in an argument")
+			}
+			_ = a.Kill()
+			<-a.Done()
+			// Nothing the program or omo wrote for it holds the id: its
+			// transcript and the configuration folders of its account.
+			for _, root := range []string{filepath.Dir(spec.LogPath), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("CODEX_HOME"), os.Getenv("HOME")} {
+				filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+					if err != nil || d.IsDir() {
+						return err
+					}
+					if data, _ := os.ReadFile(path); strings.Contains(string(data), testSessionID) {
+						t.Errorf("%s holds the session id", path)
+					}
+					return nil
+				})
+			}
+		})
 	}
 }
 

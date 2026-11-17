@@ -14,14 +14,14 @@ import (
 func TestEverySupportedCLIGetsItsStartAdapter(t *testing.T) {
 	for _, provider := range agentcli.Supported {
 		spec := Spec{CLI: string(provider), Command: "wrapper", Args: []string{"--x"}, Dir: "/work/repo",
-			StartPrompt: "run omo ai ready", Delivery: Delivery{Inject: true}}
+			StartPrompt: "run omo ai ready", Delivery: Delivery{Inject: true}, MCPBridge: "/bin/omo"}
 		got := prepareLaunch(spec)
-		want := agentcli.Prepare(provider, "wrapper", []string{"--x"}, map[string]string{}, "/work/repo", "run omo ai ready", true, true)
+		want := agentcli.Prepare(provider, "wrapper", []string{"--x"}, map[string]string{}, "/work/repo", "run omo ai ready", true, true, "/bin/omo")
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: launch = %+v, want the adapter's %+v", provider, got, want)
 		}
 	}
-	custom := prepareLaunch(Spec{CLI: api.CLICustom, Command: "agy", Args: []string{"--x"}, Dir: "/work/repo", StartPrompt: "p", Delivery: Delivery{Inject: true}})
+	custom := prepareLaunch(Spec{CLI: api.CLICustom, Command: "agy", Args: []string{"--x"}, Dir: "/work/repo", StartPrompt: "p", Delivery: Delivery{Inject: true}, MCPBridge: "/bin/omo"})
 	if custom.PromptInjected || !reflect.DeepEqual(custom.Args, []string{"--x"}) {
 		t.Errorf("custom launch = %+v", custom)
 	}

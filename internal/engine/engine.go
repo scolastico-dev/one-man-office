@@ -69,6 +69,9 @@ type Options struct {
 	// Usage says how close models are to their usage limits; nil means
 	// every model is unmetered.
 	Usage UsageView
+	// MCP returns the MCP settings: whether Claude Code and Codex agents
+	// get omo's MCP bridge for their session. nil means on for both.
+	MCP func() api.MCPSettings
 }
 
 // Engine runs agents for the board. Create it with New, then Run it.
@@ -84,6 +87,9 @@ type Engine struct {
 	wake   chan struct{}
 	// pathPrefix is the folder of the omo executable.
 	pathPrefix string
+	// omoPath is the omo executable with its links resolved, whose `mcp
+	// stdio` agents get as their MCP server; "" when unknown.
+	omoPath string
 
 	// passMu serializes passes.
 	passMu sync.Mutex
@@ -207,6 +213,9 @@ func New(o Options) *Engine {
 	}
 	if exe != "" {
 		e.pathPrefix = filepath.Dir(exe)
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			e.omoPath = real
+		}
 	}
 	if r, ok := o.Runner.(*agents.PTYRunner); ok && r.RunDir == "" && o.Layout.Run != "" {
 		r.RunDir = o.Layout.Run

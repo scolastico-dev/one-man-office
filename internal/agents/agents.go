@@ -87,8 +87,8 @@ func (d Delivery) ReadyTimeout() time.Duration {
 // Spec describes one agent process.
 type Spec struct {
 	// SessionID becomes OMO_AGENT_ID and nothing else. It must not occur in
-	// Name, Command, Args, Dir, LogPath or StartPrompt; Start refuses such a
-	// spec.
+	// Name, Command, Args, Dir, LogPath, StartPrompt or MCPBridge; Start
+	// refuses such a spec.
 	SessionID string
 	// Name is the agent's display name, used in error messages.
 	Name string
@@ -120,6 +120,11 @@ type Spec struct {
 	// StartPrompt is the first prompt; it may end up as a launch argument.
 	StartPrompt string
 	Delivery    Delivery
+	// MCPBridge is the absolute path of the omo executable whose `mcp
+	// stdio` a Claude Code or Codex agent gets as its MCP server "omo" for
+	// this session (agentcli.BridgeArgs); "" gives none. The bridge learns
+	// the session from OMO_AGENT_ID, never from an argument.
+	MCPBridge string
 	// AwaitingReady reports whether the agent has not yet acknowledged its
 	// start prompt. Typed deliveries and resends happen only while it
 	// returns true; nil means "always". It must return quickly.
@@ -193,7 +198,7 @@ func checkSpec(spec Spec) error {
 	if spec.LogPath == "" {
 		return fmt.Errorf("start agent %s: no log path", spec.Name)
 	}
-	fields := append([]string{spec.Name, spec.Command, spec.Dir, spec.LogPath, spec.StartPrompt, spec.AccountDir}, spec.Args...)
+	fields := append([]string{spec.Name, spec.Command, spec.Dir, spec.LogPath, spec.StartPrompt, spec.AccountDir, spec.MCPBridge}, spec.Args...)
 	for _, field := range fields {
 		if strings.Contains(field, spec.SessionID) {
 			return fmt.Errorf("start agent %s: %w", spec.Name, ErrSessionIDExposed)

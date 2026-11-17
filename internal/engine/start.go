@@ -715,6 +715,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 		Socket:        socket,
 		PathPrefix:    e.pathPrefix,
 		StartPrompt:   e.renderPrompt("start", prompts.Data{Name: name, Role: string(r.role), Ticket: int(r.ticket)}),
+		MCPBridge:     e.mcpBridge(prof.CLI),
 		Delivery:      en.delivery,
 		AwaitingReady: en.awaitingReady,
 	}
@@ -824,4 +825,23 @@ func (e *Engine) renderPrompt(name string, d prompts.Data) string {
 		e.log.Printf("engine: render the default prompt %s: %v", name, err)
 	}
 	return out
+}
+
+// mcpBridge is the omo executable whose `mcp stdio` a new agent of cli
+// gets as its MCP server for its session, or "" when it gets none: the
+// MCP settings switch it per program, and only Claude Code and Codex take
+// a server for one session.
+func (e *Engine) mcpBridge(cli string) string {
+	s := api.MCPSettings{Enabled: true, Inject: api.MCPInject{Claude: true, Codex: true}}
+	if e.o.MCP != nil {
+		s = e.o.MCP()
+	}
+	if !s.Enabled {
+		return ""
+	}
+	switch {
+	case cli == api.CLIClaude && s.Inject.Claude, cli == api.CLICodex && s.Inject.Codex:
+		return e.omoPath
+	}
+	return ""
 }

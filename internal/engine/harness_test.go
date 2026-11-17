@@ -250,6 +250,8 @@ type harnessConfig struct {
 	profile *settings.Profile
 	// projects is the number of git repositories registered as projects.
 	projects int
+	// mcp is the engine's MCP settings; nil is the engine's default.
+	mcp func() api.MCPSettings
 }
 
 func withLimit(n int) func(*harnessConfig)            { return func(c *harnessConfig) { c.limit = n } }
@@ -259,6 +261,9 @@ func withProfile(p settings.Profile) func(*harnessConfig) {
 }
 func withProjects(n int) func(*harnessConfig) {
 	return func(c *harnessConfig) { c.projects = n }
+}
+func withMCP(f func() api.MCPSettings) func(*harnessConfig) {
+	return func(c *harnessConfig) { c.mcp = f }
 }
 
 type harness struct {
@@ -421,6 +426,7 @@ func newHarness(t *testing.T, opts ...func(*harnessConfig)) *harness {
 			return nil
 		},
 		Log: log.New(h.logs, "", 0), Now: h.clock.Now,
+		MCP: cfg.mcp,
 	})
 	// Tests let waits time out after milliseconds; TestWaitMinimum checks
 	// the real minimum.
