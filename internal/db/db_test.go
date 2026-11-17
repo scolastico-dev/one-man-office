@@ -1,7 +1,10 @@
 package db
 
 import (
+	"bytes"
 	"database/sql"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -83,8 +86,13 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Close()
-	if _, err := Open(path); err == nil {
-		t.Fatal("Open accepted a database from a newer schema version")
+	before, _ := os.ReadFile(path)
+	_, err = Open(path)
+	if !errors.Is(err, ErrNewerSchema) || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "update omo") {
+		t.Fatalf("Open of a newer database: %v", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Fatal("Open changed a database of a newer omo")
 	}
 }
 

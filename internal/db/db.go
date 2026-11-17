@@ -5,7 +5,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +37,10 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	return d, nil
 }
 
+// ErrNewerSchema is returned (wrapped) by Open for a database a newer omo
+// wrote. Open changes nothing in it.
+var ErrNewerSchema = errors.New("the database was made by a newer omo")
+
 // SchemaVersion is the schema version a freshly opened database ends up at.
 const SchemaVersion = 7
 
@@ -42,6 +48,11 @@ const SchemaVersion = 7
 // pending migrations, each in its own transaction. A single connection
 // serializes all writes.
 func Open(path string) (*sql.DB, error) {
+	// A database of a newer omo is refused before anything (switching it to
+	// WAL included) touches it.
+	if err := refuseNewer(path); err != nil {
+		return nil, err
+	}
 	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -50,9 +61,33 @@ func Open(path string) (*sql.DB, error) {
 	d.SetMaxOpenConns(1)
 	if err := migrate(d); err != nil {
 		d.Close()
+		if errors.Is(err, ErrNewerSchema) {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 		return nil, err
 	}
 	return d, nil
+}
+
+func refuseNewer(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	d, err := OpenReadOnly(path)
+	if err != nil {
+		// Not readable this way (for example not yet a database): Open
+		// reports what is wrong.
+		return nil
+	}
+	defer d.Close()
+	var current int
+	if err := d.QueryRow(`PRAGMA user_version`).Scan(&current); err != nil {
+		return nil
+	}
+	if current > len(migrations) {
+		return fmt.Errorf("%s: %w (schema %d, this omo knows %d): update omo to use it (omo update); this omo leaves it as it is", path, ErrNewerSchema, current, len(migrations))
+	}
+	return nil
 }
 
 func migrate(d *sql.DB) error {
@@ -102,7 +137,7 @@ func applyMigration(d *sql.DB, v int) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if current > len(migrations) {
-		return fmt.Errorf("database schema version %d is newer than supported version %d", current, len(migrations))
+		return fmt.Errorf("%w (schema %d, this omo knows %d): update omo to use it (omo update); this omo leaves it as it is", ErrNewerSchema, current, len(migrations))
 	}
 	if current > v {
 		return nil
