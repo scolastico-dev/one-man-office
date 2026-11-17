@@ -105,7 +105,7 @@ func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *f
 	f.pool = newPool(Options{
 		Servers:  f.list,
 		Auth:     f.store,
-		Redirect: func() string { return "http://localhost:18123/oauth/callback" },
+		Redirect: func(context.Context) string { return "http://localhost:18123/oauth/callback" },
 		LogDir:   f.logDir,
 		Env:      func() []string { return f.env },
 		Home:     f.home,

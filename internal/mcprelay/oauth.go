@@ -307,7 +307,7 @@ func (p *Pool) Connect(ctx context.Context, name string) (string, error) {
 	if s.Auth != api.MCPAuthOAuth || s.Transport == api.MCPTransportStdio {
 		return "", fmt.Errorf("server %s does not sign in with OAuth", name)
 	}
-	redirect := p.o.Redirect()
+	redirect := p.o.Redirect(ctx)
 	if redirect == "" {
 		return "", errors.New("omo does not know the address of its OAuth callback")
 	}

@@ -35,9 +35,10 @@ type Options struct {
 	Servers func() []api.MCPServer
 	// Auth keeps the OAuth sign-ins; nil keeps them in memory.
 	Auth mcpauth.UpstreamStore
-	// Redirect returns the address of omo's OAuth callback
-	// (<public_url>/oauth/callback or http://localhost:<port>/oauth/callback).
-	Redirect func() string
+	// Redirect returns the address of omo's OAuth callback for a sign-in
+	// started with ctx (Connect's): the callback at the address the user's
+	// browser reached omo by.
+	Redirect func(ctx context.Context) string
 	// LogDir is the folder of the servers' logs (mcp-<name>.log).
 	LogDir string
 	// Env returns the environment programs get (childenv.Inherited()).
@@ -186,7 +187,7 @@ func newPool(o Options, t tunables) *Pool {
 		o.Env = func() []string { return nil }
 	}
 	if o.Redirect == nil {
-		o.Redirect = func() string { return "" }
+		o.Redirect = func(context.Context) string { return "" }
 	}
 	if o.Version == "" {
 		o.Version = "dev"
@@ -613,7 +614,9 @@ func (p *Pool) Changed(names []string) {
 		}
 		p.changed(name)
 	}
-	p.toolsChanged()
+	// The tools may have changed; the caller, which changed the settings,
+	// announces that.
+	p.gen.Add(1)
 }
 
 // Close stops every instance and the janitor.
