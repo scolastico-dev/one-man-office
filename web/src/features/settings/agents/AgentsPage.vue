@@ -3,10 +3,9 @@
 // with which command, arguments, environment and account) and their models,
 // one profile's form at a time, and the detection of agent programs. The open
 // profile is part of this page's state, not of the address. The list is read
-// again when a profile file changes, after a snapshot and when the event
-// stream is live again; reads are numbered so an older answer never replaces
-// a newer one.
-import { computed, onScopeDispose, ref, watch } from 'vue'
+// again (liveRead) when a profile file changes, after a snapshot, when the
+// event stream is live again and when the tab is shown again.
+import { computed, ref } from 'vue'
 import { getProfiles } from '../../../api/endpoints'
 import type { ApiEvent, FileError, Profile, SettingsChangedData, SettingsInvalidData } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -14,6 +13,7 @@ import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
+import { liveRead } from '../../../store/liveRead'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
@@ -33,25 +33,6 @@ const errors = ref<FileError[]>([])
 const loaded = ref(false)
 const loadError = ref('')
 
-let seq = 0
-let applied = 0
-async function reload() {
-  const mine = ++seq
-  try {
-    const { data } = await getProfiles(session.client)
-    if (mine <= applied) return
-    applied = mine
-    profiles.value = data.profiles
-    errors.value = data.errors
-    loadError.value = ''
-  } catch (e) {
-    if (mine <= applied) return
-    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The profiles could not be read.'
-  } finally {
-    loaded.value = true
-  }
-}
-
 function concernsProfiles(ev: ApiEvent): boolean {
   if (ev.kind === 'settings.changed') return (ev.data as Partial<SettingsChangedData> | null)?.section === 'profiles'
   if (ev.kind === 'settings.invalid') {
@@ -60,22 +41,22 @@ function concernsProfiles(ev: ApiEvent): boolean {
   }
   return false
 }
-const offEvent = store.onEvent('*', (ev) => {
-  if (concernsProfiles(ev)) void reload()
-})
-const offSnapshot = store.onSnapshot(() => void reload())
-const stopLive = watch(
-  () => store.connection.value,
-  (now, before) => {
-    if (now === 'live' && before !== 'live') void reload()
+const live = liveRead({
+  store,
+  read: async () => (await getProfiles(session.client)).data,
+  apply(data) {
+    profiles.value = data.profiles
+    errors.value = data.errors
+    loadError.value = ''
+    loaded.value = true
   },
-)
-onScopeDispose(() => {
-  offEvent()
-  offSnapshot()
-  stopLive()
+  failed(e) {
+    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The profiles could not be read.'
+    loaded.value = true
+  },
+  watches: concernsProfiles,
 })
-void reload()
+const reload = live.reload
 
 /** The open profile, and for one not stored yet the program chosen for it. */
 const selected = ref<string | null>(null)
