@@ -86,12 +86,20 @@ const approve: TicketAction = {
     const target = ctx.targets[t.column === 'planning' ? 'ready' : 'done']
     return target.allowed ? undefined : target.reason ?? 'It cannot be approved right now.'
   },
-  describe: (t, ctx) =>
-    t.column === 'planning' ? 'Gives the green light: it moves to Ready For Dev, where an agent picks it up.' : approvalEffect(t, projectNames(ctx.store)),
+  describe: (t, ctx) => (t.column === 'planning' ? releaseEffect(t, ctx.store) : approvalEffect(t, projectNames(ctx.store))),
   run: (t, ctx) => {
     if (t.column === 'planning') return ctx.store.requestMove(t.number, 'ready', null)
     ctx.ask('approve')
   },
+}
+
+/** What approving a ticket in Planning does: a task waits in Ready For Dev until its story is In Progress. */
+function releaseEffect(t: TicketSummary, store: BoardStore): string {
+  const story = t.story === null ? undefined : store.state.tickets.get(t.story)?.t
+  if (story !== undefined && story.column !== 'in_progress') {
+    return `Gives the green light: it moves to Ready For Dev and waits there until its story #${story.number} is In Progress.`
+  }
+  return 'Gives the green light: it moves to Ready For Dev, where an agent starts on it as soon as nothing holds it back.'
 }
 
 const reject: TicketAction = {

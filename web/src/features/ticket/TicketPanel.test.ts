@@ -585,3 +585,17 @@ test('the attention heading is Needs attention for the user and names the superv
   const { w: other } = await open(hn, 2)
   expect(other.get('[data-attention] .actions__attention-head').text()).toBe('Needs the CEO')
 })
+
+test('the Approve hint of a task says it waits while its story is not In Progress', async () => {
+  const hn = await panelHarness(
+    seeded(
+      ticket({ number: 1, type: 'story', column: 'planning', projects: [demo] }),
+      ticket({ number: 2, story: 1, column: 'planning', projects: [demo] }),
+      ticket({ number: 3, column: 'planning', projects: [demo] }),
+    ),
+  )
+  const { w } = await open(hn, 2)
+  expect(action(w, 'approve').attributes('title')).toContain('waits there until its story #1 is In Progress')
+  const { w: standalone } = await open(hn, 3)
+  expect(action(standalone, 'approve').attributes('title')).toContain('an agent starts on it as soon as nothing holds it back')
+})
