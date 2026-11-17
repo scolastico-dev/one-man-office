@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -284,6 +285,85 @@ func TestStopAllEndsAgentBeingStarted(t *testing.T) {
 	for _, a := range h.runner.all() {
 		if !a.isOver() {
 			t.Fatal("the agent being started survived stop all")
+		}
+	}
+	if n := h.liveCount(); n != 0 {
+		t.Fatalf("%d live sessions", n)
+	}
+}
+
+// A start under way when omo is paused ends the agent it started again:
+// while paused nothing starts.
+func TestStartCompletedAfterPauseEndsItself(t *testing.T) {
+	h := newHarness(t)
+	h.e.pause = func(point string) {
+		if point == "spawn" {
+			if err := h.b.SetPaused(h.ctx, true); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	h.e.pause = nil
+	agents := h.runner.all()
+	if len(agents) != 1 {
+		t.Fatalf("%d agents started", len(agents))
+	}
+	if !agents[0].isKilled() {
+		t.Fatal("the agent whose start completed after the pause still runs")
+	}
+	if got := h.waitEnded(agents[0].id); got.EndReason != "omo was paused while the agent started" {
+		t.Fatalf("ended with %q", got.EndReason)
+	}
+	if c := h.ticket(task).Column; c != api.ColumnInProgress {
+		t.Fatalf("#%d is %s", task, c)
+	}
+	if err := h.b.SetPaused(h.ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	h.live(api.RoleDeveloper, task)
+}
+
+// Stop all agents skips an agent whose process is still being started;
+// when that start completes after the round, before Stop all looks at the
+// pending starts again, the start ends its agent itself.
+func TestStopAllEndsAgentWhoseStartCompletesAfterARound(t *testing.T) {
+	h := newHarness(t)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h.runner.mu.Lock()
+	h.runner.block = release
+	h.runner.mu.Unlock()
+	var once sync.Once
+	h.e.pause = func(point string) {
+		switch point {
+		case "spawn":
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		case "stop-all-round":
+			once.Do(func() {
+				close(release)
+				h.waitFor("the start to complete", func() bool { return !h.e.agentStartsPending() })
+			})
+		}
+	}
+	task := h.standalone("one")
+	h.approve(task)
+	h.e.pass(h.ctx)
+	h.awaitClosedSignal(entered)
+	if err := h.e.StopAll(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.e.settle()
+	h.e.pause = nil
+	for _, a := range h.runner.all() {
+		if !a.isOver() {
+			t.Fatal("an agent whose start completed during stop all survived it")
 		}
 	}
 	if n := h.liveCount(); n != 0 {

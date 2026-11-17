@@ -16,6 +16,10 @@ const handoffPoll = 100 * time.Millisecond
 // stopAllReason is the end reason of the agents "stop all agents" ends.
 const stopAllReason = "stopped by the user"
 
+// pausedStartReason is the end reason of an agent whose start completed
+// after omo was paused.
+const pausedStartReason = "omo was paused while the agent started"
+
 // shutdownState is the state of a graceful stop.
 type shutdownState struct {
 	mu sync.Mutex
@@ -202,6 +206,9 @@ func (e *Engine) StopAll(ctx context.Context) error {
 	defer tick.Stop()
 	for {
 		e.endAllButCEO(ctx)
+		e.at("stop-all-round")
+		// A start that completes after this round skipped it sees the
+		// pause and ends its agent itself (startWork).
 		if !e.agentStartsPending() {
 			return nil
 		}

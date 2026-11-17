@@ -157,7 +157,7 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 		e.log.Printf("engine: read #%d: %v", a.ticket, err)
 		return fmt.Errorf("read the board: %w", err)
 	}
-	if !ok || !s.wanted(t) || e.isStopping() {
+	if !ok || !s.wanted(t) || e.isStopping() || snap.Paused {
 		return nil
 	}
 	e.at("spawn")
@@ -169,7 +169,7 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 	if project == "" && a.role == api.RoleReviewer && len(t.Projects) == 1 {
 		project = t.Projects[0].ID
 	}
-	_, err = e.spawn(ctx, spawnRequest{
+	sess, err := e.spawn(ctx, spawnRequest{
 		role: a.role, ticket: a.ticket, project: project, purpose: purposeOrWork(a.purpose), round: round,
 		model: model, workdir: dir, job: job, sessions: snap.Sessions,
 	})
@@ -179,6 +179,15 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 		if !errors.As(err, &counted) {
 			return fmt.Errorf("start the agent: %w", err)
 		}
+		return nil
+	}
+	// While paused nothing starts: an agent whose start was under way when
+	// omo was paused (by Stop all agents, say) ends again at once, so no
+	// stop misses it. Lifting the pause starts a fresh one.
+	if paused, err := e.b.Paused(ctx); err != nil {
+		e.log.Printf("engine: read whether omo is paused after starting %s on #%d: %v", a.role, a.ticket, err)
+	} else if paused {
+		e.end(ctx, sess.ID, pausedStartReason)
 		return nil
 	}
 	if a.role == workingRole(t) && purposeOrWork(a.purpose) == api.PurposeWork {
