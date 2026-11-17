@@ -58,6 +58,12 @@ func Dir() (string, error) {
 	return resolveDir(runtime.GOOS, user, os.Getenv("APPDATA"), os.Getenv("OMO_HOME"))
 }
 
+// DefaultDir is the home omo uses without OMO_HOME, for the user home
+// folder user.
+func DefaultDir(user string) (string, error) {
+	return resolveDir(runtime.GOOS, user, os.Getenv("APPDATA"), "")
+}
+
 func resolveDir(platform, user, app, override string) (string, error) {
 	if override != "" {
 		if !filepath.IsAbs(override) {

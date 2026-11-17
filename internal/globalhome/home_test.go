@@ -122,3 +122,19 @@ func TestWriteFileAtomicReplacesContent(t *testing.T) {
 		t.Fatalf("leftover temp files: %v", entries)
 	}
 }
+
+// DefaultDir is the home Dir resolves without OMO_HOME.
+func TestDefaultDirIsDirWithoutOverride(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	t.Setenv("OMO_HOME", "")
+	want, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_HOME", filepath.Join(t.TempDir(), "other"))
+	got, err := DefaultDir(user)
+	if err != nil || got != want {
+		t.Fatalf("DefaultDir = %q, %v; want %q", got, err, want)
+	}
+}

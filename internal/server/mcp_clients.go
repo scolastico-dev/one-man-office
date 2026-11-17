@@ -5,11 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/homezip"
 	"github.com/scolastico-dev/one-man-office/internal/mcpclients"
 )
@@ -66,19 +66,18 @@ var mcpClientsMachine = func(s *Server) (mcpclients.Options, error) {
 		Home:     home,
 		OmoPath:  exe,
 		OmoHome:  s.opts.Layout.Root,
-		PassHome: filepath.Clean(s.opts.Layout.Root) != defaultOmoHome(home),
+		PassHome: passHome(s.opts.Layout.Root, home),
 		Env:      childenv.Inherited(),
 		LookPath: exec.LookPath,
 		Getenv:   os.LookupEnv,
 	}, nil
 }
 
-// defaultOmoHome is the home omo uses without OMO_HOME.
-func defaultOmoHome(home string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("APPDATA"), "omo")
-	}
-	return filepath.Join(home, ".local", "omo")
+// passHome reports whether omo's entries in the agent programs' files must
+// name its home root: when it is not the home omo uses without OMO_HOME.
+func passHome(root, home string) bool {
+	def, err := globalhome.DefaultDir(home)
+	return err != nil || filepath.Clean(root) != def
 }
 
 // mcpServerStore is omo's store of relayed servers, when the settings store
