@@ -45,6 +45,65 @@ type registration struct {
 	// Registered says the client was registered by omo (dynamic
 	// registration) rather than configured.
 	Registered bool `json:"registered"`
+	// ServerURL, Resource and ConfiguredClient are the server's settings
+	// the sign-in was given for: its address, its resource override and
+	// its configured client id. The sign-in is used only while they are
+	// unchanged.
+	ServerURL        string `json:"server_url"`
+	Resource         string `json:"resource,omitempty"`
+	ConfiguredClient string `json:"configured_client_id,omitempty"`
+}
+
+// boundTo reports whether the stored sign-in a was given for the settings
+// of s: an OAuth server at the same address, with the same resource and
+// configured client. Any other sign-in is never used for s.
+func boundTo(a mcpauth.UpstreamAuth, s api.MCPServer) bool {
+	if s.Auth != api.MCPAuthOAuth || s.Transport == api.MCPTransportStdio {
+		return false
+	}
+	var reg registration
+	if json.Unmarshal(a.Registration, &reg) != nil {
+		return false
+	}
+	return reg.ServerURL != "" && reg.ServerURL == s.URL && reg.Resource == s.OAuth.Resource &&
+		reg.ConfiguredClient == s.OAuth.ClientID
+}
+
+// loadBound returns the stored sign-in of s when it was given for s's
+// settings; ok is false otherwise.
+func (p *Pool) loadBound(ctx context.Context, s api.MCPServer) (mcpauth.UpstreamAuth, bool, error) {
+	a, ok, err := p.store.Load(ctx, s.Name)
+	if err != nil || !ok || !boundTo(a, s) {
+		return mcpauth.UpstreamAuth{}, false, err
+	}
+	return a, true, nil
+}
+
+// dropStaleSignIn deletes the stored sign-in of server name when the
+// server was removed or its settings no longer match it, and revokes it
+// in the background.
+func (p *Pool) dropStaleSignIn(name string) {
+	ctx := context.Background()
+	a, ok, err := p.store.Load(ctx, name)
+	if err != nil || !ok {
+		return
+	}
+	s, exists := p.o.Configured(name)
+	if exists && boundTo(a, s) {
+		return
+	}
+	if err := p.store.Delete(ctx, name); err != nil {
+		p.logf("mcp server %s: deleting its old sign-in failed: %v", name, err)
+		return
+	}
+	go p.revoke(context.Background(), name, a, p.logf)
+}
+
+// logf writes a line to omo's log, if there is one.
+func (p *Pool) logf(format string, args ...any) {
+	if p.o.Log != nil {
+		p.o.Log.Printf(format, args...)
+	}
 }
 
 // login is one interactive sign-in started by Connect.
@@ -311,7 +370,7 @@ func (p *Pool) Connect(ctx context.Context, name string) (string, error) {
 	if redirect == "" {
 		return "", errors.New("omo does not know the address of its OAuth callback")
 	}
-	prior, hasPrior, err := p.store.Load(ctx, name)
+	prior, hasPrior, err := p.loadBound(ctx, s)
 	if err != nil {
 		return "", fmt.Errorf("reading the sign-in of server %s: %w", name, err)
 	}
@@ -415,11 +474,14 @@ func (p *Pool) saveLogin(s api.MCPServer, l *login) error {
 		}
 	}
 	reg := registration{
-		AuthURL:       l.conf.Endpoint.AuthURL,
-		TokenURL:      l.conf.Endpoint.TokenURL,
-		AuthStyle:     l.conf.Endpoint.AuthStyle,
-		RevocationURL: l.revocation,
-		Registered:    l.registered,
+		AuthURL:          l.conf.Endpoint.AuthURL,
+		TokenURL:         l.conf.Endpoint.TokenURL,
+		AuthStyle:        l.conf.Endpoint.AuthStyle,
+		RevocationURL:    l.revocation,
+		Registered:       l.registered,
+		ServerURL:        s.URL,
+		Resource:         s.OAuth.Resource,
+		ConfiguredClient: s.OAuth.ClientID,
 	}
 	raw, _ := json.Marshal(reg)
 	a := mcpauth.UpstreamAuth{
@@ -527,14 +589,14 @@ func callbackPage(w http.ResponseWriter, status int, msg, server string) {
 	fmt.Fprintf(w, "<!doctype html><html><head><meta charset=\"utf-8\"><title>omo</title></head><body><p>%s</p>%s</body></html>\n", html.EscapeString(msg), link)
 }
 
-// loadAuth reads the sign-in state of name from the store once. Call with
-// p.mu held.
-func (p *Pool) loadAuth(name string, st *serverState) {
+// loadAuth reads the sign-in state of s from the store once; a stored
+// sign-in given for other settings counts as none. Call with p.mu held.
+func (p *Pool) loadAuth(s api.MCPServer, st *serverState) {
 	if st.authLoaded {
 		return
 	}
 	st.authLoaded = true
-	a, ok, err := p.store.Load(context.Background(), name)
+	a, ok, err := p.loadBound(context.Background(), s)
 	switch {
 	case err != nil:
 		st.auth = api.MCPAuthState{State: api.MCPAuthStateError}
@@ -553,9 +615,9 @@ func (p *Pool) loadAuth(name string, st *serverState) {
 }
 
 // tokenSource returns the refreshing token source of the stored sign-in of
-// s; every refreshed token is stored.
+// s, when it was given for s's settings; every refreshed token is stored.
 func (p *Pool) tokenSource(s api.MCPServer, st *serverState) (oauth2.TokenSource, error) {
-	a, ok, err := p.store.Load(context.Background(), s.Name)
+	a, ok, err := p.loadBound(context.Background(), s)
 	if err != nil {
 		return nil, fmt.Errorf("reading the sign-in: %w", err)
 	}
@@ -667,7 +729,10 @@ func (p *Pool) Disconnect(ctx context.Context, name string) error {
 		return fmt.Errorf("reading the sign-in of server %s: %w", name, err)
 	}
 	if ok {
-		p.revoke(ctx, name, a)
+		p.mu.Lock()
+		st := p.state(name)
+		p.mu.Unlock()
+		p.revoke(ctx, name, a, st.log.printf)
 	}
 	if err := p.store.Delete(ctx, name); err != nil {
 		return fmt.Errorf("deleting the sign-in of server %s: %w", name, err)
@@ -685,8 +750,8 @@ func (p *Pool) Disconnect(ctx context.Context, name string) error {
 }
 
 // revoke asks the authorization server to revoke the tokens of a (RFC
-// 7009); failures are only logged.
-func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth) {
+// 7009); failures are only logged with logf.
+func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth, logf func(string, ...any)) {
 	var reg registration
 	if json.Unmarshal(a.Registration, &reg) != nil || reg.RevocationURL == "" || a.Token == nil {
 		return
@@ -707,16 +772,15 @@ func (p *Pool) revoke(ctx context.Context, name string, a mcpauth.UpstreamAuth) 
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := p.base.RoundTrip(req)
-		p.mu.Lock()
-		st := p.state(name)
-		p.mu.Unlock()
 		if err != nil {
-			st.log.printf("revoking the sign-in failed: %s", st.redact.redact(shortReason(err)))
+			r := &redactor{}
+			r.add(a.ClientSecret, a.Token.AccessToken, a.Token.RefreshToken)
+			logf("revoking the sign-in of %s failed: %s", name, r.redact(shortReason(err)))
 			return
 		}
 		drain(resp)
 		if resp.StatusCode != http.StatusOK {
-			st.log.printf("revoking the sign-in failed: status %d", resp.StatusCode)
+			logf("revoking the sign-in of %s failed: status %d", name, resp.StatusCode)
 		}
 	}
 }

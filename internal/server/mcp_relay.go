@@ -28,14 +28,15 @@ type mcpCallbackBase struct{}
 // kept in the database. Call it once the routes are registered.
 func (s *Server) startMCPRelay() {
 	s.mcp.pool = mcprelay.New(mcprelay.Options{
-		Servers:  s.mcpRelayedServers,
-		Auth:     s.mcpAuth.upstream,
-		Redirect: s.mcpCallbackAddress,
-		LogDir:   filepath.Join(s.opts.Layout.Logs, mcpLogFolder),
-		Env:      childenv.Inherited,
-		Emit:     s.mcpEmit,
-		Log:      s.log,
-		Version:  s.opts.Version,
+		Servers:    s.mcpRelayedServers,
+		Configured: s.settings.MCPServer,
+		Auth:       s.mcpAuth.upstream,
+		Redirect:   s.mcpCallbackAddress,
+		LogDir:     filepath.Join(s.opts.Layout.Logs, mcpLogFolder),
+		Env:        childenv.Inherited,
+		Emit:       s.mcpEmit,
+		Log:        s.log,
+		Version:    s.opts.Version,
 	})
 	s.mcp.relay, s.mcpConf.relay = s.mcp.pool, s.mcp.pool
 	s.mcp.on.Store(s.mcpSettings().Enabled)

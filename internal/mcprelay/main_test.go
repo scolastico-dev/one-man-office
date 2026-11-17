@@ -91,7 +91,9 @@ type fixture struct {
 	env     []string
 	mu      sync.Mutex
 	servers []api.MCPServer
-	store   *MemoryStore
+	// off hides every server from the pool, as the general MCP switch does.
+	off   bool
+	store *MemoryStore
 }
 
 func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *fixture {
@@ -103,13 +105,14 @@ func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *f
 		tune(&tun)
 	}
 	f.pool = newPool(Options{
-		Servers:  f.list,
-		Auth:     f.store,
-		Redirect: func(context.Context) string { return "http://localhost:18123/oauth/callback" },
-		LogDir:   f.logDir,
-		Env:      func() []string { return f.env },
-		Home:     f.home,
-		Emit:     f.events.emit,
+		Servers:    f.list,
+		Configured: f.configured,
+		Auth:       f.store,
+		Redirect:   func(context.Context) string { return "http://localhost:18123/oauth/callback" },
+		LogDir:     f.logDir,
+		Env:        func() []string { return f.env },
+		Home:       f.home,
+		Emit:       f.events.emit,
 	}, tun)
 	t.Cleanup(f.pool.Close)
 	return f
@@ -118,7 +121,21 @@ func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *f
 func (f *fixture) list() []api.MCPServer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.off {
+		return nil
+	}
 	return append([]api.MCPServer(nil), f.servers...)
+}
+
+func (f *fixture) configured(name string) (api.MCPServer, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.servers {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return api.MCPServer{}, false
 }
 
 func (f *fixture) set(servers ...api.MCPServer) {

@@ -31,8 +31,13 @@ import (
 
 // Options are what the pool needs from the server.
 type Options struct {
-	// Servers returns the configured servers.
+	// Servers returns the servers the relay runs (none while MCP is
+	// switched off).
 	Servers func() []api.MCPServer
+	// Configured returns the settings of server name whether or not MCP
+	// is switched on; ok is false when there is no such server. nil looks
+	// the name up in Servers.
+	Configured func(name string) (api.MCPServer, bool)
 	// Auth keeps the OAuth sign-ins; nil keeps them in memory.
 	Auth mcpauth.UpstreamStore
 	// Redirect returns the address of omo's OAuth callback for a sign-in
@@ -191,6 +196,17 @@ func newPool(o Options, t tunables) *Pool {
 	}
 	if o.Version == "" {
 		o.Version = "dev"
+	}
+	if o.Configured == nil {
+		servers := o.Servers
+		o.Configured = func(name string) (api.MCPServer, bool) {
+			for _, s := range servers() {
+				if s.Name == name {
+					return s, true
+				}
+			}
+			return api.MCPServer{}, false
+		}
 	}
 	if o.Home == "" {
 		o.Home, _ = os.UserHomeDir()
@@ -441,7 +457,7 @@ func (p *Pool) acquire(ctx context.Context, s api.MCPServer, id mcpserver.Identi
 			return nil, err
 		}
 		if s.Auth == api.MCPAuthOAuth && s.Transport != api.MCPTransportStdio {
-			p.loadAuth(s.Name, st)
+			p.loadAuth(s, st)
 			if st.auth.State != api.MCPAuthStateConnected {
 				p.mu.Unlock()
 				return nil, errNeedsLogin
@@ -600,9 +616,11 @@ func (p *Pool) reset(name string) {
 
 // Changed takes the settings of the servers names into use: their
 // instances stop and start again with the new settings on their next use.
-// A removed server is forgotten.
+// A removed server is forgotten. A stored sign-in that no longer matches
+// the server's settings (or of a removed server) is revoked and deleted.
 func (p *Pool) Changed(names []string) {
 	for _, name := range names {
+		p.dropStaleSignIn(name)
 		p.reset(name)
 		if _, ok := p.config(name); !ok {
 			p.mu.Lock()
@@ -709,7 +727,7 @@ func (p *Pool) Status() []api.MCPServerState {
 			}
 		}
 		if s.Auth == api.MCPAuthOAuth && s.Transport != api.MCPTransportStdio {
-			p.loadAuth(s.Name, st)
+			p.loadAuth(s, st)
 			state.Auth = st.auth
 			state.Auth.Scopes = slices.Clone(st.auth.Scopes)
 			if state.Auth.Scopes == nil {
@@ -760,14 +778,15 @@ func validServerName(name string) bool {
 
 // Test starts the draft server s apart from the pool, lists its tools and
 // stops it; nothing is kept. An OAuth server uses the sign-in stored under
-// its name.
+// its name only when that was given for the draft's address, resource and
+// client.
 func (p *Pool) Test(ctx context.Context, s api.MCPServer) (api.MCPTestResult, error) {
 	began := time.Now()
 	res := api.MCPTestResult{Tools: []string{}, Omitted: []api.MCPOmittedTool{}}
 	st := &serverState{redact: &redactor{}}
 	st.log = newServerLog("", s.Name, st.redact)
 	if s.Auth == api.MCPAuthOAuth && s.Transport != api.MCPTransportStdio {
-		p.loadAuth(s.Name, st)
+		p.loadAuth(s, st)
 		if st.auth.State != api.MCPAuthStateConnected {
 			res.Error = describeStartError(s.Name, errNeedsLogin)
 			res.Millis = time.Since(began).Milliseconds()
