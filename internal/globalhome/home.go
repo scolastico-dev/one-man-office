@@ -182,7 +182,7 @@ func checkMarker(root string) error {
 type oldInstallationError struct{ root string }
 
 func (e oldInstallationError) Error() string {
-	return fmt.Sprintf("omo: %s holds an installation of an older omo. This version cannot use it yet; set OMO_HOME to another folder.", e.root)
+	return fmt.Sprintf("%s holds the files of omo 0.11 or older. Start omo in a terminal to choose what happens to them, or set OMO_HOME to another folder", e.root)
 }
 
 func (e oldInstallationError) Is(target error) bool { return target == ErrOldInstallation }

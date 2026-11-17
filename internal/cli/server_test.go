@@ -97,17 +97,6 @@ func TestTokenStableAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestOldInstallationIsRefused(t *testing.T) {
-	home := isolate(t)
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("x: 1\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := execute(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "older omo") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 // snapshotTree maps every path under root to its mode and content.
 func snapshotTree(t *testing.T, root string) map[string]string {
 	t.Helper()
@@ -150,7 +139,7 @@ func TestOldInstallationLeavesStopAndUnregisterUntouched(t *testing.T) {
 			}
 			before := snapshotTree(t, home)
 			_, err := execute(context.Background(), args...)
-			if err == nil || !strings.Contains(err.Error(), "older omo") {
+			if err == nil || !strings.Contains(err.Error(), "omo 0.11 or older") {
 				t.Fatalf("error = %v", err)
 			}
 			if after := snapshotTree(t, home); !reflect.DeepEqual(before, after) {

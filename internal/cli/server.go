@@ -124,6 +124,13 @@ func stopSignals(parent context.Context) (ctx context.Context, hurry <-chan stru
 
 func startServer(ctx context.Context, hurry <-chan struct{}, cmd *cobra.Command, version string, detached bool, backgroundID string) error {
 	layout, err := globalhome.Open()
+	if errors.Is(err, globalhome.ErrOldInstallation) {
+		goOn, oldErr := meetOldInstallation(ctx, cmd)
+		if !goOn {
+			return oldErr
+		}
+		layout, err = globalhome.Open()
+	}
 	if err != nil {
 		return err
 	}

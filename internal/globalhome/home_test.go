@@ -49,7 +49,7 @@ func TestOpenRefusesOldInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Open()
-	if !errors.Is(err, ErrOldInstallation) || !strings.Contains(err.Error(), "set OMO_HOME to another folder") {
+	if !errors.Is(err, ErrOldInstallation) || !strings.Contains(err.Error(), "Start omo in a terminal to choose") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "layout.json")); statErr == nil {

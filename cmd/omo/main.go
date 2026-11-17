@@ -11,7 +11,7 @@ import (
 var version = "dev"
 
 func main() {
-	if err := cli.Root(version).Execute(); err != nil {
+	if err := cli.Explain(cli.Root(version).Execute()); err != nil {
 		fmt.Fprintln(os.Stderr, "omo:", err)
 		os.Exit(1)
 	}
