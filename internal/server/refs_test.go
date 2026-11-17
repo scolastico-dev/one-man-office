@@ -22,9 +22,8 @@ type refsRace struct {
 	kind, id string
 	// missing, when set, is the project folder the race removes from disk:
 	// while the ticket write is stopped, or before the removal starts.
-	missing                 string
-	writeOK, removeOK       int
-	writeLostCode, lostCode string
+	missing           string
+	writeOK, removeOK int
 }
 
 // refsRaces builds a fresh server for each case of a ticket write against a

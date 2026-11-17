@@ -168,7 +168,6 @@ type runner struct {
 
 	client  *apiclient.Client
 	me      *api.Me
-	own     *api.Ticket
 	story   *int
 	project string
 	name    string

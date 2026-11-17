@@ -80,15 +80,6 @@ func Start(o Options) (*Terminal, error) {
 	return Own(o.ID, p, o.OnExit), nil
 }
 
-func (i *Terminal) setError(err error) {
-	if err == nil {
-		return
-	}
-	i.mu.Lock()
-	i.info.Error = err.Error()
-	i.mu.Unlock()
-}
-
 // Own wraps an already started process in a Terminal.
 func Own(id string, p Process, onExit func(*Terminal, error)) *Terminal {
 	i := &Terminal{info: Info{ID: id, State: "running", Started: time.Now()}, process: p, streams: map[chan []byte]struct{}{}, done: make(chan struct{}), inputQueue: make(chan terminalInput, 8), stopInput: make(chan struct{}), writerDone: make(chan struct{})}

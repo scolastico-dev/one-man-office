@@ -467,8 +467,6 @@ func (g *Git) worktreeDiffSetup(ctx context.Context, repo, dir string) (wt *work
 
 type untrackedFn func(ctx context.Context, max int) ([]FileChange, bool, error)
 
-const singleListFiles = 200000
-
 // fileDiff finds path in the list of the diff of revs and reads its patch
 // with lines lines of context. whole refuses a patch that does not fit with
 // ErrTooLarge instead of cutting it.

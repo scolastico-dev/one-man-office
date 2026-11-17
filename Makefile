@@ -74,7 +74,7 @@ test:
 	go test ./... -timeout 900s
 
 ## check: everything CI should gate on
-check: fmt vet test
+check: fmt vet lint test
 
 ## fmt: report unformatted files (does not rewrite)
 fmt:
@@ -84,6 +84,10 @@ fmt:
 ## vet: run go vet
 vet:
 	go vet ./...
+
+## lint: report unused code with staticcheck when it is installed (skipped otherwise)
+lint:
+	@if command -v staticcheck >/dev/null 2>&1; then staticcheck -checks U1000 ./...; else echo "staticcheck is not installed: unused-code check skipped"; fi
 
 ## tidy: sync go.mod/go.sum
 tidy:

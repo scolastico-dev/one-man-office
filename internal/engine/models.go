@@ -128,11 +128,6 @@ const (
 	startNoModel
 )
 
-// eligible reports whether id exists and is below its soft threshold.
-func eligible(cat modelCatalog, use usageFunc, id string) bool {
-	return exists(cat, id) && !use.overSoft(id)
-}
-
 // canStart reports whether pick would find a model for c, and if not, why
 // not, without moving any cursor.
 func canStart(c modelChoice, cat modelCatalog, use usageFunc) startCheck {
