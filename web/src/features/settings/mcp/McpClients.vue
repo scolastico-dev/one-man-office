@@ -303,6 +303,7 @@ const applyLabel = computed(() => {
 }
 .plan__entries > div {
   display: grid;
+  align-content: start;
   gap: var(--omo-space);
   min-width: 0;
 }
@@ -316,7 +317,9 @@ const applyLabel = computed(() => {
   font-family: inherit;
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
-  white-space: pre;
+  /* The commands and entries are read before they run: wrapped, never cut off at the side. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 code {
   font-family: inherit;
