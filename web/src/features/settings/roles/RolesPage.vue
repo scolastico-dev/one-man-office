@@ -3,7 +3,7 @@
 // per role to choose its models and how it picks among them. Each role is its
 // own file with its own revision; one Save bar at the end saves every changed
 // role (useSettingsGroup), and each role shows its own refusal or conflict.
-import { onScopeDispose, ref, shallowRef } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { ApiError } from '../../../api/client'
 import { listModels } from '../../../api/endpoints'
 import type { ApiEvent, Model } from '../../../api/types'
@@ -12,6 +12,7 @@ import SaveBar from '../../../components/ui/SaveBar.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
+import { liveRead } from '../../../store/liveRead'
 import { roleTitle, SETUP_ROLES } from '../../onboarding/agentSetup'
 import SettingsPage from '../SettingsPage.vue'
 import { useSettingsGroup } from '../settingsGroup'
@@ -46,38 +47,21 @@ async function saveAll() {
 
 const models = shallowRef<Model[] | null>(null)
 const failure = ref('')
-let attempt = 0
-let applied = 0
 
-/** Reads the models again; an older answer never replaces a newer one. */
-async function readModels() {
-  const mine = ++attempt
-  try {
-    const { data } = await listModels(client)
-    if (mine < applied) return
-    applied = mine
+const reader = liveRead({
+  store,
+  read: async () => (await listModels(client)).data,
+  apply(data) {
     models.value = data
     failure.value = ''
-  } catch (e) {
-    if (mine < applied) return
-    applied = mine
+  },
+  failed(e) {
     failure.value = e instanceof ApiError ? e.message : 'The models could not be read.'
-  }
-}
-
-const watches = (ev: ApiEvent) => {
-  if (ev.kind === 'settings.invalid') return true
-  return ev.kind === 'settings.changed' && (ev.data as { section?: string } | null)?.section === 'profiles'
-}
-const offEvent = store.onEvent('*', (ev) => {
-  if (watches(ev)) void readModels()
+  },
+  watches: (ev: ApiEvent) =>
+    ev.kind === 'settings.invalid' || (ev.kind === 'settings.changed' && (ev.data as { section?: string } | null)?.section === 'profiles'),
 })
-const offSnapshot = store.onSnapshot(() => void readModels())
-onScopeDispose(() => {
-  offEvent()
-  offSnapshot()
-})
-void readModels()
+const readModels = () => reader.reload()
 </script>
 
 <template>

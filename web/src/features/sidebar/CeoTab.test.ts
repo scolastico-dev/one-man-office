@@ -288,3 +288,29 @@ test('without a running CEO a model choice says nothing about a restart', async 
   expect(sent.map((s) => `${s.method} ${s.path}`)).toEqual(['PUT /api/roles/ceo'])
   expect(w.find('[data-ceo-model-next]').exists()).toBe(false)
 })
+
+test('after a gap in the board connection the CEO role is read again, so the next choice carries its new revision', async () => {
+  const { hn, w, sent } = await open('restored')
+  // Settings, Roles changed the CEO's role while this page did not hear it.
+  hn.ceo.roles = [{ name: 'ceo', models: ['fake/strong'], assignment: 'round_robin', revision: 'r5' }]
+  hn.omo.stream!.onState('retrying', 1000)
+  hn.omo.stream!.onState('live')
+  await flushPromises()
+  expect(w.get('[data-ceo-model] button').text()).toBe('Model: fake/strong')
+  const client = hn.session.client as unknown as { send: (m: string, p: string, b?: unknown, o?: { ifMatch?: string }) => Promise<unknown> }
+  const send = client.send
+  const matches: (string | undefined)[] = []
+  client.send = (m, p, b, o) => {
+    matches.push(o?.ifMatch)
+    return send(m, p, b, o)
+  }
+  await w.get('[data-ceo-model] button').trigger('click')
+  await flushPromises()
+  await w
+    .findAll('[role="option"]')
+    .find((o) => o.text().includes('fake/default'))!
+    .trigger('click')
+  await flushPromises()
+  expect(sent.map((s) => `${s.method} ${s.path}`)).toEqual(['PUT /api/roles/ceo'])
+  expect(matches).toEqual(['r5'])
+})

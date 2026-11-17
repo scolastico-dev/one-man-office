@@ -93,3 +93,26 @@ test('grants are listed apart from tokens and can be revoked after asking', asyn
   expect(w.find('[data-mcp-grant="Claude Code"]').exists()).toBe(false)
   expect(w.find('[data-no-mcp-grants]').exists()).toBe(true)
 })
+
+/** The browser tab is hidden and shown again, as after a look at another tab. */
+function shownAgain(): void {
+  for (const state of ['hidden', 'visible']) {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  delete (document as { visibilityState?: unknown }).visibilityState
+}
+
+test('the list is read again when the tab is shown again: a grant made elsewhere appears, a use updates "last used"', async () => {
+  const { w, h } = await open((omo) => {
+    omo.mcp.tokens = [{ ...grant, last_used_at: null }]
+  })
+  expect(w.text()).not.toContain('Codex desktop')
+  h.omo.mcp.tokens = [
+    { ...grant, last_used_at: '2026-11-17T09:00:00Z' },
+    { ...grant, id: 'cd34', name: 'Codex desktop' },
+  ]
+  shownAgain()
+  await flushPromises()
+  expect(w.text()).toContain('Codex desktop')
+})

@@ -11,6 +11,7 @@ import { useRouter } from 'vue-router'
 import { failureText } from '../../api/lostAnswer'
 import { getSkillSets, listMCPClients } from '../../api/endpoints'
 import type { ApiEvent, SettingsChangedData } from '../../api/types'
+import { concernsClients } from '../../store/mcpEvents'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
@@ -47,7 +48,7 @@ const agy = liveRead({
   store,
   read: async () => (agyNeedsEntry.value ? (await listMCPClients(session.client)).data : null),
   apply: (r) => (agyRegistered.value = r === null ? null : (r ?? []).some((c) => c.target.cli === 'agy' && c.state === 'installed')),
-  watches: (ev: ApiEvent) => ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'mcp',
+  watches: concernsClients,
 })
 watch(agyNeedsEntry, (need) => need && void agy.reload())
 

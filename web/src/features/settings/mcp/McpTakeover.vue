@@ -21,6 +21,8 @@ import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { GLOBAL_LABEL } from './mcpForms'
+import { concernsTakeover } from '../../../store/mcpEvents'
+import { liveRead } from '../../../store/liveRead'
 import { pickErrors, sourceWords, takeoverDetails, targetIdWords } from './takeoverForms'
 
 const props = defineProps<{
@@ -38,21 +40,32 @@ const reading = ref(false)
 /** Per candidate key: chosen, and its name in omo. */
 const picks = reactive<Record<string, { on: boolean; name: string }>>({})
 
-async function read() {
-  reading.value = true
-  try {
-    const { data } = await getMCPTakeover(session.client)
+// The programs' files change without omo: besides a change of omo's servers
+// or the profiles, they are read again whenever the tab is shown again. A
+// pick and a name the user set stay for a server that is still there.
+const list = liveRead({
+  store: session.store,
+  async read() {
+    reading.value = true
+    try {
+      return (await getMCPTakeover(session.client)).data
+    } finally {
+      reading.value = false
+    }
+  },
+  apply(data) {
     preview.value = { candidates: data.candidates ?? [], stays: data.stays ?? [] }
-    for (const k of Object.keys(picks)) delete picks[k]
-    for (const c of preview.value.candidates) picks[c.key] = { on: c.conflict === '', name: c.name }
+    const keys = new Set(preview.value.candidates.map((c) => c.key))
+    for (const k of Object.keys(picks)) if (!keys.has(k)) delete picks[k]
+    for (const c of preview.value.candidates) picks[c.key] ??= { on: c.conflict === '', name: c.name }
     loadError.value = ''
-  } catch (e) {
+  },
+  failed(e) {
     loadError.value = e instanceof Error && e.message !== '' ? e.message : "The agent programs' servers could not be read."
-  } finally {
-    reading.value = false
-  }
-}
-void read()
+  },
+  watches: concernsTakeover,
+})
+const read = () => list.reload()
 
 const removeFromPrograms = ref(true)
 const chosen = computed(() => (preview.value?.candidates ?? []).filter((c) => picks[c.key]?.on))

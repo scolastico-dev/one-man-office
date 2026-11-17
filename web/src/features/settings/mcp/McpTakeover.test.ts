@@ -88,3 +88,30 @@ test('keeping the programs’ entries is sent as such', async () => {
   await flushPromises()
   expect((h.sent[0]?.body as { remove_from_cli: boolean }).remove_from_cli).toBe(false)
 })
+
+/** The browser tab is hidden and shown again, as after a look at another tab. */
+function shownAgain(): void {
+  for (const state of ['hidden', 'visible']) {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  delete (document as { visibilityState?: unknown }).visibilityState
+}
+
+test('reading the files again keeps the picks and names the user set for servers still there', async () => {
+  const { w, h } = await open()
+  const nameOf = () => cand(w, 'k-gh').get('input[data-mcp-candidate-name], [data-mcp-candidate-name] input')
+  await nameOf().setValue('gh')
+  await cand(w, 'k-fs').get('[role="switch"]').trigger('click', { detail: 1 })
+  expect(cand(w, 'k-fs').get('[role="switch"]').attributes('aria-checked')).toBe('true')
+  h.omo.mcp.takeover = structuredClone(PREVIEW)
+  shownAgain()
+  await flushPromises()
+  expect(cand(w, 'k-fs').get('[role="switch"]').attributes('aria-checked')).toBe('true')
+  expect((nameOf().element as HTMLInputElement).value).toBe('gh')
+  // A server gone from the files leaves the list.
+  h.omo.mcp.takeover = { ...structuredClone(PREVIEW), candidates: [structuredClone(PREVIEW.candidates[0]!)] }
+  shownAgain()
+  await flushPromises()
+  expect(w.findAll('[data-mcp-candidate]')).toHaveLength(1)
+})

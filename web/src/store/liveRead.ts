@@ -1,6 +1,8 @@
 // A list a page shows and keeps current: read at once, read again
-// when an event says it may have changed, after a snapshot and when the
-// event stream is live again. Reads are numbered, so an older answer (or an
+// when an event says it may have changed, after a snapshot, when the
+// event stream is live again and when the browser tab is shown again (what
+// changes without an event, such as when a token was last used, is then
+// current whenever the user looks). Reads are numbered, so an older answer (or an
 // older failure) never replaces a newer one. Stops with the calling
 // component or effect scope.
 import { getCurrentScope, onScopeDispose, watch } from 'vue'
@@ -51,10 +53,16 @@ export function liveRead<T>(o: LiveReadOptions<T>): LiveRead {
       if (now === 'live' && before !== 'live') void reload()
     },
   )
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') void reload()
+  }
+  const doc = typeof document !== 'undefined' ? document : null
+  doc?.addEventListener('visibilitychange', onVisibility)
   const stop = () => {
     offEvent()
     offSnapshot()
     stopLive()
+    doc?.removeEventListener('visibilitychange', onVisibility)
   }
   if (getCurrentScope()) onScopeDispose(stop)
   void reload()

@@ -9,7 +9,8 @@
 import { computed, ref } from 'vue'
 import { createMCPToken, listMCPTokens, revokeMCPToken } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { MCPToken } from '../../../api/types'
+import type { ApiEvent, MCPToken, SettingsChangedData } from '../../../api/types'
+import { liveRead } from '../../../store/liveRead'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import RelativeTime from '../../../components/ui/RelativeTime.vue'
@@ -35,20 +36,22 @@ const commands = connectionCommands(base)
 
 const tokens = ref<MCPToken[] | null>(null)
 const loadError = ref('')
-let seq = 0
-async function read() {
-  const mine = ++seq
-  try {
-    const { data } = await listMCPTokens(session.client)
-    if (mine !== seq) return
+// No event tells of a token used, revoked in another tab or expired, or of a
+// grant made on the consent page: the list is read again whenever the tab is
+// shown again, besides after a resync and when the MCP endpoint is switched.
+const list = liveRead({
+  store: session.store,
+  read: async () => (await listMCPTokens(session.client)).data,
+  apply(data) {
     tokens.value = data ?? []
     loadError.value = ''
-  } catch (e) {
-    if (mine !== seq) return
+  },
+  failed(e) {
     loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The tokens could not be read.'
-  }
-}
-void read()
+  },
+  watches: (ev: ApiEvent) => ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'general',
+})
+const read = () => list.reload()
 
 const pats = computed(() => (tokens.value ?? []).filter((t) => t.kind === 'pat'))
 const grants = computed(() => (tokens.value ?? []).filter((t) => t.kind === 'oauth'))
@@ -79,6 +82,7 @@ async function create() {
     const { data } = await createMCPToken(session.client, { name: name.value.trim(), ...(exp === null ? {} : { expires_at: exp }) })
     secret.value = data.secret
     createdName.value = data.token.name
+    list.newer()
     tokens.value = [...(tokens.value ?? []).filter((t) => t.id !== data.token.id), data.token]
     name.value = ''
     announce.polite(`Token ${visibleText(data.token.name)} created.`)
@@ -113,6 +117,7 @@ async function revoke(t: MCPToken) {
   revokeError.value = null
   try {
     await revokeMCPToken(session.client, t.id)
+    list.newer()
     tokens.value = (tokens.value ?? []).filter((x) => x.id !== t.id)
     announce.polite(`Revoked ${what}.`)
   } catch (e) {

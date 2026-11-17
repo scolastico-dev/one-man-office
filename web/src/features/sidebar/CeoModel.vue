@@ -3,7 +3,7 @@
 // one setting Settings, Roles edits: a choice here makes the chosen model the
 // list's only entry (the assignment stays). A running CEO keeps its model
 // until its next start; the tab says so and offers to restart it now.
-import { computed, onBeforeUnmount, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { getRoles, listModels, putRole } from '../../api/endpoints'
 import { NO_REVISION, type AgentSession, type ApiEvent, type Model, type RoleSettings, type SettingsChangedData } from '../../api/types'
 import SearchPicker from '../../components/ui/SearchPicker.vue'
@@ -11,6 +11,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import { useSession } from '../../session'
+import { liveRead } from '../../store/liveRead'
 import { listText, modelItems, startsWithOther, withOnlyModel } from './ceoModel'
 
 const props = withDefaults(
@@ -39,24 +40,25 @@ const next = computed(() => startsWithOther(props.live, list.value))
 
 const message = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback)
 
-async function load() {
-  try {
-    const [roles, all] = await Promise.all([getRoles(session.client), listModels(session.client)])
+// The list changes elsewhere too (Settings, Roles; a profile that goes takes
+// its models along); after a resync its revision is read again, or the next
+// choice would be refused as stale.
+const reader = liveRead({
+  store: session.store,
+  read: () => Promise.all([getRoles(session.client), listModels(session.client)]),
+  apply([roles, all]) {
     role.value = roles.data.find((r) => r.name === 'ceo') ?? { name: 'ceo', models: [], assignment: 'round_robin', revision: NO_REVISION }
     models.value = all.data
     error.value = ''
-  } catch (e) {
+  },
+  failed(e) {
     error.value = message(e, 'The CEO’s model could not be read.')
-  }
-}
-void load()
-
-// The list changes elsewhere too (Settings, Roles; a profile that goes takes its models along).
-const off = session.store.onEvent('settings.changed', (ev: ApiEvent) => {
-  const d = ev.data as Partial<SettingsChangedData> | null
-  if ((d?.section === 'roles' && d.name === 'ceo') || d?.section === 'profiles') void load()
+  },
+  watches(ev: ApiEvent) {
+    const d = ev.kind === 'settings.changed' ? (ev.data as Partial<SettingsChangedData> | null) : null
+    return (d?.section === 'roles' && d.name === 'ceo') || d?.section === 'profiles'
+  },
 })
-onBeforeUnmount(off)
 
 async function choose(id: string) {
   const current = role.value
@@ -66,12 +68,13 @@ async function choose(id: string) {
   error.value = ''
   try {
     const { data } = await putRole(session.client, withOnlyModel(current, id), current.revision ?? NO_REVISION)
+    reader.newer()
     role.value = data
     announcer.polite(`The CEO’s model is now ${id}.`)
   } catch (e) {
     error.value = message(e, 'The CEO’s model could not be saved.')
     announcer.assertive(error.value)
-    void load()
+    void reader.reload()
   } finally {
     saving.value = false
   }

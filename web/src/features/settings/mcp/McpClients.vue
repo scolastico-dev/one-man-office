@@ -12,6 +12,8 @@ import { ApiError } from '../../../api/client'
 import { applyMCPClient, listMCPClients, planMCPClient } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import type { MCPClientApplied, MCPClientPlan, MCPClientState } from '../../../api/types'
+import { liveRead } from '../../../store/liveRead'
+import { concernsClients } from '../../../store/mcpEvents'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import StatusBadge from '../../../components/ui/StatusBadge.vue'
@@ -27,22 +29,25 @@ const announce = useAnnouncer()
 
 const states = ref<MCPClientState[] | null>(null)
 const loadError = ref('')
-let seq = 0
-async function read() {
-  const mine = ++seq
-  try {
-    const { data } = await listMCPClients(session.client)
-    if (mine !== seq) return
+// The files are the programs' own: besides a change of the profiles (their
+// account folders) or of the MCP endpoint, they are read again whenever the
+// tab is shown again.
+const reader = liveRead({
+  store: session.store,
+  read: async () => (await listMCPClients(session.client)).data,
+  apply(data) {
     states.value = data ?? []
     loadError.value = ''
-  } catch (e) {
-    if (mine !== seq) return
+  },
+  failed(e) {
     loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The agent programs could not be read.'
-  }
-}
-void read()
+  },
+  watches: concernsClients,
+})
+const read = () => reader.reload()
 
 function take(st: MCPClientState) {
+  reader.newer()
   const list = states.value ?? []
   states.value = list.map((x) => (x.target.id === st.target.id ? st : x))
 }

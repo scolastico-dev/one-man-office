@@ -95,3 +95,12 @@ test('a plan with nothing to do says so and offers no apply', async () => {
   await flushPromises()
   expect(w.get('[data-mcp-plan-commands]').text()).toBe('claude mcp remove omo')
 })
+
+test('a change of the profiles reads the list again: a new account folder shows', async () => {
+  const { w, h } = await open([client()])
+  expect(w.findAll('[data-mcp-client]')).toHaveLength(1)
+  h.omo.mcp.clients = [client(), client({ target: { id: 'codex-9f', cli: 'codex', account: '/home/u/.codex-work', config_path: '/home/u/.codex-work/config.toml' } })]
+  h.omo.emit('settings.changed', { section: 'profiles', name: 'work', source: 'app' })
+  await flushPromises()
+  expect(w.findAll('[data-mcp-client]')).toHaveLength(2)
+})

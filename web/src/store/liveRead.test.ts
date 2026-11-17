@@ -46,6 +46,33 @@ test('reads at once, and again on a watched event, a snapshot and when the strea
   expect(store.listeners()).toBe(0)
 })
 
+test('reads again when the browser tab is shown again, not when it is hidden', async () => {
+  const store = fakeStore()
+  let n = 0
+  const got: number[] = []
+  const scope = effectScope()
+  scope.run(() => liveRead({ store, read: async () => ++n, apply: (v) => got.push(v), watches: () => false }))
+  await flushPromises()
+  const shown = (state: 'visible' | 'hidden') => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  try {
+    shown('hidden')
+    await flushPromises()
+    expect(got).toEqual([1])
+    shown('visible')
+    await flushPromises()
+    expect(got).toEqual([1, 2])
+    scope.stop()
+    shown('visible')
+    await flushPromises()
+    expect(got).toEqual([1, 2])
+  } finally {
+    delete (document as { visibilityState?: unknown }).visibilityState
+  }
+})
+
 test('an older answer never replaces a newer one; a failure of an older read is not shown', async () => {
   const store = fakeStore()
   const releases: ((v: string) => void)[] = []
