@@ -4,9 +4,10 @@ import "time"
 
 // Values of SkillSet.Update.
 const (
-	// SkillSetAtStart updates the checkout whenever an agent starts.
+	// SkillSetAtStart updates the checkout at every start of omo.
 	SkillSetAtStart = "at_start"
-	// SkillSetPinned never updates the checkout by itself.
+	// SkillSetPinned does not follow the branch: the checkout is fetched
+	// again only on Update now or when the repository or ref changes.
 	SkillSetPinned = "pinned"
 )
 
