@@ -25,10 +25,10 @@ func addMCPCommand(root *cobra.Command) {
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "omo's MCP server for agent programs",
-		Long: "omo serves its `omo ai` commands as MCP tools, and the tools of the MCP servers it relays,\n" +
-			"at /mcp. Agent programs reach it through `omo mcp stdio`, which acts as the agent session\n" +
-			"of OMO_AGENT_ID, as `omo ai` does. `omo mcp install` registers that bridge in the agent\n" +
-			"programs; `omo mcp token` manages the tokens other MCP clients reach /mcp with.",
+		Long: "omo serves its \"omo ai\" commands as MCP tools, and the tools of the MCP servers it relays,\n" +
+			"at /mcp. Agent programs reach it through \"omo mcp stdio\", which acts as the agent session\n" +
+			"of OMO_AGENT_ID, as \"omo ai\" does. \"omo mcp install\" registers that bridge in the agent\n" +
+			"programs; \"omo mcp token\" manages the tokens other MCP clients reach /mcp with.",
 		Args: cobra.NoArgs,
 	}
 	version := root.Version
@@ -55,7 +55,7 @@ func addMCPCommand(root *cobra.Command) {
 		Use:   "status",
 		Short: "Show the relayed MCP servers and what omo's MCP endpoint offers here",
 		Long: "List the MCP servers omo relays with their states (outside an agent session), then connect\n" +
-			"to omo's MCP endpoint as `omo mcp stdio` would in this terminal and list the tools it offers.",
+			"to omo's MCP endpoint as \"omo mcp stdio\" would in this terminal and list the tools it offers.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			session, dial, err := mcpbridge.Environment()
@@ -278,7 +278,7 @@ func mcpClientCommand(action string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use + " [PROGRAM|TARGET]",
 		Short: short,
-		Long: "Show how omo " + verb + " its MCP server (`omo mcp stdio`) in the configuration of the agent\n" +
+		Long: "Show how omo " + verb + " its MCP server (\"omo mcp stdio\") in the configuration of the agent\n" +
 			"programs: every program and profile account omo knows, the targets of one PROGRAM (claude,\n" +
 			"codex, agy), or one TARGET by the id the MCP page shows. Nothing changes without --yes; omo\n" +
 			"keeps a copy of every file it changes. omo must be running.",
