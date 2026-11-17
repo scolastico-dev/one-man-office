@@ -100,7 +100,7 @@ test('waiting items equal the needs-me rule: question, attention on my tickets i
   expect(got.map((w) => w.ticket).sort()).toEqual(tickets.filter(needsMe).map((t) => t.number).sort())
   expect(got.find((w) => w.ticket === 1)).toMatchObject({ kind: 'question', title: 'Asks', text: '2 questions for you' })
   // The failed step in the board card's words.
-  expect(got.find((w) => w.ticket === 2)).toMatchObject({ kind: 'attention', text: 'needs attention · the agent keeps failing' })
+  expect(got.find((w) => w.ticket === 2)).toMatchObject({ kind: 'attention', text: 'needs attention · the agent stopped working' })
   expect(got.find((w) => w.ticket === 8)).toMatchObject({ kind: 'attention', text: 'needs attention' })
   expect(got.find((w) => w.ticket === 4)).toMatchObject({ kind: 'review', text: 'your review' })
   expect(got.find((w) => w.ticket === 7)).toMatchObject({ kind: 'attention', text: 'needs attention · merge blocked' })

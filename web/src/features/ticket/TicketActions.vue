@@ -33,7 +33,7 @@ const hintId = useId()
 
 const STEP_TEXT: Record<string, string> = {
   start: 'Starting work on it failed.',
-  agent: 'Its agent keeps failing.',
+  agent: 'Its agent stopped working.',
   merge: 'The merge is blocked.',
 }
 

@@ -5,7 +5,7 @@ import type { SlotView } from './slots'
 
 const STEP_TEXT: Record<string, string> = {
   start: 'starting work failed',
-  agent: 'the agent keeps failing',
+  agent: 'the agent stopped working',
   merge: 'merge blocked',
 }
 

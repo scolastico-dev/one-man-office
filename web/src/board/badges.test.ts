@@ -58,7 +58,7 @@ describe('badgeFor', () => {
 
   test('failed_step counts as needs attention with the step in the tooltip', () => {
     expect(badgeFor(t({ failed_step: 'start', attention: 'no worktree' }))).toMatchObject({ tone: 'danger', text: 'needs attention', title: 'starting work failed: no worktree' })
-    expect(badgeFor(t({ failed_step: 'agent' }))?.title).toBe('the agent keeps failing')
+    expect(badgeFor(t({ failed_step: 'agent' }))?.title).toBe('the agent stopped working')
     expect(badgeFor(t({ failed_step: 'merge', attention: 'conflict' }))?.title).toBe('merge blocked: conflict')
     expect(badgeFor(t({ attention: 'stuck' }))?.title).toBe('stuck')
     expect(badgeFor(t({ failed_step: '' }))).toBeNull()
