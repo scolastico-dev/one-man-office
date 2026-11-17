@@ -92,7 +92,7 @@ test('a new user goes from the printed address to a first task done by an agent'
   // Approve gives the green light; a developer and then a reviewer work it.
   await page.locator('li[data-ticket="1"]').click()
   const panel = page.locator('[data-ticket-panel]')
-  await expect(panel.getByText('Gives the green light: it moves to Ready For Dev, where an agent picks it up.')).toBeVisible()
+  await expect(panel.getByText('Gives the green light: it moves to Ready For Dev, where an agent starts on it as soon as nothing holds it back.')).toBeVisible()
   await panel.getByRole('button', { name: 'Approve', exact: true }).click()
   await expectCardIn(page, 1, 'Review')
   await expect(panel.locator('[data-ticket-badge]')).toHaveText('your review', { timeout: 30_000 })
