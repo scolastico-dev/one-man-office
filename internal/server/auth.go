@@ -58,6 +58,10 @@ func (s *Server) BrowserHandler() http.Handler {
 			reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/plugin-assets/") {
+			s.servePluginAsset(w, r)
+			return
+		}
 		if ownAuth(r.URL.Path) {
 			s.serveOwnAuth(w, r, false)
 			return

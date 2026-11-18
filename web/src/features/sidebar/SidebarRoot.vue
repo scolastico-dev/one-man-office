@@ -12,6 +12,7 @@ import Splitter from '../../components/ui/Splitter.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import UiTabs, { type UiTab } from '../../components/ui/UiTabs.vue'
 import { useBoard } from '../../store'
+import SidebarPlugins from '../plugins/SidebarPlugins.vue'
 import { registerSidebarActions } from './sidebarActions'
 import { sidebarTabs, visibleTabs } from './sidebarTabs'
 import { MAX_SHARE, MIN_WIDTH, NARROW_QUERY, useSidebar } from './useSidebar'
@@ -136,11 +137,14 @@ watch(
           </svg>
         </IconButton>
       </div>
-      <UiTabs v-if="sidebar.open.value" :model-value="tab" class="side__tabs" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
-        <template #panel="{ active }">
-          <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
-        </template>
-      </UiTabs>
+      <div v-if="sidebar.open.value" class="side__body">
+        <UiTabs :model-value="tab" class="side__tabs" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
+          <template #panel="{ active }">
+            <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
+          </template>
+        </UiTabs>
+        <SidebarPlugins />
+      </div>
       <!-- Collapsed, no tab is shown, so none is marked as selected. -->
       <UiTabs v-else model-value="" class="side__tabs" :tabs="tabs" label="Sidebar" orientation="vertical" @update:model-value="pick" />
     </div>
@@ -154,6 +158,7 @@ watch(
         <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
       </template>
     </UiTabs>
+    <SidebarPlugins v-if="sidebar.sheet.value" />
   </UiDialog>
 </template>
 
@@ -193,9 +198,9 @@ watch(
   justify-content: flex-end;
   padding-right: calc(var(--omo-space) * 2);
 }
-.side__tabs {
-  min-height: 0;
-}
+.side__body { display: flex; flex-direction: column; min-height: 0; }
+.side__tabs { flex: 1 1 auto; min-height: 0; }
+.side__body > :deep(.sidebar-plugins) { flex: none; }
 .side__tabs :deep([role='tabpanel']) {
   overflow-y: auto;
 }
@@ -215,4 +220,5 @@ watch(
 .side-sheet__tabs {
   flex: 1 1 auto;
 }
+.side-sheet > .dialog__body > .sidebar-plugins { flex: none; }
 </style>

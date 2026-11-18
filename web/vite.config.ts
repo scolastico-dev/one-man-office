@@ -107,7 +107,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      '^/(?:api|plugin-assets)(?:/|$)': {
         target,
         changeOrigin: true,
         configure(proxy) {

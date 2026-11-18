@@ -8,6 +8,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -73,35 +74,40 @@ func frontendNode(dir, rel string, folder bool) error {
 	return nil
 }
 
-func hashFrontendFile(h hash.Hash, dir, rel string, limit int64) (int64, error) {
+func hashFrontendFile(h hash.Hash, dir, rel string, limit int64) ([]byte, error) {
 	if err := publicPath(rel); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := frontendNode(dir, rel, false); err != nil {
-		return 0, err
+		return nil, err
 	}
 	b, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), limit)
 	if err != nil {
-		return 0, errors.New("frontend file cannot be read or exceeds its byte limit")
+		return nil, errors.New("frontend file cannot be read or exceeds its byte limit")
 	}
 	// Length framing prevents file-name/content boundary collisions.
 	fmt.Fprintf(h, "%d:%s:%d:", len(rel), rel, len(b))
 	_, _ = h.Write(b)
-	return int64(len(b)), nil
+	return b, nil
 }
 
-func (m *Manifest) readFrontend(dir string, raw []byte) error {
+func (m *Manifest) readFrontendFile(dir string, raw []byte, target string) ([]byte, error) {
+	var content []byte
 	h := sha256.New()
 	fmt.Fprintf(h, "%d:", len(raw))
 	_, _ = h.Write(raw)
 	if m.Frontend.Script != "" {
-		total, err := hashFrontendFile(h, dir, m.Frontend.Script, MaxFrontendScriptBytes)
+		script, err := hashFrontendFile(h, dir, m.Frontend.Script, MaxFrontendScriptBytes)
+		total := int64(len(script))
+		if target == m.Frontend.Script {
+			content = script
+		}
 		if err != nil {
-			return fmt.Errorf("frontend.script: %w", err)
+			return nil, fmt.Errorf("frontend.script: %w", err)
 		}
 		if m.Frontend.Assets != "" {
 			if err := frontendNode(dir, m.Frontend.Assets, true); err != nil {
-				return fmt.Errorf("frontend.assets: %w", err)
+				return nil, fmt.Errorf("frontend.assets: %w", err)
 			}
 			entries := 1
 			err := filepath.WalkDir(filepath.Join(dir, filepath.FromSlash(m.Frontend.Assets)), func(p string, d os.DirEntry, err error) error {
@@ -132,15 +138,58 @@ func (m *Manifest) readFrontend(dir string, raw []byte) error {
 				if d.Type()&os.ModeSymlink != 0 || !d.Type().IsRegular() {
 					return errors.New("frontend assets must be regular files, without symlinks")
 				}
-				n, err := hashFrontendFile(h, dir, rel, MaxFrontendBytes-total)
-				total += n
+				data, err := hashFrontendFile(h, dir, rel, MaxFrontendBytes-total)
+				total += int64(len(data))
+				if rel == target {
+					content = data
+				}
 				return err
 			})
 			if err != nil {
-				return fmt.Errorf("frontend.assets: %w", err)
+				return nil, fmt.Errorf("frontend.assets: %w", err)
 			}
 		}
 	}
 	m.contentID = hex.EncodeToString(h.Sum(nil))
-	return nil
+	return content, nil
+}
+
+// FrontendFile reads only an enabled plugin's declared public files. Repeat
+// validation at read time: an installed tree can change after runtime loading.
+// The content identity also prevents serving new bytes under an old address.
+func (m *Manager) FrontendFile(name, identity, rel string) ([]byte, error) {
+	missing := errors.New("plugin asset unavailable")
+	if !ValidName(name) || publicPath(rel) != nil || identity == "" {
+		return nil, missing
+	}
+	m.mu.Lock()
+	var e *entry
+	for _, candidate := range m.entries {
+		if candidate.settings.Name == name {
+			e = candidate
+			break
+		}
+	}
+	if m.closed || e == nil || e.p == nil || !e.settings.Enabled || e.manifest.contentID != identity {
+		m.mu.Unlock()
+		return nil, missing
+	}
+	dir := e.p.dir
+	m.mu.Unlock()
+	manifest, data, err := readManifest(dir, rel)
+	if err != nil || manifest.contentID != identity || manifest.Frontend.Script == "" {
+		return nil, missing
+	}
+	if rel != manifest.Frontend.Script && (manifest.Frontend.Assets == "" || !strings.HasPrefix(rel, manifest.Frontend.Assets+"/")) {
+		return nil, missing
+	}
+	if data == nil {
+		return nil, missing
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || !slices.Contains(m.entries, e) || e.p == nil || !e.settings.Enabled {
+		return nil, missing
+	}
+	return data, nil
 }

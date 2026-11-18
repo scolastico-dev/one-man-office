@@ -1,5 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { defineComponent, h as h0, provide, reactive } from 'vue'
 import type { PluginHook, PluginInfo, PluginSettings, PluginsResponse } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
@@ -12,6 +12,7 @@ let mounted: VueWrapper | null = null
 afterEach(() => {
   mounted?.unmount()
   mounted = null
+  vi.restoreAllMocks()
 })
 
 const manual = (name: string, description: string, scope = 'global'): PluginHook => ({ event: 'manual', name, description, scope, interval: '' })
@@ -269,4 +270,24 @@ test('an Update that omo asks to acknowledge (its source changed since the insta
   await flushPromises()
   expect(h.sent).toHaveLength(3)
   expect(w.find('[data-plugin-update-error]').exists()).toBe(false)
+})
+
+test('settings actions cannot open a result after the plugin is disabled', async () => {
+  const tab = { opener: window, closed: false, location: { href: 'about:blank', replace: vi.fn() }, close: vi.fn() }
+  vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
+  const props = reactive({ info: info(), settings: settings() })
+  const h = await harness()
+  let finish!: () => void
+  h.respond.write = () => new Promise((resolve) => { finish = () => resolve(ok({ message: 'Late', url: 'https://example.test/' })) })
+  const Host = defineComponent({ setup: () => () => h0(PluginDetail, { name: 'log', ...props }) })
+  const w = await mountWith(h, Host, {})
+  mounted = w
+  await w.get('[data-plugin-action="sum"]').trigger('click')
+  props.info = info({ state: 'disabled' })
+  props.settings = settings({ enabled: false })
+  await flushPromises()
+  finish()
+  await flushPromises()
+  expect(tab.location.replace).not.toHaveBeenCalled()
+  expect(tab.close).toHaveBeenCalledTimes(1)
 })

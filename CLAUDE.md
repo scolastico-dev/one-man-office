@@ -113,7 +113,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 
 - `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
 - `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
-- Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` is proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
+- Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` and `/plugin-assets` are proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
 - Which columns accept a drag is computed in the browser (`web/src/board/moveRules.ts`) and checked against `internal/board/testdata/user_drag_targets.json`, which the Go test `TestUserDragTargetsGolden` generates from the real board. A change to the transition rules regenerates it in the same commit: `go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1`.
 - The seeding tool (`web/e2e/seed`, built by the e2e global setup) writes states the API cannot reach (tickets in progress or review) into a fresh temporary home before omo starts. They are board records only: seeded branches do not exist in the repository, and omo ends seeded agent sessions when it starts.
 - Terminals use xterm.js (`web/src/features/terminal/`). `LazyTerminal.ts` loads it as its own chunk, so the entry chunk holds no xterm code; every consumer imports `LazyTerminal`. A websocket offers the subprotocols `omo` and `omo-token.<token>`; the token is never in an address. Pasted and dropped text is cleaned first (`terminalPaste.ts`: control characters and escape sequences are removed, so `ESC[201~` cannot end bracketed paste early). Dropped files, and pasted files without text, are images for the program: `TerminalView` uploads them (`uploadTerminalImage`) and pastes the paths (`terminalImages.ts`: `isImageFile`, `shellQuote`, `pastedPaths`); other files get a note. The clipboard (`terminalClipboard.ts`): OSC 52 is only ever a set (`parseOsc52`: base64, UTF-8, 1 MiB; a `?` query is never answered), taken within 5 s of the user's key or pointer press in that view and never while history replays; `writeClipboard` tries `execCommand('copy')` (any address, needs a gesture) then `navigator.clipboard` (secure contexts); a refused copy waits as "Copy selection" in the screen's corner and goes on the next key or pointer press. `clipboardKey` maps Ctrl+C with a selection (copy, then clear), Ctrl+Shift+C, Ctrl+Insert (copy) and Ctrl+V, Ctrl+Shift+V, Shift+Insert (the browser's paste); not on a Mac. Only `TerminalView.vue` makes an emulator (`TerminalView.test.ts` fails otherwise), so every view behaves the same. A terminal link whose text is not its address asks for confirmation before it opens.
@@ -215,8 +215,34 @@ preserved exactly (HTTP(S), no credentials/auth tokens/known secrets, 8192 bytes
 forward ids lowercase 32-hex. Lua manual results retain the run's HTTP-aware
 redactor until answer processing. Consumers must open forward results through
 the authenticated proxy Open flow, never put board credentials in hook URLs.
-Serving/loading frontend code and rendering declared controls are separate
-from this metadata contract. Full schema: [Plugins](wiki/plugins.md).
+Frontend serving: `server/plugin_assets.go` and `Manager.FrontendFile` expose
+only enabled installed public script/assets under
+`/plugin-assets/<name>/<content_id>/<declared-path>` (GET/HEAD, public bundled
+files, no settings/data). Raw-path handling precedes ServeMux cleaning; every
+read repeats portable path/ancestor/regular-file/homefile bounds and verifies
+content identity using the exact captured bytes. No-store preserves disable
+and update checks; CSP stays script-src self. `web/src/features/plugins/`
+loads classic entries once per enabled code lifetime on every authenticated
+board document. Entries capture `document.currentScript.omo` and call
+`omo.initialize(setup)`. The bound facade provides lifetime-guarded
+button/panel registration, detached route context/subscriptions, own manual
+hooks, asset URLs and authenticated forward navigation; signal and cleanup
+end stale asynchronous initialization. Errors isolate the plugin and offer
+Retry; lock suspends actions/listeners and unlock refreshes route context.
+Shared PluginControls renders ticket/sidebar/project buttons and text/image
+panels; per-worktree controls send ticket+project for recorded worktrees or
+explicitly explain missing folders, with no repository fallback. Legacy ticket
+hooks remain unless a declaration replaces them; settings retain global hooks.
+All action-result sinks use pluginNavigation/openForward to reserve a detached
+tab synchronously, wait through plugin-controlled polling, and acquire proxy
+Open only for a final forward result. They never retry a lost action and close
+unused blank tabs; disabling/updating prevents late navigation. Config editor
+primitive controls share the JSON draft, unknown keys, If-Match and conflict
+handling; missing booleans are unchecked. PluginTasks uses task API/events,
+reconnect/snapshot refresh, shared useNow, bounded visible output and Stop.
+Focused checks: Go TestPluginAssets, Vue features/plugins/proxy/pluginNavigation,
+settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
+(actual entry/image/own-hook execution under unchanged CSP). Full schema: [Plugins](wiki/plugins.md).
 
 Plugin tasks: `plugins/tasks.go`, `tasks_lua.go`, `startup.go` and
 `server/plugin_tasks.go`. Lua `omo.task_start{ name, command, args?, cwd?, env?,

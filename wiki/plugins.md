@@ -176,9 +176,8 @@ refused with a message saying what to use instead.
 ### Button, frontend and configuration declarations
 
 The manifest reader validates these additive declarations and exposes them in
-`PluginInfo`. The current contract provides metadata: declared-button rendering,
-frontend serving/loading and configuration controls are separate from validation.
-The existing JSON configuration editor remains available.
+`PluginInfo`. The board renders these controls for enabled, loaded plugins. The JSON
+configuration editor remains available alongside primitive fields.
 
 ```json
 {
@@ -226,8 +225,15 @@ record), `settings`, `settings.yaml`, `settings.yml`, `settings.json` and
 `plugin.json` are private at every depth and cannot appear in public paths.
 The script is at most 1 MiB; the script plus assets are at most 64 MiB and
 10,000 entries (files and directories, including the script and assets root).
-Asset serving must recheck confinement on each read; loading is not protection
-against later filesystem edits by a plugin running as you.
+Asset serving repeats these checks and hashes the exact bytes served on each
+request; loading alone is not protection against later filesystem edits. Only
+the declared entry and files under the asset directory are public, at
+`/plugin-assets/<installed-name>/<content_id>/<declared-path>`. GET and HEAD
+need no sign-in; only these bundled files are public. Configuration, the plugin
+manifest, hook source outside assets, settings and data are never served there.
+Disabled, removed, invalid and outdated identities return 404. Responses use
+`no-store` so browser caches cannot keep disabled code available. Host/Origin
+checks, MIME types and the board’s existing CSP still apply.
 
 A configuration field names a top-level JSON key. Keys and select values use
 1–64 letters, digits, `.`, `_` or `-`, starting with a letter or digit. Keys
@@ -239,6 +245,13 @@ number, or a listed select value. Missing defaults are allowed and do not invent
 a value (in particular, no licence acceptance is implied). Unlisted JSON keys
 are kept, and the user's existing values win over defaults on install/update.
 These declarations validate defaults, not arbitrary existing user configuration.
+The settings page shows selects, boolean switches, text and number inputs.
+Absent booleans display unchecked; choosing an editor never accepts its terms.
+Each edit retains unknown JSON keys and uses the same Save, Discard, unsaved
+leave guard and revision-conflict controls as JSON edits. Invalid JSON keeps
+its text and disables primitive controls until corrected. Choice labels and
+the plugin description can explain unavailable platforms; a plugin may also
+show a frontend panel or return an explanatory hook message.
 
 `GET /api/plugins` and `plugin.changed` include `buttons`, `frontend`,
 `config_fields` and `content_id` in each `PluginInfo`. Empty declarations are
@@ -435,7 +448,12 @@ lines and identical tails cause no invalidation. This caps continuous output
 at six refresh events per minute per plugin. Lifecycle changes bypass the
 output throttle. Clients refetch GET after an invalidation, reconnect or
 event-stream resync. TypeScript
-clients have `getPluginTasks` and `stopPluginTask`.
+clients have `getPluginTasks` and `stopPluginTask`. The plugin settings page
+shows each task’s name, ticket, elapsed time, state/error and bounded redacted
+output, with Stop for a running task and Refresh for recovery. It refetches on
+task invalidation, reconnect and snapshot/resync; failed reads retain the last
+known records and offer Refresh. Elapsed time uses the board’s shared clock.
+Output stays in a keyboard-accessible scroll box on narrow screens.
 
 Runtime adapters use `Manager.StartTask(ctx, plugin, TaskStart)`,
 `Tasks(plugin)`, `StopTask(plugin, name)`, `StopTaskID(plugin, id, reason)` and
@@ -454,10 +472,98 @@ Dispatch; `Server.PluginsReady()` is called after launching both listeners in
 `Run`. Embedders call it after serving their own handlers. No automatic task
 restart, persistence, editor management or command-side task identity is added.
 
+### Frontend entry and the browser omo facade
+
+Every authenticated board document loads enabled entries, including settings,
+ticket pages and terminal windows. A classic script must capture its own facade
+synchronously and call `initialize` once. There is no shared `window.omo`:
+
+```js
+(() => {
+  const omo = document.currentScript.omo;
+  omo.initialize(() => {
+    omo.addButton({
+      id: 'open', label: 'Open editor', place: 'ticket', per_worktree: true,
+      run: (context) => omo.runHook('open', {
+        ticket: context.ticket.number, project: context.project,
+      }),
+    });
+    const unsubscribe = omo.onRouteChange((context) => {
+      omo.addPanel({
+        id: 'context', place: 'sidebar', title: 'Editor',
+        text: `Current page: ${context.page}`,
+        image: omo.assetUrl('logo.png'),
+      });
+    });
+    return unsubscribe;
+  });
+})();
+```
+
+Entries are external same-origin scripts, without eval, blob script URLs or a
+CSP relaxation. They run with the board user's rights; the existing plugin
+installation confirmation covers this. Direct board DOM access is unsupported.
+The stable facade methods are:
+
+| Member | Contract |
+|---|---|
+| `signal` | Read-only `AbortSignal`, aborted when this enabled code lifetime ends or fails. Use it to cancel polling/fetches. |
+| `initialize(setup)` | Calls `setup(omo)` once; setup may be async and return a cleanup function. Rejection removes partial controls and offers Retry. A late cleanup runs immediately if the plugin has already ended. |
+| `addButton(spec)` | Adds or replaces this plugin's button by `id`; returns a disposer for that registration. Spec: `{id,label,place,per_worktree?,action?,run?}`. `place` is `ticket`, `sidebar` or `project`; `per_worktree` belongs only to ticket. Supply exactly one manual `action` name or `run(context)` callback. Callbacks may return a structured hook result, synchronously or by Promise; void means no message/navigation. |
+| `removeButton(id)` | Removes only this plugin's button. |
+| `addPanel(spec)` | Adds or replaces `{id,place,title,text,image?}`; returns its registration's disposer. Place is `ticket` or `sidebar`. Text is plain text with hidden characters escaped. Optional image must use this plugin's versioned asset URL. |
+| `removePanel(id)` | Removes only this plugin's panel. |
+| `context()` | Returns a detached copy of the current route context. |
+| `onRouteChange(callback)` | Immediately supplies current context, then each route/context change; returns unsubscribe. Suspended under the lock screen, then delivers current context on unlock. A failing listener removes that plugin's frontend without affecting others. |
+| `runHook(action, context?)` | Runs only this plugin's own named manual hook; resolves `{message,url?,forward_id?}`. Explicit context is `{ticket?,project?}`. Without it, ticket hooks use the current ticket/project; global hooks use the selected project only. No automatic retries, including on a lost response. |
+| `assetUrl(path)` | Builds a same-origin versioned URL relative to `frontend.assets`. Refuses traversal/private/Windows paths; throws if no assets are declared. |
+| `openForward(id)` | From a user gesture, reserves a detached tab and opens a forward through the authenticated proxy Open API. Resolves void; rejects and closes the unused tab on failure or expired plugin lifetime. |
+| `open(callback)` | From a user gesture outside a registered button callback, reserves a tab before calling the async callback, then processes its final structured result. Returns that result. |
+
+IDs are 1–64 letters/digits/underscore/dot/hyphen. At most 64 buttons and 64
+panels per plugin; titles/labels are 1–200 visible characters and panel text is
+at most 16,000 UTF-16 code units. A disposer removes its own registration even
+if the same id was replaced later. Each plugin's facade is frozen and bound to
+its installed name; it cannot select another plugin through `runHook`.
+
+Route context is `{page, ticket?, project?}`. Page is `board`, `ticket`,
+`settings` or `terminal`. Ticket, when present, is
+`{number,title,projects:[{id,worktree}],workdir}`; project is an optional selected
+registered project id. Button callbacks receive the clicked ticket and selected
+worktree/project, even while another ticket is open. Context never contains
+login tokens, agent session identities, route fragments or arbitrary queries.
+
+Registered buttons reserve their tab **before** invoking the hook/callback.
+Return the final structured result from `run`; do not call `open` or
+`openForward` inside it. For a first-use download, the callback may start once,
+show progress with `addPanel`, and poll a separate idempotent status hook until
+ready, using `signal` to stop when disabled. Only its final `forward_id` obtains
+the short-lived Open grant. A failed/lost action is surfaced without rerunning
+it; message-only answers and failures close unused blank tabs. A page the user
+navigates in the reserved tab is left alone. Blocked popups still permit a
+message-only action; a navigation answer then reports that the action ran and
+the browser blocked its tab. Board credentials never enter destinations.
+
+Route changes preserve registrations and the entry's initialization. Disable,
+removal, invalidation, a changed installed commit or content identity removes controls/listeners,
+aborts signal and runs cleanup; obsolete asynchronous initialization cannot
+register again. While locked, controls and hook/open calls are suspended.
+Load/initialization/listener failures affect only that plugin and show Retry.
+A document initializes each installed commit/content identity once per enabled lifetime (except an
+explicit retry); updating assets or entry bytes gives a new address/lifetime.
+
 ### Buttons (manual hooks)
 
-A manual hook with `scope: ticket` adds a button to every ticket; one with
-`scope: global` adds a button on the plugin's page. Only you press them. One
+A manual hook with `scope: ticket` adds a legacy button to every ticket unless
+a declared ticket button uses that hook. A hook with `scope: global` stays
+available on the plugin’s settings page, including when it is also declared
+in the sidebar. Declared sidebar controls appear in the expanded sidebar and
+its mobile sheet; project controls have one row for each enabled project.
+`per_worktree` ticket buttons expand for recorded nonempty worktree paths,
+sending both ticket and selected project. A projectless ticket with a recorded
+working folder sends ticket alone. Without a usable folder the control is
+disabled with an explanation, never redirected to another repository. Project
+sidebar controls send project alone. Only you press them. One
 action per plugin runs at a time, bounded by its timeout.
 
 `POST /api/plugins/{name}/actions/{action}` accepts `{ticket?, project?}`.

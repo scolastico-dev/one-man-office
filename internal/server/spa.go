@@ -31,6 +31,7 @@ const assetCacheControl = "public, max-age=31536000, immutable"
 // index.html for every other GET or HEAD outside /api, so deep links such as
 // /123 load the app.
 func (s *Server) registerSPA(mux *http.ServeMux) {
+	mux.HandleFunc("/plugin-assets/", s.servePluginAsset)
 	mux.HandleFunc("GET /assets/{path...}", serveAsset)
 	mux.HandleFunc("/", serveSPA)
 }

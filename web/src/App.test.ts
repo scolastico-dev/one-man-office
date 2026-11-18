@@ -97,8 +97,9 @@ test('renders five columns from the snapshot with counts', async () => {
 test('a ticket.moved event moves the card without a reload', async () => {
   const omo = omoWithBoard()
   const { wrapper } = await boot(omo)
-  const reads = omo.reads.length
   omo.stream!.onState('live')
+  await flushPromises()
+  const reads = omo.reads.length
 
   omo.change('ticket.moved', ticket({ ...omo.tickets[1]!, column: 'ready', rank: 0 }))
   await flushPromises()

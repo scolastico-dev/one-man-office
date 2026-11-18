@@ -15,6 +15,7 @@ import Toaster from './components/ui/Toaster.vue'
 import LockedScreen from './features/auth/LockedScreen.vue'
 import UnreachableScreen from './features/auth/UnreachableScreen.vue'
 import LiveBoard from './features/board/LiveBoard.vue'
+import PluginHost from './features/plugins/PluginHost.vue'
 import { useSession } from './session'
 import { provideBoard } from './store'
 
@@ -91,6 +92,7 @@ onBeforeUnmount(() => {
       :aria-hidden="boardShown ? undefined : 'true'"
       data-board-kept
     >
+      <PluginHost />
       <TerminalWindow v-if="terminalWindow" />
       <OAuthConsent v-else-if="consentPage" />
       <LiveBoard v-else />

@@ -36,6 +36,14 @@ test('blocked tabs give a useful error without issuing a grant', async () => {
   expect(openingForwards.size).toBe(0)
 })
 
+test('a browser that refuses opener detachment closes the tab and issues no grant', async () => {
+  const { tab, send, client } = setup()
+  Object.defineProperty(tab, 'opener', { set() { throw new Error('refused') } })
+  await expect(openForward(client, 'abc')).rejects.toThrow(/tabs/i)
+  expect(tab.close).toHaveBeenCalledTimes(1)
+  expect(send).not.toHaveBeenCalled()
+})
+
 test.each(['Forbidden', 'Cannot reach omo'])('API failure %s closes the reserved blank tab and permits a retry', async (message) => {
   const { tab, send, client } = setup()
   send.mockRejectedValueOnce(new Error(message))

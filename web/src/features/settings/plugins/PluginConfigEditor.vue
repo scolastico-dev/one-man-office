@@ -10,11 +10,14 @@
 // The default slot is shown between the field and the Save bar (the log).
 import { computed, ref, useId, watch } from 'vue'
 import { getPlugins, putPlugin } from '../../../api/endpoints'
-import { NO_REVISION, type ApiEvent, type PluginInfo, type PluginSettings, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
+import { NO_REVISION, type ApiEvent, type PluginConfigField, type PluginInfo, type PluginSettings, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SaveBar from '../../../components/ui/SaveBar.vue'
 import TextArea from '../../../components/ui/TextArea.vue'
+import SelectField from '../../../components/ui/SelectField.vue'
+import TextField from '../../../components/ui/TextField.vue'
+import Toggle from '../../../components/ui/Toggle.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
@@ -43,9 +46,11 @@ const shownName = computed(() => visibleText(props.name))
 
 /** The stored settings the last read found; a save sends them with the edited configuration. */
 let stored: PluginSettings | null = null
+const fields = ref<PluginConfigField[]>([])
 
 async function readStored(): Promise<{ found: PluginSettings | undefined; errors: ReturnType<typeof errorsOfPlugin> }> {
   const { data } = await getPlugins(session.client)
+  fields.value = data.plugins.find((p) => p.name === props.name)?.config_fields ?? []
   return { found: data.settings.find((s) => s.name === props.name), errors: errorsOfPlugin(data.errors ?? [], props.name) }
 }
 
@@ -124,6 +129,17 @@ function onInput(value: string) {
   if (r.draft.value) r.draft.value.config = got.value
 }
 
+function editField(field: PluginConfigField, value: string | boolean) {
+  if (!draft.value || parseError.value) return
+  const config = { ...draft.value.config }
+  if ((field.type === 'select' || field.type === 'number') && value === '') delete config[field.key]
+  else config[field.key] = field.type === 'number' ? Number(value) : value
+  draft.value.config = config
+}
+function stringValue(field: PluginConfigField): string {
+  const value = draft.value?.config[field.key]
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
 const shownError = computed(() => parseError.value ?? (fe.value['config'] ? visibleText(fe.value['config']) : undefined))
 
 async function save() {
@@ -146,6 +162,11 @@ async function save() {
     <template v-if="draft">
       <UnplacedErrors :errors="unplaced" />
       <FormSection legend="Configuration" :level="4" description="A JSON object; the plugin reads it as its configuration.">
+        <div v-for="f in fields" :key="f.key" class="plugin-config__primitive">
+          <SelectField v-if="f.type === 'select'" :label="visibleText(f.label)" :model-value="stringValue(f)" :options="[{ value: '', label: 'Not set' }, ...(f.choices ?? []).map((c) => ({ value: c.value, label: visibleText(c.label) }))]" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
+          <Toggle v-else-if="f.type === 'boolean'" :label="visibleText(f.label)" :model-value="draft.config[f.key] === true" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
+          <TextField v-else :label="visibleText(f.label)" :type="f.type === 'number' ? 'number' : 'text'" :model-value="stringValue(f)" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
+        </div>
         <div class="plugin-config__code">
           <TextArea
             :id="fieldId"
