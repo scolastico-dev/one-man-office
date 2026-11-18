@@ -230,7 +230,7 @@ Engine and end-to-end tests run agents as the scripted fake agent (`internal/fak
 
 Test helper processes that run the test binary again (such as the helpers in `internal/agents`) must not block with a bare `select {}`: built with `CGO_ENABLED=0` (as `make` does) the runtime ends such a process as a deadlock. Use a sleep loop.
 
-Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
+Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. Before starting the omo binary, invoking its CLI or calling `server.Run`, a test environment drops **every** inherited `OMO_` variable (case-insensitively) before adding its own; an inherited socket override bypasses an isolated home. `childenvtest.SetOmo` and `CheckOmo` guard the smoke, CLI and helper environments; the browser harness uses the same samples. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
 ## CI and releases
 

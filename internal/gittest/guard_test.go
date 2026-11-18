@@ -101,7 +101,7 @@ func TestBrowserHarnessIsolatesGit(t *testing.T) {
 	if len(bad) > 0 {
 		t.Errorf("these browser test files run git with the developer's configuration:\n%s", strings.Join(bad, "\n"))
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "support", "omo.ts"))
+	raw, err := os.ReadFile(filepath.Join(root, "support", "env.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}

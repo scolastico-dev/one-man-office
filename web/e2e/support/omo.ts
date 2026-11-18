@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { devNull, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
+import { cleanEnv, holdsAgentProgram } from './env'
+export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
 const DEFAULT_PORT = 8090
@@ -104,60 +106,6 @@ export interface Omo {
   seed(scenario: object): Promise<Record<string, number>>
   /** Everything the server printed so far. */
   output(): string
-}
-
-/** The agent programs omo knows; the real ones of the developer's machine must never be reachable from a test's omo (a first start or a usage script would run them). */
-const AGENT_PROGRAMS = ['claude', 'codex', 'agy', 'gemini'] as const
-
-function holdsAgentProgram(dir: string): boolean {
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
-  return AGENT_PROGRAMS.some((p) =>
-    exts.some((e) => {
-      try {
-        accessSync(join(dir, p + e), constants.X_OK)
-        return true
-      } catch {
-        return false
-      }
-    }),
-  )
-}
-
-/** The runner's own PATH without every folder that holds an agent program or a shim of one. */
-export function pathWithoutAgentPrograms(path: string | undefined = process.env.PATH): string {
-  return (path ?? '').split(delimiter).filter((dir) => dir !== '' && !holdsAgentProgram(dir)).join(delimiter)
-}
-
-/** An environment that cannot reach anything of the developer's omo, git or shell session; `path` replaces PATH when given. */
-function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k.startsWith('OMO_') || k === 'APPDATA' || k === 'USERPROFILE' || k.startsWith('XDG_') || k.startsWith('GIT_CONFIG')) continue
-    env[k] = v
-  }
-  return {
-    ...env,
-    // omo's own git (merges, squashes) and the agents' git read no global or system configuration: no developer signing setup.
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_NOSYSTEM: '1',
-    OMO_HOME: join(home, 'omo'),
-    HOME: home,
-    USERPROFILE: home,
-    APPDATA: join(home, 'appdata'),
-    XDG_CONFIG_HOME: join(home, 'xdg-config'),
-    XDG_STATE_HOME: join(home, 'xdg-state'),
-    XDG_DATA_HOME: join(home, 'xdg-data'),
-    // omo's plugin list: a repository at this place in the test's home (see
-    // pluginListPath), never the real one on the network.
-    OMO_PLUGIN_CATALOG: pluginListPath(home),
-    // Without a PATH of the test's own, the runner's PATH minus the folders of the real agent programs.
-    [process.platform === 'win32' ? 'Path' : 'PATH']: path ?? pathWithoutAgentPrograms(),
-  }
-}
-
-/** Where omo reads its plugin list in a test: a bare repository in the test's temporary folder, missing until a test makes it (`makePluginList`). */
-export function pluginListPath(home: string): string {
-  return join(home, 'plugin-list.git')
 }
 
 /** A port that is free right now: listen on 0, read it, close. */

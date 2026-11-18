@@ -6,7 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func build(t *testing.T) string {
@@ -21,11 +24,11 @@ func build(t *testing.T) string {
 	return exe
 }
 
-// environment is the test's environment without anything of the fake agent.
+// environment drops inherited omo state before adding this test's values.
 func environment(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if len(kv) >= 4 && kv[:4] == "OMO_" {
+		if strings.HasPrefix(strings.ToUpper(kv), "OMO_") {
 			continue
 		}
 		env = append(env, kv)
@@ -58,4 +61,10 @@ func TestRunsWhenEnabled(t *testing.T) {
 	if !bytes.Contains(out, []byte("hello from the fake")) {
 		t.Fatalf("output %q", out)
 	}
+}
+
+func TestEnvironmentDropsInheritedOmo(t *testing.T) {
+	childenvtest.SetOmo(t)
+	childenvtest.CheckOmo(t, environment(), nil)
+	childenvtest.CheckOmo(t, environment("OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
 }

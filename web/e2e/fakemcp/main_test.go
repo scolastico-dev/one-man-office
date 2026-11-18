@@ -7,7 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -26,11 +29,11 @@ func build(t *testing.T) string {
 	return exe
 }
 
-// environment is the test's environment without the fake server's switch.
+// environment drops inherited omo state before adding this test's values.
 func environment(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if bytes.HasPrefix([]byte(kv), []byte(fakemcp.EnvEnable+"=")) {
+		if strings.HasPrefix(strings.ToUpper(kv), "OMO_") || strings.HasPrefix(kv, fakemcp.EnvEnable+"=") {
 			continue
 		}
 		env = append(env, kv)
@@ -69,4 +72,16 @@ func TestServesItsToolsWhenEnabled(t *testing.T) {
 	if tc, ok := res.Content[0].(*mcp.TextContent); !ok || tc.Text != "echo: hi" {
 		t.Fatalf("echo answered %#v", res.Content)
 	}
+}
+
+func TestEnvironmentDropsInheritedOmo(t *testing.T) {
+	t.Setenv(fakemcp.EnvEnable, "1")
+	for _, entry := range environment() {
+		if strings.HasPrefix(entry, fakemcp.EnvEnable+"=") {
+			t.Errorf("test environment leaks %s", fakemcp.EnvEnable)
+		}
+	}
+	childenvtest.SetOmo(t)
+	childenvtest.CheckOmo(t, environment(), nil)
+	childenvtest.CheckOmo(t, environment("OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
 }
