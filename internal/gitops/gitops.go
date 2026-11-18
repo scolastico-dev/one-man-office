@@ -111,10 +111,11 @@ func (g *Git) lockKey(repo string) string {
 	key, ok = commonGitDir(repo)
 	if !ok {
 		if abs, err := filepath.Abs(repo); err == nil {
-			return abs
+			return pathKey(abs)
 		}
 		return repo
 	}
+	key = pathKey(key)
 	g.mu.Lock()
 	g.lockKeys[repo] = key
 	g.mu.Unlock()
@@ -170,7 +171,7 @@ func SameRepository(a, b string) (same, known bool) {
 	if !ok {
 		return false, false
 	}
-	return ca == cb, true
+	return samePathString(ca, cb), true
 }
 
 // isGitDir reports whether dir looks like a git directory (a bare

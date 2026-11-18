@@ -126,7 +126,7 @@ func (g *Git) SetAgentFolders(roots ...string) {
 			r = abs
 		}
 		clean = append(clean, filepath.Clean(r))
-		if real, err := filepath.EvalSymlinks(r); err == nil && real != filepath.Clean(r) {
+		if real := realPath(r); real != filepath.Clean(r) {
 			clean = append(clean, real)
 		}
 	}
@@ -156,13 +156,10 @@ func (g *Git) checkDiscovery(dir string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrAgentFolder, dir)
 	}
-	forms := []string{filepath.Clean(abs)}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		forms = append(forms, real)
-	}
+	forms := []string{filepath.Clean(abs), realPath(abs)}
 	for _, r := range roots {
 		for _, f := range forms {
-			if f == r || within(r, f) {
+			if samePathString(f, r) || within(r, f) {
 				return fmt.Errorf("%w: %s", ErrAgentFolder, dir)
 			}
 		}
@@ -170,19 +167,69 @@ func (g *Git) checkDiscovery(dir string) error {
 	return nil
 }
 
-// within reports whether p lies below root (both clean and absolute).
+// within reports whether p lies below root (both clean and absolute), names
+// compared as samePathString compares them.
 func within(root, p string) bool {
+	if foldsCase {
+		root, p = strings.ToLower(root), strings.ToLower(p)
+	}
 	rel, err := filepath.Rel(root, p)
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
+// foldsCase says that the platform's file systems ignore the case of names
+// by default.
+var foldsCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
 // samePathString compares two clean absolute paths as the platform's file
 // system does by default.
 func samePathString(a, b string) bool {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+	if foldsCase {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+// pathKey is a clean absolute path as a map key: paths that samePathString
+// calls the same get one key.
+func pathKey(p string) string {
+	if foldsCase {
+		return strings.ToLower(p)
+	}
+	return p
+}
+
+// realPath returns p absolute and clean, with links resolved in the longest
+// leading part of it that exists; what does not exist is kept as given. It
+// is the form in which this package compares a folder omo names with a
+// folder git names: git records and prints folders resolved. On Windows
+// resolving also replaces short names (C:\Users\RUNNER~1 for
+// C:\Users\runneradmin) by the long ones and gives every name the case the
+// file system stores, and a folder that is gone cannot be resolved itself,
+// only its parents. Compare the result with samePathString.
+func realPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	p = filepath.Clean(p)
+	rest := ""
+	for cur := p; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
+}
+
+// samePath reports whether a and b name the same folder: both in the form
+// of realPath, compared as the file system compares names.
+func samePath(a, b string) bool {
+	return samePathString(realPath(a), realPath(b))
 }
 
 // commonDir returns the common git directory of the repository at repo,
@@ -213,10 +260,7 @@ func plainFolder(dir string) (string, error) {
 		return "", err
 	}
 	abs = filepath.Clean(abs)
-	parent := filepath.Dir(abs)
-	if real, err := filepath.EvalSymlinks(parent); err == nil {
-		parent = real
-	}
+	parent := realPath(filepath.Dir(abs))
 	cand := filepath.Join(parent, filepath.Base(abs))
 	fi, err := os.Lstat(cand)
 	if err != nil {
@@ -224,6 +268,13 @@ func plainFolder(dir string) (string, error) {
 	}
 	if fi.Mode().Type() != fs.ModeDir {
 		return "", fmt.Errorf("%w: %s", ErrNotAFolder, dir)
+	}
+	// The folder's own name as the file system stores it (on Windows the
+	// caller may have given its short name or another case). Only a result
+	// in the same parent is taken: a link put there since the check above
+	// would resolve to another place.
+	if real, err := filepath.EvalSymlinks(cand); err == nil && samePathString(filepath.Dir(real), parent) {
+		cand = real
 	}
 	return cand, nil
 }
@@ -348,11 +399,7 @@ func (g *Git) worktreeRecord(repo, dir string) (string, error) {
 		return "", err
 	}
 	abs = filepath.Clean(abs)
-	parent := filepath.Dir(abs)
-	if real, err := filepath.EvalSymlinks(parent); err == nil {
-		parent = real
-	}
-	return recordOf(common, filepath.Join(parent, filepath.Base(abs)))
+	return recordOf(common, filepath.Join(realPath(filepath.Dir(abs)), filepath.Base(abs)))
 }
 
 // sparseKeys may be set in a worktree's own config whatever the main

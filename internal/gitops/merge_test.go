@@ -199,7 +199,7 @@ func TestAdvanceIntoDirtyCheckoutChangesNothing(t *testing.T) {
 	if !errors.Is(err, ErrCheckoutBlocked) || !errors.As(err, &blocked) {
 		t.Fatalf("err = %v, want ErrCheckoutBlocked", err)
 	}
-	if !reflect.DeepEqual(blocked.Files, []string{"f.txt"}) || blocked.Worktree != repo {
+	if !reflect.DeepEqual(blocked.Files, []string{"f.txt"}) || !samePathT(blocked.Worktree, repo) {
 		t.Fatalf("blocked = %+v", blocked)
 	}
 	if !strings.Contains(err.Error(), "f.txt") {
@@ -354,7 +354,7 @@ func TestAdvanceInSecondWorktree(t *testing.T) {
 	write(t, filepath.Join(second, "other.txt"), "unrelated in second\n")
 	beforeUser := snapshot(t, repo)
 
-	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || wt != second {
+	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || !samePathT(wt, second) {
 		t.Fatalf("WorktreeOf = %q %v %v, want %q", wt, found, err, second)
 	}
 	if err := g.AdvanceBranch(repo, "main", from, res.Commit); err != nil {
@@ -375,7 +375,7 @@ func TestAdvanceInSecondWorktree(t *testing.T) {
 	before2 := snapshot(t, second)
 	err := g.AdvanceBranch(repo, "main", from2, res2.Commit)
 	var blocked *BlockedError
-	if !errors.As(err, &blocked) || blocked.Worktree != second || !reflect.DeepEqual(blocked.Files, []string{"other.txt"}) {
+	if !errors.As(err, &blocked) || !samePathT(blocked.Worktree, second) || !reflect.DeepEqual(blocked.Files, []string{"other.txt"}) {
 		t.Fatalf("err = %v, want blocked in %s by other.txt", err, second)
 	}
 	sameSnapshot(t, "second worktree", before2, snapshot(t, second))
@@ -440,7 +440,7 @@ func TestAdvanceRefusesBranchBeingRebased(t *testing.T) {
 	from := rev(t, repo, "main")
 	res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
 	tgFails(t, second, "rebase", "upstream") // stops on a conflict, HEAD detached
-	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || wt != second {
+	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || !samePathT(wt, second) {
 		t.Fatalf("WorktreeOf = %q %v %v, want the rebasing worktree", wt, found, err)
 	}
 	before := snapshot(t, second)
@@ -622,7 +622,7 @@ func TestAdvanceDetectsBranchSwitchBeforeFastForward(t *testing.T) {
 	if !errors.Is(err, ErrCheckoutSwitched) || !errors.As(err, &switched) {
 		t.Fatalf("err = %v, want ErrCheckoutSwitched", err)
 	}
-	if switched.Head != "other" || switched.Branch != "main" || switched.At != from || switched.Worktree != repo {
+	if switched.Head != "other" || switched.Branch != "main" || switched.At != from || !samePathT(switched.Worktree, repo) {
 		t.Fatalf("switched = %+v", switched)
 	}
 	if !strings.Contains(err.Error(), "other") || !strings.Contains(err.Error(), "main did not move") {
@@ -654,7 +654,7 @@ func TestAdvanceDetectsCheckoutBeforeRefUpdate(t *testing.T) {
 	if !errors.Is(err, ErrStaleCheckout) || !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want ErrStaleCheckout", err)
 	}
-	if stale.Worktree != second || stale.Branch != "main" || stale.From != from || stale.To != res.Commit {
+	if !samePathT(stale.Worktree, second) || stale.Branch != "main" || stale.From != from || stale.To != res.Commit {
 		t.Fatalf("stale = %+v", stale)
 	}
 

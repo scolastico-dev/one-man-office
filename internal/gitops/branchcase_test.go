@@ -45,7 +45,7 @@ func TestCheckedOutIgnoresCase(t *testing.T) {
 	repo := newTestRepo(t)
 	g := testGit(t)
 	tg(t, repo, "branch", "Feature")
-	tg(t, repo, "branch", "feature")
+	branchTwin(t, repo, "feature")
 	wt := filepath.Join(t.TempDir(), "wt")
 	tg(t, repo, "worktree", "add", wt, "Feature")
 	at, found, err := g.WorktreeOf(repo, "feature")
@@ -68,12 +68,6 @@ func TestCheckedOutIgnoresCase(t *testing.T) {
 	if rev(t, repo, "Feature") != from || rev(t, repo, "feature") != from {
 		t.Fatal("a branch moved")
 	}
-}
-
-func samePathT(a, b string) bool {
-	ra, _ := filepath.EvalSymlinks(a)
-	rb, _ := filepath.EvalSymlinks(b)
-	return ra == rb
 }
 
 func TestProtectedLookupIgnoresCase(t *testing.T) {
