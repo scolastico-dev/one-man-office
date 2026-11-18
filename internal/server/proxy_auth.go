@@ -63,9 +63,10 @@ func (a *proxyAuthState) issue(dest proxyDestination, now time.Time) (string, er
 	return secret, nil
 }
 
-// exchange consumes and creates the session atomically, so concurrent exchanges
-// have exactly one winner. An incorrect origin cannot consume a valid grant.
-func (a *proxyAuthState) exchange(secret, origin string, now time.Time) (proxyDestination, string, bool) {
+// exchange consumes a grant and reuses or creates a session atomically, so
+// concurrent exchanges have exactly one winner. An incorrect origin cannot
+// consume a valid grant. Reuse preserves the session's original expiry.
+func (a *proxyAuthState) exchange(secret, origin, existingSession string, now time.Time) (proxyDestination, string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepLocked(now)
@@ -74,6 +75,9 @@ func (a *proxyAuthState) exchange(secret, origin string, now time.Time) (proxyDe
 		return proxyDestination{}, "", false
 	}
 	delete(a.grants, secret)
+	if _, ok := a.sessions[existingSession]; ok {
+		return grant.destination, existingSession, true
+	}
 	if len(a.sessions) >= proxyAuthLimit {
 		return proxyDestination{}, "", false
 	}

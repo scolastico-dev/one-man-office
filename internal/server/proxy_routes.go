@@ -111,13 +111,15 @@ func (s *Server) openProxyForward(w http.ResponseWriter, r *http.Request) {
 	// When the board is outside the shared cookie domain, its authenticated
 	// Open response establishes a host-local session for the permanent path URL.
 	if s.opts.Config.ProxyBaseHost != "" && s.proxyCookieDomain(r) == "" {
-		session, err := s.proxyAuth.newSession(time.Now())
-		if err != nil {
-			s.proxyAuth.revokeGrant(grant)
-			writeError(w, r, api.Errorf(api.CodeUnavailable, "too many active Web UI sessions; try again later"))
-			return
+		if !s.proxyAuth.authorized(singleProxyCookie(r, proxy.SessionCookie), time.Now()) {
+			session, err := s.proxyAuth.newSession(time.Now())
+			if err != nil {
+				s.proxyAuth.revokeGrant(grant)
+				writeError(w, r, api.Errorf(api.CodeUnavailable, "too many active Web UI sessions; try again later"))
+				return
+			}
+			s.setProxyCookie(w, r, proxy.SessionCookie, session)
 		}
-		s.setProxyCookie(w, r, proxy.SessionCookie, session)
 		s.setProxyCookie(w, r, proxy.ForwardCookie, f.ID)
 	}
 	writeJSON(w, 200, proxyOpenResult{dest.Origin + proxyInternalPrefix + "bootstrap#" + grant})
@@ -179,18 +181,23 @@ func (s *Server) serveProxyInternal(w http.ResponseWriter, r *http.Request) {
 			s.proxyPage(w, r, 401, "Open the Web UI from the board.")
 			return
 		}
-		dest, session, ok := s.proxyAuth.exchange(req.Grant, s.proxyOrigin(r), time.Now())
+		existingSession := singleProxyCookie(r, proxy.SessionCookie)
+		dest, session, ok := s.proxyAuth.exchange(req.Grant, s.proxyOrigin(r), existingSession, time.Now())
 		if !ok {
 			s.proxyPage(w, r, 401, "This Web UI sign-in expired or has already been used. Open it again from the board.")
 			return
 		}
 		if _, err := s.board.LiveProxyForward(r.Context(), board.System, dest.ForwardID); err != nil {
 			s.proxyAuth.forgetForward(dest.ForwardID)
-			s.proxyAuth.revokeSession(session)
+			if session != existingSession {
+				s.proxyAuth.revokeSession(session)
+			}
 			s.proxyPage(w, r, 401, "This Web UI forward no longer exists.")
 			return
 		}
-		s.setProxyCookie(w, r, proxy.SessionCookie, session)
+		if session != existingSession {
+			s.setProxyCookie(w, r, proxy.SessionCookie, session)
+		}
 		s.setProxyCookie(w, r, proxy.ForwardCookie, dest.ForwardID)
 		writeJSON(w, 200, proxyOpenResult{dest.URL})
 	default:
