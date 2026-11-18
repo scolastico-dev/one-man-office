@@ -9,7 +9,7 @@ import { initRepo } from './support/git'
 import type { Locator } from '@playwright/test'
 import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
 import { openBoard } from './support/board'
-import { script, waitForNoLiveSession } from './support/agents'
+import { script, waitForRestartsExhausted } from './support/agents'
 import { makePlugin } from './support/plugin'
 import { auditWheels } from './support/wheelAudit'
 
@@ -105,22 +105,19 @@ test.describe('an agent that exits', () => {
   test("the saved log of an ended agent in the ticket's Agents tab", async ({ page, omo }) => {
     const n = await omo.createTicket({ title: 'Ends at once' })
     await omo.moveTicket(n, 'ready')
-    // The agent has finished before anything asks for it: the session is read from what was saved, never observed running.
-    await expect
-      .poll(async () => (await omo.api<{ ticket: number | null; role: string; state: string }[]>('GET', '/api/agents')).some((s) => s.ticket === n && s.role === 'developer' && s.state === 'ended'), {
-        message: `waiting for the saved, ended developer session of #${n}`,
-        timeout: 30_000,
-      })
-      .toBe(true)
-    await waitForNoLiveSession(omo, n)
+    // Every attempt has finished before anything asks: the row is the one session picked by its id from what was saved.
+    const sessions = await waitForRestartsExhausted(omo, n, 'developer')
+    const saved = sessions[0]!
     await openBoard(page, omo)
     await page.goto(omo.url(`/ticket/${n}?tab=agents`))
-    const item = page.locator('[data-ticket-page] li[data-session]').first()
+    // Every attempt is listed, newest first: a row by its position would be another session than the one the test picked.
+    await expect(page.locator('[data-ticket-page] li[data-session]')).toHaveCount(sessions.length)
+    const item = page.locator(`[data-ticket-page] li[data-session="${saved.id}"]`)
     await expect(item.locator('[data-ended]')).toBeVisible()
     await item.getByRole('button', { name: 'Show log' }).click()
     await expect(item.locator('pre')).toContainText('line 100 of the log')
     expect(await item.locator('pre').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
-    expect((await auditWheels(page, '[data-ticket-page] li[data-session]', "an ended agent's log")).bad).toEqual([])
+    expect((await auditWheels(page, `[data-ticket-page] li[data-session="${saved!.id}"]`, "an ended agent's log")).bad).toEqual([])
   })
 })
 

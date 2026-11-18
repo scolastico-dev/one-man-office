@@ -84,3 +84,23 @@ export async function expectNoAgentProcesses(omo: Omo): Promise<void> {
   await omo.stop()
   await expect.poll(() => agentProcesses(omo), { message: 'agent processes left behind', timeout: 15_000 }).toEqual([])
 }
+
+/**
+ * For a script that exits without handing in: the engine counts every exit as a failure and starts a fresh agent until the third
+ * failure in a row flags the ticket (`failed_step`) and starts no more, with a moment between two attempts when nothing is live.
+ * Waits for that final state (the ticket flagged, nothing live), and answers the saved sessions of `role` on `ticket`, all ended,
+ * so that a test acts on one session it picked by its id and never on a row by its position, which a later attempt would take.
+ */
+export async function waitForRestartsExhausted(omo: Omo, ticket: number, role: AgentRole): Promise<AgentSession[]> {
+  await expect
+    .poll(async () => (await omo.api<{ failed_step?: string }>('GET', `/api/tickets/${ticket}`)).failed_step ?? '', {
+      message: `waiting for the ${role} of #${ticket} to fail for the last time`,
+      timeout: 30_000,
+    })
+    .not.toBe('')
+  await waitForNoLiveSession(omo, ticket)
+  const ended = (await omo.api<AgentSession[]>('GET', '/api/agents')).filter((s) => s.ticket === ticket && s.role === role)
+  expect(ended.length, `the saved ${role} sessions of #${ticket}`).toBeGreaterThan(0)
+  expect(ended.map((s) => s.state)).toEqual(ended.map(() => 'ended'))
+  return ended
+}
