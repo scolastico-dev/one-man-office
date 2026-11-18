@@ -50,7 +50,7 @@ export async function installSample(omo: Omo) {
       if action=='project' then return {message=event.data.project.kind..': '..event.data.project.path} end
       local ticket=event.data.ticket.number
       local port=assert(omo.free_loopback_port())
-      local t=assert(omo.task_start{name='worker-'..ticket,command=${JSON.stringify(process.execPath)},args={'worker.cjs','--host','127.0.0.1','--port',tostring(port),'--default-folder',${JSON.stringify(omo.home)},'--server-base-path','/','--without-connection-token'},ticket=ticket,env={SAMPLE_TOKEN=config.token}})
+      local t=assert(omo.task_start{name='worker-'..ticket,command=${JSON.stringify(process.execPath)},args={'worker.cjs','--host','127.0.0.1','--port',tostring(port),'--default-folder',${JSON.stringify(omo.home)},'--without-connection-token'},ticket=ticket,env={SAMPLE_TOKEN=config.token}})
       assert(omo.forward_add{name='Sample worker',port=port,ticket=ticket,task_id=t.id,strip_prefix=true})
       return {message='Started '..t.name}`,
   })

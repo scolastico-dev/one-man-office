@@ -4,12 +4,17 @@ const http = require('node:http');
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const args = process.argv.slice(2);
-const flag = name => args[args.indexOf(name) + 1];
+const flag = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 const codeServer = args.includes('--bind-addr');
 const port = Number(codeServer ? flag('--bind-addr').split(':')[1] : flag('--port'));
 const host = codeServer ? flag('--bind-addr').split(':')[0] : flag('--host');
 const folder = codeServer ? args.at(-1) : flag('--default-folder');
-const base = codeServer ? '/' : flag('--server-base-path');
+// Pinned OpenVSCode strips the explicit flag's trailing slash, but defaults
+// to '/' when omitted. An explicit '/' therefore produces an empty base and
+// a malformed browser WebSocket URL. Refuse that launch in routine fixtures.
+const suppliedBase = flag('--server-base-path');
+if (!codeServer && suppliedBase === '/') throw new Error('OpenVSCode root base must omit --server-base-path');
+const base = codeServer ? '/' : suppliedBase ?? '/';
 if (host !== '127.0.0.1' || (codeServer ? flag('--auth') !== 'none' : !args.includes('--without-connection-token'))) throw new Error('unsafe editor arguments');
 const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'inherit' });
 console.log('FIXTURE_PID:' + process.pid);

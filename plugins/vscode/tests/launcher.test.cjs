@@ -29,7 +29,7 @@ function run(t,f,editor,p,id='a'.repeat(32),extra={}) {
   const capture=path.join(f.root,'capture-'+id+'.json');
   const runtime=f.runtime??fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'omo-r-')));
   if(!f.runtime)t.after(()=>fs.rmSync(runtime,{recursive:true,force:true}));
-  const child=spawn(process.execPath,[launch,'run',editor,f.cache,f.folder,f.data,id,String(p),'/proxy/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/',runtime],{env:{PATH:process.env.PATH,...f.host,GIT_CONFIG_NOSYSTEM:'1',SSH_AUTH_SOCK:path.join(f.root,'fake-agent.sock'),GIT_SSH_COMMAND:'ssh -F fake-tool-config',CAPTURE_FILE:capture,PORT:'9',CODE_SERVER_HOST:'0.0.0.0',code_server_config:path.join(f.root,'foreign-config.yaml'),VSCODE_PORTABLE:path.join(f.root,'foreign-portable'),vscode_appdata:path.join(f.root,'foreign-appdata'),VSCODE_AGENT_FOLDER:path.join(f.root,'foreign-server'),NODE_OPTIONS:'',TMPDIR:path.join(f.root,'inherited long temp directory'),TEMP:path.join(f.root,'inherited windows temp'),EDITOR_HOST_XDG_RUNTIME_DIR:'foreign-host-runtime',editor_host_xdg_runtime_dir:'foreign-case-runtime',CS_DISABLE_PROXY:'1',EXTENSIONS_GALLERY:'https://foreign.invalid/gallery',tmp:'foreign-tmp',TmpDir:'foreign-temp',PASSWORD:'secret',OMO_FAKE_SECRET:'must-not-reach-editor',...extra}});
+  const child=spawn(process.execPath,[launch,'run',editor,f.cache,f.folder,f.data,id,String(p),f.base??'/proxy/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/',runtime],{env:{PATH:process.env.PATH,...f.host,GIT_CONFIG_NOSYSTEM:'1',SSH_AUTH_SOCK:path.join(f.root,'fake-agent.sock'),GIT_SSH_COMMAND:'ssh -F fake-tool-config',CAPTURE_FILE:capture,PORT:'9',CODE_SERVER_HOST:'0.0.0.0',code_server_config:path.join(f.root,'foreign-config.yaml'),VSCODE_PORTABLE:path.join(f.root,'foreign-portable'),vscode_appdata:path.join(f.root,'foreign-appdata'),VSCODE_AGENT_FOLDER:path.join(f.root,'foreign-server'),NODE_OPTIONS:'',TMPDIR:path.join(f.root,'inherited long temp directory'),TEMP:path.join(f.root,'inherited windows temp'),EDITOR_HOST_XDG_RUNTIME_DIR:'foreign-host-runtime',editor_host_xdg_runtime_dir:'foreign-case-runtime',CS_DISABLE_PROXY:'1',EXTENSIONS_GALLERY:'https://foreign.invalid/gallery',tmp:'foreign-tmp',TmpDir:'foreign-temp',PASSWORD:'secret',OMO_FAKE_SECRET:'must-not-reach-editor',...extra}});
   let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
   const end=new Promise(r=>child.on('close',(code,signal)=>r({code,signal,output})));
   const stop=async()=>{child.kill('SIGTERM');await end;};
@@ -57,6 +57,23 @@ function vscodeFlag(capture,key,editor){
   const prefix=key.replace(/^--/,'')+'=';
   return capture.args.find((value,i)=>capture.args[i-1]==='--vscode-option'&&value.startsWith(prefix))?.slice(prefix.length);
 }
+for(const editor of ['code-server','openvscode'])for(const base of ['/', '/proxy/0123456789abcdef0123456789abcdef/'])for(const windows of [false,true])test(editor+' base-path contract '+base+(windows?' on Windows branch':''),async t=>{
+  const f=setup(t,editorScript,editor);f.base=base;
+  const extra={};
+  if(windows){
+    const platform=path.join(f.root,'windows-platform.cjs');
+    fs.writeFileSync(platform,"Object.defineProperty(process,'platform',{value:'win32'});");
+    extra.NODE_OPTIONS='--require '+JSON.stringify(platform);
+  }
+  const p=await port(),r=run(t,f,editor,p,'d'.repeat(32),extra);
+  await until(()=>r.output().includes('OMO_EDITOR_READY'));
+  const capture=JSON.parse(fs.readFileSync(r.capture));
+  const count=capture.args.filter(arg=>arg==='--server-base-path').length;
+  if(editor==='openvscode'&&base!=='/'){
+    assert.equal(count,1);assert.equal(flag(capture,'--server-base-path'),base);
+  }else assert.equal(count,0,'root must use the publisher default; explicit / breaks OpenVSCode WebSocket URLs');
+  assert.equal(await(await fetch('http://127.0.0.1:'+p+base)).text(),'fixture editor');
+});
 for(const editor of ['code-server','openvscode']) test(editor+' preserves fake host tools and confines editor state with literal workspace and loopback',async t=>{
   const f=setup(t,editorScript,editor),p=await port(),r=run(t,f,editor,p);
   await until(()=>r.output().includes('OMO_EDITOR_READY'));
