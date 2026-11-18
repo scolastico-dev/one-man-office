@@ -10,7 +10,9 @@ The first click reserves a new tab, checks/downloads the pinned editor, shows
 installation progress on the board and starts its supervised task. The same
 tab then opens through omo's authenticated Web UI proxy. Keep the board open
 while installation finishes; allow popups. A lost request is reported without
-automatic retries: inspect tasks/logs before clicking again. A later click
+automatic retries: inspect tasks/logs before clicking again. Only a confirmed
+pre-execution busy response is retried, within the same cancellable deadline.
+A later click
 reuses the same running instance for the canonical folder/editor/version.
 
 ## Editors and platforms
@@ -78,9 +80,19 @@ plugin; there is no `latest` lookup or arbitrary download/version setting.
 The generic artifact helper downloads asynchronously over HTTPS, checks SHA-256,
 bounds compressed/expanded size and archive members, rejects unsafe paths/links,
 and publishes an atomic cache generation. Reuse checks the complete cached tree
-without downloading again. Cache data and session HOME/config/data/extensions/tmp
-stay below the plugin's own data folder, `plugins/.data/vscode/`; completed
-artifact generations survive restart. Unix preserves contained file symlinks;
+without downloading again. Artifact generations and editor-managed persistent
+state stay below the plugin's own data folder, `plugins/.data/vscode/`.
+`profiles/<editor>/` holds settings, extensions, portable defaults and extension
+downloads, shared across folders and pinned versions of that editor. The two
+editors have separate profiles. Shared Remote settings live in
+`profiles/<editor>/portable/user-data/Machine/settings.json`; edit the Remote
+settings scope in the editor. `User/settings.json` is retained and seeds a missing
+Machine file without replacing existing JSONC. Browser-local preferences follow
+the editor's normal origin/profile behavior. `sessions/<folder/editor/version hash>/` holds
+server data, logs and cache for each instance. Completed
+artifact generations, profiles and session directories survive restart and idle
+cleanup; session directories are not automatically pruned. Stop the editor before
+manually removing an obsolete session directory. Unix preserves contained file symlinks;
 Windows materializes file links, which can change Node realpath semantics.
 The plugin launches the real JS entry with bundled `node` / `node.exe`, not
 copied `.bin` wrappers or shell commands. Windows native execution remains
@@ -90,7 +102,24 @@ code-server and OpenVSCode use MIT, with separate third-party/extension terms.
 The launcher disables code-server update checks, initializes `update.mode=none`,
 and OpenVSCode has no editor updater endpoint in its OSS product. Neither uses
 a CLI that can silently fetch another editor. Normal user-installed extensions
-have their own network behavior/licences. Editor flags disable the editor's own
+have their own network behavior/licences. Host HOME/USERPROFILE, XDG configuration,
+data/cache/state roots and Windows APPDATA/LOCALAPPDATA remain available to Git,
+SSH and terminal tools. Those tools use and may write their normal host
+configuration; the editor is not a filesystem sandbox. Editor-specific flags,
+portable paths and a pinned code-server path-provider preload direct editor
+state into plugin data, including wrapper logs/heartbeat that bypass
+`--user-data-dir`. IPC/runtime/tmp uses a short unique private OS temporary
+directory allocated by omo's generic task helper, with mode 0700 on Unix. This
+avoids Unix socket byte-length limits even with long or multibyte plugin paths
+or inherited TMPDIR. The editor receives this private XDG_RUNTIME_DIR. Initial
+Linux/macOS terminal settings restore the host value through
+`EDITOR_HOST_XDG_RUNTIME_DIR` (empty if originally unset); existing user JSONC
+and terminal overrides remain untouched. Such profiles may need that terminal
+setting explicitly if they predate it or override it. This runtime distinction
+does not change host HOME or configuration/data roots. Core releases the private
+directory after reaping its stable task, including failed startup, Stop, idle,
+disable/remove/replacement and shutdown; normal host temporary files are untouched.
+Editor flags disable the editor's own
 password/token and bind exclusively to IPv4 `127.0.0.1`. Inherited `PORT`,
 `CODE_SERVER_*`, `VSCODE_*`, password and Node selectors cannot override the
 editor launch. code-server uses prefix stripping plus the exact loopback trusted
@@ -108,15 +137,18 @@ the idle interval. Reconnecting clears that interval. HTTP health/poll traffic
 does not extend it. A never-connected/abandoned startup also expires. Physical
 network loss is observed when the underlying connections close.
 
-Tasks are named `cs-t<TICKET>-<folder hash>`, `ovs-t<TICKET>-<folder hash>` or
-`cs-project-<folder hash>` / `ovs-project-<folder hash>`. Their first output lines
+Tasks are named `cs-t<TICKET>-<folder hash>-<run>`, `ovs-t<TICKET>-<folder hash>-<run>` or
+`cs-project-<folder hash>-<run>` / `ovs-project-<folder hash>-<run>`. Names are unique
+per run so delayed cleanup cannot stop a replacement. Their first output lines
 identify the folder and private state directory. **Stop** in plugin settings,
 ticket completion/cancellation, idle expiry, removing a watched forward,
 disable/remove and omo shutdown stop the process tree and remove its forward.
-No editor restarts automatically. omo startup clears stale instance/request
-references and starts no editor. Periodic maintenance (once a minute) reaps
-orphaned tasks/forwards left by an interrupted hook and prunes stale references;
-new clicks also prune completed folders, so the bounded store stays usable. Downloads remain cached. If a forward/task is
+No editor restarts automatically. omo startup leaves old references inert and
+starts no editor. Manual opens prune completed folders, keeping the bounded
+store usable. Periodic maintenance (once a minute) reaps orphaned tasks/forwards
+left by an interrupted hook after a 120-second grace from the last manual hook.
+It checks only its original resource snapshot and leaves records to manual
+hooks, so it cannot delete a concurrent launch. Downloads remain cached. If a forward/task is
 stale, a subsequent explicit click cleans up and recreates it. Bind collisions
 get at most three attempts; other early exits/timeouts require an explicit retry.
 
@@ -158,14 +190,23 @@ node plugins/vscode/tests/probe.cjs code-server --subdomain --cross-site
 ```
 
 Each runs the actual plugin first-click installation through the real board,
-opens the workbench in the reserved tab, checks a second click reuses the task,
+opens the workbench in the reserved tab, saves a text edit directly into each
+folder, checks a second click reuses the task,
+opens two simultaneous folders with retained shared settings/extensions and
+separate temporary directories, runs Git against disposable host configuration
+inside both integrated terminals, checks independent folder cleanup,
 keeps browsers connected beyond the configured one-minute idle timeout, tests
 reconnect and checks last-disconnect task/forward removal. Temp files and a
 secret-free `report.json` are retained at the printed path; the server and
 browser are stopped on success and failure. Delete those disposable files when
 you no longer need the evidence. These probes are not part of routine tests.
+Append `--smoke` for the first-use, reuse, two-folder settings/terminal/edit and
+explicit Stop checks without waiting through the idle/reconnect phase.
 
 On the exercised Linux amd64 builds, both path workbenches load successfully
 while the publisher's optional `vsda` JavaScript/WASM resources return 404.
-These requests are recorded in probe reports; this does not certify proprietary
-authentication features or arbitrary extensions.
+code-server also requests a TypeScript extension browser entry absent from its
+pinned publisher archive; its Node extension entry still activates. Failed
+requests are recorded in probe reports, including the requested file for remote
+resources. These checks do not certify proprietary authentication features or
+arbitrary extensions.

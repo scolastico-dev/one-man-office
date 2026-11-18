@@ -4,6 +4,8 @@ local source = assert(io.open('plugins/vscode/editor.lua')):read('*a')
 local passed = 0
 local function same(a,b) assert(a==b, tostring(a)..' ~= '..tostring(b)) end
 local function contains(s,t) assert(string.find(s,t,1,true), tostring(s)..' lacks '..t) end
+local function copy(v) if type(v)~='table' then return v end;local out={};for k,x in pairs(v) do out[k]=copy(x) end;return out end
+local function identity(folder) return '\nOMO_EDITOR_IDENTITY:'..folder:gsub('.',function(c)return string.format('%02x',c:byte())end)..'\n' end
 local function fixture()
   local f={store={},tasks={},forwards={},starts={},artifacts={},installs=0,ports=0,stops=0,now=1000,config={},host={os='linux',arch='amd64'}}
   local function hash(s) -- Distinct deterministic fixture keys, not an integrity implementation.
@@ -11,24 +13,25 @@ local function fixture()
     return string.format('%064d',h)
   end
   f.omo={sha256_hex=hash, now=function() return f.now end, log=function() end,
-    store_get=function(k) return f.store[k] end, store_set=function(k,v) local count=0;for _ in pairs(f.store) do count=count+1 end;if not f.store[k] and count>=1000 then return nil,'the plugin stores at most 1000 keys' end;f.store[k]=v; return true end,
+    store_get=function(k) return copy(f.store[k]) end, store_set=function(k,v) local count=0;for _ in pairs(f.store) do count=count+1 end;if not f.store[k] and count>=1000 then return nil,'the plugin stores at most 1000 keys' end;f.store[k]=copy(v); return true end,
     store_delete=function(k) f.store[k]=nil; return true end,
     store_keys=function() local out={};for k in pairs(f.store) do out[#out+1]=k end; return out end,
     data_dir=function() return '/plugin data' end,
-    exec=function(cmd,script,mode,folder) same(mode,'identity'); f.identity=folder; return folder,'' end,
+    task_temp_dir=function() f.temp_sequence=(f.temp_sequence or 0)+1;return {id='temp-'..f.temp_sequence,path='/tmp/omo-'..f.temp_sequence} end,
+    exec=function(cmd,script,mode,folder) same(mode,'identity'); f.identity=folder; return f.identity_output or identity(folder),'' end,
     artifact_start=function(a) assert(#a.key<=64,'artifact key exceeds 64 bytes'); if a.key:find(f.config.editor or 'code-server',1,true) then return nil,'artifact key contains a configuration value' end; f.installs=f.installs+1; f.artifact_options=a; local old=f.artifacts[a.key]
       if old and old.state=='failed' and not a.retry then return nil,'explicit retry required' end
       f.artifacts[a.key]={state='running',phase='checking',bytes=0,total_bytes=0,verification='sha256'};return f.artifacts[a.key] end,
     artifact_status=function(k) return f.artifacts[k] end,
-    task_list=function() return f.tasks end,
+    task_list=function() return copy(f.tasks) end,
     task_start=function(a) f.starts[#f.starts+1]=a;local t={id='task-'..#f.starts,name=a.name,ticket=a.ticket,state='running',output={}}
       f.tasks[#f.tasks+1]=t;return t end,
-    task_stop=function(name) f.stops=f.stops+1;for _,t in ipairs(f.tasks) do if t.name==name then t.state='exited' end end;return true end,
+    task_stop=function(name) f.stops=f.stops+1;for _,t in ipairs(f.tasks) do if t.name==name then t.state='exited';for i=#f.forwards,1,-1 do if f.forwards[i].task_id==t.id then table.remove(f.forwards,i) end end end end;return true end,
     free_loopback_port=function() f.ports=f.ports+1;return 40000+f.ports end,
-    forward_add=function(a) f.forward_options=a;local id=string.format('%032d',#f.forwards+1);local x={id=id,port=a.port,ticket=a.ticket,base_path='/proxy/'..id..'/',address='http://board/proxy/'..id..'/',activity={active_websockets=0,no_client_since='now'}};f.forwards[#f.forwards+1]=x;return x end,
-    forward_list=function() return f.forwards end,
+    forward_add=function(a) f.forward_options=a;f.forward_sequence=(f.forward_sequence or 0)+1;local id=string.format('%032d',f.forward_sequence);local x={id=id,port=a.port,ticket=a.ticket,base_path='/proxy/'..id..'/',address='http://board/proxy/'..id..'/',activity={active_websockets=0,no_client_since='now'}};f.forwards[#f.forwards+1]=x;return x end,
+    forward_list=function() return copy(f.forwards) end,
     forward_attach=function(id,task) for _,x in ipairs(f.forwards) do if x.id==id then x.task_id=task end end; return true end,
-    forward_remove=function(id) for i=#f.forwards,1,-1 do if f.forwards[i].id==id then table.remove(f.forwards,i) end end;return true end,
+    forward_remove=function(id) for i=#f.forwards,1,-1 do if f.forwards[i].id==id then table.remove(f.forwards,i);return true end end;return nil,'forward not found' end,
     forward_idle_watch=function(id,seconds) f.watch={id=id,seconds=seconds};return true end}
   f.ticket={number=7,folders={{project='alpha',path='/work/-- quoted " 世界',available=true,kind='worktree'},{project='beta',path='/work/second',available=true,kind='worktree'}}}
   function f:run(action,project,ticket)
@@ -37,6 +40,7 @@ local function fixture()
     setmetatable(env,{__index=_G}); local fn=assert(loadstring(source));setfenv(fn,env);return fn()
   end
   function f:ready() self.artifacts[self.artifact_options.key]={state='ready',phase='ready',path='/verified cache',verification='sha256'} end
+  function f:timer(kind) local env={omo=self.omo,config=self.config,event={event=kind or 'timer',data={},host=self.host}};setmetatable(env,{__index=_G});local fn=assert(loadstring(source));setfenv(fn,env);return fn() end
   function f:opened(action,project,ticket) self:run(action or 'open-ticket',project,ticket);self:ready();self:run((action=='open-project') and 'status-project' or 'status-ticket',project,ticket);local t=self.tasks[#self.tasks];t.output={'OMO_EDITOR_READY'};return self:run((action=='open-project') and 'status-project' or 'status-ticket',project,ticket) end
   return f
 end
@@ -48,6 +52,7 @@ test('default pin verifies before launch and pending completes',function()
  contains(f.artifact_options.url,'/v4.145.2/');same(f.artifact_options.strip_components,1)
  f:ready();r=f:run('status-ticket');same(#f.starts,1);same(f.starts[1].ticket,7);contains(f.starts[1].command,'/lib/node')
  same(f.identity,'/work/-- quoted " 世界');same(f.forward_options.host,'127.0.0.1');same(f.forward_options.strip_prefix,true)
+ same(f.starts[1].temp_dir,'temp-1');same(f.starts[1].args[10],'/tmp/omo-1')
  f.tasks[1].output={'OMO_EDITOR_READY'};r=f:run('status-ticket');same(r.forward_id,f.forwards[1].id);same(f.watch.seconds,1800);same(r.url,nil)
 end)
 
@@ -97,10 +102,11 @@ test('failed downloads require next explicit click and changed selection leaves 
  f=fixture();f:opened();f.config.editor='openvscode';f:run('open-ticket');same(#f.starts,1);same(f.stops,0);same(f.installs,2)
 end)
 
-test('startup clears only plugin instance references and never starts editors',function()
- local f=fixture();f.store['instance:a']={task='old'};f.store['request:a']={};f.store['other']='keep'
+test('startup leaves inert state for manual pruning and never starts editors',function()
+ local f=fixture();f.store['instance:a']={task='old'};f.store['request:a']={instance='instance:a'};f.store['other']='keep'
  local env={omo=f.omo,config={},event={event='omo_started',data={},host=f.host}};setmetatable(env,{__index=_G});local fn=assert(loadstring(source));setfenv(fn,env);fn()
- same(f.store['instance:a'],nil);same(f.store['request:a'],nil);same(f.store.other,'keep');same(#f.starts,0);same(f.installs,0)
+ same(f.store['instance:a'].task,'old');same(f.store.other,'keep');same(#f.starts,0);same(f.installs,0)
+ f:run('open-ticket');same(f.store['instance:a'],nil);same(f.store['request:a'],nil)
 end)
 
 test('storage failure after spawn cannot leak an unwatched or unrecorded editor',function()
@@ -129,7 +135,7 @@ test('maintenance reaps orphan resources left by an interrupted hook',function()
 end)
 
 
-test('Windows case-sensitive canonical folders stay distinct',function()
+test('distinct canonical identities differing only by case are not folded on Windows',function()
  local f=fixture();f.host.os='windows';f:opened('open-project','Repo',false)
  f:opened('open-project','repo',false);same(#f.starts,2);same(#f.forwards,2)
 end)
@@ -158,6 +164,78 @@ end)
 
 test('global project action rejects ticket context rather than creating an unbound worktree editor',function()
  local f=fixture();contains(f:run('open-project').message,'ticket');same(f.installs,0);same(#f.starts,0)
+end)
+
+test('timer cannot reap a manual launch between resource creation and persistence',function()
+ for _,boundary in ipairs({'forward_add','task_start','forward_attach','forward_idle_watch','store_set'}) do
+  local f=fixture();f:run('open-ticket');f:ready();local original=f.omo[boundary]
+  f.omo[boundary]=function(...) local a={...};local out={original(unpack(a))};if boundary~='store_set' or tostring(a[1]):sub(1,9)=='instance:' then f:timer() end;return unpack(out) end
+  local r=f:run('status-ticket');contains(r.message,'pending');same(#f.starts,1);same(f.tasks[1].state,'running');same(#f.forwards,1);same(f.stops,0)
+  f:timer('omo_started');same(f.tasks[1].state,'running');same(#f.forwards,1)
+  f.tasks[1].output={'OMO_EDITOR_READY'};same(f:run('status-ticket').forward_id,f.forwards[1].id)
+ end
+end)
+
+test('timer resumes orphan cleanup after an interrupted manual hook grace',function()
+ local f=fixture();f:run('open-ticket');f.tasks={{id='orphan',name='orphan',state='running',output={}}};f.forwards={{id='orphan-forward',task_id='orphan'}}
+ f:timer();same(f.tasks[1].state,'running');f.now=f.now+121;f:timer();same(f.tasks[1].state,'exited');same(#f.forwards,0)
+end)
+
+test('cleanup tolerates task exit callback and concurrent forward removal',function()
+ local f=fixture();f:opened();f.now=f.now+100;f.tasks[1].output={};for _,v in pairs(f.store) do if type(v)=='table' and v.key then v.ready=false end end
+ contains(f:run('status-ticket').message,'timed out');same(#f.forwards,0);same(f.tasks[1].state,'exited')
+ f=fixture();f:opened();f.tasks[1].state='failed';local original=f.omo.forward_remove
+ f.omo.forward_remove=function(id) original(id);return nil,'forward not found' end
+ contains(f:run('status-ticket').message,'stopped');same(#f.forwards,0)
+end)
+
+test('successive runs never reuse a task name that can stop another stable identity',function()
+ local f=fixture();f:opened();local old=f.starts[1].name;f.tasks[1].state='exited';f.forwards={};f:opened();assert(old~=f.starts[2].name,'task name reused')
+end)
+
+test('identity marker ignores merged runtime diagnostics and preserves canonical alias reuse',function()
+ local f=fixture();f.identity_output='preload stdout\nwarning on stderr\n'..identity('/canonical/quote "\n世界')..'trailing warning\n';f:opened()
+ local first=f.starts[1].name;f.ticket.folders[1].path='/work/alias';f.identity_output='different diagnostics\n'..identity('/canonical/quote "\n世界');f:opened();same(#f.starts,1);same(f.starts[1].name,first)
+end)
+
+test('missing malformed or ambiguous identity marker cannot create resources',function()
+ for _,output in ipairs({'/raw/path','warning OMO_EDITOR_IDENTITY:6162\n','\nOMO_EDITOR_IDENTITY:abc\n','\nOMO_EDITOR_IDENTITY:00\n',identity('/one')..identity('/two')}) do
+  local f=fixture();f.identity_output=output;f:run('open-ticket');f:ready();contains(f:run('status-ticket').message,'resolve');same(#f.starts,0);same(#f.forwards,0)
+ end
+end)
+
+test('workspace or error text containing readiness and collision words is not a sentinel',function()
+ local f=fixture();f:run('open-ticket');f:ready();f:run('status-ticket');f.tasks[1].output={'Workspace: "/repo/OMO_EDITOR_READY"'}
+ local r=f:run('status-ticket');contains(r.message,'pending');same(r.forward_id,nil)
+ f.tasks[1].state='failed';f.tasks[1].output={'Failed: /repo/OMO_EDITOR_PORT_COLLISION'}
+ contains(f:run('status-ticket').message,'stopped');same(#f.starts,1)
+end)
+
+test('failed attachment or idle watch requires a fresh integrity check on next click',function()
+ for _,boundary in ipairs({'forward_attach','forward_idle_watch','task_start','task_temp_dir','forward_add','free_loopback_port'}) do
+  local f=fixture();f:run('open-ticket');f:ready();f.omo[boundary]=function() return nil,'fixture refusal' end
+  f:run('status-ticket');same(#f.forwards,0)
+  for _,t in ipairs(f.tasks) do assert(t.state~='running') end
+  f:run('open-ticket');same(f.installs,2)
+ end
+end)
+
+test('a manual replacement after timer lease check survives the older resource snapshot',function()
+ local f=fixture();f:opened();f.now=f.now+121
+ for k in pairs(f.store) do if k:sub(1,9)=='instance:' then f.store[k]=nil end end
+ local keys=f.omo.store_keys;local interleave=true
+ f.omo.store_keys=function()
+  if interleave then interleave=false;f:opened() end
+  return keys()
+ end
+ f:timer();same(#f.starts,2);same(f.tasks[2].state,'running');same(#f.forwards,1);same(f.forwards[1].task_id,f.tasks[2].id)
+end)
+
+test('a refused ticket binding retains the owner and next explicit click reverifies',function()
+ local f=fixture();f.identity_output=identity('/canonical/shared');f:opened()
+ f:run('open-project','alpha',false);f:ready();contains(f:run('status-project','alpha',false).message,'another ticket binding')
+ same(#f.starts,1);same(f.tasks[1].state,'running');same(f.tasks[1].ticket,7)
+ f:run('open-project','alpha',false);same(f.installs,3)
 end)
 
 print(passed..' tests passed')

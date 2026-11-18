@@ -38,12 +38,14 @@
   "hooks": [
     {
       "event": "omo_started",
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     },
     {
       "event": "timer",
       "interval": "1m",
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     },
     {
       "event": "manual",
@@ -51,7 +53,8 @@
       "scope": "ticket",
       "description": "Start or reuse the selected ticket editor",
       "hidden": true,
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     },
     {
       "event": "manual",
@@ -59,7 +62,8 @@
       "scope": "ticket",
       "description": "Continue the pending ticket editor request",
       "hidden": true,
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     },
     {
       "event": "manual",
@@ -67,7 +71,8 @@
       "scope": "global",
       "description": "Start or reuse the selected project editor",
       "hidden": true,
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     },
     {
       "event": "manual",
@@ -75,7 +80,8 @@
       "scope": "global",
       "description": "Continue the pending project editor request",
       "hidden": true,
-      "lua": "editor.lua"
+      "lua": "editor.lua",
+      "timeout": "30s"
     }
   ]
 }

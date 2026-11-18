@@ -538,6 +538,8 @@ type Manager struct {
 	artifactsMu    sync.Mutex
 	artifacts      map[string]map[string]*artifactJob
 	artifactLimits *artifactLimits // tests override finite production bounds
+	taskTempDirsWG sync.WaitGroup
+	taskTempDirs   map[string]*taskTempDir // unattached leases; guarded by tasksMu
 	tasksWG        sync.WaitGroup
 	tasksMu        sync.Mutex
 	tasks          map[string]*task
@@ -677,6 +679,7 @@ func (m *Manager) Close() {
 		}
 	}
 	m.mu.Unlock()
+	m.releaseTaskTempDirs(nil)
 	m.stopTasks(func(*task) bool { return true }, TaskShutdown)
 	m.tasksWG.Wait()
 	m.stopArtifacts("", false)
@@ -689,6 +692,7 @@ func (m *Manager) Close() {
 		p.wg.Wait()
 	}
 	m.manual.Wait()
+	m.taskTempDirsWG.Wait()
 	if m.o.Unloaded != nil {
 		for _, p := range running {
 			m.o.Unloaded(p.name, TaskShutdown)
@@ -807,7 +811,10 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 		if e.p == nil || kept[e.p] {
 			continue
 		}
+		m.mu.Lock()
 		e.p.cancel()
+		m.releaseTaskTempDirs(e.p)
+		m.mu.Unlock()
 		replacement := next[e.settings.Name]
 		reason := ""
 		switch {

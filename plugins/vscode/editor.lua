@@ -1,23 +1,41 @@
--- One serialized plugin hook owns all editor state. No request supplies a path.
+-- Manual hooks exclude each other, but queued timer/startup hooks can overlap.
+-- No request supplies a path.
 local settings, data = config or {}, event.data or {}
 local function message(s) return {message=s} end
 local function pending(s) return message('VS Code pending: '..s) end
 local function save(k,v) local ok,why=omo.store_set(k,v); if not ok then error(why) end end
 local function drop(k) local ok,why=omo.store_delete(k); if not ok then error(why) end end
 
-if event.event == 'omo_started' then
-  -- The server already removed stale owned forwards; never resurrect tasks.
-  for _,k in ipairs(assert(omo.store_keys())) do
-    if k:sub(1,9)=='instance:' or k:sub(1,8)=='request:' then drop(k) end
+local function remove_forward(id)
+  for _,f in ipairs(assert(omo.forward_list())) do
+    if f.id==id then
+      local ok,why=omo.forward_remove(id)
+      if ok then return end
+      -- Exit callbacks and a concurrent timer may have won the removal.
+      for _,remaining in ipairs(assert(omo.forward_list())) do
+        if remaining.id==id then error(why) end
+      end
+      return
+    end
   end
-  return
+end
+local function stop_task(t)
+  local ok,why=omo.task_stop(t.name)
+  if ok then return end
+  for _,remaining in ipairs(assert(omo.task_list())) do
+    if remaining.id==t.id and remaining.state=='running' then error(why) end
+  end
 end
 
--- Hooks are serialized. Prune stale references before admitting a new folder;
--- the timer also reaps resources left between creation and persistence if a
--- browser request/hook was interrupted. Maintenance never launches anything.
+if event.event=='omo_started' then return end -- Old records are inert; never restart.
+local manual=event.event=='manual'
+-- These hooks declare 30-second deadlines. Allow grace for an interrupted hook;
+-- the timer takes resource snapshots BEFORE checking this lease. Resources
+-- created by a later manual hook cannot appear in those snapshots.
+if manual then save('manual-until',omo.now()+120) end
 if event.event=='timer' or data.action=='open-ticket' or data.action=='open-project' then
   local tasks,forwards=assert(omo.task_list()),assert(omo.forward_list())
+  if event.event=='timer' and (omo.store_get('manual-until') or 0)>omo.now() then return end
   local task_by_id,forward_by_id,kept_tasks,kept_forwards={},{},{},{}
   for _,t in ipairs(tasks) do task_by_id[t.id]=t end
   for _,f in ipairs(forwards) do forward_by_id[f.id]=f end
@@ -29,22 +47,20 @@ if event.event=='timer' or data.action=='open-ticket' or data.action=='open-proj
       local f=rec and forward_by_id[rec.forward]
       if t and t.state=='running' and f and f.task_id==t.id then
         kept_tasks[t.id]=true;kept_forwards[f.id]=true
-      elseif event.event=='timer' and t and t.state~='running' and not rec.ready and omo.now()-rec.started<90 then
-        -- Status still needs this short-lived exit evidence to classify a
-        -- bind collision or explain an early failure from the same click.
-      else drop(key) end
+      elseif manual then drop(key) end
     end
   end
   for _,key in ipairs(keys) do
-    if key:sub(1,8)=='request:' then
+    if manual and key:sub(1,8)=='request:' then
       local req=omo.store_get(key)
       if req and ((req.instance and not omo.store_get(req.instance)) or
         (not req.instance and omo.now()-(req.requested or 0)>35*60)) then drop(key) end
     end
   end
-  for _,t in ipairs(tasks) do if t.state=='running' and not kept_tasks[t.id] then assert(omo.task_stop(t.name)) end end
-  -- Task-exit callbacks may already have removed attached forwards.
-  for _,f in ipairs(assert(omo.forward_list())) do if not kept_forwards[f.id] then assert(omo.forward_remove(f.id)) end end
+  for _,t in ipairs(tasks) do if t.state=='running' and not kept_tasks[t.id] then stop_task(t) end end
+  -- Only the original snapshot: a fresh list could contain a concurrent launch.
+  -- Unique task names ensure an old stop can never stop a replacement run.
+  for _,f in ipairs(forwards) do if not kept_forwards[f.id] then remove_forward(f.id) end end
   if event.event=='timer' then return end
 end
 
@@ -106,12 +122,12 @@ local function find_forward(forwards,id)
 end
 local function cleanup(rec,tasks,forwards)
   local t=find_task(tasks,rec.task)
-  if t and t.state=='running' then assert(omo.task_stop(t.name)) end
-  if find_forward(forwards,rec.forward) then assert(omo.forward_remove(rec.forward)) end
+  if t and t.state=='running' then stop_task(t) end
+  remove_forward(rec.forward)
   drop(rec.key)
 end
 local function output_has(t,text)
-  for _,line in ipairs(t.output or {}) do if line:find(text,1,true) then return true end end
+  for _,line in ipairs(t.output or {}) do if line==text then return true end end
   return false
 end
 local function ready(rec,t,forward)
@@ -182,8 +198,18 @@ if job.state~='ready' or job.verification~='sha256' or not job.path then
 end
 local node=job.path..(editor=='code-server' and '/lib/node' or '/node')..(host.os=='windows' and '.exe' or '')
 -- Bundled verified runtime resolves aliases/case before deriving instance identity.
-local canonical,err=omo.exec(node,'launch.cjs','identity',folder)
-if err~='' or canonical=='' then drop(request_key);return message('Editor runtime cannot resolve the folder. Check host ABI/runtime requirements and output in plugin settings: '..tostring(err)) end
+local output,err=omo.exec(node,'launch.cjs','identity',folder)
+local canonical,count=nil,0
+-- exec merges stdout/stderr and Node may run an inherited preload or warn
+-- before launch.cjs starts. Only one complete, hex-encoded marker is identity.
+for line in ((output or '')..'\n'):gmatch('([^\n]*)\n') do
+  local encoded=line:match('^OMO_EDITOR_IDENTITY:([a-f0-9]+)\r?$')
+  if encoded then
+    count=count+1
+    if #encoded%2==0 then canonical=encoded:gsub('..',function(pair)return string.char(tonumber(pair,16))end) end
+  end
+end
+if err~='' or count~=1 or not canonical or canonical=='' or canonical:find('\0',1,true) then drop(request_key);return message('Editor runtime cannot resolve the folder. Check host ABI/runtime requirements and output in plugin settings: '..tostring(err)) end
 if host.os=='windows' then canonical=canonical:gsub('\\','/') end
 local key='instance:'..omo.sha256_hex(canonical..'\0'..editor..'\0'..version)
 local tasks,forwards=records()
@@ -192,7 +218,7 @@ if old then
   local t,f=find_task(tasks,old.task),find_forward(forwards,old.forward)
   if t and t.state=='running' and f and f.task_id==t.id then
     -- A global/ticket alias must never steal a ticket-bound lifecycle.
-    if (t.ticket or 0)~=(binding or 0) then return message('This folder already has an editor with another ticket binding. Stop that editor in plugin settings before reopening here.') end
+    if (t.ticket or 0)~=(binding or 0) then drop(request_key);return message('This folder already has an editor with another ticket binding. Stop that editor in plugin settings before reopening here.') end
     req.instance=key;save(request_key,req)
     local result,why=ready(old,t,f)
     if result then return result end
@@ -202,28 +228,33 @@ if old then
   cleanup(old,tasks,forwards)
 end
 local port,port_error=omo.free_loopback_port()
-if not port then return message('No loopback port available: '..tostring(port_error)) end
+if not port then drop(request_key);return message('No loopback port available: '..tostring(port_error)) end
+local sequence=(omo.store_get('run-sequence') or 0)+1
+save('run-sequence',sequence)
 local forward,forward_error=omo.forward_add{name='VS Code '..(binding and 'ticket '..binding or 'project'),host='127.0.0.1',port=port,ticket=binding,strip_prefix=editor=='code-server'}
-if not forward then return message('Editor forward could not be registered: '..tostring(forward_error)) end
+if not forward then drop(request_key);return message('Editor forward could not be registered: '..tostring(forward_error)) end
 local base=forward.base_path
 -- The address is a routing hint only. The final UI obtains a fresh Open grant.
 if not forward.address:find('/proxy/'..forward.id..'/',1,true) then base='/' end
 local id=key:sub(10,41)
+local temporary,temp_error=omo.task_temp_dir()
+if not temporary then remove_forward(forward.id);drop(request_key);return message('Editor runtime directory could not be allocated: '..tostring(temp_error)) end
 local task,start_error=omo.task_start{
-  name=(editor=='code-server' and 'cs-' or 'ovs-')..(binding and 't'..binding..'-' or 'project-')..id,
-  command=node,args={'launch.cjs','run',editor,job.path,folder,assert(omo.data_dir()),id,tostring(port),base},
-  env={NODE_OPTIONS='',NODE_PATH=''},ticket=binding,
+  name=(editor=='code-server' and 'cs-' or 'ovs-')..(binding and 't'..binding..'-' or 'project-')..id:sub(1,24)..'-'..string.format('%.0f',sequence),
+  command=node,args={'launch.cjs','run',editor,job.path,folder,assert(omo.data_dir()),id,tostring(port),base,temporary.path},
+  env={NODE_OPTIONS='',NODE_PATH=''},ticket=binding,temp_dir=temporary.id,
 }
-if not task then assert(omo.forward_remove(forward.id));return message('Editor process could not start: '..tostring(start_error)..'. Check runtime requirements in the plugin README.') end
+if not task then remove_forward(forward.id);drop(request_key);return message('Editor process could not start: '..tostring(start_error)..'. Check runtime requirements in the plugin README.') end
 local attached,attach_error=omo.forward_attach(forward.id,task.id)
 if not attached then
-  assert(omo.task_stop(task.name));omo.forward_remove(forward.id)
+  stop_task(task);remove_forward(forward.id)
+  drop(request_key)
   return message('Editor exited before its forward could attach: '..tostring(attach_error)..'. Inspect output in plugin settings.')
 end
 local rec={key=key,task=task.id,forward=forward.id,started=omo.now(),attempt=req.attempt,ready=false}
 -- Watch immediately as well: an abandoned first-use tab cannot leak a task.
 local watched,watch_error=omo.forward_idle_watch(forward.id,idle*60)
-if not watched then cleanup(rec,assert(omo.task_list()),assert(omo.forward_list()));return message('Cannot arm editor idle cleanup: '..tostring(watch_error)) end
+if not watched then cleanup(rec,assert(omo.task_list()),assert(omo.forward_list()));drop(request_key);return message('Cannot arm editor idle cleanup: '..tostring(watch_error)) end
 local persisted,store_error=pcall(function()
   save(key,rec);req.instance=key;save(request_key,req)
 end)

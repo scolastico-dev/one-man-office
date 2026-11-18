@@ -15,6 +15,23 @@
         omo.signal.addEventListener('abort', abort, { once: true });
       });
     }
+    function checkDeadline(started) {
+      active();
+      if (Date.now() - started > 35 * 60 * 1000) throw new Error('Editor installation timed out. Check the plugin log and task output before retrying.');
+    }
+    async function runHook(action, payload, started) {
+      for (;;) {
+        checkDeadline(started);
+        try {
+          return await omo.runHook(action, payload);
+        } catch (error) {
+          // This exact refusal guarantees the hook never ran. Every other
+          // failure, including a lost response, must be surfaced without retry.
+          if (error?.status !== 409 || error?.code !== 'conflict' || error?.message !== 'an action of plugin vscode is already running') throw error;
+          await pause();
+        }
+      }
+    }
     function open(context, place) {
       active();
       const payload = { project: context.project };
@@ -28,15 +45,15 @@
         try {
           // The board has already reserved the new tab during the gesture.
           // Never retry a lost action response: it may have started the editor.
-          let result = await omo.runHook(`open-${action}`, payload);
+          let result = await runHook(`open-${action}`, payload, started);
           while (result.message?.startsWith('VS Code pending:')) {
             active();
             omo.addPanel({ id: panel, place: place === 'ticket' ? 'ticket' : 'sidebar', title: 'Opening VS Code',
               text: `${payload.project ?? 'Selected folder'}: ${result.message.slice(17).trim()}` });
-            if (Date.now() - started > 35 * 60 * 1000) throw new Error('Editor installation timed out. Check the plugin log and task output before retrying.');
+            checkDeadline(started);
             await pause();
             active();
-            result = await omo.runHook(`status-${action}`, payload);
+            result = await runHook(`status-${action}`, payload, started);
           }
           active();
           return result;

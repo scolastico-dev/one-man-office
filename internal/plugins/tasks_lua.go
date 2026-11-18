@@ -19,7 +19,13 @@ func pushTaskValue(L *lua.LState, v any) int {
 
 func (m *Manager) luaTaskStart(box *luabox.Box, p *plugin) lua.LGFunction {
 	return func(L *lua.LState) int {
-		value, err := luabox.ToGo(L.CheckTable(1))
+		opts := L.CheckTable(1)
+		// A failed decode is still a failed start. Release only this runtime's
+		// unclaimed lease, never a claimed task's or another runtime's directory.
+		if id, ok := opts.RawGetString("temp_dir").(lua.LString); ok {
+			defer m.discardTaskTempDir(p, string(id))
+		}
+		value, err := luabox.ToGo(opts)
 		if err != nil {
 			return fail(L, "task_start requires a task options table")
 		}
