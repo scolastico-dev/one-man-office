@@ -313,7 +313,9 @@ Path-mode redirects with a path are resolved at the upstream request URL before
 being mapped into the forward; redirect dot segments (including encoded dots)
 are normalized before prefixing. Literal backslashes in redirect paths use the
 browser's separator interpretation; malformed path-mode Location values are
-dropped, preserving the rest of the response. Request path bytes are never
+dropped, as are authority-less HTTP(S) references such as `http:/x` and
+`http:../../x` that browsers can resolve onto the board origin. The rest of the
+response is preserved. Request path bytes are never
 normalized. Grant-query filtering recognizes both `&` and legacy `;` separators
 without reencoding unrelated query bytes.
 `__Host-` application cookies keep `Path=/`, which browsers require for those

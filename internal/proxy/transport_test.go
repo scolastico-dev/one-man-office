@@ -497,3 +497,25 @@ func TestGrantQuerySeparators(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthoritylessHTTPRedirects(t *testing.T) {
+	for _, location := range []string{"http:/x", "http:../../x", "http:x", "HTTP:/x", "https:/x", "hTtPs:../../x", "http:", "https:///x"} {
+		for _, mode := range []Mode{PathMode, SubdomainMode} {
+			t.Run(location+fmt.Sprint(mode), func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Location", location); w.WriteHeader(302) }))
+				defer upstream.Close()
+				tr := NewTransport()
+				defer tr.CloseIdleConnections()
+				w := httptest.NewRecorder()
+				tr.Handler(forwardFor(t, upstream.URL), mode).ServeHTTP(w, httptest.NewRequest("GET", "/proxy/abc/a/b", nil))
+				want := location
+				if mode == PathMode {
+					want = ""
+				}
+				if got := w.Header().Get("Location"); w.Code != 302 || got != want {
+					t.Fatalf("status=%d Location=%q want %q", w.Code, got, want)
+				}
+			})
+		}
+	}
+}

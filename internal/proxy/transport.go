@@ -282,6 +282,12 @@ func rewriteLocation(s string, target *url.URL, prefix string, mode Mode, v Requ
 		}
 		return s
 	}
+	// Browsers resolve authority-less HTTP(S) references against the public
+	// origin, including opaque forms like http:../../x. Go's hierarchical URL
+	// resolver does not model that interpretation, so drop them in path mode.
+	if mode == PathMode && u.Host == "" && (strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) {
+		return ""
+	}
 	if u.Opaque != "" || u.User != nil {
 		return s
 	}
