@@ -96,7 +96,8 @@ test('one sample uses declarations and the public facade across routes, configur
   await expect(page.locator('script[data-omo-plugin="sample"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Dynamic status', exact: true })).toHaveCount(0)
   // Enabling reloads the plugin: wait for the saved response before the status action.
-  const enabled = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok())
+  // It names the enabling request: the earlier disabling PUT may still be answered after this waiter exists.
+  const enabled = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok() && r.request().postDataJSON()?.enabled === true)
   await detail.locator('[data-plugin-enabled]').click()
   await enabled
   await expect.poll(() => status(omo)).toBe('starts=2 running=0 mode=two')
