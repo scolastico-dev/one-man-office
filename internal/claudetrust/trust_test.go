@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 func read(t *testing.T, path string) map[string]any {
@@ -34,10 +36,10 @@ func project(t *testing.T, path, dir string) map[string]any {
 
 func TestEnsureCreatesConfigAndTrustsDir(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), ".claude.json")
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
-	p := project(t, cfg, "/work/office")
+	p := project(t, cfg, office)
 	if p["hasTrustDialogAccepted"] != true {
 		t.Fatalf("dir not trusted: %v", p)
 	}
@@ -48,11 +50,11 @@ func TestEnsureCreatesConfigAndTrustsDir(t *testing.T) {
 
 func TestEnsureForEnvUsesSelectedClaudeConfigDirectory(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "account", "claude")
-	if err := EnsureForEnv(map[string]string{"CLAUDE_CONFIG_DIR": root}, "/work/office"); err != nil {
+	if err := EnsureForEnv(map[string]string{"CLAUDE_CONFIG_DIR": root}, office); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, ".claude.json")
-	if got := project(t, path, "/work/office"); got["hasTrustDialogAccepted"] != true {
+	if got := project(t, path, office); got["hasTrustDialogAccepted"] != true {
 		t.Fatalf("custom account trust = %v", got)
 	}
 }
@@ -75,7 +77,7 @@ func TestEnsurePreservesEverythingElse(t *testing.T) {
 	if err := os.WriteFile(cfg, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 	m := read(t, cfg)
@@ -94,13 +96,13 @@ func TestEnsurePreservesEverythingElse(t *testing.T) {
 func TestEnsureKeepsExistingProjectKeys(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), ".claude.json")
 	raw, _ := json.Marshal(map[string]any{"projects": map[string]any{
-		"/work/office": map[string]any{"allowedTools": []any{"Read"}, "hasTrustDialogAccepted": false},
+		office: map[string]any{"allowedTools": []any{"Read"}, "hasTrustDialogAccepted": false},
 	}})
 	os.WriteFile(cfg, raw, 0o600)
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
-	p := project(t, cfg, "/work/office")
+	p := project(t, cfg, office)
 	if p["hasTrustDialogAccepted"] != true {
 		t.Fatal("trust not flipped to true")
 	}
@@ -112,7 +114,7 @@ func TestEnsureKeepsExistingProjectKeys(t *testing.T) {
 func TestEnsurePreservesFileMode(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), ".claude.json")
 	os.WriteFile(cfg, []byte(`{"projects":{}}`), 0o600)
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(cfg)
@@ -132,7 +134,7 @@ func TestEnsureIsSafeConcurrently(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			EnsureIn(cfg, filepath.Join("/work", string(rune('a'+i))))
+			EnsureIn(cfg, filepath.Join(testpath.Abs("/work"), string(rune('a'+i))))
 		}(i)
 	}
 	wg.Wait()
@@ -221,14 +223,14 @@ func TestEnsureStartsOverWhenTheFileChangesWhileItWrites(t *testing.T) {
 			writeJSON(t, path, map[string]any{"numStartups": 2.0, "tipsHistory": map[string]any{"x": 1.0}})
 		}
 	}, nil)
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 	m := read(t, cfg)
 	if m["numStartups"] != 2.0 || m["tipsHistory"] == nil {
 		t.Fatalf("Claude's concurrent change was lost: %v", m)
 	}
-	if p := project(t, cfg, "/work/office"); p["hasTrustDialogAccepted"] != true {
+	if p := project(t, cfg, office); p["hasTrustDialogAccepted"] != true {
 		t.Fatalf("trust missing: %v", p)
 	}
 }
@@ -245,13 +247,13 @@ func TestEnsureRetriesWhenItsChangeIsOverwritten(t *testing.T) {
 			writeJSON(t, path, map[string]any{"numStartups": 1.0})
 		}
 	})
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 	if overwrites != 2 {
 		t.Fatalf("overwrites = %d", overwrites)
 	}
-	if p := project(t, cfg, "/work/office"); p["hasTrustDialogAccepted"] != true {
+	if p := project(t, cfg, office); p["hasTrustDialogAccepted"] != true {
 		t.Fatalf("trust missing after retries: %v", p)
 	}
 
@@ -260,13 +262,13 @@ func TestEnsureRetriesWhenItsChangeIsOverwritten(t *testing.T) {
 	setHooks(t, nil, func(path string) {
 		if overwrites < 1 {
 			overwrites++
-			writeJSON(t, path, map[string]any{"projects": map[string]any{"/work/office": map[string]any{"hasTrustDialogAccepted": true}}})
+			writeJSON(t, path, map[string]any{"projects": map[string]any{office: map[string]any{"hasTrustDialogAccepted": true}}})
 		}
 	})
-	if err := ForgetIn(cfg, "/work/office"); err != nil {
+	if err := ForgetIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
-	if projects, _ := read(t, cfg)["projects"].(map[string]any); projects["/work/office"] != nil {
+	if projects, _ := read(t, cfg)["projects"].(map[string]any); projects[office] != nil {
 		t.Fatalf("entry back after ForgetIn: %v", projects)
 	}
 }
@@ -280,7 +282,7 @@ func TestEnsureGivesUpWhenTheFileKeepsChanging(t *testing.T) {
 		n++
 		writeJSON(t, path, map[string]any{"n": float64(n)})
 	}, nil)
-	if err := EnsureIn(cfg, "/work/office"); err == nil {
+	if err := EnsureIn(cfg, office); err == nil {
 		t.Fatal("no error although every attempt met a changed file")
 	}
 	if n != updateAttempts {
@@ -298,10 +300,10 @@ func TestUnparsableConfigIsNeverWritten(t *testing.T) {
 	if err := os.WriteFile(cfg, broken, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureIn(cfg, "/work/office"); err == nil {
+	if err := EnsureIn(cfg, office); err == nil {
 		t.Fatal("EnsureIn accepted an unparsable file")
 	}
-	if err := ForgetIn(cfg, "/work/office"); err == nil {
+	if err := ForgetIn(cfg, office); err == nil {
 		t.Fatal("ForgetIn accepted an unparsable file")
 	}
 	if raw, _ := os.ReadFile(cfg); string(raw) != string(broken) {
@@ -316,11 +318,14 @@ func TestUnparsableConfigIsNeverWritten(t *testing.T) {
 func TestEnsureDoesNotRewriteATrustedFolder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 	setHooks(t, func(string) { t.Fatal("a trusted folder was written again") }, nil)
-	if err := EnsureIn(cfg, "/work/office"); err != nil {
+	if err := EnsureIn(cfg, office); err != nil {
 		t.Fatal(err)
 	}
 }
+
+// office is the project folder of these tests: any absolute path.
+var office = testpath.Abs("/work/office")

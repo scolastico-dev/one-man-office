@@ -13,6 +13,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/skillsets"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // isolateGit keeps the server's git, and the test's, away from the
@@ -163,7 +164,7 @@ func TestSkillSetRoutesRefuseAgents(t *testing.T) {
 			body         any
 		}{
 			{"GET", "/api/skillsets", nil},
-			{"PUT", "/api/skillsets/x", api.SkillSet{Repository: "/srv/x.git", Update: api.SkillSetPinned}},
+			{"PUT", "/api/skillsets/x", api.SkillSet{Repository: testpath.Abs("/srv/x.git"), Update: api.SkillSetPinned}},
 			{"DELETE", "/api/skillsets/x", nil},
 			{"POST", "/api/skillsets/x/update", map[string]any{}},
 		} {
@@ -181,7 +182,7 @@ func TestSkillSetRoutesRefuseAgents(t *testing.T) {
 func TestPreviewShowsSkillSets(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
-	if err := s.settings.PutSkillSetIf("", api.SkillSet{Name: "sp", Repository: "/srv/skills.git", Update: api.SkillSetPinned, Enabled: true,
+	if err := s.settings.PutSkillSetIf("", api.SkillSet{Name: "sp", Repository: testpath.Abs("/srv/skills.git"), Update: api.SkillSetPinned, Enabled: true,
 		Instructions: map[string]string{"developer": "Read SKILLS.md first."}}); err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +197,7 @@ func TestPreviewShowsSkillSets(t *testing.T) {
 		t.Fatalf("a set without checkout is in the preview:\n%s", p.Text)
 	}
 	checkout := filepath.Join(s.opts.Layout.Skills, "sp")
-	if err := skillsets.RecordSource(checkout, "/srv/skills.git", ""); err != nil {
+	if err := skillsets.RecordSource(checkout, testpath.Abs("/srv/skills.git"), ""); err != nil {
 		t.Fatal(err)
 	}
 	block := "Skill set sp (checked out at " + checkout + "; read-only, omo updates it):\nRead SKILLS.md first."

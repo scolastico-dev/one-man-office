@@ -93,7 +93,7 @@ func TestSkillSetValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Accepted addresses and refs.
-	for _, repo := range []string{"git@github.com:obra/superpowers.git", "ssh://git@host/x.git", "/srv/git/skills"} {
+	for _, repo := range []string{"git@github.com:obra/superpowers.git", "ssh://git@host/x.git", abs("/srv/git/skills")} {
 		k := superpowers()
 		k.Repository = repo
 		k.Ref = ""
@@ -143,14 +143,14 @@ func TestSkillSetRevisions(t *testing.T) {
 	// A hand edit not yet polled makes the page's revision stale; the edit
 	// is delivered as from disk.
 	log.take()
-	writeFile(t, filepath.Join(home, "skillsets", "superpowers.yaml"), "repository: /srv/skills\nenabled: false\n")
+	writeFile(t, filepath.Join(home, "skillsets", "superpowers.yaml"), "repository: "+abs("/srv/skills")+"\nenabled: false\n")
 	k.Enabled = false
 	wantCode(t, s.PutSkillSetIf(rev, k), api.CodeStaleSettings)
 	ch := log.take()
 	if len(ch) != 1 || ch[0].Section != SectionSkillSets || !ch[0].FromDisk {
 		t.Fatalf("changes = %+v", ch)
 	}
-	if got, _ := s.SkillSet("superpowers"); got.Repository != "/srv/skills" {
+	if got, _ := s.SkillSet("superpowers"); got.Repository != abs("/srv/skills") {
 		t.Fatalf("hand edit not loaded: %+v", got)
 	}
 	wantCode(t, s.DeleteSkillSetIf(rev, "superpowers"), api.CodeStaleSettings)

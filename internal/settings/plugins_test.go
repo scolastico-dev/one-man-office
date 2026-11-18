@@ -58,7 +58,7 @@ func TestPluginSettingsValidation(t *testing.T) {
 	for _, p := range []PluginSettings{
 		pushover(),
 		{Name: "My.Plugin", Source: "https://example.com/p.git", Subpath: "plugins/mine", Ref: "v1.2"},
-		{Name: "local", Source: "/srv/plugins/local"},
+		{Name: "local", Source: abs("/srv/plugins/local")},
 	} {
 		if err := s.PutPluginIf(NoRevision, p); err != nil {
 			t.Fatalf("%s: %v", p.Name, err)
@@ -86,9 +86,9 @@ func TestPluginSettingsValidation(t *testing.T) {
 	wantCode(t, s.PutPluginIf(NoRevision, pushover()), api.CodeStaleSettings)
 
 	// A file whose config is not an object is broken.
-	writeFile(t, filepath.Join(home, "plugins", "list.yaml"), "source: /srv/plugins/pushover\nconfig: [1, 2]\n")
-	writeFile(t, filepath.Join(home, "plugins", "text.yaml"), "source: /srv/plugins/pushover\nconfig: hello\n")
-	writeFile(t, filepath.Join(home, "plugins", "keys.yaml"), "source: /srv/plugins/pushover\nconfig:\n  ? [a]\n  : x\n")
+	writeFile(t, filepath.Join(home, "plugins", "list.yaml"), "source: "+abs("/srv/plugins/pushover")+"\nconfig: [1, 2]\n")
+	writeFile(t, filepath.Join(home, "plugins", "text.yaml"), "source: "+abs("/srv/plugins/pushover")+"\nconfig: hello\n")
+	writeFile(t, filepath.Join(home, "plugins", "keys.yaml"), "source: "+abs("/srv/plugins/pushover")+"\nconfig:\n  ? [a]\n  : x\n")
 	s.Reload()
 	errs := s.Errors()
 	if len(errs) != 3 {
@@ -174,7 +174,7 @@ func TestPluginConfigHoldsOnlyJSONValues(t *testing.T) {
 		"deep":  "config:\n  a: " + strings.Repeat("[", 70) + strings.Repeat("]", 70) + "\n",
 		"float": "config:\n  n: 1.5\n  ok: true\n  none: null\n  when: \"2024-01-01\"\n",
 	} {
-		writeFile(t, filepath.Join(home, "plugins", name+".yaml"), "source: /srv/plugins/pushover\n"+text)
+		writeFile(t, filepath.Join(home, "plugins", name+".yaml"), "source: "+abs("/srv/plugins/pushover")+"\n"+text)
 	}
 	s.Reload()
 	for _, name := range []string{"date", "inf", "int", "deep"} {

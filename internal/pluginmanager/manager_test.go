@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -213,6 +214,11 @@ func TestInstallFromLocalRepository(t *testing.T) {
 		}
 	}
 	for rel, perm := range map[string]os.FileMode{"demo/plugin.json": 0o600, "demo/run.sh": 0o700, "demo/lib": 0o700} {
+		if runtime.GOOS == "windows" {
+			// Windows has no Unix file modes: every file reads as 0666
+			// and every folder as 0777, whatever it was created with.
+			break
+		}
 		info, err := os.Lstat(filepath.Join(e.root, rel))
 		if err != nil {
 			t.Fatal(err)

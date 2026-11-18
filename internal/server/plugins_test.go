@@ -19,6 +19,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // recordCommand is a command hook that appends its standard input (the
@@ -459,7 +460,7 @@ func TestPluginOperationsOneAtATime(t *testing.T) {
 		}
 		wantStatus(t, resp.StatusCode, http.StatusConflict)
 	}
-	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: "/nowhere/rec.git"})
+	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: testpath.Abs("/nowhere/rec.git")})
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
 	release()
 }

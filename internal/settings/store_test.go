@@ -8,7 +8,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
+
+// abs names an absolute path of a test ("/ws") as one that is absolute on
+// the platform the test runs on; see testpath.Abs.
+func abs(path string) string { return testpath.Abs(path) }
 
 // openTest opens a store in an isolated omo home and records every change.
 func openTest(t *testing.T) (*Store, string, *changeLog) {
@@ -57,7 +63,7 @@ func TestOpenNeverFailsOnInvalidFiles(t *testing.T) {
 	t.Setenv("OMO_HOME", home)
 	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: [")
 	writeFile(t, filepath.Join(home, "projects", "a.yaml"), "name: [")
-	writeFile(t, filepath.Join(home, "projects", "Bad Name.yaml"), "name: x\npath: /x\n")
+	writeFile(t, filepath.Join(home, "projects", "Bad Name.yaml"), "name: x\npath: "+abs("/x")+"\n")
 	s, err := Open(home, Options{})
 	if err != nil {
 		t.Fatal(err)

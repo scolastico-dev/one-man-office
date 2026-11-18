@@ -155,8 +155,13 @@ func TestDiffRouteFileContextRemoteBaseAndLinks(t *testing.T) {
 	}
 	gitIn(t, wt, "add", "link")
 	f := okJSON[api.DiffFile](t, e.u, 200, "GET", contextURL(n, e.project, "link", "true", "all"), nil)
-	if f.Patch == nil || strings.Contains(*f.Patch, "SECRET") || !strings.Contains(*f.Patch, "+"+secret) {
+	if f.Patch == nil || strings.Contains(*f.Patch, "SECRET") {
 		t.Fatalf("link: %+v", f)
+	}
+	// The patch of a link is its target as git stored it.
+	want := "+" + secret
+	if !strings.Contains(*f.Patch, want) {
+		t.Fatalf("link: patch %q, want %q in it", *f.Patch, want)
 	}
 }
 

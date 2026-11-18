@@ -14,6 +14,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // gitEnv is the environment of the test's git commands and of the Git under
@@ -508,7 +509,7 @@ func TestSkillSetStartCleansLeftovers(t *testing.T) {
 		}
 	}
 	writeFile(t, filepath.Join(e.dir, "NOTES"), "kept: not a set name\n")
-	e.put("s", "/nonexistent/repo.git", "", api.SkillSetPinned, nil)
+	e.put("s", testpath.Abs("/nonexistent/repo.git"), "", api.SkillSetPinned, nil)
 	m := e.manager()
 	m.Start(context.Background())
 	deadline := time.Now().Add(10 * time.Second)

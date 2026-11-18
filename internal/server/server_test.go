@@ -27,6 +27,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/service"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 )
 
@@ -50,6 +51,17 @@ func testConfig(mutate ...func(*serverconfig.Config)) serverconfig.Config {
 		m(&c)
 	}
 	return c
+}
+
+// absJSON is the JSON text of a path that is absolute where the test runs:
+// a path that starts with a slash is not absolute on Windows, and a request
+// that is to be refused for another reason would be refused for its path.
+func absJSON(path string) string {
+	raw, err := json.Marshal(testpath.Abs(path))
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
 }
 
 // newTestServer opens a server (no listeners) on a fresh home.

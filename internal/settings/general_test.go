@@ -116,7 +116,7 @@ func TestSetGeneralValidates(t *testing.T) {
 		"handoff_timeout":             func(g *General) { g.Stop.HandoffTimeout = -1 },
 		"rescan_interval":             func(g *General) { g.RescanInterval = 0 },
 		"max_depth": func(g *General) {
-			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/ws", MaxDepth: 17}}
+			g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 17}}
 		},
 		"workspace_roots.0.path": func(g *General) {
 			g.WorkspaceRoots = []WorkspaceRoot{{Path: "relative/ws", MaxDepth: 4}}
@@ -210,9 +210,9 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 		field string
 		roots []WorkspaceRoot
 	}{
-		{"workspace_roots.1.path", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4}, {Path: "/ws/./x/..", MaxDepth: 2}}},
-		{"workspace_roots.2.path", []WorkspaceRoot{{Path: "~/ws", MaxDepth: 4}, {Path: "/other", MaxDepth: 4}, {Path: filepath.Join(homeDir, "ws") + "/", MaxDepth: 4}}},
-		{"workspace_roots.0.ignore.2", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4, Ignore: []string{"a", "b", "a"}}}},
+		{"workspace_roots.1.path", []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 4}, {Path: abs("/ws/./x/.."), MaxDepth: 2}}},
+		{"workspace_roots.2.path", []WorkspaceRoot{{Path: "~/ws", MaxDepth: 4}, {Path: abs("/other"), MaxDepth: 4}, {Path: filepath.Join(homeDir, "ws") + "/", MaxDepth: 4}}},
+		{"workspace_roots.0.ignore.2", []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 4, Ignore: []string{"a", "b", "a"}}}},
 	} {
 		g := Defaults()
 		g.WorkspaceRoots = c.roots
@@ -227,13 +227,13 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	}
 	// The same pattern in two roots is fine.
 	g := Defaults()
-	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", MaxDepth: 4, Ignore: []string{"x"}}, {Path: "/b", MaxDepth: 4, Ignore: []string{"x"}}}
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), MaxDepth: 4, Ignore: []string{"x"}}, {Path: abs("/b"), MaxDepth: 4, Ignore: []string{"x"}}}
 	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 
 	// A hand-written file with repeats loads as it is.
-	writeFile(t, filepath.Join(home, "settings.yaml"), "workspace_roots:\n  - path: /ws\n    ignore: [a, a]\n  - path: /ws/\n")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "workspace_roots:\n  - path: "+abs("/ws")+"\n    ignore: [a, a]\n  - path: "+abs("/ws/")+"\n")
 	s.Reload()
 	if errs := s.Errors(); len(errs) != 0 {
 		t.Fatalf("errors = %+v", errs)
@@ -250,7 +250,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	}
 	// A new repeat is refused.
 	_, err = s.UpdateGeneral("", func(g *General) error {
-		g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: "/c", MaxDepth: 4}, WorkspaceRoot{Path: "/c", MaxDepth: 4})
+		g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: abs("/c"), MaxDepth: 4}, WorkspaceRoot{Path: abs("/c"), MaxDepth: 4})
 		return nil
 	})
 	if fieldOf(err) != "workspace_roots.3.path" {
