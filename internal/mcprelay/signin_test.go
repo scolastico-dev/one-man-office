@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
@@ -201,11 +200,10 @@ func TestARefusedTestKeepsTheSignIn(t *testing.T) {
 	if !strings.Contains(res.Error, "needs a sign-in") {
 		t.Fatalf("test result %+v", res)
 	}
-	deadline := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if f.storedToken("remote") != token || f.state("remote").Auth.State != api.MCPAuthStateConnected {
-			t.Fatalf("the test signed the saved server out: %+v", f.state("remote"))
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Test returns after the temporary connection and its startup have ended.
+	// Auth failures are bound to their originating instance and credential;
+	// a draft cannot publish invalidation into the saved server.
+	if f.storedToken("remote") != token || f.state("remote").Auth.State != api.MCPAuthStateConnected {
+		t.Fatalf("the test signed the saved server out: %+v", f.state("remote"))
 	}
 }
