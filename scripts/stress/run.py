@@ -2,6 +2,7 @@
 """Linux constrained-runner campaigns. No retries: every requested attempt counts."""
 import argparse
 import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -66,17 +67,27 @@ def subreaper():
         raise OSError(ctypes.get_errno(), 'cannot become a child subreaper')
 
 
+def vanished(error):
+    # A process or thread that exits between listing /proc/<pid>/task and
+    # reading task/<tid>/children is reported as ENOENT or ESRCH. Nothing else
+    # (permissions, I/O) means "gone", so nothing else is tolerated.
+    return isinstance(error, OSError) and error.errno in (errno.ENOENT, errno.ESRCH)
+
+
 def descendants(pid):
     found = set()
+    children = set()
     try:
-        children = set()
         for task in Path(f'/proc/{pid}/task').iterdir():
             try:
                 children.update((task / 'children').read_text().split())
-            except FileNotFoundError:
-                pass
-    except FileNotFoundError:
-        return found
+            except OSError as error:
+                if not vanished(error):
+                    raise
+    except OSError as error:
+        if not vanished(error):
+            raise
+        # Keep the children read before it vanished; they are still owned.
     for child in children:
         child = int(child)
         found.add(child)

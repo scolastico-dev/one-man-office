@@ -1,4 +1,5 @@
 """Runner contract checks; no omo processes or real suites are launched."""
+import errno
 import importlib.util
 import json
 import os
@@ -15,6 +16,47 @@ SPEC = importlib.util.spec_from_file_location('stress_run', Path(__file__).with_
 runner = importlib.util.module_from_spec(SPEC)
 if SPEC.loader and Path(SPEC.origin).exists():
     SPEC.loader.exec_module(runner)
+
+
+class FakeProc:
+    """A /proc/<pid>/task tree with exact vanishing points.
+
+    tree: pid -> {tid: [child pids]}. faults: pid -> (level, errno) raised the
+    first time that pid is enumerated ('enumerate') or a task's children are
+    read ('children'). No timing: the interleaving is fixed by the table.
+    """
+    def __init__(self, tree, faults):
+        self.tree, self.faults = tree, dict(faults)
+
+    def path(self, value):
+        return FakePath(self, str(value))
+
+
+class FakePath:
+    def __init__(self, proc, value):
+        self.proc, self.value = proc, value
+
+    def __truediv__(self, other):
+        return FakePath(self.proc, f'{self.value}/{other}')
+
+    def _fault(self, pid, level):
+        fault = self.proc.faults.get(pid)
+        if fault and fault[0] == level:
+            del self.proc.faults[pid]
+            raise OSError(fault[1], os.strerror(fault[1]))
+
+    def iterdir(self):
+        pid = int(self.value.split('/')[2])
+        self._fault(pid, 'enumerate')
+        if pid not in self.proc.tree:
+            raise FileNotFoundError(errno.ENOENT, 'no such process')
+        return [FakePath(self.proc, f'{self.value}/{tid}') for tid in self.proc.tree[pid]]
+
+    def read_text(self):
+        parts = self.value.split('/')
+        pid, tid = int(parts[2]), int(parts[4])
+        self._fault(pid, 'children')
+        return ' '.join(self.proc.tree[pid][tid])
 
 
 class Contracts(unittest.TestCase):
@@ -375,6 +417,94 @@ sys.exit(3)
              mock.patch.object(runner.os, 'waitpid', side_effect=AssertionError('blocking generic waitpid forbidden')):
             self.assertTrue(runner.cleanup(proc))
         self.assertTrue(any(pid == 202 for pid, _ in killed))
+
+
+    # Process-enumeration disappearance class: a process or thread can vanish
+    # between listing /proc/<pid>/task and reading task/<tid>/children, and the
+    # kernel reports that as ENOENT or ESRCH at either step. Only those two
+    # errno values mean "gone"; every other failure must still propagate.
+    def test_vanished_process_is_tolerated_at_both_levels_with_both_errnos(self):
+        for code in (errno.ENOENT, errno.ESRCH):
+            for level in ('enumerate', 'children'):
+                with self.subTest(errno=errno.errorcode[code], level=level):
+                    proc = FakeProc({1: {10: ['2', '3']}, 2: {20: []}, 3: {30: []}},
+                                    {(1 if level == 'enumerate' else 2): (level, code)})
+                    with mock.patch.object(runner, 'Path', proc.path):
+                        found = runner.descendants(1)
+                    if level == 'enumerate':
+                        self.assertEqual(found, set())
+                    else:
+                        self.assertEqual(found, {2, 3})
+
+    def test_vanished_descendants_do_not_hide_surviving_branches(self):
+        for code in (errno.ENOENT, errno.ESRCH):
+            with self.subTest(errno=errno.errorcode[code]):
+                tree = {1: {10: ['2', '3']}, 2: {20: ['4']}, 3: {30: ['5']}, 5: {50: ['6']}}
+                faults = {2: ('enumerate', code), 5: ('children', code)}
+                proc = FakeProc(tree, faults)
+                with mock.patch.object(runner, 'Path', proc.path):
+                    found = runner.descendants(1)
+                # 2 vanished before its children could be read; 5's task vanished.
+                self.assertEqual(found, {2, 3, 5})
+
+    def test_unrelated_process_scan_failures_still_propagate(self):
+        for code in (errno.EACCES, errno.EIO, errno.EPERM):
+            for level in ('enumerate', 'children'):
+                with self.subTest(errno=errno.errorcode[code], level=level):
+                    proc = FakeProc({1: {10: ['2']}, 2: {20: []}}, {(1 if level == 'enumerate' else 2): (level, code)})
+                    with mock.patch.object(runner, 'Path', proc.path), self.assertRaises(OSError) as raised:
+                        runner.descendants(1)
+                    self.assertEqual(raised.exception.errno, code)
+
+    def test_real_teardown_survives_vanishing_scan_and_keeps_true_status(self):
+        # Inject ESRCH, then ENOENT, at the real scan boundaries during real
+        # reaping and cleanup of a real detached grandchild; the direct
+        # command's exit status and the final cleanup result must not change.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = """
+import os, sys, time
+from pathlib import Path
+child = os.fork()
+if child == 0:
+    orphan = os.fork()
+    if orphan == 0:
+        os.setsid()
+        time.sleep(100)
+    Path('orphan').write_text(str(orphan))
+    os._exit(0)
+os.waitpid(child, 0)
+while not Path('orphan').exists():
+    time.sleep(0.01)
+sys.exit(5)
+"""
+            injected = []
+            real_path = runner.Path
+
+            class Flaky:
+                def __init__(self, value):
+                    self.value = real_path(value)
+                def __truediv__(self, other):
+                    return Flaky(self.value / other)
+                def iterdir(self):
+                    if self.value.name == 'task' and 'enumerate' not in injected:
+                        injected.append('enumerate')
+                        raise ProcessLookupError(errno.ESRCH, 'vanished')
+                    return [Flaky(item) for item in self.value.iterdir()]
+                def read_text(self):
+                    if self.value.name == 'children' and 'children' not in injected:
+                        injected.append('children')
+                        raise FileNotFoundError(errno.ENOENT, 'vanished')
+                    return self.value.read_text()
+
+            with mock.patch.object(runner, 'Path', Flaky):
+                result = runner.execute([sys.executable, '-c', code], root,
+                                        runner.child_env(os.environ, root / 'state', {}),
+                                        sorted(os.sched_getaffinity(0))[:2], root, 30)
+            self.assertEqual(injected, ['enumerate', 'children'])
+            self.assertEqual(result['returncode'], 5)
+            self.assertTrue(result['cleaned'])
+            self.assertFalse(real_path(f"/proc/{int((root / 'orphan').read_text())}").exists())
 
 
     def test_discovered_browser_inventory_cannot_silently_disappear(self):
