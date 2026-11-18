@@ -291,3 +291,12 @@ test('settings actions cannot open a result after the plugin is disabled', async
   expect(tab.location.replace).not.toHaveBeenCalled()
   expect(tab.close).toHaveBeenCalledTimes(1)
 })
+
+test('hidden global hooks have no automatically generated settings controls', async () => {
+  const { w } = await open({ info: info({ hooks: [
+    manual('default', 'Default'),
+    { ...manual('visible', 'Visible'), hidden: false },
+    { ...manual('secret', 'Secret'), hidden: true },
+  ] }) })
+  expect(w.findAll('[data-plugin-action]').map((b) => b.attributes('data-plugin-action'))).toEqual(['default', 'visible'])
+})

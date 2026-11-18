@@ -77,7 +77,22 @@ it). The plugin's log keeps its last 500 lines, newest last.
 |---|---|
 | [pushover](../plugins/pushover/README.md) | A Pushover notification on your phone when a ticket needs your attention or an agent asks you a question. Button: "Send a test notification". |
 | [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
+| [vscode](../plugins/vscode/README.md) | Opens ticket worktrees and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
+
+The VS Code plugin edits folders directly alongside agents, with no locking.
+Its default is code-server, its idle setting defaults to 30 minutes after the
+last connected browser disconnects, and its task output/Stop control lives on
+its settings page. First-use progress completes in the tab reserved by that
+same click; the editor has no separate sign-in. The Microsoft option would
+launch a verified official **server-web** payload directly, rather than
+literally invoking `code serve-web`, but is currently blocked: Microsoft's
+[terms](https://code.visualstudio.com/license/server) and
+[FAQ](https://code.visualstudio.com/docs/remote/faq#_can-i-use-vs-code-server-to-build-a-service)
+have not established permission for this integration. A saved acceptance value
+cannot unlock it; no licence is accepted or Microsoft payload downloaded/run.
+The [plugin README](../plugins/vscode/README.md) lists exact pins/checksums,
+platform/runtime limitations, direct-edit behavior and opt-in real probes.
 
 Each plugin's README lists its configuration keys. Pushover and Discord send at
 most 20 messages an hour by default (`max_per_hour`).
@@ -166,7 +181,13 @@ Optional fields:
   naming the configuration key that holds it.
 - Manual hooks: `name` (the button's id), `description` (its text, at most 200
   characters) and `scope`: `global` (a button on the plugin's page; the
-  default) or `ticket` (a button on every ticket).
+  default) or `ticket` (a button on every ticket). Optional `hidden: true`
+  suppresses automatically generated legacy ticket/settings action controls;
+  it defaults to false. Explicit declared buttons may still reference a hidden
+  hook, and the owning frontend may invoke it with `runHook`. This is presentation
+  metadata, not an authorization boundary. `hidden` must be a boolean, is only
+  valid on manual hooks, and rejects null/other types and nonmanual use (including
+  `hidden: false`). Existing plugins keep their implicit controls.
 
 The manifest is read strictly: unknown fields are refused. Fields and events
 of plugins written for omo 0.11 (`requires`, `roles`, `manual_args`,
@@ -322,8 +343,12 @@ carries a session id, terminal id or arbitrary inherited environment values. Tex
 attention texts) is only ever in `data`, never in arguments, environment values
 or file names.
 
-Plugins see the events from omo's start on, never older ones. A plugin's hooks
-run one at a time, in order. At most 60 events of one kind a minute run a
+Plugins see the events from omo's start on, never older ones. Queued event hooks
+run one at a time, in order. Manual actions exclude other manual actions for
+that plugin (a concurrent call receives a busy 409), but run on the request
+goroutine and can overlap queued hooks, including timers and startup. Plugins
+must coordinate shared state and resource cleanup accordingly.
+At most 60 events of one kind a minute run a
 plugin's hooks, and a full queue (256 events) drops events with a log line;
 this also keeps a hook that causes its own event (a `comment_written` hook that
 comments) from running for ever.
@@ -360,7 +385,8 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `omo.artifact_start{ key, url, sha256, format, strip_components, retry }` | starts or reuses an asynchronous plugin-owned artifact install; returns a status or `nil, error`; see Artifact installs |
 | `omo.artifact_status(key)` | polls this plugin's in-memory artifact status, or `nil, error` |
 | `omo.runtime_info()` | `{os, arch}` using Go platform names, e.g. `linux`, `darwin`, `windows` and `amd64`, `arm64`; no external command |
-| `omo.task_start{ name, command, args, cwd, env, ticket }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
+| `omo.task_temp_dir()` | allocates a private short temporary directory, returning `{id, path}` or `nil, error`; pass its opaque ID to `task_start` immediately |
+| `omo.task_start{ name, command, args, cwd, env, ticket, temp_dir }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
 | `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
 | `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
 | `omo.sleep(seconds)` | waits at most 10 s, within the run's time limit |
@@ -498,6 +524,39 @@ A task runs independently of the hook that started it. The hook can return or
 reach its time limit while the process continues. omo never restarts a task or
 persists its process state. A new omo server starts with an empty task list;
 startup hooks may explicitly start fresh tasks.
+
+For runtime sockets or temporary files, allocate an owned directory immediately
+before starting the task:
+
+```lua
+local temporary, err = omo.task_temp_dir()
+if not temporary then return {message = err} end
+local task, err = omo.task_start{
+  name = "worker", command = "my-worker",
+  args = {"--runtime-dir", temporary.path}, temp_dir = temporary.id
+}
+if not task then return {message = err} end
+```
+
+`task_temp_dir()` returns exactly `{id: string, path: string}`. Its opaque ID
+belongs to the allocating plugin runtime and is single-use. `temp_dir` on
+`task_start` accepts that ID, never a filesystem path. The start consumes it
+before validating or spawning the process; a failed start releases it. A valid
+start binds cleanup to that stable task ID, independently of reusable names or
+hook cancellation. Cleanup follows process-tree reaping on natural exit, Stop,
+ticket lifecycle, idle/watched-forward removal, disable/remove/replacement and
+server shutdown. Configuration-only refresh preserves running tasks and their
+directories. Normal task output and API records are unchanged.
+
+Allocations are mode 0700 on Unix and use short `/tmp/omo-*` paths, independent
+of inherited `TMPDIR`; Windows uses its OS temporary directory. At most 16
+unattached allocations per runtime are allowed, and unused allocations expire
+after 60 seconds or when that runtime ends. Allocate immediately before
+`task_start`, rather than before a download or other long work. Only directories
+created by this helper can be removed; it exposes no arbitrary-path cleanup.
+Removal retries transient failures for up to one second; a persistent operating
+system deletion error is recorded in omo's server log.
+Persistent state belongs in `omo.data_dir()`.
 
 ```lua
 local task, err = omo.task_start{

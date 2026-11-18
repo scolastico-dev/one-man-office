@@ -83,7 +83,7 @@ Package map (`internal/`):
 | `plugins` | the plugin runtime: one global scope, one queue and goroutine per plugin, command and Lua hooks on `luabox`, manual actions, log, per-plugin store (`internal/db`); `omo.agents`/`omo.send_to_agent` reach the running agents through `Options.Agents` (the server's `pluginAgents`, by terminal id, delivering with `Engine.Notify`, the engine's own notification path) |
 | `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure; `Check` refuses a bad name, source, subpath or ref before anything is fetched); `catalog.go` reads omo's plugin list (`FetchCatalog`, `ParseCatalog`, `TagOf`, `Acknowledged`, `CatalogFromEnv`) |
 | `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
-| `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
+| `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`, `vscode`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
 | `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
 | `mcpserver` | omo's MCP endpoint (`/mcp`): the `omo ai` commands as board tools for agent sessions and the tools of the relayed servers, for the identity bound to each request |
 | `mcprelay` | the relayed upstream MCP servers: stdio processes (per agent session or shared), HTTP and SSE connections, sign-in (headers, a header command, OAuth), tools under omo's names (`<server>__<tool>`), calls with timeouts, cancellation and progress, a result over 4 MiB refused; logs in `logs/mcp/` through `homefile.Append`; `fakemcp` is the scripted server of the tests |
@@ -198,6 +198,9 @@ are unique. Select defaults must be listed, other declared defaults must match
 type (numbers finite). `omo_started` (`EventOmoStarted`) runs once per enabled lifecycle after the
 API/socket are serving, and on install/enable; configuration saves and unrelated
 reloads preserve it. `Server.PluginsReady` is the embedder readiness call. Old names remain refused with new guidance.
+Queued hooks are serialized per plugin; manual hooks exclude only other manual
+hooks and can overlap queued timer/startup hooks. Shared plugin state and cleanup
+must account for that concurrency; the manual busy 409 is a pre-execution refusal.
 `plugins/frontend.go` validates portable confined public paths (including
 Windows device/drive paths), missing files and symlinks in `ReadManifest`, so
 install staging and runtime use identical checks. Private/dot-prefixed files
@@ -246,10 +249,57 @@ Focused checks: Go TestPluginAssets, Vue features/plugins/proxy/pluginNavigation
 settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
 (actual entry/image/own-hook execution under unchanged CSP). Full schema: [Plugins](wiki/plugins.md).
 
+Official browser editor: all editor policy is in `plugins/vscode/` (Lua,
+frontend and a JS launcher executed by the verified artifact's bundled Node;
+no editor-specific core package). Pins: code-server 4.145.2, OpenVSCode 1.109.5;
+platform URLs/SHA-256 live in editor.lua. Microsoft remains a visible unavailable
+choice pending affirmative licence permission; no checkbox/old saved consent can
+enable it and no Microsoft artifact is fetched. Hidden manual open/status hooks
+use authoritative selected ticket/project folders, async artifact start/status,
+canonical folder/editor/version instance keys, stable task/forward identities,
+readiness and three bounded bind attempts. The frontend polls using its facade,
+returns only the final forward ID to the gesture-reserved tab and does not retry
+lost action responses; only the precise pre-execution busy 409 is retried within
+the original cancellable deadline. A new execution rechecks artifact integrity; existing
+instances keep their editor after setting changes. Attached monotonic forward
+idle watches default to 30 minutes. Timer maintenance snapshots resources before
+checking a 120-second manual-hook grace, never deletes instance/request records,
+and only reaps its original resource snapshot. Manual opens prune stale records;
+startup leaves them inert and never restarts editors. Unique per-run task names
+and idempotent removals prevent stale cleanup from affecting replacement runs.
+Host HOME/USERPROFILE and configuration/data/cache roots remain available to
+normal tools. Shared per-editor profiles/extensions survive folder/version
+changes; explicit flags/portable paths and a pinned code-server path-provider
+preload confine editor-managed persistent state. Session directories retain
+server/log/cache data until manually removed after Stop. Short private task
+temporary-directory leases own IPC/tmp; the editor alone receives a private
+XDG_RUNTIME_DIR, and initial terminal settings restore its host value for tools.
+Hidden hook metadata (`hidden?: boolean`, manual only,
+strict false/true, no null/nonmanual presence) suppresses implicit ticket/settings
+controls, including the sample, while explicit declarations and own facade calls
+remain valid. It is presentation, not authorization.
+Verification: `lua5.1 plugins/vscode/tests/hooks.lua` and
+`node --test plugins/vscode/tests/*.test.cjs` are no-download fixtures; opt-in
+`node plugins/vscode/tests/probe.cjs code-server|openvscode [--subdomain]` runs
+actual publisher artifacts through isolated temporary omo/proxy/Chromium, including
+first-use tab, reuse, concurrent folders, shared profile retention, temporary-host
+Git through integrated terminals, connected-beyond-idle/reconnect and independent
+cleanup. Never run the
+Microsoft mode or accept its terms in a probe. Linux amd64 publisher probes are
+proven; macOS/Windows/arm64 are fixture/metadata-only. Full details and runtime
+prerequisites: [plugin README](plugins/vscode/README.md).
+
 Plugin tasks: `plugins/tasks.go`, `tasks_lua.go`, `startup.go` and
 `server/plugin_tasks.go`. Lua `omo.task_start{ name, command, args?, cwd?, env?,
-ticket? }` returns a task or nil/error; `omo.task_list()` lists own records;
+ticket?, temp_dir? }` returns a task or nil/error; `omo.task_list()` lists own records;
 `omo.task_stop(name)` stops the latest run, idempotently while retained.
+`omo.task_temp_dir()` returns `{id,path}` for a helper-owned short OS temporary
+directory (Unix 0700 `/tmp/omo-*`, independent of inherited TMPDIR). `temp_dir`
+consumes the same-runtime single-use opaque lease ID before validation/spawn;
+failed starts release it, successful starts bind cleanup to the stable task ID
+after tree reaping on every exit/Stop/lifecycle path. Unattached allocations are
+bounded 16/runtime and expire after 60s or runtime cancellation. Running tasks and
+their directories survive configuration-only refresh. No arbitrary deletion API.
 `Manager.StartTask`, `Tasks`, `StopTask`, `StopTaskID` and `StopTicketTasks` are
 server adapters. Task IDs identify runs independently of reusable names.
 `Options.TaskExited(plugin, api.PluginTask)` is invoked once outside locks after
@@ -549,6 +599,13 @@ browser's host. Its external, embedded `proxy_bootstrap.js` clears the fragment 
 `history.replaceState` before POSTing `{grant}` to `/_omo/proxy/exchange`, then
 uses `location.replace` on the returned server-owned start URL. These internal
 endpoints are reserved before fallbacks and use board Origin/security headers.
+The exact bootstrap GET/HEAD document accepts top-level `navigate`/`document`
+requests without Origin across sites, so a real Open click from a board outside
+the proxy domain works. It is an inert shell: no grant/session/cookie mutation.
+Host admission and script/exchange/other-path/board Origin and JSON checks remain;
+this is not a cross-site fetch/frame/API exception. Regression coverage includes
+all path/subdomain/public_url combinations and actual Chromium clicked reserved
+tabs, fragment clearing, one-use exchange and WebSockets.
 The board bearer token is never used as a proxy cookie or put in these URLs.
 The grant binds its forward, start URL and exchange origin (case/default ports
 canonicalized), is 256 bits of crypto randomness, lasts **60 seconds**, and is

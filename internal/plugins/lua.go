@@ -51,6 +51,7 @@ func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any
 	box.Set("artifact_start", m.luaArtifactStart(box, p))
 	box.Set("artifact_status", m.luaArtifactStatus(p))
 	box.Set("runtime_info", luaRuntimeInfo)
+	box.Set("task_temp_dir", m.luaTaskTempDir(p))
 	box.Set("task_start", m.luaTaskStart(box, p))
 	box.Set("task_list", m.luaTaskList(p))
 	box.Set("task_stop", m.luaTaskStop(p))

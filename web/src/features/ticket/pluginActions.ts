@@ -10,7 +10,7 @@
 // part of the board's first chunk.
 //
 // A ticket action ("<plugin>: <description>") exists for every manual hook of
-// scope `ticket` of a plugin that is installed, enabled and loaded. Pressing
+// scope `ticket` that is not hidden, of a plugin that is installed, enabled and loaded. Pressing
 // it asks nothing: it runs the hook for the ticket, as the user, and shows the
 // answer in a small dialog over the panel (the action row shows a refusal
 // under the button). Plugin names and texts are shown as visible text.
@@ -152,7 +152,7 @@ export function ticketActionsOf(d: PluginsResponse | null): PluginTicketAction[]
     if (!RUNS_HOOKS.has(p.state)) continue
     if (d.settings.find((s) => s.name === p.name)?.enabled === false) continue
     for (const hk of p.hooks) {
-      if (hk.event === 'manual' && hk.scope === 'ticket' && hk.name !== '' && !(p.buttons ?? []).some((b) => b.place === 'ticket' && b.action === hk.name)) out.push({ plugin: p.name, action: hk.name, description: hk.description })
+      if (hk.event === 'manual' && !hk.hidden && hk.scope === 'ticket' && hk.name !== '' && !(p.buttons ?? []).some((b) => b.place === 'ticket' && b.action === hk.name)) out.push({ plugin: p.name, action: hk.name, description: hk.description })
     }
   }
   return out

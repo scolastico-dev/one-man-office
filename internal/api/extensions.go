@@ -134,6 +134,9 @@ type PluginHook struct {
 	Description string `json:"description"`
 	// Scope of a manual hook: ticket or global.
 	Scope string `json:"scope"`
+	// Hidden suppresses automatically generated controls for a manual hook.
+	// Explicit controls and direct invocation remain available.
+	Hidden bool `json:"hidden,omitempty"`
 	// Interval is set for timer hooks only.
 	Interval string `json:"interval"`
 }

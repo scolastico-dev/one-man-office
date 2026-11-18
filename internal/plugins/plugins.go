@@ -211,6 +211,9 @@ type Hook struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Scope       string `json:"scope,omitempty"`
+	// Hidden suppresses automatic manual-action controls; explicit buttons and
+	// direct invocation remain available. It is presentation, not authorization.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // removedFields are manifest fields the engine had once, with what to say
@@ -248,7 +251,7 @@ var manifestFields = map[string]bool{"name": true, "version": true, "description
 
 var hookFields = map[string]bool{
 	"event": true, "lua": true, "command": true, "timeout": true, "interval": true,
-	"interval_config": true, "name": true, "description": true, "scope": true,
+	"interval_config": true, "name": true, "description": true, "scope": true, "hidden": true,
 }
 
 // quoted is text from a manifest as it may appear in an error: cut, quoted
@@ -311,6 +314,16 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		}
 		if err := checkFields(h, hookFields, fmt.Sprintf("hook %d: ", i+1)); err != nil {
 			return Manifest{}, err
+		}
+		if hidden, ok := h["hidden"]; ok {
+			value := string(bytes.TrimSpace(hidden))
+			if value != "true" && value != "false" {
+				return Manifest{}, fmt.Errorf("hook %d: hidden must be a boolean", i+1)
+			}
+			var event string
+			if err := json.Unmarshal(h["event"], &event); err == nil && event != EventManual {
+				return Manifest{}, fmt.Errorf("hook %d: hidden is for manual hooks only", i+1)
+			}
 		}
 	}
 	if err := checkDeclarationJSON(fields); err != nil {
@@ -525,6 +538,8 @@ type Manager struct {
 	artifactsMu    sync.Mutex
 	artifacts      map[string]map[string]*artifactJob
 	artifactLimits *artifactLimits // tests override finite production bounds
+	taskTempDirsWG sync.WaitGroup
+	taskTempDirs   map[string]*taskTempDir // unattached leases; guarded by tasksMu
 	tasksWG        sync.WaitGroup
 	tasksMu        sync.Mutex
 	tasks          map[string]*task
@@ -664,6 +679,7 @@ func (m *Manager) Close() {
 		}
 	}
 	m.mu.Unlock()
+	m.releaseTaskTempDirs(nil)
 	m.stopTasks(func(*task) bool { return true }, TaskShutdown)
 	m.tasksWG.Wait()
 	m.stopArtifacts("", false)
@@ -676,6 +692,7 @@ func (m *Manager) Close() {
 		p.wg.Wait()
 	}
 	m.manual.Wait()
+	m.taskTempDirsWG.Wait()
 	if m.o.Unloaded != nil {
 		for _, p := range running {
 			m.o.Unloaded(p.name, TaskShutdown)
@@ -794,7 +811,10 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 		if e.p == nil || kept[e.p] {
 			continue
 		}
+		m.mu.Lock()
 		e.p.cancel()
+		m.releaseTaskTempDirs(e.p)
+		m.mu.Unlock()
 		replacement := next[e.settings.Name]
 		reason := ""
 		switch {
@@ -1363,7 +1383,7 @@ func (e *entry) infoLocked() api.PluginInfo {
 		info.LastRunAt = &at
 	}
 	for _, h := range e.manifest.Hooks {
-		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval}
+		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval, Hidden: h.Hidden}
 		if h.Event == EventTimer && h.Interval == "" && e.p != nil {
 			for _, lh := range e.p.hooks {
 				if lh.Event == EventTimer && lh.IntervalConfig == h.IntervalConfig {

@@ -47,9 +47,9 @@ export function eventNoun(event: string): string {
   return EVENT_NOUNS[event] ?? event
 }
 
-/** The manual actions of a plugin with the given scope, in the manifest's order. */
+/** The visible automatic manual actions with the given scope, in manifest order. */
 export function manualActions(info: Pick<PluginInfo, 'hooks'>, scope: 'ticket' | 'global'): PluginHook[] {
-  return info.hooks.filter((h) => h.event === 'manual' && (h.scope || 'global') === scope && h.name !== '')
+  return info.hooks.filter((h) => h.event === 'manual' && !h.hidden && (h.scope || 'global') === scope && h.name !== '')
 }
 
 /** The configuration as the editor shows it: indented JSON. */

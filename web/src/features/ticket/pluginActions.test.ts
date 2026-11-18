@@ -187,3 +187,13 @@ test('disabling a plugin while a legacy hook waits closes its reservation and ne
   expect(tab.location.replace).not.toHaveBeenCalled()
   expect(tab.close).toHaveBeenCalledTimes(1)
 })
+
+// A hidden ticket hook must never create a legacy action, even without a frontend.
+test('hidden ticket hooks do not generate actions and absent or false hooks remain visible', () => {
+  const d = response([info('p', { hooks: [
+    manual('default', 'Default'),
+    { ...manual('visible', 'Visible'), hidden: false },
+    { ...manual('secret', 'Secret'), hidden: true },
+  ] })])
+  expect(ticketActionsOf(d).map((a) => a.action)).toEqual(['default', 'visible'])
+})

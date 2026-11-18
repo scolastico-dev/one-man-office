@@ -52,6 +52,8 @@ type TaskStart struct {
 	Cwd     string            `json:"cwd,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Ticket  int               `json:"ticket,omitempty"`
+	// TempDir claims an opaque lease returned by omo.task_temp_dir.
+	TempDir string `json:"temp_dir,omitempty"`
 }
 
 type task struct {
@@ -62,6 +64,7 @@ type task struct {
 	cancel       context.CancelFunc
 	done         chan struct{} // closed after reaping, output flush and exit callback
 	output       *taskOutput
+	tempDir      *taskTempDir
 }
 
 func validateTask(req TaskStart) error {
@@ -117,12 +120,9 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 			m.o.TasksChanged(name)
 		}
 	}()
-	if err := validateTask(req); err != nil {
-		return api.PluginTask{}, err
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || ctx.Err() != nil {
+	if m.closed {
 		return api.PluginTask{}, ErrClosed
 	}
 	var p *plugin
@@ -134,6 +134,21 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 	}
 	if p == nil || (bound != nil && p != bound) || p.ctx.Err() != nil {
 		return api.PluginTask{}, ErrUnknownPlugin
+	}
+	dir, err := m.claimTaskTempDir(p, req.TempDir)
+	if err != nil {
+		return api.PluginTask{}, err
+	}
+	defer func() {
+		if resultErr != nil {
+			m.removeTaskTempDir(dir)
+		}
+	}()
+	if ctx.Err() != nil {
+		return api.PluginTask{}, ErrClosed
+	}
+	if err := validateTask(req); err != nil {
+		return api.PluginTask{}, err
 	}
 	if red == nil {
 		red = p.redactor()
@@ -212,6 +227,8 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 	}}
 	cmd.Stdout = out
 	cmd.Stderr = out
+	// Bind the lease to its immutable task identity before the process can run.
+	t := &task{plugin: name, cancel: cancel, done: make(chan struct{}), output: out, tempDir: dir, record: api.PluginTask{ID: rand.Text(), Name: req.Name, Ticket: req.Ticket, StartedAt: m.now().UTC().Format(time.RFC3339Nano), State: "running", Output: []string{}}}
 	group, err := newProcessGroup(cmd)
 	if err != nil {
 		cancel()
@@ -229,7 +246,7 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 		return api.PluginTask{}, errors.New("the task program could not start")
 	}
 	m.taskSequence++
-	t := &task{sequence: m.taskSequence, plugin: name, cancel: cancel, done: make(chan struct{}), output: out, record: api.PluginTask{ID: rand.Text(), Name: req.Name, Ticket: req.Ticket, StartedAt: m.now().UTC().Format(time.RFC3339Nano), State: "running", Output: []string{}}}
+	t.sequence = m.taskSequence
 	if m.tasks == nil {
 		m.tasks = map[string]*task{}
 	}
@@ -263,6 +280,7 @@ func (m *Manager) waitTask(t *task, cmd *exec.Cmd, group *processGroup) {
 	group.close() // Includes surviving descendants after a natural parent exit.
 	t.cancel()
 	t.output.flush()
+	m.removeTaskTempDir(t.tempDir)
 	m.tasksMu.Lock()
 	m.exitSequence++
 	t.exitSequence = m.exitSequence
