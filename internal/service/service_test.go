@@ -232,14 +232,17 @@ func TestSecondStopHurries(t *testing.T) {
 }
 
 // A stop request that was accepted is answered before the server can go away:
-// the handler is held after it signalled the stop until the server function has
-// returned, the latest moment Run may begin to close the control server. Without
-// the answer being sent first, the caller got no response at all (EOF).
+// the handler is held after it signalled the stop until the test has received
+// the answer, while the server function returns and Run closes the control
+// server. Without the answer being sent first, the caller got no response at
+// all (EOF).
 func TestAnAcceptedStopIsAnsweredBeforeTheServerGoesAway(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
-	served := make(chan struct{})
+	gate := make(chan struct{})
+	var open sync.Once
+	release := func() { open.Do(func() { close(gate) }) }
 	previous := stopSignalled
-	stopSignalled = func() { <-served }
+	stopSignalled = func() { <-gate }
 	t.Cleanup(func() { stopSignalled = previous })
 	serving := make(chan struct{})
 	runCtx, runCancel := context.WithCancel(context.Background())
@@ -252,15 +255,33 @@ func TestAnAcceptedStopIsAnsweredBeforeTheServerGoesAway(t *testing.T) {
 			}
 			close(serving)
 			<-ctx.Done()
-			close(served)
 			return nil
 		})
 	}()
+	t.Cleanup(func() {
+		runCancel()
+		release()
+		<-done
+	})
 	<-serving
-	if err := Stop(context.Background()); err != nil && !errors.Is(err, ErrNotRunning) {
+	dir, err := directory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := readState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The answer is observed on its own: Stop would also wait for Run to
+	// release the lifecycle lock, which cannot happen while the gate is shut.
+	answered := make(chan error, 1)
+	go func() { answered <- controlRequest(context.Background(), state, "POST", "/stop") }()
+	if err := <-answered; err != nil {
 		t.Fatalf("an accepted stop was not answered: %v", err)
 	}
+	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	done <- nil // let cleanup observe the completed server, too
 }
