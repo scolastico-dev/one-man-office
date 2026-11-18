@@ -55,7 +55,7 @@ test('alternate editor platform matrix and no Microsoft consent bypass',function
  local f=fixture();f.config.editor='openvscode';f:run('open-ticket');same(f.artifact_options.sha256,'b433bf4f0227321a7014d8460d10a8f958adc0f45aa79bd889e84e65e8f88363');f:ready();f:run('status-ticket');same(f.forward_options.strip_prefix,false);same(f.starts[1].args[3],'openvscode')
  for _,osname in ipairs({'darwin','windows'}) do f=fixture();f.host.os=osname;f.config.editor='openvscode';contains(f:run('open-ticket').message,'unavailable');same(f.installs,0) end
  f=fixture();f.host.os='windows';f.host.arch='arm64';contains(f:run('open-ticket').message,'unavailable');same(f.installs,0)
- f=fixture();f.config.editor='microsoft';f.config.accept_microsoft_license=true;contains(f:run('open-ticket').message,'terms have not been confirmed');same(f.installs,0);same(#f.starts,0)
+ for _,accepted in ipairs({false,true}) do f=fixture();f.config.editor='microsoft';f.config.accept_microsoft_license=accepted;contains(f:run('open-ticket').message,'terms have not been confirmed');same(f.installs,0);same(#f.starts,0) end
 end)
 
 test('all native artifact pins and runtime layouts',function()
