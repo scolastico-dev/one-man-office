@@ -6,12 +6,13 @@ import (
 	"errors"
 	"net"
 	"regexp"
+	"strconv"
 	"syscall"
 )
 
 // Acquire calls start with an ephemeral port. start must fully stop any failed
-// server before returning. Only a bind collision during fixture startup may
-// allocate another port; every other error is returned unchanged.
+// server before returning. Only a TCP bind collision on that port during fixture
+// startup may allocate another port; every other error is returned unchanged.
 func Acquire(start func(int) error) (int, error) { return acquire(candidate, start) }
 
 func candidate() (int, error) {
@@ -30,18 +31,38 @@ func acquire(next func() (int, error), start func(int) error) (int, error) {
 			return 0, err
 		}
 		err = start(port)
-		if err == nil || attempt == 2 || !bindCollision(err) {
+		if err == nil || attempt == 2 || !bindCollision(err, port) {
 			return port, err
 		}
 	}
 }
 
-var bindDiagnostic = regexp.MustCompile(`(?i)listen tcp[46]? [^\r\n]+: bind: (address already in use|only one usage of each socket address)`)
+// Subprocesses lose the typed error. Accept only the complete server.Run
+// diagnostic, optionally prefixed by main/service.Run, on its own output line.
+var bindDiagnostic = regexp.MustCompile(`(?mi)^(?:omo: )?listen on (\S+): listen tcp[46]? (\S+): bind: (?:address already in use|only one usage of each socket address \(protocol/network address/port\) is normally permitted\.)\r?$`)
 
-func bindCollision(err error) bool {
+// Winsock reports WSAEADDRINUSE, distinct from syscall.EADDRINUSE on Windows.
+const wsaAddressInUse = syscall.Errno(10048)
+
+func bindCollision(err error, port int) bool {
 	var op *net.OpError
-	if errors.As(err, &op) && op.Op == "listen" && errors.Is(op.Err, syscall.EADDRINUSE) {
-		return true
+	if errors.As(err, &op) {
+		// Typed information is authoritative: an unrelated listener must not
+		// become retryable because its wrapper also contains a bind diagnostic.
+		addr, ok := op.Addr.(*net.TCPAddr)
+		return op.Op == "listen" && (op.Net == "tcp" || op.Net == "tcp4" || op.Net == "tcp6") &&
+			ok && addr != nil && addr.Port == port &&
+			(errors.Is(op.Err, syscall.EADDRINUSE) || errors.Is(op.Err, wsaAddressInUse))
 	}
-	return bindDiagnostic.MatchString(err.Error())
+	for _, match := range bindDiagnostic.FindAllStringSubmatch(err.Error(), -1) {
+		_, requested, err := net.SplitHostPort(match[1])
+		if err != nil || requested != strconv.Itoa(port) {
+			continue
+		}
+		_, bound, err := net.SplitHostPort(match[2])
+		if err == nil && bound == strconv.Itoa(port) {
+			return true
+		}
+	}
+	return false
 }
