@@ -403,6 +403,7 @@ func TestMissingProjectFlagsAttentionAndStartsNothing(t *testing.T) {
 }
 
 func TestUnknownFolderAtWorktreePathIsNotTouched(t *testing.T) {
+	useLongTempRoot(t)
 	h := newHarness(t)
 	task := h.standalone("one")
 	dir := WorktreeDir(h.layout.Worktrees, h.project, task)
@@ -416,9 +417,10 @@ func TestUnknownFolderAtWorktreePathIsNotTouched(t *testing.T) {
 	h.approve(task)
 	h.step()
 	tk := h.ticket(task)
-	if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, dir) {
+	if tk.FailedStep != api.FailedStart {
 		t.Fatalf("failed step %q attention %q", tk.FailedStep, tk.Attention)
 	}
+	h.wantAttentionReason(task, fmt.Sprintf("the folder %s already exists and is not a worktree omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", dir, task))
 	if tk.Column != api.ColumnReady || tk.Busy {
 		t.Fatalf("column %s busy %v", tk.Column, tk.Busy)
 	}
@@ -478,6 +480,7 @@ func TestStartContinuesWithBranchOfInterruptedStart(t *testing.T) {
 // own: another ticket's branch name, a branch with commits of its own or
 // uncommitted changes fail the start and are left alone.
 func TestStartRefusesWorktreeThatIsNotItsOwn(t *testing.T) {
+	useLongTempRoot(t)
 	cases := map[string]func(h *harness, task int64, own string) string{
 		"other name": func(h *harness, task int64, own string) string { return h.interruptedCut(task, "someone/else") },
 		"own commits": func(h *harness, task int64, own string) string {
@@ -505,9 +508,10 @@ func TestStartRefusesWorktreeThatIsNotItsOwn(t *testing.T) {
 			h.approve(task)
 			h.step()
 			tk = h.ticket(task)
-			if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "already exists and is not a worktree omo recorded") {
+			if tk.FailedStep != api.FailedStart {
 				t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 			}
+			h.wantAttentionReason(task, fmt.Sprintf("the folder %s already exists and is not a worktree omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", WorktreeDir(h.layout.Worktrees, h.project, task), task))
 			if tk.Projects[0].Branch != "" || len(h.runner.all()) != 0 {
 				t.Fatalf("branch %q recorded, %d agents", tk.Projects[0].Branch, len(h.runner.all()))
 			}
@@ -742,6 +746,7 @@ func TestMissingWorktreeFolderIsRecreated(t *testing.T) {
 // An agent replaced its worktree folder by a link to another ticket's
 // worktree: its next session must not start there.
 func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
+	useLongTempRoot(t)
 	h := newHarness(t, withLimit(2))
 	one := h.standalone("one")
 	two := h.standalone("two")
@@ -774,9 +779,10 @@ func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
 	if startsIn(wtOne) != before {
 		t.Fatalf("a session started in the linked folder %s", wtOne)
 	}
-	if tk := h.ticket(one); tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "leaves it alone") {
+	if tk := h.ticket(one); tk.FailedStep != api.FailedStart {
 		t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 	}
+	h.wantAttentionReason(one, fmt.Sprintf("the folder %s exists but does not have branch %s of #%d checked out; omo leaves it alone. Move or remove it, then retry.", wtOne, h.ticket(one).Projects[0].Branch, one))
 }
 
 // ---- engine start and stop ----

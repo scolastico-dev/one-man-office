@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -145,6 +146,7 @@ func TestOldBranchNamesAreStillCleanedUp(t *testing.T) {
 // picking could not see it) fails the export of that project and stays
 // untouched.
 func TestExportNeverPushesOntoAForeignRemoteBranch(t *testing.T) {
+	useLongTempRoot(t)
 	h := gitHarness(t)
 	h.setBranchTemplate("{slug}")
 	bare := h.origin(h.project)
@@ -158,9 +160,20 @@ func TestExportNeverPushesOntoAForeignRemoteBranch(t *testing.T) {
 	if tk.Projects[0].Branch != "export-me" {
 		t.Fatalf("branch %q", tk.Projects[0].Branch)
 	}
-	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman || !strings.Contains(tk.Attention, "the remote has a branch of that name") {
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman {
 		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
 	}
+	commit := gitRun(t, h.repo, "rev-parse", "export-me")
+	reason := fmt.Sprintf("pushing %s to origin (%s) as export-me: the remote has a branch of that name that omo did not push, at %s; omo leaves it alone", commit[:12], bare, foreign)
+	if got := h.exportFailureReason(n, h.project); got != reason {
+		t.Fatalf("export reason %q, want %q", got, reason)
+	}
+	h.wantExportStates(n, api.ExportFailedState)
+	if tk.FailedStep != api.FailedNone || tk.Resolution != "" || tk.Projects[0].ExportURL != "" {
+		t.Fatalf("unexpected failure/export state: %+v", tk)
+	}
+	wantReasonSummary(t, tk.Projects[0].ExportError, reason)
+	wantReasonSummary(t, tk.Attention, "Export of "+h.project+" failed: "+reason)
 	if got := remoteHead(t, bare, "export-me"); got != foreign {
 		t.Fatalf("the remote branch moved to %s", got)
 	}
