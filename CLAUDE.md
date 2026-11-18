@@ -471,6 +471,15 @@ and `node --test web/scripts/proxy-subdomain.test.mjs`. The standalone browser
 fixture uses httptest handlers only, never an omo process, CLI/socket or engine;
 it checks actual Chromium domain/Secure cookie acceptance, two forward hosts,
 HTTP/HTTPS, unrelated-board path mode, target redirects/cookies and Host refusal.
+The driver starts that helper only through `web/scripts/fixtureProcess.mjs`
+(`fixtureEnv`, `startFixture`): an allowlisted environment that keeps every
+configured temporary root (`TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR`; Windows names in
+any case) so the Go build and the helper's folders stay below the root the
+runner owns, activation (`PROXY_BROWSER_FIXTURE=1`) given by the driver alone,
+and every start failure (no program, early exit, unreadable fixtures line) or
+test failure ends the helper's process group before it is reported.
+`web/src/testing/fixtureProcess.test.ts` (in `make web-check`) pins this and
+fails on a driver that starts a child process itself.
 
 ## Web UI workflow verification
 

@@ -7,7 +7,7 @@ import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
 import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentPrograms } from './env'
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
-import { isPortCollision } from './startup'
+import { findAddress, isPortCollision } from './startup'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -353,12 +353,11 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
     c.once('error', (e) => (buffer += `spawn failed: ${e.message}\n`))
     c.stdout?.on('data', onData)
     c.stderr?.on('data', onData)
-    const re = new RegExp(`^omo: http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?\\s*$`, 'm')
     const deadline = Date.now() + READY_TIMEOUT_MS
     while (Date.now() < deadline) {
-      const m = re.exec(buffer)
-      if (m) {
-        omo.token = m[1] ?? ''
+      const found = findAddress(buffer, port)
+      if (found) {
+        omo.token = found.token
         omo.accessUrl = omo.token === '' ? omo.url('/') : `http://omo.localhost:${port}/#${omo.token}`
         return undefined
       }

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { isPortCollision } from '../../e2e/support/startup'
+import { findAddress, isPortCollision } from '../../e2e/support/startup'
 
 test('startup retries only a bind collision on the test server TCP port', () => {
   expect(isPortCollision('Error: listen on 127.0.0.1:32123: listen tcp 127.0.0.1:32123: bind: address already in use', 32123)).toBe(true)
@@ -10,4 +10,15 @@ test('startup retries only a bind collision on the test server TCP port', () => 
     'listen tcp 127.0.0.1:32124: bind: address already in use',
     'listen tcp 127.0.0.1:32123: bind: permission denied',
   ]) expect(isPortCollision(unrelated, 32123), unrelated).toBe(false)
+})
+
+test('the printed address counts only once its line is complete, so a token split across reads is never lost', () => {
+  const token = 'a'.repeat(64)
+  const line = `omo: http://omo.localhost:32123/#${token}`
+  expect(findAddress(`${line}`, 32123)).toBeUndefined()
+  expect(findAddress(`omo: http://omo.localhost:32123/`, 32123)).toBeUndefined()
+  expect(findAddress(`${line.slice(0, 40)}`, 32123)).toBeUndefined()
+  expect(findAddress(`${line}\n`, 32123)).toEqual({ token })
+  expect(findAddress(`noise\r\nomo: http://omo.localhost:32123/\r\n`, 32123)).toEqual({ token: '' })
+  expect(findAddress(`omo: http://omo.localhost:32124/\n`, 32123)).toBeUndefined()
 })
