@@ -38,6 +38,11 @@ type Config struct {
 	// It does not change where omo listens. "" advertises the address omo
 	// listens on. Set stores it as scheme://host[:port]/.
 	PublicURL string `yaml:"public_url,omitempty"`
+	// ProxyBaseHost enables exactly one composed forward label below this DNS host.
+	// Empty disables subdomains. Prefix/suffix may be staged while disabled.
+	ProxyBaseHost    string `yaml:"proxy_base_host,omitempty"`
+	ProxyLabelPrefix string `yaml:"proxy_label_prefix,omitempty"`
+	ProxyLabelSuffix string `yaml:"proxy_label_suffix,omitempty"`
 }
 
 // Defaults returns the options used when server.yaml is absent or a key is
@@ -48,7 +53,7 @@ func Defaults() Config {
 
 // Keys lists the option names in their documented order.
 func Keys() []string {
-	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts", "public_url"}
+	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts", "public_url", "proxy_base_host", "proxy_label_prefix", "proxy_label_suffix"}
 }
 
 // Validate checks every option and the relations between them.
@@ -78,7 +83,7 @@ func (c Config) Validate() error {
 	if _, _, err := ParsePublicURL(c.PublicURL); err != nil {
 		return fmt.Errorf("public_url: %w", err)
 	}
-	return nil
+	return c.validateProxy()
 }
 
 // Public is the parsed public_url.
@@ -293,6 +298,12 @@ func Set(path, key, value string) (Config, error) {
 		c.OriginCheck = b
 	case "allowed_hosts":
 		c.AllowedHosts = ParseAllowedHosts(value)
+	case "proxy_base_host":
+		c.ProxyBaseHost = strings.ToLower(value)
+	case "proxy_label_prefix":
+		c.ProxyLabelPrefix = strings.ToLower(value)
+	case "proxy_label_suffix":
+		c.ProxyLabelSuffix = strings.ToLower(value)
 	case "public_url":
 		canonical, _, err := ParsePublicURL(value)
 		if err != nil {
@@ -328,6 +339,12 @@ func Unset(path, key string) (Config, error) {
 		c.OriginCheck = d.OriginCheck
 	case "allowed_hosts":
 		c.AllowedHosts = nil
+	case "proxy_base_host":
+		c.ProxyBaseHost = ""
+	case "proxy_label_prefix":
+		c.ProxyLabelPrefix = ""
+	case "proxy_label_suffix":
+		c.ProxyLabelSuffix = ""
 	case "public_url":
 		c.PublicURL = ""
 	default:

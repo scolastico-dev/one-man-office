@@ -18,6 +18,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { BOARD_SUSPENDED } from '../../../components/ui/dialogHost'
 import { boardLocation, ticketLocation } from '../../../locations'
 import TicketActions from '../TicketActions.vue'
+import ForwardList from '../../proxy/ForwardList.vue'
 import TicketDescription from '../TicketDescription.vue'
 import TicketFields from '../TicketFields.vue'
 import TicketHeader from '../TicketHeader.vue'
@@ -170,6 +171,7 @@ function toggleDetails() {
           <template #overview>
             <div class="tpage__overview">
               <TicketDescription :view="view" :ticket="ticket" :heading-id="`${titleId}-desc`" />
+              <ForwardList :key="ticket.number" :ticket="ticket" />
               <section v-if="!detailsBeside" class="tpage__inline-fields" :aria-labelledby="`${titleId}-fields-inline`" data-page-fields="inline">
                 <h3 :id="`${titleId}-fields-inline`" class="tpage__h">Details</h3>
                 <TicketFields :ticket="ticket" />

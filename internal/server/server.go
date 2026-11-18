@@ -33,6 +33,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/images"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/proxy"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/usage"
@@ -135,11 +136,13 @@ type Server struct {
 	setup setupState
 	// usage, skills and plugins are the extensions (usage.go, skillsets.go,
 	// plugins.go).
-	usage   usageFeature
-	skills  skillSetFeature
-	plugins pluginFeature
-	mcpAuth mcpAuthFeature // tokens and OAuth server of /mcp (mcp_auth.go)
-	mcpConf mcpSettingsFeature
+	usage          usageFeature
+	skills         skillSetFeature
+	plugins        pluginFeature
+	proxyAuth      proxyAuthState
+	proxyTransport *proxy.Transport
+	mcpAuth        mcpAuthFeature // tokens and OAuth server of /mcp (mcp_auth.go)
+	mcpConf        mcpSettingsFeature
 	// imageStore is the images folder; imageStray the number of files in it
 	// without a record the last sweep counted (images.go).
 	imageStore *images.Store
@@ -274,6 +277,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if firstStart && o.DetectAgents != nil {
 		s.detectAtFirstStart()
 	}
+	s.proxyTransport = proxy.NewTransport()
 	s.mux = s.routes()
 	s.startMCPRelay()
 	s.background(s.settings.Run)
@@ -283,6 +287,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.scan.request(scanStart)
 	s.background(s.scan.run)
 	s.background(s.runImageSweep)
+	s.background(s.runProxySweep)
 	return s, nil
 }
 
@@ -323,6 +328,9 @@ func (s *Server) Close() error {
 		s.stopSkillSets()
 		s.stopUsage()
 		s.stopMCPRelay()
+		if s.proxyTransport != nil {
+			s.proxyTransport.CloseIdleConnections()
+		}
 		if s.db != nil {
 			s.closeErr = s.db.Close()
 		}

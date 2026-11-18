@@ -44,9 +44,17 @@ func isAPI(path string) bool {
 // caller is always the user.
 func (s *Server) BrowserHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		setSecurityHeaders(w)
 		r = withRequestContext(r, board.User, s.log)
-		if !s.allowedHost(r) || (s.opts.Config.OriginCheck && !s.sameOrigin(r)) {
+		if !s.allowedHost(r) {
+			setSecurityHeaders(w)
+			reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
+			return
+		}
+		if s.routeProxy(w, r) {
+			return
+		}
+		setSecurityHeaders(w)
+		if s.opts.Config.OriginCheck && !s.sameOrigin(r) {
 			reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
 			return
 		}
@@ -128,7 +136,7 @@ func (s *Server) allowedHost(r *http.Request) bool {
 	if port == boundPort && s.builtinHost(host, exposed) {
 		return true
 	}
-	return s.listedHost(host, port, hasPort) || s.publicHost(host, port, hasPort)
+	return s.listedHost(host, port, hasPort) || s.publicHost(host, port, hasPort) || s.proxyHostPort(r)
 }
 
 // publicHost matches the host of the public_url option: exactly its name and

@@ -74,6 +74,8 @@ func forActor[T any](a Actor, v T, err error) (T, error) {
 		for i := range *x {
 			(*x)[i].Author.Session = ""
 		}
+	case *api.ProxyForward, *[]api.ProxyForward:
+		// Forward records contain no credentials or session ids.
 	default:
 		panic(fmt.Sprintf("board: no session id rule for %T", v))
 	}

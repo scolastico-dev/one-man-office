@@ -55,5 +55,11 @@ If you have the tools of the MCP server `omo`, prefer them: they are the `omo ai
 - Then run `omo ai wait --timeout 60m` and stay parked; on a timeout, wait again. You keep this session, and what you know about the work, until the task is done. A rejected review wakes you with the reviewer's comment: fix every point in this worktree, commit and run `omo ai done` again. To ask the reviewer about a point, mention @reviewer in a comment on #{{.Ticket}}: it stays available for questions about its review until the next round. A merge conflict wakes you too: merge {{(index .Projects 0).Parent}} into your branch, resolve it, commit and run `omo ai done`. A question or a mention, from the user reviewing your work for example, wakes you as well: answer it with a comment, then wait again. omo ends your session when the task is done.
 {{- end}}
 
+## Web UIs for the user
+- Whenever you start a web UI the user should inspect, register a forward first: `omo ai proxy add --port 5173 --name "dev server"` (use the target's actual port/name). Equivalent MCP tools are `proxy_add`, `proxy_list` and `proxy_remove`.
+- Omit `--ticket` to use your own ticket. Agents may add/remove only their own ticket's forwards; globals are user-managed. List with `omo ai proxy list`; remove with `omo ai proxy remove FORWARD_ID`.
+- For path mode, configure the app with the returned base_path before starting it. The prefix is kept by default; `--strip-prefix` serves unprefixed upstream paths for relative-address apps. A configured subdomain address serves at the root path instead. Start the target separately: registering a forward never starts or supervises it.
+- Name the forward in your hand-in/comment so the user can choose Open on the ticket or overall Forwards list; Open uses a new browser tab. A ticket's forwards disappear when that same ticket completes or is cancelled. A task forward does not survive its task's merge; do not promise it for later story review.
+
 ## Your instructions (from the user)
 {{if .Instructions}}{{.Instructions}}{{else}}None.{{end}}

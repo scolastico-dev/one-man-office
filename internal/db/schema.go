@@ -234,5 +234,18 @@ CREATE TABLE mcp_upstream_auth (
   error         TEXT NOT NULL DEFAULT '',
   updated_at    TEXT NOT NULL
 );
+`, // Version 8: persistent web UI forwards, global or owned by a ticket.
+	`CREATE TABLE proxy_forwards (
+  id           TEXT PRIMARY KEY,
+  ticket_id    INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+  host         TEXT NOT NULL,
+  port         INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+  scheme       TEXT NOT NULL CHECK (scheme IN ('http','https')),
+  name         TEXT NOT NULL,
+  start_path   TEXT NOT NULL,
+  strip_prefix INTEGER NOT NULL DEFAULT 0 CHECK (strip_prefix IN (0,1)),
+  verify_tls   INTEGER NOT NULL DEFAULT 0 CHECK (verify_tls IN (0,1))
+);
+CREATE INDEX proxy_forwards_ticket ON proxy_forwards(ticket_id);
 `,
 }

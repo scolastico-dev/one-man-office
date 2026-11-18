@@ -53,6 +53,50 @@ keeps other people and other web pages out.
 The local socket that `omo ai` uses is reachable by processes of your user
 only, without a token.
 
+## Web UI forwards
+
+See [Web UI forwards](proxy.md) for commands, app configuration and HTTPS setup.
+
+Registered web UIs run through omo's existing browser address under
+`/proxy/<id>/`. With token sign-in, open a forward through the board's Open API
+(`POST /api/proxy/forwards/<id>/open`): its one-use sign-in grant expires after
+60 seconds. The sign-in page clears it from the address before exchanging it
+for an HttpOnly cookie, then replaces the page with the forward's start path.
+The proxy session lasts 12 hours; restarting omo requires opening it again.
+With optional [subdomain routing](running.md#optional-web-ui-subdomains), the
+proxy cookie covers the configured base and forward subdomains. If the board
+uses an unrelated host, authenticated Open also sets a host-local proxy session
+there so path URLs remain usable. Forward subdomains accept only the configured
+prefix/id/suffix composition on the listener or external public port; the
+board's Origin checks remain unchanged.
+Direct addresses without a valid session link back to the board. Basic sign-in
+checks the board credentials on each request; `auth: none` requires no sign-in.
+
+omo removes its own cookies and recognized credentials before sending requests
+to the app. Forwarded apps are trusted code: in path mode they share the board's
+origin and can access its browser storage. Only register apps you trust. The
+app controls its own response headers and cross-origin policy; the board keeps
+its own checks. In path mode, `Service-Worker-Allowed` can let an app install
+a service worker covering the board's origin, and `Clear-Site-Data` can clear
+origin data. omo passes these headers through; these origin effects can
+persist after removal of a forward. omo itself installs no service worker.
+Its generated proxy error/sign-in pages use `no-referrer` and `no-store` so
+their board links avoid the app Referer fallback.
+Subdomains also carry trusted apps: upstream Domain cookies
+may cover the base, and JavaScript can plant duplicate reserved cookies, which fail closed.
+Choose a base that supports Domain cookies (not a public suffix). Use a
+canonical board `public_url` so Back to board reaches the origin where you
+signed in; a different base has separate browser token storage. A base used
+for board access behind HTTPS needs `public_url` or `allowed_hosts` for the
+board's existing Origin checks.
+
+Removal of a forward or a ticket reaching Done/cancelled blocks new proxied
+requests. It does not forcibly close existing WebSocket, SSE or other streaming
+connections; those may continue until the app or client closes them.
+
+Use an HTTPS reverse proxy with `public_url` set to its external
+HTTPS address so proxy cookies are Secure and Open uses the right host and port.
+
 ## Plugins, scripts and relayed servers
 
 All of these are code that runs as you:

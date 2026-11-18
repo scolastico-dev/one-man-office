@@ -59,6 +59,7 @@ Package map (`internal/`):
 | `agentsetup` | the catalog of the agent programs omo knows (Claude Code `fable`/`opus`/`sonnet`/`haiku`, Codex `astra`/`sol`/`luna`, Antigravity `opus`/`sonnet`/`flash-high`/`flash-low`/`gpt-oss` (two quota groups: each model lists its group's weekly window), Gemini `carbon`/`argon`/`hydrogen`/`flash`; the strongest of each is not selectable and goes to the CEO), `Detect`, which plans profiles and role assignments from the programs found on `PATH` (it skips a program that has a profile and never changes profiles on disk), and `AddMissingModels` ("Add missing models": the catalog models a profile lacks, by name); it never runs a program |
 | `folderlist` | the folder listing behind the folder picker: folder names only, bounded, links marked, names with hidden characters escaped |
 | `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker. Settings routes are registered through one table (`access.go`, `registerRoutes`) whose rows carry the access rule. Beyond tickets: `diff.go` (`/api/tickets/{n}/diff`, `/diff/file`; `/diff/file?context=<0..1048576|all>` reads one file of git's own list again with that much context, never cut: a patch over 1 MiB is refused with 422, so the web shows hidden lines through the same parser and rendering path (`features/diff/expand.ts`, `useDiff` `expand`/`expansionOf`, kept per file while its patch is unchanged); each project says how far its local base branch is behind and ahead of its remote-tracking branch, and `?base=remote` compares with that branch, never fetching; the Diff tab says when the base is behind and offers that comparison per ticket and project for the browser session, `features/diff/useDiff.ts`), `thread.go` (`/api/tickets/{n}/thread`, `/api/notifications`, `/api/sessions/{id}/log`), `images.go` (`POST /api/tickets/{n}/images` takes the raw bytes as `application/octet-stream` with the percent-encoded name in `Omo-Image-Name`, from the user and from agents that may comment on the ticket (route rule `agentWrite`), checked before the body is read; `GET /api/tickets/{n}/images`, `GET /api/images/{id}` and `/content` follow the read scope of the image's own ticket; `DELETE /api/images/{id}` is the user's; `POST /api/terminal-images` (userOnly, raw upload like the ticket upload, same sniffing and 10 MiB limit, 2 GiB for the folder) stores an image dropped or pasted into a terminal in `images/terminal/` with no record and answers `api.TerminalImage` `{path, name, content_type, size}`, the absolute path the browser pastes; the bytes go out with their sniffed type, `nosniff`, an inline made-up file name, their own CSP and private immutable caching; `sweepImages` expires images hourly, and deletes terminal images `keep_days_after_done` days after their upload by file time, `images.Store.RemoveOlder`), `terminals.go` (`/api/terminals` and its websocket; `POST` takes a project or ticket, or `{home: true}` for a shell in the OS home folder, titled "Home", with no project or ticket, 422 when combined with either). The terminal, notification and log routes are for the user only; an agent session gets 403 |
+| `proxy` | streaming reverse-proxy transport for trusted Web UI forwards; shared TLS pools, credential filtering and redirect/cookie rewriting; browser auth/routing belongs to `server` |
 | `transport` | socket / named pipe endpoints and dialers |
 | `service` | lifecycle of the one server process |
 | `apiclient`, `cli` | `omo ai` and the human commands; `apiclient.NewWithTransport` with `HandlerTransport` serves a client's requests in process through a handler (the socket handler) |
@@ -191,6 +192,40 @@ Export. An export goes project by project (`internal/engine/export.go`): a proje
 
 Limit of the model: the socket and the files in `OMO_HOME` are not a security boundary against agents. An agent runs as the same user, can leave out its session header on the socket and can write the settings files directly, and omo gives terminals anyway. The route rule above keeps an agent that goes through the API honest; it does not stop one that does not.
 
+## Web UI forward registry
+
+Web UI forward registry: `api/proxy.go`, `board/proxy.go` and
+`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 8).
+`GET /api/proxy/forwards[?ticket=N]` returns `{forwards: []}`;
+`POST /api/proxy/forwards` takes `{ticket, host, port, scheme, name, start_path,
+strip_prefix, verify_tls}` and returns the record (201);
+`DELETE /api/proxy/forwards/{id}` returns 204. Omitted/null ticket is global;
+defaults are `127.0.0.1`, `http`, `/`, false, false. Board owns validation and
+permissions: user manages every forward, agents mutate only their own
+nonzero `Actor.Ticket`, reads follow ticket scope (globals visible with
+unrestricted reads). `ProxyForward` is the scoped id lookup;
+`LiveProxyForward(ctx, System, id)` is the server-internal live routing lookup.
+Records have a random lowercase DNS-safe `id`, `base_path=/proxy/<id>/` and
+`address` including the start path/query; HTTP adds the advertised server origin
+to the board's relative address, or the preferred subdomain address when
+configured. IPv6 hosts are stored without brackets.
+`proxy.forward_added` and `proxy.forward_removed` carry the public record with
+a relative address. Every Done transition removes ticket forwards and emits
+removals within `setColumn`'s transaction, including cancellation cascades;
+globals survive. Closed tickets refuse new forwards. No target is probed or
+started. Shared `aicmd/proxy.go` supplies `omo ai proxy add|list|remove` and MCP
+tools; omitted CLI/MCP ticket uses the agent's own ticket (user add: global,
+user list: all). Add prints the address, required app base path and process
+reminder. Browser routing and Open/sign-in are implemented separately in
+`server/proxy_routes.go` and `proxy_auth.go`. The browser uses shared
+`features/proxy/ForwardList.vue` / `ForwardForm.vue` in both ticket views and
+the topbar overall dialog; authoritative live reads follow forward events,
+reconnect and resync. `openForward.ts` reserves one detached new tab during the
+user gesture, calls Open with normal API auth, and navigates the returned
+opaque URL unchanged. It closes failed blank reservations and reports errors;
+it never constructs proxy hosts or places board credentials in destinations.
+See [Web UI forwards](wiki/proxy.md).
+
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
 ```text
@@ -207,7 +242,7 @@ skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/
 mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  files an import or an MCP registration replaced
 ```
 
-`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
+`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `proxy_base_host` (empty by default; enables forward subdomains), `proxy_label_prefix` and `proxy_label_suffix` (empty; compose a single label around the 32-hex-character id), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
@@ -251,3 +286,198 @@ The container entrypoint (`docker/entrypoint.sh`) runs `omo config set host 0.0.
 3. Run `git diff --check` and inspect the final diff.
 4. Update the `wiki/` pages (and `README.md` when its short overview changes) and this guide when user-visible behavior, commands, the home layout or release assets change.
 5. Document only current behavior; git history is the record of old behavior.
+
+## Web UI forward transport
+
+`internal/proxy` is the reusable data plane; it registers no browser route and
+performs no authentication. Create one `proxy.NewTransport()` for the server,
+reuse `Handler(api.ProxyForward, proxy.PathMode|proxy.SubdomainMode)` after the
+router authenticates and selects a live forward on every request, and call
+`CloseIdleConnections()` on shutdown. Two shared connection pools separate TLS
+verification policies; target connections bypass environment HTTP proxies.
+Path mode checks the literal `/proxy/<id>` prefix and strips it only when the
+record requests it; subdomain mode leaves the request path unchanged.
+`X-Forwarded-Prefix` is sent only for path mode with `strip_prefix=true`, naming
+what was removed; it is absent when the path prefix is retained or in subdomain
+mode. Conventional client-IP headers (`X-Real-IP`, `True-Client-IP`, provider IP
+headers and related legacy variants) are removed alongside client forwarding
+headers; `X-Forwarded-For` is derived from the accepted connection's RemoteAddr.
+
+The router supplies `proxy.WithRequestContext(r, proxy.RequestContext{...})`:
+`PublicScheme`/`PublicHost` are the accepted public request origin (never arbitrary
+forwarding headers), `BoardURL` is the board's accepted origin for the error-page
+link, and `RemoveAuthorization` is true only for positively identified omo
+credentials, including omo Basic auth. App Authorization otherwise survives.
+`OnError func(error)` optionally reports upstream connection/TLS failures to the
+router's logger; a cancelled client request produces neither a failure callback
+nor an unavailable page. The page explains both connect and TLS failures.
+All generated proxy HTML (including router denial/missing pages and sign-in)
+uses `Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so board
+links avoid the app Referer fallback. The unavailable page adds the board
+origin's root slash without reencoding its query and keeps template escaping.
+The reserved cookie names are `proxy.SessionCookie` (`omo_proxy_session`) and
+`proxy.ForwardCookie` (`omo_proxy_forward`); neither is sent upstream or accepted
+from upstream Set-Cookie. `X-Omo-*`, `Omo-*`, client forwarding headers,
+`omo-token.*` WebSocket protocols and the defensive `proxy.GrantQuery`
+(`__omo_proxy_grant`) query key are removed. Other Cookie headers and application
+credentials remain. Responses stream through `httputil.ReverseProxy`, including
+upgrades, without board security/cache headers. Target redirects and cookie
+paths/scopes are rewritten; connection failures get an escaped HTML page.
+Absolute and protocol-relative target redirects are classified by host and port
+regardless of URL userinfo; target userinfo is discarded before rewriting to the
+path forward or accepted public subdomain origin. External redirect userinfo is
+preserved with the external destination.
+Path-mode redirects with a path are resolved at the upstream request URL before
+being mapped into the forward. Escaped relative paths are joined to the upstream
+directory before literal and encoded dot segments are normalized together, so a
+literal parent segment cannot consume an encoded dot segment prematurely.
+Non-dot path escapes (including encoded slashes), duplicate slashes and
+query/fragment escapes are preserved. Literal backslashes in redirect paths use the
+browser's separator interpretation; malformed path-mode Location values are
+dropped, as are authority-less HTTP(S) references such as `http:/x` and
+`http:../../x` that browsers can resolve onto the board origin. The rest of the
+response is preserved. Request path bytes are never
+normalized. Grant-query filtering recognizes both `&` and legacy `;` separators
+without reencoding unrelated query bytes.
+`__Host-` application cookies keep `Path=/`, which browsers require for those
+names; this is shared root scope, consistent with trusted apps, rather than a
+cookie isolation boundary. Other applicable cookie paths receive the prefix.
+
+Path-mode apps share the board's origin, including its localStorage; this
+transport provides credential filtering, not isolation from trusted app code.
+Upstream `Service-Worker-Allowed` and `Clear-Site-Data` remain intact, including
+persistent origin effects; omo itself installs no service worker. Removing a
+forward or completing/cancelling its ticket blocks new requests, but does not
+forcibly close existing WebSocket/SSE/streaming connections.
+
+
+## Web UI browser routing and sign-in
+
+`BrowserHandler` validates Host, then classifies proxy traffic before the
+board's Origin/auth/JSON checks, CSP/cache headers and mux. Explicit paths
+`/proxy/<id>/...` select a live forward; `/proxy/<id>` redirects with 307 to
+its trailing slash, preserving the query. Open supplies the record's
+`start_path` and query. A same-origin Referer under `/proxy/<id>/` redirects
+root paths (including `/api` and `/assets`) under that forward with 307,
+retaining method, body and query. With no Referer, application WebSockets
+select `proxy.ForwardCookie`. The registered board sockets
+`GET /api/agents/{id}/terminal` and `GET /api/terminals/{id}/socket` always
+stay on the board, even with a proxy Referer; other `/api` WebSockets remain
+available to apps. Normal board HTTP/event streams keep their existing
+Origin/auth/security behavior. App Origin, CORS and WebSocket policy is the
+upstream's; proxy authentication always runs first.
+
+`POST /api/proxy/forwards/{id}/open` is a `userOnly` board API route with normal
+JSON/auth checks; optional body is an empty object. It returns `{url: string}`.
+Token mode returns `/_omo/proxy/bootstrap#<grant>` on the preferred forward
+origin: a configured subdomain, otherwise the canonical public_url origin or
+accepted request origin when public_url is unset. The printed
+omo.localhost address is a local access hint and must not replace a remote
+browser's host. Its external, embedded `proxy_bootstrap.js` clears the fragment with
+`history.replaceState` before POSTing `{grant}` to `/_omo/proxy/exchange`, then
+uses `location.replace` on the returned server-owned start URL. These internal
+endpoints are reserved before fallbacks and use board Origin/security headers.
+The board bearer token is never used as a proxy cookie or put in these URLs.
+The grant binds its forward, start URL and exchange origin (case/default ports
+canonicalized), is 256 bits of crypto randomness, lasts **60 seconds**, and is
+consumed atomically once. Client-supplied return URLs are refused. Removed
+forwards cannot be exchanged or routed. Failed live checks revoke an unissued
+session. State expires on use and in a one-minute background sweep; the sweep
+also drops grants for vanished forwards. Each map is capped at **4096** entries.
+
+Proxy sessions last **12 hours** without sliding expiry and are shared across
+forwards; live-forward checks remain mandatory on every request. Restarting omo
+invalidates grants and sessions. `omo_proxy_session` and `omo_proxy_forward`
+are host-only in path mode, or `Domain=<proxy_base_host>` on the configured base
+and forward subdomains; `Path=/`, `HttpOnly`, `SameSite=Lax`, `Max-Age=43200`.
+An authenticated Open on a board outside that domain also issues a host-local
+proxy session, keeping its `/proxy/<id>/` URLs usable. Secure is set
+for actual TLS or the matching HTTPS `public_url`. Do not infer deployment
+scheme or port from arbitrary X-Forwarded headers. Open/exchange and explicit
+document navigation update the last-forward cookie. Forged, expired or duplicate
+session cookies fail closed. Basic mode challenges/checks the board credentials
+on every proxy request; none adds no sign-in. Both support direct addresses and
+Open. Only positively identified omo Authorization is stripped; an omo token in
+WebSocket protocols must not cause application Authorization to be removed.
+
+Reusable server helpers for proxy routing: `proxyOpenDestination` builds the
+server-owned `proxyDestination{ForwardID, Origin, URL}`; `authorizeProxy` is the
+common auth gate; `setProxyCookie` centralizes cookie flags/scope;
+`proxyOrigin`/`proxyBoardURL` supply accepted public context; `serveProxyForward`
+calls the shared transport **after** auth and a live lookup. The server owns one
+transport and closes idle connections at shutdown. Subdomain routing reuses
+this auth gate and the same one-use exchange.
+
+Focused checks: `go test ./internal/server -run TestProxy -count=1` and
+`node --test web/scripts/proxy-bootstrap.test.mjs`. The latter needs web npm
+dependencies and Playwright Chromium; it uses a standalone Node HTTP server,
+never omo's CLI/socket/home, and checks actual fragment clearing, referrers and
+back/forward history under CSP. Streaming and WebSocket BrowserHandler tests use
+real local upstreams. Trusted path-mode apps share the board's origin and
+localStorage; filtering transport credentials does not isolate trusted app code.
+
+## Optional Web UI subdomains
+
+`proxy_base_host` is a bare DNS hostname (at least two labels, no scheme, port,
+path, IP literal, trailing dot or wildcard); empty disables the mode.
+`proxy_label_prefix` + the 32-hex-character id + `proxy_label_suffix` must be
+one DNS label: ASCII letters/digits/hyphens, alphanumeric ends, at most 63 bytes.
+The full hostname is at most 253 bytes. Set lowercases all three options; hand
+edits match case-insensitively. Prefix/suffix can be staged while disabled.
+An explicitly listed board alias in `allowed_hosts` or `public_url` must not
+match a composed forward host, which would be ambiguous. Other exact board
+aliases retain their existing behavior, including below the base. The base
+itself remains the board.
+Only the exact composed host on the listener port or configured public_url port
+is accepted; unknown well-formed ids return the missing-forward page.
+
+Open, registration and list addresses prefer the subdomain with unprefixed
+`start_path` and query. `base_path` remains `/proxy/<id>/` in every record.
+Without public_url, browser addresses use the accepted request origin's
+scheme/port; socket registration/list uses the advertised listener address.
+With public_url, Open uses its canonical scheme/port, including HTTPS/default
+ports behind TLS termination. Client forwarding headers never select these.
+Subdomain requests keep path/query bytes; the reusable transport rewrites target
+Location/cookies without a path prefix. Same-origin app WebSocket Origin is
+translated to the target's origin after Host rewriting; foreign origins stay
+subject to upstream checks. Board Origin checks are unchanged; only internal
+bootstrap/exchange gets the exact configured subdomain-origin exception.
+
+Configure wildcard DNS (and matching reverse proxy host routing/certificate for
+HTTPS) for `*.<proxy_base_host>` to omo's existing port. `*.localhost` resolves
+locally in browsers, including shared Domain cookies on `apps.localhost`.
+Focused coverage: `go test ./internal/serverconfig ./internal/cli ./internal/server ./internal/proxy`
+and `node --test web/scripts/proxy-subdomain.test.mjs`. The standalone browser
+fixture uses httptest handlers only, never an omo process, CLI/socket or engine;
+it checks actual Chromium domain/Secure cookie acceptance, two forward hosts,
+HTTP/HTTPS, unrelated-board path mode, target redirects/cookies and Host refusal.
+
+## Web UI workflow verification
+
+Developer/reviewer/PM defaults teach register → configure returned base →
+start separately → name the forward in hand-in, within each role's existing
+filesystem rules. Path mode keeps the prefix unless `strip_prefix`; subdomain
+mode uses `/`. A task forward expires when that task completes, including
+merge into a story; it is not a persistent story preview. The shared CLI/MCP
+add output describes both app bases; schemas/options remain in `aicmd`.
+
+`go test ./internal/server -run '^TestProxyAgentWorkflow$' -count=1` composes
+shared aicmd add/list/remove, own-ticket defaults, real browser Open/exchange,
+base-aware app/assets, WebSocket echo, SSE before close and removal in
+keep/strip/forced-subdomain modes. It uses temporary homes and httptest
+listeners, no CLI process/socket/engine. `web/e2e/proxy.spec.ts` checks actual
+new-tab board controls, browser cookies/history, cleanup and root-asset
+Referer fallback, including board security/auth isolation. Reuse the existing
+transport, registry cleanup and standalone bootstrap/subdomain browser tests.
+
+Deployment caveats: localhost resolves on the browser machine, so remote
+clients need real wildcard DNS. Domain cookies require a usable base that is
+not a public suffix. App Domain cookies may cover the base; trusted app JS
+can plant duplicate reserved cookies, which fail closed. There is no cookie
+isolation promise. Set canonical `public_url` for Back to board links and
+consistent token storage. Behind HTTPS termination, a base used for board
+access also needs `public_url` or `allowed_hosts` for existing board Origin
+checks. External proxies must preserve Host, support upgrades/long-lived
+streams, avoid response buffering for SSE and request buffering where upload
+streaming matters. Path mode and subdomain app bases are different: routing
+coexists, but a target may need reconfiguration to serve both.

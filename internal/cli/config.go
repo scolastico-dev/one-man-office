@@ -64,7 +64,15 @@ public_url is the address omo advertises: printed at the start, shown on the
 General page and used in links to the board. Use an absolute http:// or
 https:// address without path, such as https://omo.example.com/. It does not
 change where omo listens (host and port); omo accepts the Host and Origin of
-that address, nothing else. An empty value or config unset removes it.`,
+that address, nothing else. An empty value or config unset removes it.
+
+proxy_base_host enables Web UI subdomains: a bare DNS host such as apps.localhost
+(no scheme, port, path or wildcard). Empty disables them. proxy_label_prefix and
+proxy_label_suffix compose one label around the 32-character forward id, with
+at most 63 characters and alphanumeric ends. For a suffix starting with a hyphen:
+  omo config set -- proxy_label_suffix -user123
+Wildcard DNS and any HTTPS reverse proxy must route these hosts to omo's existing
+port. The base host remains the board; Open prefers each forward's subdomain.`,
 			Args: cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				layout, _, err := loadConfig()
@@ -178,6 +186,12 @@ func configValue(c serverconfig.Config, key string) string {
 		return strconv.FormatBool(c.OriginCheck)
 	case "allowed_hosts":
 		return serverconfig.FormatAllowedHosts(c.AllowedHosts)
+	case "proxy_base_host":
+		return c.ProxyBaseHost
+	case "proxy_label_prefix":
+		return c.ProxyLabelPrefix
+	case "proxy_label_suffix":
+		return c.ProxyLabelSuffix
 	case "public_url":
 		return c.PublicBase()
 	}

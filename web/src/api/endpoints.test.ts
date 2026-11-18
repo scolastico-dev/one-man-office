@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, test } from 'vitest'
 import type { ApiClient } from './client'
 import * as e from './endpoints'
 
@@ -418,4 +418,21 @@ describe('endpoints', () => {
     expect(seen[0]).toMatchObject({ method: 'GET', path: '/api/oauth/consent', query: { client_id: 'omo_dcr_x', redirect_uri: 'http://127.0.0.1:5/cb', state: 'a b' } })
     expect(seen[1]).toMatchObject({ method: 'POST', path: '/api/oauth/consent', body: { query: q, approve: false } })
   })
+})
+
+test('proxy registry scopes lists, sends every option and escapes ids; Open uses authenticated JSON', async () => {
+  const { client, seen } = spy()
+  await e.listProxyForwards(client)
+  await e.listProxyForwards(client, 4)
+  const body = { ticket: 4, host: '::1', port: 5173, scheme: 'https', name: 'Preview', start_path: '/app?q=x', strip_prefix: true, verify_tls: true }
+  await e.createProxyForward(client, body)
+  await e.removeProxyForward(client, 'a/b')
+  await e.openProxyForward(client, 'a/b')
+  expect(seen).toMatchObject([
+    { method: 'GET', path: '/api/proxy/forwards', query: { ticket: undefined } },
+    { method: 'GET', path: '/api/proxy/forwards', query: { ticket: 4 } },
+    { method: 'POST', path: '/api/proxy/forwards', body },
+    { method: 'DELETE', path: '/api/proxy/forwards/a%2Fb' },
+    { method: 'POST', path: '/api/proxy/forwards/a%2Fb/open', body: {} },
+  ])
 })

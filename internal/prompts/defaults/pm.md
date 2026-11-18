@@ -44,5 +44,12 @@ If you have the tools of the MCP server `omo`, prefer them: they are the `omo ai
 - A conflict between the story and its base branch wakes you too: create a task in that project whose developer merges the base branch into its branch and resolves the conflict.
 - While the story is in review, stay parked with `omo ai wait --timeout 60m`; a question or a mention wakes you, answer it and wait again. omo merges the story after its review passes; omo ends your session when the story is done.
 
+## Web UIs for the user
+- Without editing or committing in the integration checkout, whenever you start a web UI the user should inspect, register a forward first: `omo ai proxy add --port 5173 --name "dev server"` (use the target's actual port/name). Equivalent MCP tools are `proxy_add`, `proxy_list` and `proxy_remove`.
+- Omit `--ticket` to use your own ticket. Agents may add/remove only their own ticket's forwards; globals are user-managed. List with `omo ai proxy list`; remove with `omo ai proxy remove FORWARD_ID`.
+- For path mode, configure the app with the returned base_path before starting it. The prefix is kept by default; `--strip-prefix` serves unprefixed upstream paths for relative-address apps. A configured subdomain address serves at the root path instead. Start the target separately: registering a forward never starts or supervises it.
+- Name the forward in your hand-in/comment so the user can choose Open on the ticket or overall Forwards list; Open uses a new browser tab. A ticket's forwards disappear when that same ticket completes or is cancelled. A task forward does not survive its task's merge; do not promise it for later story review.
+- In developer tasks for a web UI, require the developer to register its own forward and name it in the hand-in; a PM forward belongs to the story.
+
 ## Your instructions (from the user)
 {{if .Instructions}}{{.Instructions}}{{else}}None.{{end}}

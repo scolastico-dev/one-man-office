@@ -176,6 +176,10 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 			"POST /api/tickets/{n}/remove-project": "/api/tickets/" + strconv.Itoa(n) + "/remove-project",
 			"POST /api/tickets/{n}/remove-workdir": "/api/tickets/" + strconv.Itoa(n) + "/remove-workdir",
 		}
+		forward := socketDo(t, s, "POST", "/api/proxy/forwards", api.CreateProxyForward{Ticket: sess.Ticket, Port: 5173, Name: "access fixture"}, "")
+		wantStatus(t, forward.Code, http.StatusCreated)
+		forwardID := decodeBody[api.ProxyForward](t, forward.Body).ID
+		rolePaths[role]["DELETE /api/proxy/forwards/{id}"] = "/api/proxy/forwards/" + forwardID
 	}
 	s.waitSettingsEvents(context.Background())
 	before := settingsSnapshot(t, s)
@@ -194,6 +198,14 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 					if p, ok := rolePaths[role][row.pattern]; ok {
 						path = p
 					}
+					if row.pattern == "POST /api/proxy/forwards" {
+						var ticket *int
+						if role != api.RoleCEO {
+							n, _ := strconv.Atoi(strings.Split(rolePaths[role]["POST /api/tickets/{n}/images"], "/")[3])
+							ticket = &n
+						}
+						body = api.CreateProxyForward{Ticket: ticket, Port: 5173, Name: "access fixture"}
+					}
 					var rec *httptest.ResponseRecorder
 					upload := row.pattern == "POST /api/tickets/{n}/images"
 					if upload {
@@ -210,6 +222,17 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 						rec = socketDo(t, s, method, path, body, sessions[role])
 					}
 					switch {
+					case row.access == agentWrite && fam == "proxy":
+						want := http.StatusNoContent
+						if method == http.MethodPost {
+							want = http.StatusCreated
+						}
+						if role == api.RoleCEO {
+							want = http.StatusForbidden // CEO has no own ticket.
+						}
+						if rec.Code != want {
+							t.Errorf("%s as %s: status %d, want %d: %s", row.pattern, role, rec.Code, want, rec.Body)
+						}
 					case row.access == agentRead:
 						if rec.Code != http.StatusOK {
 							t.Errorf("%s as %s: status %d, want 200: %s", row.pattern, role, rec.Code, rec.Body)
@@ -305,6 +328,9 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"GET /api/folders":            userOnly,
 		// The working folder of a done task without a project.
 		"POST /api/tickets/{n}/remove-workdir": userOnly,
+		"GET /api/proxy/forwards":              agentRead,
+		"POST /api/proxy/forwards":             agentWrite,
+		"DELETE /api/proxy/forwards/{id}":      agentWrite,
 	}
 	for pattern, access := range want {
 		if got[pattern] != access {
@@ -323,6 +349,10 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		// Removing a project from a ticket: the user and the CEO, by the
 		// board's rule (TestRemoveProjectRouteAccess).
 		"POST /api/tickets/{n}/remove-project": agentWrite,
+		// Forward writes follow own-ticket scope; reads follow ticket scope.
+		"GET /api/proxy/forwards":         agentRead,
+		"POST /api/proxy/forwards":        agentWrite,
+		"DELETE /api/proxy/forwards/{id}": agentWrite,
 	}
 	for pattern, access := range got {
 		if access != userOnly && agentRows[pattern] != access {

@@ -32,13 +32,13 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 7 || SchemaVersion != 7 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 7", v, SchemaVersion)
+	if v := userVersion(t, d); v != 8 || SchemaVersion != 8 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 8", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
 		"comment_mentions", "review_verdicts", "agent_sessions", "events", "server_state",
-		"plugin_storage", "plugin_runtime", "plugin_logs", "images", "mcp_tokens", "mcp_upstream_auth",
+		"plugin_storage", "plugin_runtime", "plugin_logs", "images", "mcp_tokens", "mcp_upstream_auth", "proxy_forwards",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
@@ -48,7 +48,7 @@ func TestOpenCreatesCurrentSchema(t *testing.T) {
 	for _, index := range []string{
 		"agent_sessions_ticket", "tickets_col_rank", "tickets_story", "ticket_projects_project",
 		"dependencies_reverse", "comments_ticket", "comments_open_questions", "events_ticket",
-		"idx_plugin_logs_plugin_id", "images_ticket",
+		"idx_plugin_logs_plugin_id", "images_ticket", "proxy_forwards_ticket",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, index).Scan(&n); err != nil || n != 1 {
