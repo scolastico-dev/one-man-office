@@ -272,7 +272,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     },
     async start() {
       assertIsolated()
-      if (child !== undefined && child.exitCode === null) throw new Error('the test server is already running')
+      if (child !== undefined && child.exitCode === null && child.signalCode === null) throw new Error('the test server is already running')
       for (let attempt = 0; ; attempt++) {
         const failure = await spawnServer()
         if (failure === undefined) break
@@ -289,7 +289,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
       if (opts.agents === undefined) await sessionsEnded()
     },
     async seed(scenario) {
-      if (child !== undefined && child.exitCode === null) throw new Error('seed() works only while the server is stopped')
+      if (child !== undefined && child.exitCode === null && child.signalCode === null) throw new Error('seed() works only while the server is stopped')
       assertIsolated()
       if (!existsSync(SEED_BINARY)) throw new Error(`the seeding tool ${SEED_BINARY} is missing; the e2e global setup builds it`)
       const json = JSON.stringify(scenario).replaceAll('{{repo}}', repo.replaceAll('\\', '\\\\'))

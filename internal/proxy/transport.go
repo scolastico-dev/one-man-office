@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -140,6 +141,11 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 			pr.Out = WithRequestContext(out, v)
 		},
 		ModifyResponse: func(res *http.Response) error {
+			if res.StatusCode == http.StatusSwitchingProtocols && strings.EqualFold(res.Header.Get("Upgrade"), "websocket") {
+				if body, ok := res.Body.(io.ReadWriteCloser); ok {
+					res.Body = websocketBody{body}
+				}
+			}
 			v := requestValues(res.Request)
 			if locations := res.Header.Values("Location"); len(locations) > 0 {
 				res.Header.Del("Location")
@@ -188,6 +194,9 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 		if mode == PathMode && !hasPrefix(r.URL.EscapedPath(), prefix) {
 			http.NotFound(w, r)
 			return
+		}
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			w = websocketWriter{w}
 		}
 		p.ServeHTTP(w, r)
 	})

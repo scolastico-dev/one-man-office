@@ -293,6 +293,9 @@ refused upgrades and health/status polling cannot keep an idle task alive.
 HTTP/SSE requests have separate request counts and do not serve as WebSocket
 presence. Connection counts reflect server-observed closure; editor/protocol
 heartbeats and network detection bound observation of physically dropped clients.
+For WebSockets, either endpoint reaching TCP EOF or a copy error closes both
+ends of the tunnel. A half-closed upstream cannot keep a disconnected browser
+counted. Other upgrade protocols retain their normal half-close behavior.
 No editor-specific default or automatic idle policy is built into the proxy.
 See [Plugins — Owned Web UI forwards](plugins.md#owned-web-ui-forwards) for the
 exact helpers, schema, timing semantics and free-loopback-port candidate contract.
