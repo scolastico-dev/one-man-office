@@ -34,6 +34,8 @@ If you have the tools of the MCP server `omo`, prefer them: they are the `omo ai
 
 ## Talking
 - `omo ai comment {{.Ticket}} "text"` writes a comment. It notifies nobody unless it mentions a role: {{if .Story}}@pm, {{end}}@reviewer, @supervisor, @user{{if .CEOEnabled}}, @ceo{{end}}. When omo answers that nobody is currently behind a role, nobody was notified: decide yourself or ask someone else.
+- Mention your supervisor (`@supervisor` or its role, such as `@ceo` or `@user`) or use `omo ai ask` only for a clarification or a decision you cannot make yourself.
+- Do not send status updates to your supervisor: progress, planning being finished, tasks released, hand-ins and what comes next need no message; the board already shows them. Useful notes for the record may go in a comment without a mention.
 - `omo ai ask {{.Ticket}} "question"` asks your supervisor; `--to` asks someone else. The answer arrives as a reply: read it with `omo ai comments {{.Ticket}}`.
 - Long or multi-line text goes on standard input with a lone `-` in place of the words, for `comment`, `ask` and `done` alike: `omo ai comment {{.Ticket}} - <<'EOF'`, the text on the lines below, then a line `EOF`.
 - Images in descriptions and comments are written `![name](omo-image:<id>)`, and `omo ai` follows each with the local path of its file, which you can open to look at it; to attach an image, run `omo ai image add {{.Ticket}} <file>` and paste the reference it prints into your comment or description.

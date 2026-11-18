@@ -166,6 +166,11 @@ role: `@developer`, `@reviewer` (on a ticket with several projects also
 `@ceo` and `@user`; typing `@` offers them. A mention of a role nobody works in
 right now is stored, and the box says so. **Ctrl+Enter** (**Cmd+Enter** on a Mac) sends.
 
+The default role prompts reserve mentions of an agent's supervisor for
+clarifications and decisions the agent cannot make itself. Routine progress
+needs no supervisor message; useful notes may go in a comment without a
+mention. See [Supervisors and questions](concepts.md#supervisors-and-questions).
+
 **Ask a question** sends the comment as a question to the product manager or
 the CEO; it stays open until answered. A question an agent asks you shows
 "Question for you" and an **Answer** button; your answer reaches the agent.

@@ -118,6 +118,15 @@ shows as "question for you" on the card and in the bell. An unanswered
 question is flagged after **Question unanswered after** (Settings → Limits);
 a question to an agent first gets a reminder.
 
+The default role prompts tell agents to mention or ask their supervisor only
+for a clarification or a decision they cannot make themselves. This also
+applies to the CEO mentioning you on tickets you supervise. Progress, finished
+planning, released tasks, hand-ins and what comes next need no message to the
+supervisor: the board already shows them. Agents may leave useful notes in a
+comment without a mention. When only you can release tasks, the product
+manager may mention you to ask for that release decision. omo still sends its
+own notifications, including finished stories and rejected reviews.
+
 ## Approval and release
 
 **Approving** moves a ticket from Planning to Ready For Dev: drag it, use
