@@ -136,6 +136,10 @@ class Contracts(unittest.TestCase):
             fake.write_text('#!' + sys.executable + '\n' + f"""
 import json, os, sys
 from pathlib import Path
+assert os.environ['GOENV'] == 'off'
+assert os.environ['GOWORK'] == 'off'
+assert os.environ['GO111MODULE'] == 'on'
+assert os.environ['GOCACHEPROG'] == ''
 if sys.argv[1] == 'env':
  print(json.dumps({{'GOCACHE': '/tmp/stress-contract-cache', 'GOPATH': '/tmp/stress-contract-path', 'GOMODCACHE': '/tmp/stress-contract-mod'}}))
  sys.exit(0)
@@ -160,7 +164,8 @@ sys.exit(1 if n == 1 else 0)
             fake.chmod(0o755)
             env = {k: v for k, v in os.environ.items() if not k.upper().startswith('OMO_')}
             env['PATH'] = str(tools) + os.pathsep + os.environ['PATH']
-            env['GOFLAGS'] = '-run=WrongSubset -short'
+            env.update(GOFLAGS='-run=WrongSubset -short', GOENV=str(root / 'inherited-goenv'),
+                       GOWORK=str(root / 'external.work'), GO111MODULE='off', GOCACHEPROG='/bin/false')
             command = [sys.executable, str(Path(SPEC.origin)), '--suite', 'go',
                        '--go-runs', '2', '--output', str(root / 'reports')]
             completed = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
@@ -392,6 +397,117 @@ sys.exit(3)
                                             sorted(os.sched_getaffinity(0))[:2], folder, 10)
                     self.assertNotEqual(result['returncode'], 0)
                     self.assertEqual((root / 'bin/omo').read_text(), 'stale-binary')
+
+
+
+    def test_real_go_build_and_tests_ignore_external_configuration(self):
+        # Exercise Go itself: an empty GOFLAGS string alone falls back to GOENV.
+        cache_env = {k: v for k, v in os.environ.items() if not k.upper().startswith('OMO_')}
+        cache_env.update(GOENV='off', GOFLAGS='', GOWORK='off', GO111MODULE='on', GOCACHEPROG='')
+        caches = json.loads(subprocess.check_output(
+            ['go', 'env', '-json', 'GOCACHE', 'GOPATH', 'GOMODCACHE'], env=cache_env))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'bin').mkdir()
+            (source / 'go.mod').write_text('module example.test/main\n\ngo 1.24\n'
+                'require example.test/dep v0.0.0\nreplace example.test/dep => ./dep\n')
+            for name, value in [('dep', 'recorded'), ('external', 'substituted')]:
+                directory = source / name if name == 'dep' else root / name
+                directory.mkdir()
+                (directory / 'go.mod').write_text('module example.test/dep\n\ngo 1.24\n')
+                (directory / 'dep.go').write_text(f'package dep\nconst Value = "{value}"\n')
+            program = ('package main\nimport ("fmt"; "example.test/dep")\n'
+                       'const source = "recorded"\nfunc main() { fmt.Print(source+":"+dep.Value) }\n')
+            (source / 'main.go').write_text(program)
+            (source / 'main_test.go').write_text('package main\nimport ("testing"; "example.test/dep")\n'
+                'func TestSource(t *testing.T) { if source != "recorded" || dep.Value != "recorded" '
+                '{ t.Fatal("external source selected", source, dep.Value) } }\n')
+            (source / 'Makefile').write_text('.PHONY: build\nbuild:\n\tgo build -o bin/omo .\n')
+            alternate = root / 'alternate.go'
+            alternate.write_text(program.replace('const source = "recorded"', 'const source = "substituted"'))
+            overlay = root / 'overlay.json'
+            overlay.write_text(json.dumps({'Replace': {str(source / 'main.go'): str(alternate)}}))
+            workspace = root / 'go.work'
+            workspace.write_text('go 1.24\nuse ./source\nreplace example.test/dep => ./external\n')
+            (source / 'main.go').write_text(program.replace('const source = "recorded"', 'const source = "stale"'))
+            subprocess.run(['go', 'build', '-o', 'bin/omo', '.'], cwd=source, env=cache_env, check=True,
+                           capture_output=True, timeout=120)
+            stale_binary = (source / 'bin/omo').read_bytes()
+            (source / 'main.go').write_text(program)
+            persisted = root / 'goenv'
+            cases = [({'GOENV': str(persisted)}, 'GOFLAGS=-n\n'),
+                     ({'GOENV': str(persisted)}, f'GOFLAGS=-overlay={overlay}\n'),
+                     ({'GOENV': ''}, 'GOFLAGS=-n\n'),
+                     ({'GOWORK': str(workspace)}, ''),
+                     ({'GO111MODULE': 'off'}, ''),
+                     ({'GOCACHEPROG': '/bin/false'}, '')]
+            for number, (override, config) in enumerate(cases):
+                with self.subTest(control=override, config=config):
+                    persisted.write_text(config)
+                    (source / 'bin/omo').write_bytes(stale_binary)
+                    folder = root / f'case-{number}'
+                    folder.mkdir()
+                    env = runner.child_env(dict(cache_env, **override), folder / 'state', caches)
+                    if override.get('GOENV') == '':
+                        default_config = Path(env['XDG_CONFIG_HOME']) / 'go/env'
+                        default_config.parent.mkdir(parents=True)
+                        default_config.write_text(config)
+                    # Make/go build and go test must both select the recorded graph.
+                    build = runner.execute(['make', 'build', 'NO_WEB='], source, env,
+                                           sorted(os.sched_getaffinity(0))[:2], folder, 120)
+                    self.assertEqual(build['returncode'], 0, (folder / 'stderr.log').read_text())
+                    self.assertNotEqual((source / 'bin/omo').read_bytes(), stale_binary)
+                    self.assertEqual(subprocess.check_output([str(source / 'bin/omo')], env=env), b'recorded:recorded')
+                    tested = runner.execute(['go', 'test', '-json', '-count=1', './...'], source, env,
+                                            sorted(os.sched_getaffinity(0))[:2], folder, 120)
+                    self.assertEqual(tested['returncode'], 0, (folder / 'stdout.log').read_text()
+                                     + (folder / 'stderr.log').read_text())
+                    self.assertEqual(runner.parse_go((folder / 'stdout.log').read_text())['tests'],
+                                     {'example.test/main::TestSource': 'passed'})
+
+            git_env = runner.child_env(cache_env, root / 'git-state', caches)
+            for command in [['git', 'init', '-q'], ['git', 'add', '.'],
+                            ['git', '-c', 'user.name=Stress fixture', '-c', 'user.email=stress@example.invalid',
+                             'commit', '-qm', 'test: record fixture source']]:
+                subprocess.run(command, cwd=source, env=git_env, check=True, capture_output=True, timeout=30)
+            persisted.write_text(f'GOFLAGS=-n -overlay={overlay}\n')
+            inherited = dict(cache_env, GOENV=str(persisted), GOWORK=str(workspace),
+                             GO111MODULE='off', GOCACHEPROG='/bin/false')
+            command = [sys.executable, str(Path(SPEC.origin)), '--source', str(source), '--suite', 'go',
+                       '--go-runs', '1', '--packages', '.', '--output', str(root / 'reports')]
+            completed = subprocess.run(command, env=inherited, capture_output=True, text=True, timeout=120)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            campaign = next((root / 'reports').iterdir())
+            summary = json.loads((campaign / 'summary.json').read_text())
+            self.assertTrue(summary['ok'])
+            self.assertEqual(summary['completed'], {'go': 1})
+            self.assertEqual(summary['tests']['go::example.test/main::TestSource']['passed'], 1)
+
+    def test_persisted_go_dry_run_cannot_hide_compile_failure_and_stale_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'go.mod').write_text('module example.test/broken\n\ngo 1.24\n')
+            (root / 'main.go').write_text('package main\nfunc main() {}\n')
+            (root / 'Makefile').write_text('.PHONY: build\nbuild:\n\tgo build -o bin/omo .\n')
+            (root / 'bin').mkdir()
+            baseline = {k: v for k, v in os.environ.items() if not k.upper().startswith('OMO_')}
+            baseline.update(GOENV='off', GOFLAGS='', GOWORK='off', GO111MODULE='on', GOCACHEPROG='')
+            caches = json.loads(subprocess.check_output(
+                ['go', 'env', '-json', 'GOCACHE', 'GOPATH', 'GOMODCACHE'], env=baseline))
+            subprocess.run(['go', 'build', '-o', 'bin/omo', '.'], cwd=root, env=baseline, check=True,
+                           capture_output=True, timeout=120)
+            stale_binary = (root / 'bin/omo').read_bytes()
+            (root / 'main.go').write_text('package main\nfunc main() { undefinedSymbol() }\n')
+            config = root / 'goenv'
+            config.write_text('GOFLAGS=-n\n')
+            env = runner.child_env(dict(os.environ, GOENV=str(config)), root / 'state', caches)
+            result = runner.execute(['make', 'build', 'NO_WEB='], root, env,
+                                    sorted(os.sched_getaffinity(0))[:2], root, 120)
+            self.assertNotEqual(result['returncode'], 0)
+            self.assertIn('undefinedSymbol', (root / 'stderr.log').read_text())
+            self.assertEqual((root / 'bin/omo').read_bytes(), stale_binary)
 
 
 if __name__ == '__main__':

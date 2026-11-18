@@ -17,6 +17,16 @@ import time
 from datetime import datetime, timezone
 
 
+def go_environment(inherited):
+    # Empty GOFLAGS falls back to the persisted GOENV file. Disable that file
+    # before even asking Go for cache paths; all later Go descendants use the
+    # same policy. Workspaces and GOPATH mode can replace the recorded graph,
+    # and an external cache program can supply artifacts outside our caches.
+    env = {k: v for k, v in inherited.items() if not k.upper().startswith('OMO_')}
+    env.update(GOENV='off', GOFLAGS='', GOWORK='off', GO111MODULE='on', GOCACHEPROG='')
+    return env
+
+
 def child_env(inherited, state, caches):
     # Never inspect, print or propagate inherited omo credentials/socket overrides.
     # Dry-run flags or an npm script-shell override can report success on stale artifacts.
@@ -27,6 +37,9 @@ def child_env(inherited, state, caches):
            and k.upper() not in build_controls and not k.upper().startswith('NPM_CONFIG_')
            and (not k.upper().startswith('GIT_') or k.upper() == 'GIT_CONFIG_PARAMETERS')
            and not k.upper().startswith(('PLAYWRIGHT_', 'PW_TEST_', 'PWTEST', 'PWDEBUG'))}
+    # Normalize after cache sharing too; callers cannot reintroduce controls.
+    env.update(caches)
+    env = go_environment(env)
     homes = {'HOME': 'home', 'USERPROFILE': 'home', 'APPDATA': 'config',
              'LOCALAPPDATA': 'data', 'XDG_CONFIG_HOME': 'config',
              'XDG_DATA_HOME': 'data', 'XDG_CACHE_HOME': 'cache',
@@ -35,9 +48,8 @@ def child_env(inherited, state, caches):
         path = state / folder
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
         env[key] = str(path)
-    env.update(caches)
     env.update(GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1',
-               SHELL='/bin/sh', CI='true', GOFLAGS='')
+               SHELL='/bin/sh', CI='true')
     return env
 
 
@@ -423,8 +435,7 @@ def main(argv=None):
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, interrupted)
     # Share dependency/compiler caches, never state or omo session variables.
-    clean = {k: v for k, v in os.environ.items() if not k.upper().startswith('OMO_')}
-    clean['GOFLAGS'] = ''
+    clean = go_environment(os.environ)
     caches = json.loads(subprocess.check_output(['go', 'env', '-json', 'GOCACHE', 'GOPATH', 'GOMODCACHE'], env=clean))
     if 'PLAYWRIGHT_BROWSERS_PATH' in clean:
         browser_cache = clean['PLAYWRIGHT_BROWSERS_PATH']

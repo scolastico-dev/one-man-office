@@ -91,8 +91,12 @@ CPU 0/1. `--cpus` can select two allowed IDs. Go uses `-race -count=1`, four
 package/test workers, GOMAXPROCS=4 and a recorded shuffle seed per attempt;
 `--seed` fixes the base (attempt n uses base+n-1). Playwright uses four workers,
 `--repeat-each=1 --retries=0`, Chromium CDP CPU rate 4 by default, and retains
-failure traces/screenshots. Inherited GOFLAGS are cleared and full-test selectors
-are explicit, so a developer's shell flags cannot silently narrow a campaign.
+failure traces/screenshots. Before Go cache discovery and in every build/test child,
+`GOENV=off` disables persisted Go configuration, `GOFLAGS` is cleared, `GOWORK=off`
+disables external workspaces, `GO111MODULE=on` selects the repository's module graph,
+and external `GOCACHEPROG` helpers are disabled. Full-test selectors are explicit,
+so inherited configuration cannot silently substitute source or narrow a campaign.
+The required `GIT_CONFIG_PARAMETERS` signing setting is preserved unchanged.
 Make flags/includes, NO_WEB and npm configuration overrides are removed so preparation always builds
 the current web app and binary. Playwright runtime/report
 overrides are removed, the source config is explicit, and a separate `--list`
