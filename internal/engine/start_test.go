@@ -276,7 +276,7 @@ func TestCrashingAgentFlaggedAfterThreeAttempts(t *testing.T) {
 		dev := h.live(api.RoleDeveloper, task)
 		h.agent(dev.ID).exit(errors.New("exit status 1"))
 		ended := h.waitEnded(dev.ID)
-		if !strings.Contains(ended.EndReason, "exited unexpectedly") {
+		if !strings.Contains(ended.EndReason, "exited unexpectedly") || ended.EndKind != api.SessionEndCrashed {
 			t.Fatalf("end reason %q", ended.EndReason)
 		}
 		h.step()
@@ -620,7 +620,7 @@ func TestRunnerStartErrorEndsSessionAndCounts(t *testing.T) {
 		t.Fatalf("column %s", tk.Column)
 	}
 	ss := h.sessions(task)
-	if len(ss) != 1 || ss[0].State != api.SessionEnded || !strings.Contains(ss[0].EndReason, "could not start") {
+	if len(ss) != 1 || ss[0].State != api.SessionEnded || ss[0].EndKind != api.SessionEndCrashed || !strings.Contains(ss[0].EndReason, "could not start") {
 		t.Fatalf("sessions %+v", ss)
 	}
 	if h.e.attempts(failKey{ticket: task, role: api.RoleDeveloper, purpose: api.PurposeWork}) != 1 {
@@ -762,9 +762,7 @@ func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
 	if err := os.Rename(wtOne, wtOne+"-moved"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(wtTwo, wtOne); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, wtTwo, wtOne)
 	startsIn := func(dir string) int {
 		n := 0
 		for _, s := range h.runner.specList() {

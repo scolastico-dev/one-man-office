@@ -63,6 +63,10 @@ func helper(mode string, args []string) int {
 	case "config-to-stderr": // the plugin's configuration on standard error, status 3
 		fmt.Fprintln(os.Stderr, "config was "+os.Getenv("OMO_PLUGIN_CONFIG"))
 		return 3
+	case "lines":
+		for range 100 {
+			fmt.Println(strings.Repeat("x", 1024))
+		}
 	case "sleep":
 		if len(args) > 0 {
 			if err := os.WriteFile(args[0], nil, 0o600); err != nil {
@@ -70,13 +74,18 @@ func helper(mode string, args []string) int {
 			}
 		}
 		time.Sleep(time.Minute)
-	case "spawn": // spawn <pidfile>: start a sleeping child, write its pid, sleep
+	case "spawn", "spawn-exit": // spawn <pidfile>: start a sleeping child, write its pid, sleep
 		exe, _ := os.Executable()
 		child := newHelperCommand(exe, "sleep")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
 		if err := child.Start(); err != nil {
 			return 2
 		}
 		_ = os.WriteFile(args[0], []byte(fmt.Sprint(child.Process.Pid)), 0o600)
+		if mode == "spawn-exit" {
+			return 0
+		}
 		time.Sleep(time.Minute)
 	}
 	return 0
@@ -410,6 +419,15 @@ omo.store_set("moved", event.data.n)
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	released := time.Now()
+	defer func() {
+		// Says what a run that timed out got to: events lost (the first one
+		// is missing when its program failed) or events still arriving.
+		if t.Failed() {
+			seen := e.stored("slow", "seen")
+			t.Logf("%v after the release: %d events seen (%.60s…), state %+v, log:\n%s", time.Since(released), strings.Count(seen, ",")+1, seen, e.info("slow"), e.logText("slow"))
+		}
+	}()
 	eventually(t, "the slow plugin", func() bool { return strings.Count(e.stored("slow", "seen"), ",") == 256 })
 	var seen []int
 	if err := json.Unmarshal([]byte(e.stored("slow", "seen")), &seen); err != nil {

@@ -130,7 +130,7 @@ const cancel: TicketAction = {
 const merged: TicketAction = {
   id: 'mark-merged',
   label: 'Mark as merged',
-  applies: (t) => t.resolution === 'exported' && !t.export_merged,
+  applies: (t) => (t.column === 'review' && t.review_stage === 'awaiting_merge') || (t.resolution === 'exported' && !t.export_merged),
   describe: (t) =>
     t.projects.filter((p) => p.export_url).length > 1
       ? 'Tells omo the pull requests were merged, so tickets that depend on it can start.'

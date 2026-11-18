@@ -149,6 +149,9 @@ start, an agent that ended without handing in, or its merge. The user retries
 every ticket, the CEO the tickets it supervises, a product manager the tasks of
 its story.`,
 			"  omo ai ticket retry 12"),
+		Def("ticket check-export", "Check now whether exported work has merged (user only)", nil, ticketCheckExport).help("check-export N",
+			`Check the remote targets of all waiting exports now, sharing one fetch per target with any check already running. N must be waiting for its export to merge. Periodic checks may be off; omo must be running and unpaused. Only the user requests a check.`,
+			"  omo ai ticket check-export 12").commandLineOnly(),
 		Def("ticket cancel", "Cancel ticket N and print it as #N type column title", everyone, ticketCancel).help("cancel N [--delete-branch [--discard-uncommitted]]",
 			`Close ticket N as cancelled; cancelling a story also cancels its open tasks.
 The user cancels every ticket, the CEO tickets it created, a product manager
@@ -190,6 +193,16 @@ them with the project; use it only when the user agreed to lose them.`,
 dependency that would form a cycle is refused and the cycle is named.`,
 			"  omo ai link 12 --depends-on 11"),
 	}
+}
+
+func ticketCheckExport(ctx context.Context, c *apiclient.Client, in ticketIn) (Result, error) {
+	var out struct {
+		Checking bool `json:"checking"`
+	}
+	if err := c.Do(ctx, "POST", fmt.Sprintf("/api/tickets/%d/check-export", in.Ticket), struct{}{}, &out); err != nil {
+		return Result{}, err
+	}
+	return last(c, fmt.Sprintf("Merge check requested for #%d and the other waiting exports.\n", in.Ticket)), nil
 }
 
 // summaryLine answers a ticket as its one-line form.

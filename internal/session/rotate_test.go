@@ -103,7 +103,7 @@ func TestSessionWritesReadableScreenLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	waitFor(t, 5*time.Second, func() bool {
 		lines, err := s.TailLog(10)
 		return err == nil && strings.Contains(strings.Join(lines, "\n"), "hello")

@@ -14,6 +14,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/secreturl"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -69,11 +70,12 @@ func target(t *testing.T, f *fakes, cli, account string) Target {
 
 func TestTargets(t *testing.T) {
 	home := t.TempDir()
+	codexAccount := testpath.Abs("/srv/codex-account")
 	profiles := []api.Profile{
 		{Name: "claude", CLI: api.CLIClaude, Command: "/opt/claude/bin/claude"},
 		{Name: "work", CLI: api.CLIClaude, AccountDir: "~/accounts/work"},
 		{Name: "work-opus", CLI: api.CLIClaude, AccountDir: filepath.Join(home, "accounts", "work"), Command: "claude-work"},
-		{Name: "codex", CLI: api.CLICodex, AccountDir: "/srv/codex-account"},
+		{Name: "codex", CLI: api.CLICodex, AccountDir: codexAccount},
 		{Name: "agy", CLI: api.CLIAgy, AccountDir: "/ignored"},
 		{Name: "gemini", CLI: api.CLIGemini},
 	}
@@ -87,7 +89,7 @@ func TestTargets(t *testing.T) {
 	want := []row{
 		{"claude", "claude", "", filepath.Join(home, ".claude.json"), "/opt/claude/bin/claude"},
 		{"claude-" + short(work), "claude", work, filepath.Join(work, ".claude.json"), "claude-work"},
-		{"codex-" + short("/srv/codex-account"), "codex", "/srv/codex-account", "/srv/codex-account/config.toml", "codex"},
+		{"codex-" + short(codexAccount), "codex", codexAccount, filepath.Join(codexAccount, "config.toml"), "codex"},
 		{"agy", "agy", "", filepath.Join(home, ".gemini", "config", "mcp_config.json"), "agy"},
 	}
 	if !slices.Equal(rows, want) {

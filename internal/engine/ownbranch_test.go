@@ -187,6 +187,7 @@ func TestExportNeverPushesOntoAForeignRemoteBranch(t *testing.T) {
 func TestExportRefusesTheBaseBranch(t *testing.T) {
 	h := gitHarness(t)
 	bare := h.origin(h.project)
+	before := remoteHead(t, bare, "main")
 	n := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Export me", Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
 	h.finishTask(n, h.project, "b.txt", "b\n")
 	tk := h.engineTicket(n)
@@ -196,8 +197,8 @@ func TestExportRefusesTheBaseBranch(t *testing.T) {
 	if _, err := h.e.prepareExport(h.ctx, h.engineTicket(n), h.project); err == nil {
 		t.Fatal("the export of the base branch was prepared")
 	}
-	if got := remoteHead(t, bare, "main"); got != "" {
-		t.Fatalf("main was pushed: %s", got)
+	if got := remoteHead(t, bare, "main"); got != before {
+		t.Fatalf("main changed: %s", got)
 	}
 	if c := h.commentsWith(n, "base branch"); c == 0 {
 		at := h.ticket(n)

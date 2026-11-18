@@ -143,6 +143,10 @@ type Engine struct {
 	// exportMu serializes settling exports (see settleExport), which
 	// passes and start workers both do.
 	exportMu sync.Mutex
+	// exportCheckMu serializes target snapshots and their results, including
+	// checks requested by the user and recovery checks.
+	exportCheckMu       sync.Mutex
+	exportCheckFailures map[string]int
 	// nt delivers notifications (see notify.go).
 	nt *notifier
 	// health holds the health checks' memory (see health.go); shut the
@@ -323,7 +327,7 @@ func (e *Engine) startup(ctx context.Context) {
 			if e.hasEntry(s.ID) {
 				continue
 			}
-			if err := e.b.EndSession(ctx, s.ID, "omo restarted"); err != nil {
+			if err := e.b.EndSession(ctx, s.ID, "omo restarted", api.SessionEndShutdown); err != nil {
 				e.log.Printf("engine: end a session of an earlier run on #%d: %s", s.Ticket, scrub(err, s.ID))
 			}
 		}
@@ -368,6 +372,11 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 		return
 	}
 	defer close(halted)
+	e.disk.mu.Lock()
+	if e.disk.exportsCancel != nil {
+		e.disk.exportsCancel()
+	}
+	e.disk.mu.Unlock()
 	e.stopGitEnvironment()
 	e.workers.Wait()
 	var wg sync.WaitGroup
@@ -375,14 +384,14 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.end(ctx, id, reason)
+			e.end(ctx, id, reason, api.SessionEndShutdown)
 		}()
 	}
 	wg.Wait()
 	e.watchers.Wait()
 	if snap, err := e.b.EngineSnapshot(ctx); err == nil {
 		for _, s := range snap.Sessions {
-			if err := e.b.EndSession(ctx, s.ID, reason); err != nil {
+			if err := e.b.EndSession(ctx, s.ID, reason, api.SessionEndShutdown); err != nil {
 				e.log.Printf("engine: end a session of #%d: %s", s.Ticket, scrub(err, s.ID))
 			}
 		}
@@ -534,7 +543,7 @@ func (e *Engine) pass(ctx context.Context) {
 		ends.Add(1)
 		go func() {
 			defer ends.Done()
-			e.end(ctx, a.session, a.reason)
+			e.end(ctx, a.session, a.reason, a.endKind)
 		}()
 	}
 	ends.Wait()
@@ -559,7 +568,7 @@ func (e *Engine) pass(ctx context.Context) {
 	for _, a := range acts {
 		switch a.kind {
 		case actAttention:
-			if err := e.b.SetAttention(ctx, a.ticket, a.reason); err != nil {
+			if err := e.b.SetAttentionOwned(ctx, a.ticket, a.attentionOwner, a.reason); err != nil {
 				e.log.Printf("engine: attention on #%d: %v", a.ticket, err)
 			}
 		case actMerge, actCleanup, actStart:

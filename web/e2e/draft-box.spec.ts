@@ -1,0 +1,110 @@
+// The draft box below an agent terminal, and agent terminals being read-only
+// by default. The fake agent reads its terminal like a full-screen CLI with an
+// input line and bracketed paste (OMO_FAKE_BRACKETED_PASTE): a message pasted
+// as one piece arrives as one line, its line breaks shown as ⏎, and every
+// submitted line is echoed as "fake: typed: <line>".
+import type { Locator, Page } from '@playwright/test'
+import { expect, test } from './support/omo'
+import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
+import { openBoard } from './support/board'
+import { png } from './support/images'
+import { expectTerminalText, makeWritable, terminalIn } from './support/terminal'
+
+test.use({
+  viewport: { width: 1440, height: 900 },
+  omoOptions: {
+    agentEnv: { OMO_FAKE_BRACKETED_PASTE: '1' },
+    agents: { developer: script('ready', 'print|hello from fake', 'await-line|alpha⏎beta|10m', 'await-line|/images/terminal/|10m', 'print|got both', 'hang') },
+  },
+})
+
+const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
+
+async function openAgent(page: Page, omo: Parameters<typeof openBoard>[1]): Promise<{ n: number; box: Locator; term: Locator }> {
+  const n = await omo.createTicket({ title: 'Write to the developer' })
+  await omo.moveTicket(n, 'ready')
+  const session = await waitForSession(omo, n, 'developer')
+  await openBoard(page, omo)
+  await page.goto(omo.url(`/${n}?tab=agents`))
+  await panel(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+  const term = terminalIn(panel(page))
+  await expectTerminalText(term, 'hello from fake')
+  return { n, box: panel(page).locator('[data-terminal-draft]'), term }
+}
+
+test('keys and paste do nothing in a read-only agent terminal; the draft box is there and sends as one message', async ({ page, omo }) => {
+  const { n, box, term } = await openAgent(page, omo)
+  await expect(panel(page).locator('[data-terminal-mode]')).toHaveText('Read only')
+
+  // Typing into the read-only terminal reaches nobody.
+  await term.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type('zzz')
+  await page.keyboard.press('Enter')
+  // Nothing to wait for here: that the keys reached nobody is read below, once
+  // a later line of the same terminal (omo's own) has been echoed. The program
+  // echoes every line in the order it got them, so a line typed above would
+  // already be on the screen before that one.
+
+  // A draft of two lines, and omo types a line into the terminal meanwhile.
+  const field = box.locator('[data-draft-field]')
+  await field.click()
+  await page.keyboard.type('alpha')
+  await page.keyboard.press('Shift+Enter')
+  await page.keyboard.type('beta')
+  await expect(field).toHaveValue('alpha\nbeta')
+  await omo.api('POST', `/api/tickets/${n}/comments`, { body: '@developer a note while you draft' })
+  await expectTerminalText(term, /typed: omo:/)
+  await expect(term.locator('.xterm-rows')).not.toContainText('typed: zzz')
+  // The line did not touch the draft or its focus.
+  await expect(field).toHaveValue('alpha\nbeta')
+  await expect(field).toBeFocused()
+
+  // Enter sends it as one message, even though the terminal is read-only.
+  await page.keyboard.press('Enter')
+  await expectTerminalText(term, 'typed: alpha⏎beta')
+  await expect(field).toHaveValue('')
+})
+
+test('an image dropped on the draft box is shown there, can be removed, and its path arrives with the message', async ({ page, omo }) => {
+  const { box, term } = await openAgent(page, omo)
+  const field = box.locator('[data-draft-field]')
+  const pasteImage = (name: string) =>
+    field.evaluate(
+      (el, { name, bytes }) => {
+        const dt = new DataTransfer()
+        dt.items.add(new File([new Uint8Array(bytes)], name, { type: 'image/png' }))
+        el.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }))
+      },
+      { name, bytes: [...png()] },
+    )
+  // The first message the script waits for.
+  await field.fill('alpha\nbeta')
+  await field.press('Enter')
+  await expectTerminalText(term, 'typed: alpha⏎beta')
+
+  await pasteImage('discard me.png')
+  await expect(box.locator('[data-draft-attachment]')).toHaveCount(1)
+  await box.locator('[data-draft-remove]').click()
+  await expect(box.locator('[data-draft-attachment]')).toHaveCount(0)
+
+  await pasteImage('keep me.png')
+  await expect(box.locator('[data-draft-attachment]')).toContainText('keep me.png')
+  await field.fill('see this')
+  await field.press('Enter')
+  await expectTerminalText(term, 'got both')
+  await expect(box.locator('[data-draft-attachment]')).toHaveCount(0)
+  await expect(field).toHaveValue('')
+})
+
+test('the toggle makes the terminal writable and the draft survives a reload', async ({ page, omo }) => {
+  const { n, box } = await openAgent(page, omo)
+  await box.locator('[data-draft-field]').fill('unfinished thought')
+  await makeWritable(panel(page))
+  await page.reload()
+  const session = await waitForSession(omo, n, 'developer')
+  await panel(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+  await expect(panel(page).locator('[data-terminal-mode]')).toHaveText('Writable')
+  await expect(panel(page).locator('[data-draft-field]')).toHaveValue('unfinished thought')
+  await omo.api('POST', '/api/agents/stop-all', {})
+  await expectNoAgentProcesses(omo)
+})

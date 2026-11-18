@@ -78,6 +78,25 @@ func TestEveryGitTestPackageIsolatesGit(t *testing.T) {
 // starts reads neither the global nor the system configuration.
 func TestBrowserHarnessIsolatesGit(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "web", "e2e")
+	bad, err := browserGitOffenders(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bad) > 0 {
+		t.Errorf("these browser test files run git with the developer's configuration:\n%s", strings.Join(bad, "\n"))
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "support", "env.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"GIT_CONFIG_GLOBAL: devNull", "GIT_CONFIG_NOSYSTEM: '1'"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the harness's server environment lacks %s", want)
+		}
+	}
+}
+
+func browserGitOffenders(root string) ([]string, error) {
 	runsGit := regexp.MustCompile(`(execFileSync|spawnSync|spawn|execSync)\(\s*'git'`)
 	var bad []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -97,20 +116,33 @@ func TestBrowserHarnessIsolatesGit(t *testing.T) {
 		}
 		return nil
 	})
+	return bad, err
+}
+
+func TestBrowserGitGuardRejectsDirectCallsAndAcceptsSharedHelper(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"unsafe.spec.ts": `execFileSync('git', ['status'])`,
+		"helper.spec.ts": `import { git } from './git'; git(repo, 'status')`,
+	}
+	// Use the actual shared helper so this test covers its accepted structure,
+	// rather than granting an exception to a function name.
+	helper, err := os.ReadFile(filepath.Join(moduleRoot(t), "web", "e2e", "support", "git.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bad) > 0 {
-		t.Errorf("these browser test files run git with the developer's configuration:\n%s", strings.Join(bad, "\n"))
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "support", "env.ts"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"GIT_CONFIG_GLOBAL: devNull", "GIT_CONFIG_NOSYSTEM: '1'"} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("the harness's server environment lacks %s", want)
+	files["git.ts"] = string(helper)
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
 		}
+	}
+	bad, err := browserGitOffenders(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bad) != 1 || bad[0] != "unsafe.spec.ts" {
+		t.Fatalf("Git isolation offenders = %v, want only unsafe.spec.ts", bad)
 	}
 }
 

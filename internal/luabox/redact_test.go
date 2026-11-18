@@ -91,3 +91,28 @@ func TestErrorTextCut(t *testing.T) {
 		t.Fatal("nil error")
 	}
 }
+
+// Sinks such as command stderr and task tails split output into lines before
+// cleaning. A multiline credential must remain redacted at each such sink.
+func TestRedactorCleansMultilineSecretFragments(t *testing.T) {
+	r := NewRedactor()
+	r.Add("private-key-first-line\r\nprivate-key-second-line\n")
+	for _, line := range []string{"private-key-first-line", "private-key-second-line", "private-key-first-line\r\nprivate-key-second-line\n"} {
+		if got := r.Clean(line); strings.Contains(got, "private-key-") {
+			t.Errorf("secret survived line splitting: %q", got)
+		}
+	}
+}
+
+func TestRedactorCloneHasIndependentSecrets(t *testing.T) {
+	original := NewRedactor()
+	original.Add("prior-secret")
+	cloned := original.Clone()
+	cloned.Add("extra-secret")
+	if got := cloned.Clean("prior-secret extra-secret"); got != "[redacted] [redacted]" {
+		t.Fatal(got)
+	}
+	if got := original.Clean("extra-secret"); got != "extra-secret" {
+		t.Fatal("clone mutated original:", got)
+	}
+}

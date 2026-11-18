@@ -46,7 +46,8 @@ func TestPluginEventMapping(t *testing.T) {
 	question.QuestionTo = api.RoleUser
 	agent := api.AgentSession{ID: "s1", Role: api.RoleDeveloper, Ticket: &seven, Name: "dev", Model: "fake/a", Purpose: api.PurposeWork}
 	ended := agent
-	ended.EndReason = "usage limit reached"
+	ended.EndReason = "Different words that mention crash but describe a usage stop"
+	ended.EndKind = api.SessionEndUsage
 	ceo := api.AgentSession{ID: "s2", Role: api.RoleCEO, Name: "ceo"}
 
 	att := map[int]string{}

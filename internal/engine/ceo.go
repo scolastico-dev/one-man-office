@@ -145,9 +145,8 @@ func ceoUsageError() error {
 	return api.Errorf(api.CodeUnavailable, "every model of the ceo role is near its usage limit; start the CEO again once one is below its limits")
 }
 
-// ceoStopReason is the end reason of a CEO session the user stopped. The
-// newest CEO session ending with it is what makes the CEO stopped (see
-// CEOStopped), so a stop also holds across a restart of omo.
+// ceoStopReason explains an explicit user stop. SessionEndUser, stored
+// separately, makes the stop hold across a restart (see CEOStopped).
 const ceoStopReason = "stopped by the user"
 
 // StopCEO ends the CEO on the user's request, after a start under way is
@@ -190,14 +189,14 @@ func (e *Engine) StopCEO(ctx context.Context) error {
 		// A start an agent's mention began while these end is waited for
 		// on the next round and ended too.
 		for _, id := range live {
-			e.end(ctx, id, ceoStopReason)
+			e.end(ctx, id, ceoStopReason, api.SessionEndUser)
 		}
 		stopped = true
 	}
 }
 
 // CEOStopped reports whether the user stopped the CEO and has not started
-// it since: whether the newest CEO session ended with ceoStopReason.
+// it since: whether the newest CEO session records an explicit user stop.
 func (e *Engine) CEOStopped(ctx context.Context) (bool, error) {
 	all, err := e.b.AgentSessions(ctx, board.System, false)
 	if err != nil {
@@ -205,7 +204,7 @@ func (e *Engine) CEOStopped(ctx context.Context) (bool, error) {
 	}
 	for _, s := range all { // newest first
 		if s.Role == api.RoleCEO {
-			return s.State == api.SessionEnded && s.EndReason == ceoStopReason, nil
+			return s.State == api.SessionEnded && s.EndKind == api.SessionEndUser, nil
 		}
 	}
 	return false, nil

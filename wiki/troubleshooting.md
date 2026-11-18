@@ -141,4 +141,5 @@ Then approve the export again (only the failed projects are tried), choose
 | "Some settings files have errors: … Fix them (the settings pages show each error), then export again." | A settings export is refused while a settings file has errors; fix the files named, then export again. |
 
 When an agent behaves oddly, read its terminal: open the ticket's Agents tab
-and type into it like into the program itself.
+and write to it in the message box below the terminal, or switch the terminal to
+writable and type into it like into the program itself.

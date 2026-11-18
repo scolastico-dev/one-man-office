@@ -59,6 +59,9 @@ func (e *Engine) keepCommits(ctx context.Context, n int64, repos ...string) erro
 			}
 			if same, _ := gitops.SameRepository(proj.Path, repo); same {
 				commits = append(commits, p.Start, p.End)
+				if p.ExportTargetCommit != "" {
+					commits = append(commits, p.ExportTargetCommit)
+				}
 			}
 		}
 		if err := e.git.KeepCommits(repo, n, commits); err != nil {

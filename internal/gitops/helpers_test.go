@@ -66,6 +66,19 @@ func testGit(t *testing.T) *Git {
 	return g
 }
 
+// gitWithGlobal returns a Git whose environment uses a global config file
+// with content: the user's own settings, which omo keeps.
+func gitWithGlobal(t *testing.T, content string, extra ...string) *Git {
+	t.Helper()
+	requireGit(t)
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	write(t, global, content)
+	g := New()
+	env := append(isolatedEnv(t), "GIT_CONFIG_GLOBAL="+global)
+	g.SetEnvironment(append(env, extra...))
+	return g
+}
+
 // tg runs a git command for test setup in dir with the isolated
 // environment and returns its output.
 func tg(t *testing.T, dir string, args ...string) string {
@@ -91,6 +104,39 @@ func tgFails(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v succeeded, want a failure\n%s", args, out)
 	}
 	return string(out)
+}
+
+// samePathT reports whether a and b name one folder. A test names its
+// folders as t.TempDir gives them, git names them resolved: on Windows the
+// first is a short name (C:\Users\RUNNER~1\...) and the second the long one,
+// on macOS the temporary folder lies behind a link.
+func samePathT(a, b string) bool { return samePath(a, b) }
+
+// registeredT reports whether the repository records a worktree at dir,
+// which may be gone.
+func registeredT(t *testing.T, repo, dir string) bool {
+	t.Helper()
+	for _, line := range strings.Split(tg(t, repo, "worktree", "list", "--porcelain"), "\n") {
+		if p, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "worktree "); ok && samePathT(filepath.FromSlash(p), dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// branchTwin creates the branch name in a repository that already has a
+// branch whose name differs from it only in case. A file system that
+// ignores case (Windows, macOS) keeps the two in one file: the existing
+// branch answers to name already and git refuses to create it again.
+func branchTwin(t *testing.T, repo, name string) {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	cmd.Dir = repo
+	cmd.Env = isolatedEnv(t)
+	if cmd.Run() == nil {
+		return
+	}
+	tg(t, repo, "branch", name)
 }
 
 func rev(t *testing.T, dir, r string) string {

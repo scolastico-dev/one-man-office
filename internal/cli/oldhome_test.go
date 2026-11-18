@@ -183,18 +183,25 @@ func TestOldInstallationContinueRefusedWhileTheOldDashboardRuns(t *testing.T) {
 	m := buildOldMachine(t, "")
 	lock := filepath.Join(m.home, "company", "run.lock")
 	writeFile(t, lock, "")
+	// The home is read before the lock is taken and after it is released:
+	// a lock of Windows keeps every other handle from reading the locked
+	// file, while a lock of Unix only keeps others from locking it. Taking
+	// the lock writes nothing, so both readings cover the whole home.
+	before := snapshotTree(t, m.home)
 	held, err := filelock.Acquire(context.Background(), lock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer held.Close()
-	before := snapshotTree(t, m.home)
 	out, err := executeWithInput(t, answering(t, "1\ny\n"))
 	if !errors.Is(err, errOldInstallation) {
 		t.Fatalf("err = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "Stop the old omo first (the company dashboard of "+m.home+")") {
 		t.Fatalf("output:\n%s", out)
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, snapshotTree(t, m.home)) {
 		t.Fatal("the home of a running old omo was changed")
@@ -215,12 +222,19 @@ func TestOldInstallationGoBackInstallsTheLastTerminalReleaseAndStopsItsOffer(t *
 	exe := filepath.Join(t.TempDir(), "omo")
 	writeFile(t, exe, "")
 	currentExecutable = func() (string, error) { return exe, nil }
+	// omo installs at the program's real path (links resolved); on Windows
+	// that also turns the short names of the temporary folder
+	// (RUNNER~1) into the long ones.
+	realExe, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
 	before := snapshotTree(t, m.home)
 	out, err := executeWithInput(t, answering(t, "2\n"))
 	if err != nil {
 		t.Fatalf("err = %v\n%s", err, out)
 	}
-	if installed != oldhome.LastRelease || target != exe {
+	if installed != oldhome.LastRelease || target != realExe {
 		t.Fatalf("installed %q at %q", installed, target)
 	}
 	raw, _ := os.ReadFile(m.officeConfig)

@@ -70,7 +70,7 @@ test.describe('with a CEO', () => {
     const terminal = terminalIn(sidebar(page))
     await expect(terminal).toBeVisible({ timeout: 30_000 })
     await expectTerminalText(terminal, 'CEO ready')
-    await expect(sidebar(page).getByText('Typing here types into the CEO.')).toBeVisible()
+    await expect(sidebar(page).getByText('Write to the CEO in the box below the terminal.')).toBeVisible()
     expect(await liveCeos(omo)).toHaveLength(1)
     expectNoTokenInUrls(seen, omo.token)
     await expectNoAgentProcesses(omo)

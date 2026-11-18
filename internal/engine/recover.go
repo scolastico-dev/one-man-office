@@ -24,5 +24,5 @@ func (e *Engine) recoverAtStart(ctx context.Context) {
 	// Before the first pass, so its merges carry the agents' author; ctx
 	// ends a command that hangs when omo stops.
 	e.syncGitEnvironment(ctx)
-	e.checkExportsMerged(ctx)
+	e.checkExportsDue(ctx, e.now())
 }

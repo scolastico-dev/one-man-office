@@ -65,12 +65,25 @@ func (b *Board) BeginWork(ctx context.Context, n int64) error {
 	})
 }
 
-// CompleteMerge records a successful merge of an approved ticket: it is done
-// and completed.
+// CompleteMerge records a successful local merge of an approved ticket.
+// It is done and completed unless some projects retain open pull requests;
+// those still need their remote merge before the ticket is done.
 func (b *Board) CompleteMerge(ctx context.Context, n int64) error {
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
 		if err := checkStage(t, api.ReviewStageMerging); err != nil {
 			return err
+		}
+		var exported bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM ticket_projects WHERE ticket_id = ? AND export_url <> '')`, n).Scan(&exported); err != nil {
+			return err
+		}
+		if exported {
+			// These projects have now merged locally, so a previous failed
+			// attempt to export them no longer describes unfinished work.
+			if _, err := tx.Exec(`UPDATE ticket_projects SET export_state = '', export_error = '' WHERE ticket_id = ? AND export_url = '' AND export_state = 'failed'`, n); err != nil {
+				return err
+			}
+			return b.completeExport(tx, System, t)
 		}
 		if err := b.setColumn(tx, n, api.ColumnDone, t.Rank, api.ResolutionCompleted); err != nil {
 			return err
@@ -106,9 +119,9 @@ func (b *Board) MergeConflict(ctx context.Context, n int64, comment string) erro
 }
 
 // CompleteExport records a successful export of a ticket with one project:
-// the project gets the pull request's url and the ticket is done as
-// exported. A ticket with several projects is exported by one export job per
-// project, each reporting its own pull request through Done.
+// the project gets the pull request's url and the ticket waits in Review
+// for the exported work to be merged. A ticket with several projects has one
+// export job per project, each reporting its own pull request through Done.
 func (b *Board) CompleteExport(ctx context.Context, n int64, url string) error {
 	url, err := checkExportURL(url)
 	if err != nil {
@@ -169,8 +182,8 @@ func checkExportURL(raw string) (string, error) {
 
 // FinishExport ends, for the engine, the export of a ticket whose projects
 // have their pull request, except those the engine left out for having no
-// commits of their own: the ticket is done and exported. When no project
-// has a pull request (every project was left out), there was nothing to
+// commits of their own: the ticket waits in Review for the remote merge.
+// When no project has a pull request (every project was left out), there was nothing to
 // export: the ticket is done as completed, its branches being contained in
 // their base branches already.
 func (b *Board) FinishExport(ctx context.Context, n int64) error {
@@ -195,8 +208,8 @@ func (b *Board) FinishExport(ctx context.Context, n int64) error {
 	})
 }
 
-// completeExport closes t, whose projects have a pull request (or were
-// left out of the export), as done and exported. The ticket's export_url
+// completeExport leaves t, whose projects have a pull request (or were
+// left out of the export), in Review awaiting the remote merge. Its export_url
 // lists the pull requests in project order, one per line.
 func (b *Board) completeExport(tx *sql.Tx, a Actor, t ticketRow) error {
 	var urls []string
@@ -211,13 +224,16 @@ func (b *Board) completeExport(tx *sql.Tx, a Actor, t ticketRow) error {
 		}); err != nil {
 		return err
 	}
-	if err := b.setColumn(tx, t.ID, api.ColumnDone, t.Rank, api.ResolutionExported); err != nil {
+	if err := checkRecorded(tx, t.ID, api.ResolutionExported); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE tickets SET export_url = ? WHERE id = ?`, strings.Join(urls, "\n"), t.ID); err != nil {
+	if err := b.setStage(tx, t.ID, api.ReviewStageAwaitingMerge, ""); err != nil {
 		return err
 	}
-	return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnDone, action: ActionExported}})
+	if _, err := tx.Exec(`UPDATE tickets SET export_url = ?, export_merged = 0, busy = 0 WHERE id = ?`, strings.Join(urls, "\n"), t.ID); err != nil {
+		return err
+	}
+	return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionExported}})
 }
 
 // ExportFailed records a failed export: the ticket stays in Review and waits
@@ -241,6 +257,9 @@ func (b *Board) exportFailed(tx *sql.Tx, a Actor, t ticketRow, message string) e
 		return err
 	}
 	if err := b.setStage(tx, t.ID, api.ReviewStageHuman, attentionLine(message)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tickets SET attention_owner = ? WHERE id = ? AND failed_step = ''`, AttentionExport, t.ID); err != nil {
 		return err
 	}
 	if err := b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionExportFailed}}); err != nil {
@@ -354,32 +373,58 @@ func attentionLine(reason string) string {
 	return line
 }
 
+// AttentionOwner identifies the producer of a flag. It is never derived from
+// its shortened display text; an empty owner denotes an unowned flag.
+type AttentionOwner string
+
+const (
+	AttentionPlanner AttentionOwner = "planner"
+	AttentionExport  AttentionOwner = "export"
+	// AttentionMergeCheck owns the flag of repeated failed remote merge checks.
+	AttentionMergeCheck AttentionOwner = "merge_check"
+)
+
 // SetAttention flags a ticket as needing attention with reason, or clears
 // the flag when reason is empty. A new reason is also posted in full as a
 // comment for the ticket's supervisor; the flag holds it cut to one line
 // (see attentionLine). Done tickets cannot be flagged.
 func (b *Board) SetAttention(ctx context.Context, n int64, reason string) error {
+	return b.SetAttentionOwned(ctx, n, "", reason)
+}
+
+// SetAttentionOwned records a flag and its producer together.
+func (b *Board) SetAttentionOwned(ctx context.Context, n int64, owner AttentionOwner, reason string) error {
+	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
+		return b.setAttentionOwned(tx, t, owner, reason)
+	})
+}
+
+// setAttentionOwned applies an attention flag, its producer and its
+// notification in the caller's transaction, so guarded engine updates share
+// the behaviour.
+func (b *Board) setAttentionOwned(tx *sql.Tx, t ticketRow, owner AttentionOwner, reason string) error {
 	reason = strings.TrimSpace(reason)
 	line := attentionLine(reason)
+	if line == "" {
+		owner = ""
+	}
 	if reason != "" && line == "" {
 		return api.Errorf(api.CodeValidation, "an attention reason needs readable text")
 	}
-	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
-		if t.Attention == line {
-			return nil
-		}
-		if reason != "" && t.Col == api.ColumnDone {
-			return api.Errorf(api.CodeInvalidTransition, "#%d is done and needs no attention", n)
-		}
-		if _, err := tx.Exec(`UPDATE tickets SET attention = ?, updated_at = ? WHERE id = ?`, line, b.stamp(), n); err != nil {
-			return err
-		}
-		if err := b.emitUpdated(tx, System, n, "attention"); err != nil {
-			return err
-		}
-		if reason == "" {
-			return nil
-		}
-		return b.systemComment(tx, n, fmt.Sprintf("Needs attention: %s", reason), t.Supervisor)
-	})
+	if t.Attention == line && t.AttentionOwner == owner {
+		return nil
+	}
+	if reason != "" && t.Col == api.ColumnDone {
+		return api.Errorf(api.CodeInvalidTransition, "#%d is done and needs no attention", t.ID)
+	}
+	if _, err := tx.Exec(`UPDATE tickets SET attention = ?, attention_owner = ?, updated_at = ? WHERE id = ?`, line, owner, b.stamp(), t.ID); err != nil {
+		return err
+	}
+	if err := b.emitUpdated(tx, System, t.ID, "attention"); err != nil {
+		return err
+	}
+	if reason == "" {
+		return nil
+	}
+	return b.systemComment(tx, t.ID, fmt.Sprintf("Needs attention: %s", reason), t.Supervisor)
 }

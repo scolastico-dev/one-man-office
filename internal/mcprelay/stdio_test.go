@@ -327,14 +327,11 @@ func TestCallTimeoutAndCancellation(t *testing.T) {
 		_, err := f.pool.Call(ctx, id, "fake__sleep", json.RawMessage(`{"millis":60000,"steps":600}`), func(float64, float64, string) { cancel() })
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("a cancelled call answered %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		// A deadlock guard, unrelated to cancellation latency.
-		t.Fatal("a cancelled call did not return")
+	// A cancelled call that never returned would end only with the test
+	// binary's own time limit, which prints every goroutine: no short clock
+	// decides this verdict.
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
 	}
 	if res := f.call(id, "fake__echo", map[string]string{"text": "still"}); res.IsError {
 		t.Fatalf("the server is unusable after a cancelled call: %q", resultText(res))
@@ -343,32 +340,34 @@ func TestCallTimeoutAndCancellation(t *testing.T) {
 
 func TestProgressIsHandedToTheCaller(t *testing.T) {
 	f := newFixture(t, nil, stdioServer("fake", nil))
+	// The SDK hands notifications over concurrently with the answer and with
+	// each other: one that is handled after the call ended finds nobody waiting
+	// (omo drops it), and two may arrive in either order. So the call is kept
+	// running until the caller has seen the first two steps (it ends the call
+	// itself, by cancelling, once both arrived), and the steps are compared as a
+	// set. Nothing here depends on how fast a notification is handled.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var mu sync.Mutex
-	var steps []float64
-	// The fake reports each step after its sleep, the last one right before
-	// its result. The SDK hands notifications over concurrently, so that
-	// last one may arrive after the call has ended, when nobody waits for
-	// it any more; the steps reported while the call runs must arrive.
-	_, err := f.pool.Call(context.Background(), agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":300,"steps":3}`), func(done, total float64, msg string) {
-		mu.Lock()
-		steps = append(steps, done)
-		mu.Unlock()
-		if total != 3 || msg != "step" {
+	seen := map[float64]bool{}
+	_, err := f.pool.Call(ctx, agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":60000,"steps":600}`), func(done, total float64, msg string) {
+		if total != 600 || msg != "step" {
 			t.Errorf("progress %v of %v: %q", done, total, msg)
 		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "the progress notifications of the running call", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(steps) >= 2
+		seen[done] = true
+		if seen[1] && seen[2] {
+			cancel()
+		}
 	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the call ended with %v, want the cancellation the caller made after steps 1 and 2", err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if steps[0] != 1 || steps[1] != 2 {
-		t.Fatalf("progress %v", steps)
+	if !seen[1] || !seen[2] {
+		t.Fatalf("progress steps seen: %v", seen)
 	}
 }
 
@@ -482,5 +481,41 @@ func TestEndedSessionsLeaveNoProcess(t *testing.T) {
 	case <-proc.exited:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the process of an ended session still runs")
+	}
+}
+
+// A flood of change notices without a change lists the tools again a few
+// times at most and announces nothing.
+func TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	f.call(id, "fake__echo", nil)
+	f.pool.mu.Lock()
+	inst := f.pool.instances[instanceKey{"fake", "s"}]
+	f.pool.mu.Unlock()
+	// A started server is usable first and announced as running right after:
+	// the call above can return before that announcement. It belongs to the
+	// start, not to the notices below, so the count begins after it.
+	eventually(t, "the start to be announced", func() bool {
+		return strings.Contains(f.events.all(), api.KindMCPChanged+` {"name":"fake","state":"running"`)
+	})
+	changed, toolsChanged := f.events.count(api.KindMCPChanged), f.events.count(api.KindMCPToolsChanged)
+	gen := f.pool.Generation()
+	for range 50 {
+		inst.toolListChanged()
+	}
+	eventually(t, "the re-listing to end", func() bool {
+		inst.mu.Lock()
+		defer inst.mu.Unlock()
+		return !inst.relistQueued && inst.relists > 0
+	})
+	inst.mu.Lock()
+	relists := inst.relists
+	inst.mu.Unlock()
+	if relists > 2 {
+		t.Fatalf("listed the tools %d times for one burst of notices", relists)
+	}
+	if f.events.count(api.KindMCPChanged) != changed || f.events.count(api.KindMCPToolsChanged) != toolsChanged || f.pool.Generation() != gen {
+		t.Fatalf("an unchanged list was announced:\n%s", f.events.all())
 	}
 }

@@ -1,0 +1,87 @@
+{
+  "name": "vscode",
+  "version": "1.0.0",
+  "description": "Browser VS Code through omo's sign-in. Edits directly alongside agents. Microsoft mode is unavailable until its terms are confirmed; direct server-web would differ from code serve-web.",
+  "default_config": {
+    "editor": "code-server",
+    "idle_minutes": 30
+  },
+  "config_fields": [
+    {
+      "key": "editor",
+      "label": "Editor (pinned publisher builds)",
+      "type": "select",
+      "choices": [
+        {
+          "value": "code-server",
+          "label": "code-server 4.145.2 (Linux/macOS; Windows amd64)"
+        },
+        {
+          "value": "openvscode",
+          "label": "OpenVSCode Server 1.109.5 (Linux amd64/arm64 only)"
+        },
+        {
+          "value": "microsoft",
+          "label": "Microsoft's VS Code for the web — unavailable: terms not confirmed for this integration"
+        }
+      ]
+    },
+    {
+      "key": "idle_minutes",
+      "label": "Stop after minutes without a connected browser (1–10080)",
+      "type": "number"
+    }
+  ],
+  "frontend": {
+    "script": "frontend.js"
+  },
+  "hooks": [
+    {
+      "event": "omo_started",
+      "lua": "editor.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "timer",
+      "interval": "1m",
+      "lua": "editor.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "open-ticket",
+      "scope": "ticket",
+      "description": "Start or reuse the selected ticket editor",
+      "hidden": true,
+      "lua": "editor.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "status-ticket",
+      "scope": "ticket",
+      "description": "Continue the pending ticket editor request",
+      "hidden": true,
+      "lua": "editor.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "open-project",
+      "scope": "global",
+      "description": "Start or reuse the selected project editor",
+      "hidden": true,
+      "lua": "editor.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "status-project",
+      "scope": "global",
+      "description": "Continue the pending project editor request",
+      "hidden": true,
+      "lua": "editor.lua",
+      "timeout": "30s"
+    }
+  ]
+}

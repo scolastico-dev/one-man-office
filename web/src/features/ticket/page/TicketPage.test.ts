@@ -19,7 +19,7 @@ afterEach(() => {
   localStorage.removeItem(PAGE_PREFS_KEY)
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }
 
 /** The panel at /<n>, as the board mounts it (closing goes to the board). */
 const PanelRoute = defineComponent({

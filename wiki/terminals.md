@@ -2,10 +2,12 @@
 
 Every agent omo runs is a real agent program in a terminal, and the board shows
 that terminal: in the CEO tab, in a ticket's Agents tab, and in a window of its
-own. You can also open your own shells. Typing into an agent's terminal types
-into the agent, exactly as if you sat at it.
+own. You can also open your own shells. An agent's terminal is read-only until
+you switch it; you write to an agent in the message box below its terminal, or
+type into the terminal itself once it is writable.
 
 - [Your own shells](#your-own-shells)
+- [Writing to an agent](#writing-to-an-agent)
 - [Typing into an agent](#typing-into-an-agent)
 - [Copy and paste](#copy-and-paste)
 - [Images](#images)
@@ -25,7 +27,57 @@ or in the working folder of a task without a project (also after it is done).
 
 Only you can open shells and read terminals and agent logs; agents cannot.
 
+## Writing to an agent
+
+Below every agent's terminal (the CEO's too, in the sidebar, in a ticket's Agents
+tab and in a terminal's own window) is a message box. Nothing omo or the agent
+does changes, sends or clears what you write there, takes the focus out of it or
+moves it, so you can write a longer message in peace while omo types its own
+lines into the terminal above.
+
+- **Enter** sends the message, **Shift+Enter** starts a new line; the **Send**
+  button does the same. The box grows with the text and then scrolls. A message
+  has at most 12,000 characters.
+- The whole text goes into the terminal as one message, as if you had pasted it
+  and pressed Enter, so several lines arrive as one message, not as several
+  submitted lines. omo writes the message and its Enter in one go: a line omo
+  types at the same moment comes before or after it, never inside it. After
+  sending, the box is empty; if sending fails (the terminal is disconnected, for
+  example) your text stays and the reason is shown.
+- Paste an image, or drop image files on the box: omo stores them as it does for
+  a terminal ([Images](#images)) and the box lists them above the text, each
+  with a button to remove it. Their paths go with the message, on a line of their
+  own. Pasted text is cleaned of control characters, as in a terminal. Other
+  files are refused with a note.
+- Each terminal keeps its own draft in this browser: it survives a reload,
+  switching to another ticket and back, and opening the terminal in its own
+  window or bringing it back. Drafts of terminals untouched for two weeks are
+  dropped.
+- The box is not shown once the agent has ended.
+- The box sends whatever the read-only switch says: that switch blocks only
+  direct typing into the terminal.
+
+## Read-only agent terminals
+
+An agent's terminal starts **read-only**, so a stray key or paste cannot reach
+the agent. The toggle above the terminal, next to the pop-out button, shows the
+state (**Read only** or **Writable**) and switches it. Switch to **Writable**
+for what the message box cannot do: answering an interactive prompt with single
+keys, arrow keys or Escape.
+
+- Read-only blocks only what would type into the terminal: the keyboard, paste
+  and dropped files. The mouse works as ever: wheel, clicks and drags are still
+  passed to a program that asks for mouse events (so scrolling works in
+  full-screen programs), and selecting and copying text, clicking links and
+  resizing work too.
+- The choice is kept per terminal for the browser session; a terminal you have
+  not switched starts read-only.
+- Your own shells are not agent terminals: they stay writable and have no
+  message box.
+
 ## Typing into an agent
+
+These keys work in a writable agent terminal and in your own shells.
 
 - **Enter** submits, as in the program itself.
 - **Shift+Enter** and **Ctrl+Enter** insert a line break without submitting.
@@ -36,7 +88,9 @@ Only you can open shells and read terminals and agent logs; agents cannot.
   before it.
 - omo's own messages to an agent (a mention, an answer, a review result) are
   typed in as one line starting with `omo: `. omo holds such a line back while
-  you type in that terminal, so it never ends up inside your text.
+  you type in that terminal, so it never ends up inside your text. A message
+  sent from the message box is written whole, so a line omo types never ends
+  up inside it either.
 
 An ended agent's terminal shows its saved log instead.
 

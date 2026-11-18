@@ -81,13 +81,13 @@ func Main() int {
 		return bridgeMain()
 	}
 	var in io.Reader = os.Stdin
-	if swallow, deaf, ok := composerSettings(); ok {
+	if swallow, deaf, paste, ok := composerSettings(); ok {
 		if err := rawInput(os.Stdin); err != nil {
 			fmt.Fprintf(os.Stdout, "fake: %v\n", err)
 			return ExitFailed
 		}
 		drop, _ := strconv.Atoi(os.Getenv(EnvDropPrompts))
-		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf), max(drop, 0))
+		in = pasteComposer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf), max(drop, 0), paste)
 		if path := os.Getenv(EnvRawReadyFile); path != "" {
 			if err := os.WriteFile(path, nil, 0o600); err != nil {
 				fmt.Fprintf(os.Stdout, "fake: %v\n", err)

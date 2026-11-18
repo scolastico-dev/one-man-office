@@ -65,3 +65,21 @@ func TestMergeModesAndBatchKeys(t *testing.T) {
 		t.Error("values")
 	}
 }
+
+func TestGeneralExportCheckIntervalWire(t *testing.T) {
+	var g General
+	if err := json.Unmarshal([]byte(`{"export_check_interval":"3m"}`), &g); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["export_check_interval"]) != `"3m"` {
+		t.Fatalf("interval = %s", fields["export_check_interval"])
+	}
+}

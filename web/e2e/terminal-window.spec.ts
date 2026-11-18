@@ -5,7 +5,7 @@ import type { Locator, Page, WebSocket } from '@playwright/test'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForSession, type AgentSession } from './support/agents'
 import { observe, openBoard } from './support/board'
-import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 
 // A terminal popped out into a window of its own: the window shows it alone,
 // the main window shows a placeholder and holds no connection to it, and the
@@ -143,6 +143,8 @@ test.describe('a developer waiting for a line', () => {
     await expect(popup.locator('.xterm-helper-textarea')).toBeFocused()
     const term = terminalIn(popup.locator('main'))
     await expectTerminalText(term, 'hello from fake')
+    await makeWritable(popup.locator('main'))
+    await popup.locator('.xterm-helper-textarea').focus()
     await popup.keyboard.type('ping')
     await popup.keyboard.press('Enter')
     await expectTerminalText(term, 'got it')

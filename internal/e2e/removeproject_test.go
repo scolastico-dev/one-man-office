@@ -30,6 +30,7 @@ func (w *world) addProject(name, address string, noAddress bool) (id, repo, bare
 	if address != "" {
 		bare = filepath.Join(w.t.TempDir(), name+".git")
 		gitIn(w.t, filepath.Dir(bare), "init", "-q", "--bare", bare)
+		gitIn(w.t, bare, "fetch", "-q", repo, "refs/heads/main:refs/heads/main")
 		gitIn(w.t, repo, "remote", "add", "origin", address)
 		n, _ := strconv.Atoi(g.AgentEnv["GIT_CONFIG_COUNT"])
 		g.AgentEnv["GIT_CONFIG_COUNT"] = strconv.Itoa(n + 1)
@@ -93,7 +94,7 @@ func projectOf(tk api.Ticket, id string) (api.TicketProject, bool) {
 // user's word, takes that project off the story: omo refuses while the
 // project's branch has commits its base lacks, and with discard ends the
 // reviewer that waits there, removes the worktree and deletes the branch.
-// Exporting again then finishes the story as exported.
+// Exporting again waits for the remaining remote merges before finishing.
 func TestRemoveProjectFromStoryEndToEnd(t *testing.T) {
 	w := newWorld(t, config{origin: true})
 	app2, repo2, bare2 := w.addProject("app2", "https://example.invalid/you/app2.git", false)
@@ -105,7 +106,8 @@ func TestRemoveProjectFromStoryEndToEnd(t *testing.T) {
 		// so every project has something to export.
 		"pm": strings.Join([]string{
 			"ready",
-			"git|-C|../../" + app2 + "/$TICKET|commit|--allow-empty|-m|work in app2",
+			"git|-C|../../" + app2 + "/$TICKET|rm|README.md",
+			"git|-C|../../" + app2 + "/$TICKET|commit|-m|work in app2",
 			"git|-C|../../" + preview + "/$TICKET|commit|--allow-empty|-m|work in preview",
 			"create-tasks|1",
 			"release-all",
@@ -187,12 +189,21 @@ func TestRemoveProjectFromStoryEndToEnd(t *testing.T) {
 		t.Fatal("a remaining project lost its branch")
 	}
 
-	// Exporting again finishes the story: both pull requests are kept.
+	// Exporting again waits for the remote merges: both pull requests are kept.
 	w.do("POST", "/api/tickets/"+itoa(story)+"/approve", api.ApproveRequest{Export: true}, nil)
-	tk = w.waitColumn(story, api.ColumnDone, "")
-	if tk.Resolution != api.ResolutionExported ||
+	tk = w.waitColumn(story, api.ColumnReview, api.ReviewStageAwaitingMerge)
+	if tk.Resolution != "" ||
 		tk.ExportURL != "https://example.invalid/you/"+w.project+"/pull/"+itoa(story)+"\nhttps://example.invalid/you/"+app2+"/pull/"+itoa(story) {
 		t.Fatalf("resolution %q url %q", tk.Resolution, tk.ExportURL)
+	}
+	for i, id := range []string{w.project, app2} {
+		p, _ := projectOf(tk, id)
+		gitIn(t, []string{w.origin, bare2}[i], "update-ref", "refs/heads/"+p.ExportBase, p.ExportCommit)
+	}
+	w.do("POST", "/api/tickets/"+itoa(story)+"/check-export", struct{}{}, nil)
+	done := w.waitColumn(story, api.ColumnDone, "")
+	if done.Resolution != api.ResolutionExported || !done.ExportMerged {
+		t.Fatalf("story not completed after remaining merges: %q, merged %v", done.Resolution, done.ExportMerged)
 	}
 	w.noCrashes(story)
 }

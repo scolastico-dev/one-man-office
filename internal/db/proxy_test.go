@@ -26,8 +26,8 @@ func TestProxyMigrationFromVersionSeven(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if userVersion(t, d) != 8 {
-		t.Fatalf("schema %d want 8", userVersion(t, d))
+	if userVersion(t, d) != SchemaVersion {
+		t.Fatalf("schema %d want %d", userVersion(t, d), SchemaVersion)
 	}
 	var value string
 	if err := d.QueryRow(`SELECT value FROM server_state WHERE key='keep'`).Scan(&value); err != nil || value != "yes" {
@@ -35,5 +35,31 @@ func TestProxyMigrationFromVersionSeven(t *testing.T) {
 	}
 	if _, err := d.Exec(`INSERT INTO proxy_forwards(id,host,port,scheme,name,start_path,strip_prefix,verify_tls) VALUES('abc','::1',5173,'http','dev','/',0,0)`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPluginForwardMigrationPreservesUserRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	d, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations[:8] {
+		if _, err := d.Exec(migration); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Exec(`PRAGMA user_version=8; INSERT INTO proxy_forwards(id,host,port,scheme,name,start_path) VALUES('user','127.0.0.1',3456,'http','keep','/')`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var owner, task string
+	if err := d.QueryRow(`SELECT plugin_owner,task_id FROM proxy_forwards WHERE id='user'`).Scan(&owner, &task); err != nil || owner != "" || task != "" {
+		t.Fatalf("migration: owner=%q task=%q err=%v", owner, task, err)
 	}
 }

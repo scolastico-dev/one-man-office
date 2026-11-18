@@ -5,25 +5,13 @@ package gitops
 import (
 	"os"
 	"os/exec"
-	"strconv"
 	"time"
-
-	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
-// killWithChildren kills git and its child processes when the command's
-// context ends. Windows has no SIGTERM a console program like git could
-// clean up on, so there is no grace period: the tree is ended at once, which
-// can leave index.lock behind.
+// killWithChildren is handled by processtree.Run/CombinedOutput on Windows:
+// the root is in a kill-on-close job before it runs, including git helpers.
+// Windows has no console SIGTERM grace period, as before.
 func killWithChildren(cmd *exec.Cmd, grace time.Duration) (afterWait func()) {
-	cmd.Cancel = func() error {
-		kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
-		kill.Env = childenv.Inherited()
-		if err := kill.Run(); err != nil {
-			return cmd.Process.Kill()
-		}
-		return nil
-	}
 	return func() {}
 }
 

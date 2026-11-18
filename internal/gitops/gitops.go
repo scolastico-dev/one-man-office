@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/branchname"
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
@@ -110,10 +111,11 @@ func (g *Git) lockKey(repo string) string {
 	key, ok = commonGitDir(repo)
 	if !ok {
 		if abs, err := filepath.Abs(repo); err == nil {
-			return abs
+			return pathKey(abs)
 		}
 		return repo
 	}
+	key = pathKey(key)
 	g.mu.Lock()
 	g.lockKeys[repo] = key
 	g.mu.Unlock()
@@ -169,7 +171,7 @@ func SameRepository(a, b string) (same, known bool) {
 	if !ok {
 		return false, false
 	}
-	return ca == cb, true
+	return samePathString(ca, cb), true
 }
 
 // isGitDir reports whether dir looks like a git directory (a bare
@@ -226,7 +228,7 @@ func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...stri
 	afterWait := killWithChildren(cmd, g.grace)
 	// Children that outlive git must not keep the output pipe open forever.
 	cmd.WaitDelay = g.grace
-	out, err := cmd.CombinedOutput()
+	out, err := processtree.CombinedOutput(cmd)
 	afterWait()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

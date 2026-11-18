@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
 import { expectCardIn, nudgeReconnect, observe, openBoard } from './support/board'
-import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page, WebSocketRoute } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { makeWorkspace, type Workspace } from './support/workspace'
@@ -398,6 +398,8 @@ test.describe('a ticket that finishes while a shell is open', () => {
       await sidebar(page).locator(`[data-session="${session.id}"]`).click()
       const developer = terminalIn(sidebar(page))
       await expectTerminalText(developer, 'waiting for shell')
+      // An agent terminal starts read-only.
+      await makeWritable(sidebar(page))
       await typeInTerminal(page, developer, 'shell-open')
 
       // The ticket is merged and done; the folder stays for the shell.

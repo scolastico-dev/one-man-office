@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -24,6 +25,7 @@ type diskState struct {
 	// exportsRunning is set while a check runs.
 	exportsChecked time.Time
 	exportsRunning bool
+	exportsCancel  context.CancelFunc
 }
 
 // HoldWorktree keeps the worktree at path from being removed until release
@@ -102,10 +104,7 @@ func holdKey(path string) string {
 	if err != nil {
 		p = filepath.Clean(path)
 	}
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		p = real
-	}
-	return p
+	return realPath(p)
 }
 
 // noteOnce reports whether the comment named key was not posted in this
@@ -134,14 +133,28 @@ func (e *Engine) forgetNote(key string) {
 const maxListed = 20
 
 // showPath writes a path so that it stays on one line and inside a code
-// span, and shows the characters that hide or reorder text as escapes.
+// span, and shows the characters that hide or reorder text as escapes. A
+// path with such a character, a backtick or a quote is written as a quoted
+// string; so is one with a backslash, except where the backslash separates
+// folders (Windows): there every path has one, and it is written as it is.
 func showPath(p string) string {
-	if strings.ContainsAny(p, "`\\\"") || strings.IndexFunc(p, func(r rune) bool {
+	if strings.ContainsAny(p, quotedInPaths) || strings.IndexFunc(p, func(r rune) bool {
 		return textsafe.IsHidden(r)
 	}) >= 0 {
 		return strings.ReplaceAll(strconv.Quote(p), "`", `\x60`)
 	}
 	return p
+}
+
+// quotedInPaths holds the visible characters that make showPath quote a
+// path.
+var quotedInPaths = quotedIn(filepath.Separator)
+
+func quotedIn(separator rune) string {
+	if separator == '\\' {
+		return "`\""
+	}
+	return "`\\\""
 }
 
 // code writes s as an inline code span, so that nothing in it is read as a

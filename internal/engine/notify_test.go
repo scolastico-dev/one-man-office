@@ -719,3 +719,12 @@ func TestAnswerAfterRestartReachesTheAgentInTheAskersSlot(t *testing.T) {
 		t.Fatalf("wait = %q, %v; want %q", r.reason, r.err, want)
 	}
 }
+
+func TestExportWaitingNotification(t *testing.T) {
+	v := routeView{sessions: []board.EngineSession{{ID: "ceo", Role: api.RoleCEO}}, ceoEnabled: true}
+	ev := movedEvent(1, api.Actor{Role: api.RoleSystem}, api.TicketSummary{Number: 7, Type: api.TypeTask, Column: api.ColumnReview, ReviewStage: api.ReviewStageAwaitingMerge, Supervisor: api.RoleCEO}, api.ColumnReview, board.ActionExported)
+	r := route(ev, v)
+	if len(r.deliveries) != 1 || !strings.Contains(r.deliveries[0].line, "exported, waiting for the merge") || strings.Contains(r.deliveries[0].line, "is done") {
+		t.Fatalf("waiting export notification: %+v", r.deliveries)
+	}
+}

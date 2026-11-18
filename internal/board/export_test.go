@@ -29,7 +29,7 @@ func exportJob(t *testing.T, b *Board, n int, project string) Actor {
 	return a
 }
 
-func TestExportResultPerProjectCompletesTicket(t *testing.T) {
+func TestExportResultPerProjectAwaitsMerge(t *testing.T) {
 	b, _ := newTestBoard(t)
 	ctx := context.Background()
 	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}, WhenApproved: api.WhenApprovedExport})
@@ -64,19 +64,19 @@ func TestExportResultPerProjectCompletesTicket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported ||
+	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" ||
 		got.ExportURL != "https://example.test/api/pull/1\nhttps://example.test/ui/pull/2" ||
 		got.Projects[0].ExportURL != "https://example.test/api/pull/1" || got.Projects[1].ExportURL != "https://example.test/ui/pull/2" {
 		t.Fatalf("after api: %s %s %q %+v", got.Column, got.Resolution, got.ExportURL, got.Projects)
 	}
 	moved := movedEvents(t, eventsAfter(t, b, last))
-	if len(moved) != 1 || moved[0].Action != ActionExported || moved[0].To != api.ColumnDone {
+	if len(moved) != 1 || moved[0].Action != ActionExported || moved[0].To != api.ColumnReview {
 		t.Fatalf("moved = %+v", moved)
 	}
 	if c, ok := lastComment(t, b, s.Number); !ok || c.Body != "opened" || c.Author.Role != api.RoleDeveloper {
 		t.Fatalf("comment = %+v", c)
 	}
-	// Exported is done, but a dependent waits until the export is merged.
+	// The export stays in Review, and a dependent waits until it is merged.
 	if w := get(t, b, dependent.Number).WaitingFor; len(w) != 1 || w[0].Reason != api.WaitingExportNotMerged {
 		t.Fatalf("waiting = %+v", w)
 	}
@@ -142,7 +142,7 @@ func TestExportErrorFailsExport(t *testing.T) {
 		t.Fatalf("retry: %q %q, %v", got.ReviewStage, got.Attention, err)
 	}
 	got, err = b.Done(ctx, exportJob(t, b, tk.Number, "api"), api.DoneRequest{URL: "https://example.test/pr/1"})
-	if err != nil || got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported || got.ExportURL != "https://example.test/pr/1" {
+	if err != nil || got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" || got.ExportURL != "https://example.test/pr/1" {
 		t.Fatalf("after retry: %s %s %q, %v", got.Column, got.Resolution, got.ExportURL, err)
 	}
 }
@@ -200,7 +200,7 @@ func TestCompleteExportSetsProjectURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := get(t, b, tk.Number)
-	if got.Resolution != api.ResolutionExported || got.ExportURL != "https://example.test/pr/9" || got.Projects[0].ExportURL != "https://example.test/pr/9" {
+	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" || got.ExportURL != "https://example.test/pr/9" || got.Projects[0].ExportURL != "https://example.test/pr/9" {
 		t.Fatalf("got %s %q %+v", got.Resolution, got.ExportURL, got.Projects)
 	}
 
@@ -291,7 +291,7 @@ func TestSetExportMergedSatisfiesDependents(t *testing.T) {
 		t.Fatal(err)
 	}
 	evs := eventsAfter(t, b, last)
-	if len(evs) != 2 || evs[0].Kind != api.KindTicketUpdated || !strings.Contains(evs[0].Detail, `"fields":["export_merged"]`) ||
+	if len(evs) != 2 || evs[0].Kind != api.KindTicketMoved || !strings.Contains(evs[0].Detail, `"action":"merged"`) ||
 		!strings.Contains(evs[0].Actor, `"role":"system"`) {
 		t.Fatalf("events = %+v", evs)
 	}
@@ -353,7 +353,7 @@ func TestExportResultOnlyFromExportJob(t *testing.T) {
 		t.Fatalf("column %s", got.Column)
 	}
 	// The export job of the task reports it.
-	if got, err := b.Done(ctx, exportJob(t, b, tk.Number, "api"), api.DoneRequest{URL: "https://example.test/pr/1"}); err != nil || got.Column != api.ColumnDone {
+	if got, err := b.Done(ctx, exportJob(t, b, tk.Number, "api"), api.DoneRequest{URL: "https://example.test/pr/1"}); err != nil || got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge {
 		t.Fatalf("export job: %s, %v", got.Column, err)
 	}
 }
@@ -440,7 +440,7 @@ func TestExportURLAfterAnotherProjectFailed(t *testing.T) {
 					_, err = b.Done(ctx, exportJob(t, b, s, "ui"), api.DoneRequest{URL: prUI})
 					wantCode(t, err, api.CodeInvalidTransition)
 					got = report(exportJob(t, b, s, "api"), api.DoneRequest{URL: "https://example.test/api/pull/1"})
-					if got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported ||
+					if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" ||
 						got.ExportURL != "https://example.test/api/pull/1\n"+prUI {
 						t.Fatalf("after retry: %s %s %q", got.Column, got.Resolution, got.ExportURL)
 					}
@@ -453,7 +453,7 @@ func TestExportURLAfterAnotherProjectFailed(t *testing.T) {
 						t.Fatal(err)
 					}
 					got = get(t, b, s)
-					if got.Column != api.ColumnDone || got.Resolution != api.ResolutionCompleted || got.Projects[1].ExportURL != prUI {
+					if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" || got.Projects[1].ExportURL != prUI {
 						t.Fatalf("after merge: %s %s %+v", got.Column, got.Resolution, got.Projects)
 					}
 				case "reject":

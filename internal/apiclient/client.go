@@ -50,11 +50,24 @@ type Client struct {
 func New(endpoint, session string) *Client {
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return transport.Dial(ctx, endpoint)
+			conn, err := transport.Dial(ctx, endpoint)
+			if err != nil {
+				return nil, &dialError{err}
+			}
+			return conn, nil
 		},
 	}
 	return &Client{http: &http.Client{Transport: tr}, endpoint: endpoint, session: session}
 }
+
+// dialError marks an error as one of reaching the socket, before any request
+// was sent. The error itself differs by platform: a Unix socket fails with a
+// *net.OpError, a Windows named pipe with an *os.PathError, so the client
+// tells a server that is not there by this mark and not by the error's type.
+type dialError struct{ err error }
+
+func (e *dialError) Error() string { return e.err.Error() }
+func (e *dialError) Unwrap() error { return e.err }
 
 // ErrEmptyAgentID is returned when OMO_AGENT_ID is set but empty: the
 // process was meant to be an agent and must not silently act as the user.
@@ -131,8 +144,8 @@ func (c *Client) send(ctx context.Context, req *http.Request, out any) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		var op *net.OpError
-		if errors.As(err, &op) && op.Op == "dial" {
+		var de *dialError
+		if errors.As(err, &de) {
 			return ErrNotRunning
 		}
 		var ue *url.Error

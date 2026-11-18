@@ -4,7 +4,6 @@ package session
 
 import "os/exec"
 
-// ownProcessGroup keeps the default cancellation on Windows: the command's
-// process is terminated. Windows has no process group to signal; a
-// grandchild it started is not waited for (see WaitDelay).
+// ownProcessGroup is handled by processtree.Output on Windows. The command
+// joins its job before executing, and descendants end with cancellation.
 func ownProcessGroup(*exec.Cmd) {}

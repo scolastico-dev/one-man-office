@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 // DiffLimits bounds what a diff result carries. A zero or negative value
@@ -196,7 +198,7 @@ func (g *Git) runCappedFor(ctx context.Context, d time.Duration, extraEnv []stri
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	afterWait := killWithChildren(cmd, g.grace)
 	cmd.WaitDelay = g.grace
-	runErr := cmd.Run()
+	runErr := processtree.Run(cmd)
 	afterWait()
 	stdout.mu.Lock()
 	out, cut = append([]byte(nil), stdout.buf.Bytes()...), stdout.cut

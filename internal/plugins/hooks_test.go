@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -140,8 +141,14 @@ func TestCommandHookEnvironment(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, vars[k], v)
 		}
 	}
-	if info, err := os.Stat(data); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+	info, err := os.Stat(data)
+	if err != nil || !info.IsDir() {
 		t.Fatalf("data folder: %v %v", info, err)
+	}
+	// Windows has no Unix file modes: Go reports 0777 for every folder
+	// there, whatever its access list says.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("data folder: mode %v, want 0700", info.Mode().Perm())
 	}
 }
 

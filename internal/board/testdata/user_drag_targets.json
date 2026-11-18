@@ -1546,6 +1546,88 @@
       }
     },
     {
+      "name": "standalone task in review, awaiting exported merge",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "awaiting_merge",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "awaiting_merge"
+        },
+        "done": {
+          "ok": true,
+          "action": "merged",
+          "column": "done"
+        }
+      }
+    },
+    {
+      "name": "story in review, awaiting exported merge",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "awaiting_merge",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "awaiting_merge"
+        },
+        "done": {
+          "ok": true,
+          "action": "merged",
+          "column": "done"
+        }
+      }
+    },
+    {
       "name": "story in review, agent review",
       "ticket": {
         "type": "story",

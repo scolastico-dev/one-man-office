@@ -25,8 +25,11 @@ web:
 
 ## web-check: type-check and unit-test the browser app
 web-check:
-	npm --prefix web run typecheck
-	npm --prefix web run test
+	@failed=""; \
+	for script in typecheck test; do \
+		npm --prefix web run $$script || failed="$$failed $$script"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "web-check: failed:$$failed"; exit 1; fi
 
 ## e2e: build omo and run the browser end-to-end tests
 e2e: build
@@ -87,8 +90,17 @@ cross-windows: cross-guard
 test:
 	go test ./... -timeout 900s
 
-## check: everything CI should gate on
-check: fmt vet lint test
+## check: everything CI should gate on. Every stage runs even when an earlier
+## one failed, so that one run reports all problems; the result is a failure
+## when any stage failed.
+check:
+	@failed=""; \
+	for stage in fmt vet lint test; do \
+		echo "== make $$stage"; \
+		$(MAKE) --no-print-directory $$stage || failed="$$failed $$stage"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "== make check: failed stages:$$failed"; exit 1; fi; \
+	echo "== make check: all stages passed"
 
 ## fmt: report unformatted files (does not rewrite)
 fmt:
@@ -97,9 +109,12 @@ fmt:
 
 ## vet: run go vet for this OS and type-check the Windows and macOS builds, tests included
 vet:
-	go vet ./...
-	GOOS=windows go vet ./...
-	GOOS=darwin go vet ./...
+	@failed=""; \
+	for os in "" windows darwin; do \
+		if [ -n "$$os" ]; then echo "GOOS=$$os go vet ./..."; else echo "go vet ./..."; fi; \
+		GOOS=$$os go vet ./... || failed="$$failed $${os:-host}"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "go vet failed for:$$failed"; exit 1; fi
 
 ## lint: report unused code with staticcheck when it is installed (skipped otherwise)
 lint:

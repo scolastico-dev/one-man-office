@@ -192,6 +192,11 @@ func (b *Board) ReleaseAllClaims(ctx context.Context) error {
 // cannot be flagged. Recording the same step and reason again changes
 // nothing.
 func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, reason string) error {
+	return b.SetFailedOwned(ctx, n, step, "", reason)
+}
+
+// SetFailedOwned records the producer of a failed step independently of its text.
+func (b *Board) SetFailedOwned(ctx context.Context, n int64, step api.FailedStep, owner AttentionOwner, reason string) error {
 	if !slices.Contains([]api.FailedStep{api.FailedStart, api.FailedAgent, api.FailedMerge}, step) {
 		return api.Errorf(api.CodeValidation, "a failed step is start, agent or merge, not %q", step)
 	}
@@ -212,7 +217,7 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 		if t.FailedStep != step {
 			fields = append(fields, "failed_step")
 		}
-		if t.Attention != line {
+		if t.Attention != line || t.AttentionOwner != owner {
 			fields = append(fields, "attention")
 		}
 		if t.Busy {
@@ -224,8 +229,8 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 		if len(fields) == 0 {
 			return false, nil
 		}
-		if _, err := tx.Exec(`UPDATE tickets SET failed_step = ?, attention = ?, busy = 0, start_blocked = '',
-			updated_at = ? WHERE id = ?`, step, line, b.stamp(), n); err != nil {
+		if _, err := tx.Exec(`UPDATE tickets SET failed_step = ?, attention = ?, attention_owner = ?, busy = 0, start_blocked = '',
+			updated_at = ? WHERE id = ?`, step, line, owner, b.stamp(), n); err != nil {
 			return false, err
 		}
 		if t.Busy {
@@ -236,7 +241,7 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 		if err != nil {
 			return false, err
 		}
-		if t.FailedStep == step && t.Attention == line {
+		if t.FailedStep == step && t.Attention == line && t.AttentionOwner == owner {
 			return true, nil
 		}
 		return true, b.systemComment(tx, n, fmt.Sprintf("Needs attention: %s", reason), t.Supervisor)
@@ -259,7 +264,7 @@ func (b *Board) ClearFailed(ctx context.Context, n int64, step api.FailedStep) e
 // clearFailed clears t's failed step and attention flag and emits
 // ticket.updated.
 func (b *Board) clearFailed(tx *sql.Tx, a Actor, t ticketRow) error {
-	if _, err := tx.Exec(`UPDATE tickets SET failed_step = '', attention = '', updated_at = ? WHERE id = ?`,
+	if _, err := tx.Exec(`UPDATE tickets SET failed_step = '', attention = '', attention_owner = '', updated_at = ? WHERE id = ?`,
 		b.stamp(), t.ID); err != nil {
 		return err
 	}

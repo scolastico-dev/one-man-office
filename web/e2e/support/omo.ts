@@ -54,6 +54,8 @@ export interface OmoOptions {
    * wait for ended sessions does not apply (a test waits on the board itself).
    */
   agents?: Partial<Record<AgentRole, string>>
+  /** More environment for the fake agent (see `internal/fakeagent`, for example `OMO_FAKE_BRACKETED_PASTE: '1'`). */
+  agentEnv?: Record<string, string>
   /**
    * `PATH` of the server and of every omo command of the test, in place of
    * the runner's own: a folder of the test's own fake programs, so what omo
@@ -77,6 +79,8 @@ export interface OmoOptions {
    * for those it finds. Needs `path` (the test's own fake programs).
    */
   firstStart?: boolean
+  /** Additional trusted CA for a local HTTPS artifact fixture, passed only to this test's server/CLI. */
+  tlsCA?: string
 }
 
 export type { CliResult }
@@ -180,6 +184,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
   }
   const ownPath = opts.programs === undefined ? opts.path : opts.programs.inheritPath ? [programs, pathWithoutAgentPrograms()].join(delimiter) : programs
   const env = cleanEnv(home, ownPath)
+  if (opts.tlsCA !== undefined) env.SSL_CERT_FILE = opts.tlsCA
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
@@ -275,7 +280,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
     },
     async start() {
       assertIsolated()
-      if (child !== undefined && child.exitCode === null) throw new Error('the test server is already running')
+      if (child !== undefined && child.exitCode === null && child.signalCode === null) throw new Error('the test server is already running')
       for (let attempt = 0; ; attempt++) {
         const failure = await spawnServer()
         if (failure === undefined) break
@@ -292,7 +297,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
       if (opts.agents === undefined) await sessionsEnded()
     },
     async seed(scenario) {
-      if (child !== undefined && child.exitCode === null) throw new Error('seed() works only while the server is stopped')
+      if (child !== undefined && child.exitCode === null && child.signalCode === null) throw new Error('seed() works only while the server is stopped')
       assertIsolated()
       if (!existsSync(SEED_BINARY)) throw new Error(`the seeding tool ${SEED_BINARY} is missing; the e2e global setup builds it`)
       const json = JSON.stringify(scenario).replaceAll('{{repo}}', repo.replaceAll('\\', '\\\\'))
@@ -376,6 +381,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
       GIT_COMMITTER_NAME: 'omo',
       GIT_COMMITTER_EMAIL: 'omo@example.invalid',
     }
+    Object.assign(env, opts.agentEnv ?? {})
     for (const role of AGENT_ROLES) {
       const text = scripts[role]
       if (text !== undefined) env[`OMO_FAKE_SCRIPT_${role.toUpperCase()}`] = text

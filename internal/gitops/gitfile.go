@@ -65,7 +65,7 @@ func (g *Git) CheckWorktreeGitFile(ctx context.Context, repo, dir string) error 
 	}
 	// git may have written the path through a link of the user's, outside
 	// the worktree: the same folder is fine, a link inside the worktree is not.
-	if p != cand && !within(cand, p) {
+	if !samePathString(p, cand) && !within(cand, p) {
 		if real, err := filepath.EvalSymlinks(p); err == nil && samePathString(real, record) {
 			return nil
 		}

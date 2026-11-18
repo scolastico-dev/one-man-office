@@ -152,7 +152,7 @@ func TestDiscoverNamesByRelativePath(t *testing.T) {
 
 	// The root itself is named by the root's base name as written.
 	rootRepo := newRepo(t, realTemp(t), "whatever")
-	added, err = s.DiscoverProjects("/somewhere/my-root", []Found{{Path: rootRepo, Rel: ""}})
+	added, err = s.DiscoverProjects(abs("/somewhere/my-root"), []Found{{Path: rootRepo, Rel: ""}})
 	if err != nil || len(added) != 1 || added[0].Name != "my-root" || added[0].ID != "my-root" {
 		t.Fatalf("root project = %+v %v", added, err)
 	}

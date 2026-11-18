@@ -18,7 +18,7 @@ func TestNaturalAgentExitReapsDetachedProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	childPID := waitForPIDFile(t, pidFile)
 	t.Cleanup(func() { _ = syscall.Kill(childPID, syscall.SIGKILL) })
 	select {

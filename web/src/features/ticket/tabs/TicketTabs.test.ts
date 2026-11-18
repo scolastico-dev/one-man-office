@@ -23,7 +23,7 @@ async function open(t: ReturnType<typeof ticket>, path: string, props: Record<st
   return { w: wrapper, router }
 }
 /** A task in project demo. */
-const task = (n: number) => ticket({ number: n, projects: [{ project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '', export_error: '' }] })
+const task = (n: number) => ticket({ number: n, projects: [{ project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '', export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] })
 const labels = (w: VueWrapper) => w.findAll('[role="tab"]').map((t) => t.attributes('data-tab'))
 
 test('tabs: Comments, Diff, Agents; Tasks only for a story', async () => {

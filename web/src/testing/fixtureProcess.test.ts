@@ -89,10 +89,25 @@ describe('starting the helper process', () => {
 
 describe('the standalone browser drivers', () => {
   const dir = resolve('scripts')
-  const drivers = readdirSync(dir).filter((name) => name.endsWith('.test.mjs'))
+  // A driver here is a script that runs the Go fixture helper, so it must start it through fixtureProcess.mjs alone. A script that starts
+  // no helper but runs one short program synchronously on purpose is listed with the reason; processOwnership.guard.test.ts holds it
+  // to the synchronous forms like every other test file.
+  const SYNCHRONOUS_ONLY: Record<string, string> = {
+    'git-isolation.test.mjs': 'checks the browser Git helper by running one synchronous node child (spawnSync) whose environment it contaminates on purpose; it starts no fixture helper',
+  }
+  const scripts = readdirSync(dir).filter((name) => name.endsWith('.test.mjs'))
+  const drivers = scripts.filter((name) => !(name in SYNCHRONOUS_ONLY))
 
   it('are found', () => {
     expect(drivers).toEqual(expect.arrayContaining(['proxy-bootstrap.test.mjs', 'proxy-subdomain.test.mjs']))
+  })
+
+  it.each(Object.keys(SYNCHRONOUS_ONLY))('%s is a listed script that starts no long-lived child and no fixture helper', (name) => {
+    expect(scripts).toContain(name)
+    expect(SYNCHRONOUS_ONLY[name]!.length).toBeGreaterThan(40)
+    const text = readFileSync(join(dir, name), 'utf8')
+    expect(text).not.toMatch(/(?<![.\w])(spawn|fork|exec|execSync|execFile)\(/)
+    expect(text).not.toMatch(/fixtureProcess|startFixture/)
   })
 
   // A driver that wrote its own child environment could drop the configured temporary roots again;
@@ -543,6 +558,16 @@ describe('tests that are skipped', () => {
     'e2e/filters.spec.ts': {
       count: 1,
       reason: 'not a platform skip: the screenshot-only test runs only when OMO_SCREENSHOTS names a folder to write to',
+    },
+    // Both were merged from main as whole-file skips on every platform but Linux. They are listed because they exist, not because they
+    // satisfy the rule above: a whole spec is wider than one assertion the platform truly cannot make (reported to the product owner).
+    'e2e/plugin-editor.spec.ts': {
+      count: 1,
+      reason: 'main\'s whole-file skip outside Linux: the spec drives a local editor protocol fixture through a POSIX runtime bridge; wider than the single-assertion rule allows, kept as merged and reported',
+    },
+    'e2e/plugin-lifecycle.spec.ts': {
+      count: 1,
+      reason: 'main\'s whole-file skip outside Linux: the spec runs a local process fixture that is exercised only on Linux there (native task tests cover other platforms); wider than the single-assertion rule allows, kept as merged and reported',
     },
   }
 

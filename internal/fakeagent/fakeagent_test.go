@@ -759,3 +759,72 @@ func TestComposerDropsWholePromptsWithoutEcho(t *testing.T) {
 		t.Fatalf("lines %q, echo %q, error %v", got, echo.String(), err)
 	}
 }
+
+func TestComposerTakesAPasteAsOneLine(t *testing.T) {
+	var echo syncBuffer
+	in, feed := io.Pipe()
+	lines := pasteComposer(in, &echo, 0, time.Time{}, 0, true)
+	go func() {
+		// The markers may be split across reads; the line breaks inside the
+		// paste do not submit, the Enter after it does.
+		feed.Write([]byte("\x1b[20"))
+		feed.Write([]byte("0~alpha\rbeta\n\x1b[201"))
+		feed.Write([]byte("~\r"))
+		feed.Write([]byte("plain\r"))
+		feed.Close()
+	}()
+	got, _ := io.ReadAll(lines)
+	if want := "alpha⏎beta⏎\nplain\n"; string(got) != want {
+		t.Fatalf("lines %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(echo.String(), "\x1b[?2004h") {
+		t.Fatalf("bracketed paste was not asked for: %q", echo.String())
+	}
+}
+
+func TestComposerWithoutBracketedPasteSubmitsEveryLine(t *testing.T) {
+	in, feed := io.Pipe()
+	lines := composer(in, io.Discard, 0, time.Time{}, 0)
+	go func() {
+		feed.Write([]byte("alpha\rbeta\r"))
+		feed.Close()
+	}()
+	if got, _ := io.ReadAll(lines); string(got) != "alpha\nbeta\n" {
+		t.Fatalf("lines %q", got)
+	}
+}
+
+// save-prompt never shows a file that is not complete: a test that waits for
+// the file to exist and then reads it gets the whole prompt.
+func TestSavePromptNeverShowsAPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "prompt.txt")
+	held := 0
+	beforeRename = func(final string) {
+		held++
+		if final != target {
+			t.Errorf("renaming to %s, want %s", final, target)
+		}
+		// The temporary file is complete, and the name is still free.
+		if _, err := os.Stat(final); !os.IsNotExist(err) {
+			t.Errorf("the final name existed before the content was complete: %v", err)
+		}
+	}
+	t.Cleanup(func() { beforeRename = nil })
+	w := startWorld(t)
+	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")
+	res := runFake(t, Options{Dir: dir, Script: "ready\nsave-prompt|" + target})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	if held != 1 {
+		t.Fatalf("held %d times", held)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("saved prompt %q: %v", got, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".prompt.txt.tmp-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
+	}
+}

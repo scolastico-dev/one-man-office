@@ -147,6 +147,8 @@ func dragSetups() []dragSetup {
 		{name: "standalone task in review, merging", col: rv, stage: api.ReviewStageMerging},
 		{name: "standalone task in review, merging, omo is merging it", col: rv, stage: api.ReviewStageMerging, busy: true},
 		{name: "standalone task in review, exporting", col: rv, stage: api.ReviewStageExporting},
+		{name: "standalone task in review, awaiting exported merge", col: rv, stage: api.ReviewStageAwaitingMerge},
+		{name: "story in review, awaiting exported merge", story: true, col: rv, stage: api.ReviewStageAwaitingMerge},
 		{name: "story in review, agent review", story: true, col: rv, stage: agentStage},
 		{name: "story in review, waiting for the user", story: true, col: rv, stage: human},
 		{name: "story in review, merging", story: true, col: rv, stage: api.ReviewStageMerging},
@@ -366,6 +368,9 @@ func TestUserDragTargetsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v\nregenerate it with: go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1", dragGoldenPath, err)
 	}
+	// A checkout on Windows may hold the file with CRLF line ends (git's
+	// core.autocrlf); the rules are the same, so the line ends do not count.
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("the board's drag rules no longer match %s.\n"+
 			"Regenerate it with: go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1\n"+

@@ -12,7 +12,11 @@ import (
 
 // ticketLine is the one-line form of a ticket: "#<n> <type> <column> <title>".
 func ticketLine(t api.TicketSummary) string {
-	return fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, OneLine(t.Title))
+	line := fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, OneLine(t.Title))
+	if t.ReviewStage == api.ReviewStageAwaitingMerge {
+		line += " [exported, waiting for the merge]"
+	}
+	return line
 }
 
 func numbers(ns []int) string {
@@ -120,6 +124,14 @@ func showTicket(w io.Writer, t api.Ticket) {
 	}
 	if t.ReviewStage != "" {
 		fmt.Fprintf(w, "review stage: %s (round %d)\n", t.ReviewStage, t.ReviewRound)
+	}
+	if t.ReviewStage == api.ReviewStageAwaitingMerge {
+		fmt.Fprintln(w, "export status: exported, waiting for the merge")
+		for _, p := range t.Projects {
+			if p.ExportCommit != "" {
+				fmt.Fprintf(w, "export target (%s): %s %s -> %s (commit %s)\n", OneLine(p.Project), OneLine(p.ExportRemote), OneLine(p.ExportBranch), OneLine(p.ExportBase), OneLine(p.ExportCommit))
+			}
+		}
 	}
 	if t.Attention != "" {
 		fmt.Fprintln(w, "attention:")

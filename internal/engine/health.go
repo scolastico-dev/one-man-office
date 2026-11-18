@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,8 +29,8 @@ type healthState struct {
 	// reminded holds the open questions whose addressee was reminded, by
 	// comment id.
 	reminded map[int64]bool
-	// flags holds, per ticket, the question whose attention text the
-	// health check set and the text as stored, so it clears only its own.
+	// flags holds, per ticket, the question whose attention flag the
+	// health check owns, so it clears only its own.
 	flags map[int64]questionFlag
 }
 
@@ -51,14 +52,15 @@ type stallRecord struct {
 	remindedAt time.Time
 	echoUntil  time.Time
 	// flagging is set while the failed step is being written; flagged is
-	// the attention text it stored ("" while not flagged).
+	// the owner of the attention it stored ("" while not flagged).
 	flagging bool
-	flagged  string
+	flagged  board.AttentionOwner
 }
 
 // questionFlag is the attention one question put on its ticket.
 type questionFlag struct {
 	comment int64
+	owner   board.AttentionOwner
 	text    string
 }
 
@@ -127,9 +129,9 @@ type stallAction struct {
 	t                   board.EngineTicket
 	remind, flag, clear bool
 	// silent is how long the agent has been silent, since how long ago
-	// it was reminded; clearText is the attention text to clear.
+	// it was reminded; clearOwner identifies the flag to clear.
 	silent, since time.Duration
-	clearText     string
+	clearOwner    board.AttentionOwner
 }
 
 // checkStalls applies the silent-agent rule to every agent the engine runs.
@@ -181,7 +183,7 @@ func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter tim
 		switch {
 		case alive:
 			if rec.flagged != "" {
-				a.clear, a.clearText = true, rec.flagged
+				a.clear, a.clearOwner = true, rec.flagged
 			}
 			*rec = stallRecord{lastOutput: lo, activeAt: now, column: t.Column, stage: t.ReviewStage, round: t.ReviewRound}
 		case silentAfter <= 0 || rec.flagged != "" || rec.flagging:
@@ -216,7 +218,7 @@ func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter tim
 		case a.flag:
 			e.flagStalled(ctx, a)
 		case a.clear:
-			if a.t.FailedStep == api.FailedAgent && a.t.Attention == a.clearText {
+			if a.t.FailedStep == api.FailedAgent && a.t.AttentionOwner == a.clearOwner {
 				if err := e.b.ClearFailed(ctx, a.t.ID, api.FailedAgent); err != nil {
 					e.log.Printf("engine: clear the stall flag of #%d: %v", a.t.ID, err)
 				}
@@ -226,17 +228,18 @@ func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter tim
 }
 
 // flagStalled gives the ticket of a silent agent the failed step agent and
-// remembers the attention text that was stored.
+// remembers the owner of the flag that was stored.
 func (e *Engine) flagStalled(ctx context.Context, a stallAction) {
 	name := a.en.sess.Name
 	reason := fmt.Sprintf("%s has produced no output for %s, also not in the %s since omo reminded it. "+
 		"Choices: retry the ticket to replace it with a fresh agent, ask it a question if it may be waiting for something, or cancel the ticket.",
 		name, shortDuration(a.silent), shortDuration(a.since))
-	stored := ""
-	if err := e.b.SetFailed(ctx, a.t.ID, api.FailedAgent, reason); err != nil {
+	owner := board.AttentionOwner("stall:" + a.en.sess.ID)
+	var stored board.AttentionOwner
+	if err := e.b.SetFailedOwned(ctx, a.t.ID, api.FailedAgent, owner, reason); err != nil {
 		e.log.Printf("engine: flag the silent agent %s on #%d: %v", name, a.t.ID, err)
 	} else if t, ok := e.ticketNow(ctx, a.t.ID); ok && t.FailedStep == api.FailedAgent {
-		stored = t.Attention
+		stored = t.AttentionOwner
 	}
 	e.health.mu.Lock()
 	if rec := e.health.stalls[a.en.sess.ID]; rec != nil && rec.flagging {
@@ -313,7 +316,7 @@ func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.D
 		if (to != api.RoleUser && age < 2*after) || flagging[q.Ticket] {
 			continue
 		}
-		if f, ok := hs.flags[q.Ticket]; ok && t.Attention == f.text {
+		if f, ok := hs.flags[q.Ticket]; ok && t.AttentionOwner == f.owner {
 			if open[f.comment] {
 				continue // the ticket already shows an open question
 			}
@@ -324,7 +327,7 @@ func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.D
 		flags = append(flags, struct {
 			ticket int64
 			flag   questionFlag
-		}{q.Ticket, questionFlag{comment: q.Comment,
+		}{q.Ticket, questionFlag{comment: q.Comment, owner: board.AttentionOwner("question:" + strconv.FormatInt(q.Comment, 10)),
 			text: fmt.Sprintf("question %d to the %s has waited %s for an answer", q.Comment, roleWords(to), shortDuration(age))}})
 	}
 	for id := range hs.reminded {
@@ -333,13 +336,13 @@ func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.D
 		}
 	}
 	for n, f := range hs.flags {
-		if flagging[n] || (open[f.comment] && tickets[n].Attention == f.text) {
+		if flagging[n] || (open[f.comment] && tickets[n].AttentionOwner == f.owner) {
 			continue
 		}
-		// Answered, replaced by somebody else's text, or the ticket is
+		// Answered, replaced by somebody else's flag, or the ticket is
 		// gone: forget it, and clear it where it still shows.
 		delete(hs.flags, n)
-		if t, ok := tickets[n]; ok && !open[f.comment] && t.Attention == f.text {
+		if t, ok := tickets[n]; ok && !open[f.comment] && t.AttentionOwner == f.owner {
 			clears = append(clears, n)
 		}
 	}
@@ -354,12 +357,9 @@ func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.D
 		}
 	}
 	for _, f := range flags {
-		if err := e.b.SetAttention(ctx, f.ticket, f.flag.text); err != nil {
+		if err := e.b.SetAttentionOwned(ctx, f.ticket, f.flag.owner, f.flag.text); err != nil {
 			e.log.Printf("engine: flag question %d on #%d: %v", f.flag.comment, f.ticket, err)
 			continue
-		}
-		if t, ok := e.ticketNow(ctx, f.ticket); ok {
-			f.flag.text = t.Attention
 		}
 		hs.mu.Lock()
 		hs.flags[f.ticket] = f.flag

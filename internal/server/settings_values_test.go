@@ -183,7 +183,7 @@ func TestNoValueInAnyRefusal(t *testing.T) {
 		`{"limits":{"tasks":` + canaryNumber + `}}`,
 		`{"max_parallel":` + canaryNumber + `,"env":{"A":` + canaryNumber + `}}`,
 		`{"env":{"A":"` + canaryGeneral + `"},"bogus":` + canaryNumber + `}`,
-		`{"workspace_roots":[{"path":"/a","max_depth":"` + canaryModel + `"}]}`,
+		`{"workspace_roots":[{"path":` + absJSON("/a") + `,"max_depth":"` + canaryModel + `"}]}`,
 		// Template errors: Go words them with the piece of the template
 		// they stopped at.
 		`{"text":"{{ .Title }} {{ \"` + canaryGeneral + `\" \"` + canaryProfile + `\" }}"}`,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 var testLocation = CatalogLocation{Source: "https://example.invalid/omo.git", Ref: "release"}
@@ -154,10 +155,11 @@ func TestAcknowledgements(t *testing.T) {
 }
 
 func TestCatalogFromEnv(t *testing.T) {
+	local := testpath.Abs("/srv/omo")
 	for in, want := range map[string]CatalogLocation{
 		"":                       DefaultCatalog(),
-		"/srv/omo":               {Source: "/srv/omo"},
-		"/srv/omo#rework":        {Source: "/srv/omo", Ref: "rework"},
+		local:                    {Source: local},
+		local + "#rework":        {Source: local, Ref: "rework"},
 		"https://x.org/o.git#v1": {Source: "https://x.org/o.git", Ref: "v1"},
 	} {
 		got, err := CatalogFromEnv(in)
@@ -165,7 +167,7 @@ func TestCatalogFromEnv(t *testing.T) {
 			t.Errorf("CatalogFromEnv(%q) = %+v, %v; want %+v", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"relative", "file:///srv/omo", "/srv/omo#-x", "http://x.org/o.git"} {
+	for _, in := range []string{"relative", "file:///srv/omo", local + "#-x", "http://x.org/o.git"} {
 		if got, err := CatalogFromEnv(in); err == nil {
 			t.Errorf("CatalogFromEnv(%q) = %+v", in, got)
 		}

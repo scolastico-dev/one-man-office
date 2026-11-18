@@ -230,6 +230,18 @@ func TestProxyForwardCleanup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if close == "export" || close == "finish export" {
+				// PR creation keeps ticket previews alive until the actual merge.
+				for _, f := range owned {
+					if _, err := b.LiveProxyForward(ctx, System, f.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, err = b.MarkMerged(ctx, User, int64(tk.Number))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			for _, f := range owned {
 				_, err = b.LiveProxyForward(ctx, System, f.ID)
 				wantCode(t, err, api.CodeNotFound)

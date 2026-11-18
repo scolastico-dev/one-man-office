@@ -380,7 +380,7 @@ func TestExportAfterRemovingProjectWithoutRemote(t *testing.T) {
 	}
 	h.exportNow(s)
 	h.steps(2)
-	if tk = h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/a/pull/1" {
+	if tk = h.ticket(s); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge || tk.ExportURL != "https://example.invalid/a/pull/1" {
 		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
 	}
 }

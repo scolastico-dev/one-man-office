@@ -403,6 +403,24 @@ func TestCleanSubjectAndCodeSpan(t *testing.T) {
 			t.Errorf("showPath(%q) = %q, want %q", in, got, want)
 		}
 	}
+	// A path of this platform is written as it is: on Windows its
+	// separator is the backslash, which must not turn every path of a
+	// comment into a quoted string with doubled backslashes.
+	if p := filepath.Join("src", "pkg", "a.go"); showPath(p) != p {
+		t.Errorf("showPath(%q) = %q, want it unchanged", p, showPath(p))
+	}
+	if q := quotedIn('\\'); strings.Contains(q, `\`) || !strings.Contains(q, "`") || !strings.Contains(q, `"`) {
+		t.Errorf("with the backslash as separator showPath quotes %q", q)
+	}
+	// Where the backslash separates nothing, it is quoted like a quote.
+	if q := quotedIn('/'); !strings.Contains(q, `\`) || !strings.Contains(q, "`") || !strings.Contains(q, `"`) {
+		t.Errorf("with the slash as separator showPath quotes %q", q)
+	}
+	if filepath.Separator == '/' {
+		if got, want := showPath(`src\a.go`), `"src\\a.go"`; got != want {
+			t.Errorf("showPath of a name with a backslash = %q, want %q", got, want)
+		}
+	}
 }
 
 // What the store hands out and takes in is a copy: the engine reads and

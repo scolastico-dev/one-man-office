@@ -14,7 +14,7 @@ afterEach(() => {
   mounted = null
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: 'omo/2', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: 'omo/2', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }
 
 function seeded(...tickets: TicketSummary[]) {
   return (omo: { tickets: TicketSummary[]; projects: unknown[] }) => {
@@ -57,7 +57,7 @@ test('Export sends {export:true}; Merge locally instead sends {merge:true}', asy
   await w.get('[data-action="export"]').trigger('click')
   const dlg = w.get('[data-approve-dialog]')
   expect(dlg.get('[data-approve-effect]').text()).toContain('omo pushes the branch and opens a pull request')
-  expect(dlg.text()).toContain('The ticket is done once the pull request exists.')
+  expect(dlg.text()).toContain('The ticket waits in Review until the exported work is merged into the remote target branch.')
   expect(w.find('[data-merge-instead]').exists()).toBe(false)
   await w.findAll('button').find((b) => b.text() === 'Export' && b.attributes('data-action') === undefined)!.trigger('click')
   await flushPromises()
