@@ -276,3 +276,34 @@ The container entrypoint (`docker/entrypoint.sh`) runs `omo config set host 0.0.
 3. Run `git diff --check` and inspect the final diff.
 4. Update the `wiki/` pages (and `README.md` when its short overview changes) and this guide when user-visible behavior, commands, the home layout or release assets change.
 5. Document only current behavior; git history is the record of old behavior.
+
+## Web UI forward transport
+
+`internal/proxy` is the reusable data plane; it registers no browser route and
+performs no authentication. Create one `proxy.NewTransport()` for the server,
+reuse `Handler(api.ProxyForward, proxy.PathMode|proxy.SubdomainMode)` after the
+router authenticates and selects a live forward on every request, and call
+`CloseIdleConnections()` on shutdown. Two shared connection pools separate TLS
+verification policies; target connections bypass environment HTTP proxies.
+Path mode checks the literal `/proxy/<id>` prefix and strips it only when the
+record requests it; subdomain mode leaves the request path unchanged.
+
+The router supplies `proxy.WithRequestContext(r, proxy.RequestContext{...})`:
+`PublicScheme`/`PublicHost` are the accepted public request origin (never arbitrary
+forwarding headers), `BoardURL` is the board's accepted origin for the error-page
+link, and `RemoveAuthorization` is true only for positively identified omo
+credentials, including omo Basic auth. App Authorization otherwise survives.
+The reserved cookie names are `proxy.SessionCookie` (`omo_proxy_session`) and
+`proxy.ForwardCookie` (`omo_proxy_forward`); neither is sent upstream or accepted
+from upstream Set-Cookie. `X-Omo-*`, `Omo-*`, client forwarding headers,
+`omo-token.*` WebSocket protocols and the defensive `proxy.GrantQuery`
+(`__omo_proxy_grant`) query key are removed. Other Cookie headers and application
+credentials remain. Responses stream through `httputil.ReverseProxy`, including
+upgrades, without board security/cache headers. Target redirects and cookie
+paths/scopes are rewritten; connection failures get an escaped HTML page.
+Path-mode redirects with a path are resolved at the upstream request URL before
+being mapped into the forward; redirect dot segments (including encoded dots)
+are normalized before prefixing. Request path bytes are never normalized.
+`__Host-` application cookies keep `Path=/`, which browsers require for those
+names; this is shared root scope, consistent with trusted apps, rather than a
+cookie isolation boundary. Other applicable cookie paths receive the prefix.
