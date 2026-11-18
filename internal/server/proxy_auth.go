@@ -148,3 +148,29 @@ func (a *proxyAuthState) revokeSession(token string) {
 	defer a.mu.Unlock()
 	delete(a.sessions, token)
 }
+
+// newSession establishes proxy access for an already authenticated board Open
+// on a host outside the configured shared cookie domain.
+func (a *proxyAuthState) newSession(now time.Time) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sweepLocked(now)
+	if len(a.sessions) >= proxyAuthLimit {
+		return "", fmt.Errorf("too many active proxy sessions")
+	}
+	token, err := proxySecret()
+	if err != nil {
+		return "", err
+	}
+	if a.sessions == nil {
+		a.sessions = make(map[string]time.Time)
+	}
+	a.sessions[token] = now.Add(proxySessionTTL)
+	return token, nil
+}
+
+func (a *proxyAuthState) revokeGrant(grant string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.grants, grant)
+}

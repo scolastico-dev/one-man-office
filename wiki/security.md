@@ -61,6 +61,12 @@ Registered web UIs run through omo's existing browser address under
 60 seconds. The sign-in page clears it from the address before exchanging it
 for an HttpOnly cookie, then replaces the page with the forward's start path.
 The proxy session lasts 12 hours; restarting omo requires opening it again.
+With optional [subdomain routing](running.md#optional-web-ui-subdomains), the
+proxy cookie covers the configured base and forward subdomains. If the board
+uses an unrelated host, authenticated Open also sets a host-local proxy session
+there so path URLs remain usable. Forward subdomains accept only the configured
+prefix/id/suffix composition on the listener or external public port; the
+board's Origin checks remain unchanged.
 Direct addresses without a valid session link back to the board. Basic sign-in
 checks the board credentials on each request; `auth: none` requires no sign-in.
 

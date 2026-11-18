@@ -17,8 +17,22 @@ func (s *Server) registerProxyForwards(mux *http.ServeMux) {
 	})
 }
 
-func (s *Server) shownProxyForward(f api.ProxyForward) api.ProxyForward {
-	f.Address = strings.TrimRight(s.Address(), "/") + f.Address
+func (s *Server) shownProxyForward(r *http.Request, f api.ProxyForward) api.ProxyForward {
+	if s.opts.Config.ProxyBaseHost != "" {
+		origin := s.Address()
+		if origin == "" {
+			origin = "http://" + s.opts.Config.Listen()
+		}
+		if public := s.opts.Config.PublicBase(); public != "" {
+			origin = public
+		}
+		if r.Host != "" && s.allowedHost(r) {
+			origin = s.proxyBoardURL(r)
+		}
+		f.Address = s.proxySubdomainOrigin(origin, f.ID) + f.StartPath
+	} else {
+		f.Address = strings.TrimRight(s.Address(), "/") + f.Address
+	}
 	return f
 }
 
@@ -42,7 +56,7 @@ func (s *Server) listProxyForwards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range forwards {
-		forwards[i] = s.shownProxyForward(forwards[i])
+		forwards[i] = s.shownProxyForward(r, forwards[i])
 	}
 	writeJSON(w, http.StatusOK, api.ProxyForwardList{Forwards: forwards})
 }
@@ -58,7 +72,7 @@ func (s *Server) createProxyForward(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, s.shownProxyForward(f))
+	writeJSON(w, http.StatusCreated, s.shownProxyForward(r, f))
 }
 
 func (s *Server) deleteProxyForward(w http.ResponseWriter, r *http.Request) {

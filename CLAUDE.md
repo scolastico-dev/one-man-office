@@ -205,8 +205,9 @@ nonzero `Actor.Ticket`, reads follow ticket scope (globals visible with
 unrestricted reads). `ProxyForward` is the scoped id lookup;
 `LiveProxyForward(ctx, System, id)` is the server-internal live routing lookup.
 Records have a random lowercase DNS-safe `id`, `base_path=/proxy/<id>/` and
-`address` including the start path/query; HTTP adds `Server.Address()` to the
-board's relative address. IPv6 hosts are stored without brackets.
+`address` including the start path/query; HTTP adds the advertised server origin
+to the board's relative address, or the preferred subdomain address when
+configured. IPv6 hosts are stored without brackets.
 `proxy.forward_added` and `proxy.forward_removed` carry the public record with
 a relative address. Every Done transition removes ticket forwards and emits
 removals within `setColumn`'s transaction, including cancellation cascades;
@@ -232,7 +233,7 @@ skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/
 mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  files an import or an MCP registration replaced
 ```
 
-`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
+`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `proxy_base_host` (empty by default; enables forward subdomains), `proxy_label_prefix` and `proxy_label_suffix` (empty; compose a single label around the 32-hex-character id), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
@@ -351,8 +352,9 @@ upstream's; proxy authentication always runs first.
 
 `POST /api/proxy/forwards/{id}/open` is a `userOnly` board API route with normal
 JSON/auth checks; optional body is an empty object. It returns `{url: string}`.
-Token mode returns `/_omo/proxy/bootstrap#<grant>` on the canonical public_url
-origin, or the accepted request origin when public_url is unset. The printed
+Token mode returns `/_omo/proxy/bootstrap#<grant>` on the preferred forward
+origin: a configured subdomain, otherwise the canonical public_url origin or
+accepted request origin when public_url is unset. The printed
 omo.localhost address is a local access hint and must not replace a remote
 browser's host. Its external, embedded `proxy_bootstrap.js` clears the fragment with
 `history.replaceState` before POSTing `{grant}` to `/_omo/proxy/exchange`, then
@@ -369,7 +371,10 @@ also drops grants for vanished forwards. Each map is capped at **4096** entries.
 Proxy sessions last **12 hours** without sliding expiry and are shared across
 forwards; live-forward checks remain mandatory on every request. Restarting omo
 invalidates grants and sessions. `omo_proxy_session` and `omo_proxy_forward`
-are host-only, `Path=/`, `HttpOnly`, `SameSite=Lax`, `Max-Age=43200`; Secure is set
+are host-only in path mode, or `Domain=<proxy_base_host>` on the configured base
+and forward subdomains; `Path=/`, `HttpOnly`, `SameSite=Lax`, `Max-Age=43200`.
+An authenticated Open on a board outside that domain also issues a host-local
+proxy session, keeping its `/proxy/<id>/` URLs usable. Secure is set
 for actual TLS or the matching HTTPS `public_url`. Do not infer deployment
 scheme or port from arbitrary X-Forwarded headers. Open/exchange and explicit
 document navigation update the last-forward cookie. Forged, expired or duplicate
@@ -378,13 +383,13 @@ on every proxy request; none adds no sign-in. Both support direct addresses and
 Open. Only positively identified omo Authorization is stripped; an omo token in
 WebSocket protocols must not cause application Authorization to be removed.
 
-Reusable server helpers for subdomain routing: `proxyOpenDestination` builds the
+Reusable server helpers for proxy routing: `proxyOpenDestination` builds the
 server-owned `proxyDestination{ForwardID, Origin, URL}`; `authorizeProxy` is the
 common auth gate; `setProxyCookie` centralizes cookie flags/scope;
 `proxyOrigin`/`proxyBoardURL` supply accepted public context; `serveProxyForward`
 calls the shared transport **after** auth and a live lookup. The server owns one
-transport and closes idle connections at shutdown. Optional wildcard routing
-must extend origin/destination/cookie helpers and reuse this auth gate.
+transport and closes idle connections at shutdown. Subdomain routing reuses
+this auth gate and the same one-use exchange.
 
 Focused checks: `go test ./internal/server -run TestProxy -count=1` and
 `node --test web/scripts/proxy-bootstrap.test.mjs`. The latter needs web npm
@@ -393,3 +398,39 @@ never omo's CLI/socket/home, and checks actual fragment clearing, referrers and
 back/forward history under CSP. Streaming and WebSocket BrowserHandler tests use
 real local upstreams. Trusted path-mode apps share the board's origin and
 localStorage; filtering transport credentials does not isolate trusted app code.
+
+## Optional Web UI subdomains
+
+`proxy_base_host` is a bare DNS hostname (at least two labels, no scheme, port,
+path, IP literal, trailing dot or wildcard); empty disables the mode.
+`proxy_label_prefix` + the 32-hex-character id + `proxy_label_suffix` must be
+one DNS label: ASCII letters/digits/hyphens, alphanumeric ends, at most 63 bytes.
+The full hostname is at most 253 bytes. Set lowercases all three options; hand
+edits match case-insensitively. Prefix/suffix can be staged while disabled.
+An explicitly listed board alias in `allowed_hosts` or `public_url` must not
+match a composed forward host, which would be ambiguous. Other exact board
+aliases retain their existing behavior, including below the base. The base
+itself remains the board.
+Only the exact composed host on the listener port or configured public_url port
+is accepted; unknown well-formed ids return the missing-forward page.
+
+Open, registration and list addresses prefer the subdomain with unprefixed
+`start_path` and query. `base_path` remains `/proxy/<id>/` in every record.
+Without public_url, browser addresses use the accepted request origin's
+scheme/port; socket registration/list uses the advertised listener address.
+With public_url, Open uses its canonical scheme/port, including HTTPS/default
+ports behind TLS termination. Client forwarding headers never select these.
+Subdomain requests keep path/query bytes; the reusable transport rewrites target
+Location/cookies without a path prefix. Same-origin app WebSocket Origin is
+translated to the target's origin after Host rewriting; foreign origins stay
+subject to upstream checks. Board Origin checks are unchanged; only internal
+bootstrap/exchange gets the exact configured subdomain-origin exception.
+
+Configure wildcard DNS (and matching reverse proxy host routing/certificate for
+HTTPS) for `*.<proxy_base_host>` to omo's existing port. `*.localhost` resolves
+locally in browsers, including shared Domain cookies on `apps.localhost`.
+Focused coverage: `go test ./internal/serverconfig ./internal/cli ./internal/server ./internal/proxy`
+and `node --test web/scripts/proxy-subdomain.test.mjs`. The standalone browser
+fixture uses httptest handlers only, never an omo process, CLI/socket or engine;
+it checks actual Chromium domain/Secure cookie acceptance, two forward hosts,
+HTTP/HTTPS, unrelated-board path mode, target redirects/cookies and Host refusal.

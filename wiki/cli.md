@@ -1033,6 +1033,14 @@ https:// address without path, such as https://omo.example.com/. It does not
 change where omo listens (host and port); omo accepts the Host and Origin of
 that address, nothing else. An empty value or config unset removes it.
 
+proxy_base_host enables Web UI subdomains: a bare DNS host such as apps.localhost
+(no scheme, port, path or wildcard). Empty disables them. proxy_label_prefix and
+proxy_label_suffix compose one label around the 32-character forward id, with
+at most 63 characters and alphanumeric ends. For a suffix starting with a hyphen:
+  omo config set -- proxy_label_suffix -user123
+Wildcard DNS and any HTTPS reverse proxy must route these hosts to omo's existing
+port. The base host remains the board; Open prefers each forward's subdomain.
+
 Usage:
   omo config set KEY VALUE [flags]
 

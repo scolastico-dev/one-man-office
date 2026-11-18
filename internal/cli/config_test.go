@@ -14,7 +14,7 @@ func TestConfigSetGetList(t *testing.T) {
 		t.Fatalf("get port = %q", out)
 	}
 	list := mustExecute(t, "config", "list")
-	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 7 {
+	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 10 {
 		t.Fatalf("list has %d lines:\n%s", n, list)
 	}
 	mustExecute(t, "config", "set", "basic_auth", "me:secret")
@@ -156,5 +156,28 @@ func TestConfigPublicURL(t *testing.T) {
 	}
 	if _, err := execute(t.Context()); err == nil || !strings.Contains(err.Error(), "public_url") {
 		t.Fatalf("start with a hand-edited value: %v", err)
+	}
+}
+
+func TestConfigProxySubdomains(t *testing.T) {
+	isolate(t)
+	for _, kv := range [][2]string{{"proxy_label_prefix", "dev-"}, {"proxy_label_suffix", "-user123"}, {"proxy_base_host", "Omo.Localhost"}} {
+		mustExecute(t, "config", "set", "--", kv[0], kv[1])
+		want := strings.ToLower(kv[1])
+		if got := strings.TrimSpace(mustExecute(t, "config", "get", kv[0])); got != want {
+			t.Fatalf("%s: %s", kv[0], got)
+		}
+		if got := mustExecute(t, "config", "list"); !strings.Contains(got, kv[0]+": "+want+"\n") {
+			t.Fatal(got)
+		}
+	}
+	if _, err := execute(t.Context(), "config", "set", "proxy_base_host", "*.example"); err == nil {
+		t.Fatal("wildcard accepted")
+	}
+	for _, key := range []string{"proxy_base_host", "proxy_label_prefix", "proxy_label_suffix"} {
+		mustExecute(t, "config", "unset", key)
+		if got := strings.TrimSpace(mustExecute(t, "config", "get", key)); got != "" {
+			t.Fatal(got)
+		}
 	}
 }

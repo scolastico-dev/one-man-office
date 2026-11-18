@@ -5,8 +5,10 @@ import (
 	_ "embed"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +35,7 @@ func (s *Server) proxyOrigin(r *http.Request) string {
 	}
 	if p, ok := s.opts.Config.Public(); ok {
 		host, port, hasPort, valid := splitHostHeader(r.Host)
-		if valid && s.publicHost(host, port, hasPort) {
+		if valid && (s.publicHost(host, port, hasPort) || s.proxyPublicHost(host, port, hasPort)) {
 			scheme = p.Scheme
 		}
 	}
@@ -59,6 +61,15 @@ func (s *Server) proxyBoardURL(r *http.Request) string {
 	if address := s.opts.Config.PublicBase(); address != "" {
 		return canonicalProxyOrigin(address)
 	}
+	host, port, hasPort, _ := splitHostHeader(r.Host)
+	if id, _ := s.proxyHost(host); id != "" {
+		origin, _ := url.Parse(s.proxyOrigin(r))
+		origin.Host = strings.ToLower(s.opts.Config.ProxyBaseHost)
+		if hasPort {
+			origin.Host = origin.Host + ":" + port
+		}
+		return canonicalProxyOrigin(origin.String())
+	}
 	return s.proxyOrigin(r)
 }
 
@@ -67,6 +78,10 @@ func (s *Server) proxyBoardURL(r *http.Request) string {
 // supply either the destination or a return path.
 func (s *Server) proxyOpenDestination(r *http.Request, f api.ProxyForward) proxyDestination {
 	origin := s.proxyBoardURL(r)
+	if s.opts.Config.ProxyBaseHost != "" {
+		origin = s.proxySubdomainOrigin(origin, f.ID)
+		return proxyDestination{ForwardID: f.ID, Origin: origin, URL: origin + f.StartPath}
+	}
 	return proxyDestination{ForwardID: f.ID, Origin: origin, URL: origin + f.BasePath + strings.TrimPrefix(f.StartPath, "/")}
 }
 
@@ -93,11 +108,23 @@ func (s *Server) openProxyForward(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, api.Errorf(api.CodeUnavailable, "too many pending proxy opens; try again shortly"))
 		return
 	}
+	// When the board is outside the shared cookie domain, its authenticated
+	// Open response establishes a host-local session for the permanent path URL.
+	if s.opts.Config.ProxyBaseHost != "" && s.proxyCookieDomain(r) == "" {
+		session, err := s.proxyAuth.newSession(time.Now())
+		if err != nil {
+			s.proxyAuth.revokeGrant(grant)
+			writeError(w, r, api.Errorf(api.CodeUnavailable, "too many active Web UI sessions; try again later"))
+			return
+		}
+		s.setProxyCookie(w, r, proxy.SessionCookie, session)
+		s.setProxyCookie(w, r, proxy.ForwardCookie, f.ID)
+	}
 	writeJSON(w, 200, proxyOpenResult{dest.Origin + proxyInternalPrefix + "bootstrap#" + grant})
 }
 
 func (s *Server) setProxyCookie(w http.ResponseWriter, r *http.Request, name, value string) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.proxyOrigin(r), "https://"), MaxAge: int(proxySessionTTL.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Domain: s.proxyCookieDomain(r), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.proxyOrigin(r), "https://"), MaxAge: int(proxySessionTTL.Seconds())})
 }
 
 func (s *Server) proxyPage(w http.ResponseWriter, r *http.Request, status int, message string) {
@@ -109,7 +136,7 @@ func (s *Server) proxyPage(w http.ResponseWriter, r *http.Request, status int, m
 
 func (s *Server) serveProxyInternal(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
-	if s.opts.Config.OriginCheck && !s.sameOrigin(r) {
+	if s.opts.Config.OriginCheck && !s.sameProxyInternalOrigin(r) {
 		reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
 		return
 	}
@@ -263,6 +290,9 @@ func (s *Server) routeProxy(w http.ResponseWriter, r *http.Request) bool {
 		s.serveProxyInternal(w, r)
 		return true
 	}
+	if s.routeProxySubdomain(w, r) {
+		return true
+	}
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && s.boardWebSocket(r) {
 		return false
 	}
@@ -337,6 +367,12 @@ func (s *Server) routeProxy(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) serveProxyForward(w http.ResponseWriter, r *http.Request, f api.ProxyForward, mode proxy.Mode) {
 	origin, _ := url.Parse(s.proxyOrigin(r))
+	// Same-origin app WebSockets need the upstream Host/Origin pair after Host
+	// rewriting. Foreign origins remain untouched for the app to accept/refuse.
+	if mode == proxy.SubdomainMode && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && r.Header.Get("Origin") != "" && s.sameProxyInternalOrigin(r) {
+		r = r.Clone(r.Context())
+		r.Header.Set("Origin", f.Scheme+"://"+net.JoinHostPort(f.Host, strconv.Itoa(f.Port)))
+	}
 	r = proxy.WithRequestContext(r, proxy.RequestContext{PublicScheme: origin.Scheme, PublicHost: origin.Host, BoardURL: s.proxyBoardURL(r), RemoveAuthorization: s.proxyAuthorizationIsOmo(r), OnError: func(error) { s.log.Printf("Web UI forward %s: upstream connection failed", f.ID) }})
 	s.proxyTransport.Handler(f, mode).ServeHTTP(w, r)
 }

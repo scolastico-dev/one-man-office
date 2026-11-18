@@ -71,6 +71,9 @@ omo config rotate-token      # a new login token (the running omo keeps the old 
 | `origin_check` | `true` | Refuse browser requests from other sites. Turn it off only behind a proxy that does its own access control. |
 | `allowed_hosts` | empty | Extra host names the browser may use to reach omo, comma-separated, each with an optional port: `omo.lan,omo.lan:8443`. |
 | `public_url` | empty | The address omo advertises, such as `https://omo.example.com/`. |
+| `proxy_base_host` | empty (disabled) | Bare DNS base for Web UI forwards, for example `apps.localhost` or `apps.example.com`. Configure wildcard DNS to omo's existing listener. |
+| `proxy_label_prefix` | empty | Forced prefix before the forward id, within its single DNS label. |
+| `proxy_label_suffix` | empty | Forced suffix after the forward id, within its single DNS label. |
 
 The local socket that `omo ai` and agents use is separate from these options:
 it lives in `OMO_HOME/run/` and only processes of your user reach it.
@@ -221,3 +224,42 @@ Sign the agent programs in once inside the container
 their logins stay in the persisted home. Because omo listens on `0.0.0.0`
 inside the container, it prints the warning about plain HTTP; the port
 mapping is what keeps it on the host's loopback.
+
+
+## Optional Web UI subdomains
+
+By default a forward uses `/proxy/<id>/`. Set `proxy_base_host` to serve each
+forward at `<prefix><id><suffix>.<base>` and have Open prefer that address.
+The path URL and its advertised `base_path` remain available.
+
+```sh
+omo config set proxy_base_host apps.localhost
+omo config set proxy_label_prefix dev-
+omo config set -- proxy_label_suffix -user123
+```
+
+After restarting omo, a forward opens as
+`http://dev-<id>-user123.apps.localhost:8090/start-path`. Browsers resolve
+`*.localhost` to the local machine; for remote access use a DNS base with a
+wildcard record pointing to the omo host. The base without the forward label
+serves the board. No extra port is opened. When using an HTTPS reverse proxy,
+route the base and wildcard hosts to omo and supply a matching certificate;
+set `public_url` to the external board address so Open uses its scheme and port.
+The board may use a different host, such as `https://board.example.com/`.
+
+The base must contain at least two DNS labels, without scheme, port, path,
+trailing dot, IP literal or wildcard. Prefix + 32-character hexadecimal id +
+suffix must form one DNS label of at most 63 characters (letters, digits,
+hyphens; no hyphen at either end); the whole hostname cannot exceed 253
+characters. All three settings match without case sensitivity. An explicit
+board alias in `allowed_hosts` or `public_url` must not match a composed forward
+host; other exact board aliases retain their behavior, including below the
+base. No other wildcard host acceptance is enabled.
+Stage prefix/suffix before enabling the base if desired; unset
+`proxy_base_host` to disable subdomains again.
+
+Open exchanges its one-use grant on the forward host and sets HttpOnly cookies
+for the base and all its forward subdomains. If the board is outside that cookie
+domain, its authenticated Open response also sets a valid host-local proxy
+session for path URLs. Upstream apps receive neither omo's cookies nor its
+recognized credentials. Basic and none use the board's normal sign-in rules.
