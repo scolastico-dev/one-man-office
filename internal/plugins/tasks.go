@@ -31,6 +31,7 @@ const (
 	TaskPluginReplaced  = "plugin_replaced"
 	TaskShutdown        = "shutdown"
 	TaskExited          = "exited"
+	TaskForwardRemoved  = "forward_removed"
 )
 
 var (

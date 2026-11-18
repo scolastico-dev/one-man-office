@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"io"
 	"net/http"
 	"os"
@@ -68,7 +70,13 @@ func TestPluginActionProjectContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Project context carries an id; folder lookup is a separate runtime feature.
+	// A selected ticket project must have an authoritative usable worktree.
+	p, _ := s.settings.Project(maker.project)
+	wt := engine.WorktreeDir(s.opts.Layout.Worktrees, p.ID, int64(n))
+	gitIn(t, p.Path, "worktree", "add", "-q", "-b", "action-context", wt)
+	if err := s.board.SetBranch(context.Background(), int64(n), p.ID, "action-context", wt); err != nil {
+		t.Fatal(err)
+	}
 	source := `assert(event.data.project.id ~= nil); return {message=event.data.project.id}`
 	if err := os.WriteFile(filepath.Join(s.opts.Layout.Plugins, "rec/ping.lua"), []byte(source), 0600); err != nil {
 		t.Fatal(err)

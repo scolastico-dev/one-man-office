@@ -38,6 +38,7 @@ const (
 	KindImageDeleted        = "image.deleted"         // data ImageEventData
 	KindImageExpired        = "image.expired"         // data ImageEventData
 	KindProxyForwardAdded   = "proxy.forward_added"   // data ProxyForward (relative address)
+	KindProxyForwardUpdated = "proxy.forward_updated" // data ProxyForward (relative address)
 	KindProxyForwardRemoved = "proxy.forward_removed" // data ProxyForward (relative address)
 	KindMCPChanged          = "mcp.changed"           // data MCPServerState
 	// KindMCPToolsChanged has no data: the tools omo offers over MCP

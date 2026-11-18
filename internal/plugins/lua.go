@@ -54,6 +54,7 @@ func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any
 	box.Set("task_start", m.luaTaskStart(box, p))
 	box.Set("task_list", m.luaTaskList(p))
 	box.Set("task_stop", m.luaTaskStop(p))
+	m.bindForwardHelpers(box, p)
 	box.Set("sleep", box.Sleep())
 	box.Set("store_get", m.luaStoreGet(p.name))
 	box.Set("store_set", m.luaStoreSet(p.name))

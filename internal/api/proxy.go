@@ -6,6 +6,8 @@ package api
 // returns a relative Address; the HTTP API adds omo's advertised origin.
 type ProxyForward struct {
 	ID          string `json:"id"`
+	Plugin      string `json:"plugin,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 	Ticket      *int   `json:"ticket"`
 	Host        string `json:"host"`
 	Port        int    `json:"port"`

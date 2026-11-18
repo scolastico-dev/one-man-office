@@ -56,6 +56,16 @@ func pluginTaskError(err error) error {
 // stopTasksForEvent runs before ordinary hook Dispatch. Event log delivery is
 // replayed by id and never uses a plugin's bounded/droppable hook queue.
 func (s *Server) stopTasksForEvent(ev api.Event) {
+	if ev.Kind == api.KindProxyForwardRemoved {
+		var f api.ProxyForward
+		if json.Unmarshal(ev.Data, &f) == nil {
+			s.pluginForwards.Lock()
+			task := s.takeWatchedForwardLocked(f.ID)
+			s.pluginForwards.Unlock()
+			s.stopRemovedForward(task)
+		}
+		return
+	}
 	if ev.Kind != api.KindTicketMoved {
 		return
 	}

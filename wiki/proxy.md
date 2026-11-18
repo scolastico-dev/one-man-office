@@ -11,7 +11,8 @@ On a ticket, find **Forwards** beneath the description in the panel, or in
 **Overview** on the full page.
 Choose **Add forward**, enter its name and target port, then copy the returned
 base path before starting the app. **Open** opens its start path in a new
-browser tab. **Remove** unregisters it without stopping the app. The topbar's
+browser tab. **Remove** unregisters it without stopping the app, except that a plugin forward
+with an idle watch also stops its attached task (see Plugin ownership below). The topbar's
 **Forwards** button lists all ticket and global forwards, with the same actions
 and links to their tickets. A target that is offline stays listed; opening it
 shows an explanation with a link back to the board. TLS connection failures
@@ -20,7 +21,8 @@ also show that page.
 A ticket forward belongs to that exact ticket. Completing or cancelling the
 ticket automatically removes its forwards, including when a task completes
 by merging into its story. Do not rely on a task's preview for later story
-review. Global forwards have no ticket and stay until the user removes them.
+review. Generic global forwards have no ticket and stay until the user removes them.
+Plugin-owned globals instead follow their plugin/task lifecycle (below).
 A removed forward stops accepting new requests; registration is not process
 supervision and does not terminate an already upgraded connection.
 
@@ -200,7 +202,9 @@ adds no sign-in. Proxy cookies do not authenticate the board API.
 
 Removing a forward or completing/cancelling its ticket prevents new proxied
 requests. Existing WebSocket, SSE and other streaming connections are not
-forcibly closed; they can continue until the app or client closes them.
+forcibly closed by the transport; they can continue until the app or client closes
+them. Removing a watched plugin forward additionally stops its attached task,
+which closes any connections served by that task.
 
 omo removes its reserved cookies, recognized omo Authorization, internal
 identity headers and omo WebSocket token protocols before forwarding. App
@@ -246,3 +250,41 @@ outer proxy even though omo itself streams. With subdomains, pass the
 wildcard Host unchanged and use wildcard routing/certificates on the same
 external port. See [Running omo](running.md#behind-a-reverse-proxy) for the
 board's deployment settings.
+
+## Plugin ownership and activity
+
+Plugins register through bound Lua `forward_add`, `forward_list` and
+`forward_remove` helpers, using this same registry, validation, transport and
+Open/sign-in. A plugin forward carries optional `plugin` and `task_id` metadata.
+Only server-bound helpers assign ownership; public create JSON rejects those
+fields. The user can still view/remove these forwards normally. Helpers cannot
+list/remove another plugin's forward or attach another plugin's task.
+
+Stable background-task attachment removes the forward on every task exit,
+including natural exit and idle stop. Unattached plugin resources end on
+disable/remove, code replacement and shutdown too. Restart removes stale
+plugin-owned records before loading hooks. Generic persistent forwards are
+preserved. Removing a watched attached forward stops its stable task with reason
+`forward_removed`, including while a WebSocket remains open or expiry is pending.
+User DELETE and the Lua removal helper wait for reaping outside the registry
+lock; direct board removal uses the reliable event follower. Done/cancel/cascade
+retains `ticket_done`; exit/removal races keep the first termination reason.
+Unwatched/generic removal continues to unregister without stopping a process.
+Task/lifecycle cleanup stays idempotent and never stops a reused task name.
+Registration and attachment emit normal board events, including
+`proxy.forward_updated` for the first task binding.
+
+Plugins can inspect authenticated request/WebSocket counts and schedule a
+plugin-chosen idle duration for an attached task. Accepted WebSockets remain
+active for their entire downstream lifetime, including hijacked connections;
+only the last disconnect starts the next idle interval. Reconnect invalidates
+old deadlines atomically with upgrade admission. Authentication failures,
+refused upgrades and health/status polling cannot keep an idle task alive.
+HTTP/SSE requests have separate request counts and do not serve as WebSocket
+presence. Connection counts reflect server-observed closure; editor/protocol
+heartbeats and network detection bound observation of physically dropped clients.
+No editor-specific default or automatic idle policy is built into the proxy.
+See [Plugins — Owned Web UI forwards](plugins.md#owned-web-ui-forwards) for the
+exact helpers, schema, timing semantics and free-loopback-port candidate contract.
+Always use user-only Open for the browser destination; helper addresses never
+contain a login token or substitute for sign-in.

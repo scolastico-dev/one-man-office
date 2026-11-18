@@ -1014,6 +1014,7 @@ export interface EventDataByKind {
   'image.deleted': ImageEventData
   'image.expired': ImageEventData
   'proxy.forward_added': ProxyForward
+  'proxy.forward_updated': ProxyForward
   'proxy.forward_removed': ProxyForward
   'mcp.changed': MCPServerState
   /** No data: the tools omo offers over MCP changed. */
@@ -1392,6 +1393,8 @@ export interface ImageEventData {
 
 /** A registered web UI. Null ticket means global; base_path is the app's required path-mode base. */
 export interface ProxyForward {
+  plugin?: string
+  task_id?: string
   id: string
   ticket: number | null
   host: string

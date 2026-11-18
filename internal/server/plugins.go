@@ -141,8 +141,11 @@ func (s *Server) registerPlugins(mux *http.ServeMux) {
 // plugins of the settings; nothing is fetched or installed here: a
 // settings file without an installed tree shows as not installed until
 // the user installs it (the update route).
-func (s *Server) startPlugins(ctx context.Context) {
+func (s *Server) startPlugins(ctx context.Context) error {
 	f := &s.plugins
+	if err := s.clearStalePluginForwards(); err != nil {
+		return fmt.Errorf("clear stale plugin forwards: %w", err)
+	}
 	f.o = pluginmanager.Options{Root: s.opts.Layout.Plugins, Git: s.git}
 	f.reload = make(chan struct{}, 1)
 	f.changed = make(chan struct{}, 1)
@@ -155,6 +158,9 @@ func (s *Server) startPlugins(ctx context.Context) {
 		Log:               s.log,
 		Changed:           s.pluginChanged,
 		Agents:            pluginAgents{s},
+		Forwards:          s,
+		Unloaded:          s.pluginUnloaded,
+		TaskExited:        s.pluginTaskExited,
 		TaskTicketLive:    s.pluginTaskTicketLive,
 		TasksChanged:      s.pluginTasksChanged,
 		TaskOutputChanged: s.pluginTaskOutputChanged,
@@ -166,6 +172,7 @@ func (s *Server) startPlugins(ctx context.Context) {
 	s.background(s.writePluginTaskEvents)
 	s.background(s.runPluginReloads)
 	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att, after) })
+	return nil
 }
 
 // pluginAgents is the plugins' view of the agents the engine runs
@@ -916,21 +923,16 @@ func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, err)
 			return
 		}
-		ticket = plugins.TicketPayload(t.TicketSummary, s.Address())
+		ticket = s.pluginTicketPayload(r.Context(), t.TicketSummary)
 		ticketProjects = t.Projects
 	}
 	if req.Project != "" {
-		if _, ok := s.settings.Project(req.Project); !ok {
-			writeError(w, r, api.Errorf(api.CodeNotFound, "project does not exist"))
+		var err error
+		project, err = s.pluginProjectContext(r.Context(), req.Ticket, req.Project, ticketProjects)
+		if err != nil {
+			writeError(w, r, err)
 			return
 		}
-		if req.Ticket > 0 && !slices.ContainsFunc(ticketProjects, func(p api.TicketProject) bool { return p.Project == req.Project }) {
-			e := api.Errorf(api.CodeValidation, "project must belong to the selected ticket")
-			e.Details = api.FieldDetail{Field: "project"}
-			writeError(w, r, e)
-			return
-		}
-		project = map[string]any{"id": req.Project}
 	}
 	type result struct {
 		answer api.PluginRunResult
@@ -1080,7 +1082,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 		if err != nil {
 			return nil
 		}
-		return plugins.TicketPayload(t.TicketSummary, s.Address())
+		return s.pluginTicketPayload(ctx, t.TicketSummary)
 	}
 	tick := time.NewTicker(pluginFollowInterval)
 	defer tick.Stop()
@@ -1138,7 +1140,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 //     seen; an empty text or a Done ticket forgets it)
 //
 // Payloads come from the plugins package's builders: no session id,
-// terminal id, folder or environment value; text written by people or
+// terminal id or inherited environment value; text written by people or
 // agents is only ever a value in them. ticket reads a ticket's payload by
 // number (nil when it cannot be read).
 func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]any, address string) []plugins.Event {
@@ -1150,6 +1152,34 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 	add := func(name string, data map[string]any) {
 		out = append(out, plugins.Event{Name: name, At: at, Data: data})
 	}
+	// Events preserve their historical metadata. Resolve current folders by ID
+	// and align to that snapshot, rather than copying a later project's order.
+	ticketPayload := func(t api.TicketSummary) map[string]any {
+		out := plugins.TicketPayload(t, address)
+		available := map[string]map[string]any{}
+		if current := ticket(t.Number); current != nil {
+			if folders, ok := current["folders"].([]any); ok {
+				for _, value := range folders {
+					if f, ok := value.(map[string]any); ok {
+						if id, ok := f["project"].(string); ok {
+							available[id] = f
+						}
+					}
+				}
+			}
+		}
+		folders := make([]any, 0, len(t.Projects))
+		for _, project := range t.Projects {
+			if f, ok := available[project.Project]; ok {
+				folders = append(folders, f)
+			} else {
+				folders = append(folders, map[string]any{"project": project.Project, "kind": "worktree", "path": "", "available": false, "reason": "folder_unavailable"})
+			}
+		}
+		out["folders"] = folders
+		return out
+	}
+
 	attention := func(t api.TicketSummary, payload map[string]any) {
 		n := t.Number
 		if t.Attention == "" || t.Column == api.ColumnDone {
@@ -1177,7 +1207,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		p := plugins.TicketPayload(d.Ticket, address)
+		p := ticketPayload(d.Ticket)
 		add(plugins.EventTicketCreated, map[string]any{"ticket": p})
 		attention(d.Ticket, p)
 	case api.KindTicketMoved:
@@ -1185,7 +1215,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		p := plugins.TicketPayload(d.Ticket, address)
+		p := ticketPayload(d.Ticket)
 		if d.From != d.To {
 			add(plugins.EventTicketMoved, map[string]any{"ticket": p, "from": string(d.From), "to": string(d.To), "action": d.Action})
 		}
@@ -1195,7 +1225,8 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		attention(d.Ticket, plugins.TicketPayload(d.Ticket, address))
+		p := ticketPayload(d.Ticket)
+		attention(d.Ticket, p)
 	case api.KindCommentCreated:
 		var d api.CommentCreatedData
 		if json.Unmarshal(ev.Data, &d) != nil {

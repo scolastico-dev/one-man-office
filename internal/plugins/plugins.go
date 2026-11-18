@@ -485,7 +485,10 @@ type Options struct {
 	Changed func(api.PluginInfo)
 	// Agents is what omo.agents and omo.send_to_agent reach; nil makes
 	// both answer that omo runs no agents.
-	Agents AgentDesk
+	Agents   AgentDesk
+	Forwards ForwardDesk
+	// Unloaded releases plugin resources after hooks have been cancelled.
+	Unloaded func(plugin, reason string)
 	// TaskTicketLive checks that a ticket exists and is nonterminal; nil
 	// refuses every ticket-bound task. Called before and after registration.
 	TaskTicketLive func(context.Context, int) bool
@@ -552,6 +555,8 @@ type entry struct {
 // plugin is a loaded plugin: its hooks, configuration, queue and the
 // goroutines that deliver to it.
 type plugin struct {
+	// forwardMu joins resource operations with unload cleanup after cancellation.
+	forwardMu  sync.Mutex
 	name       string
 	dir        string
 	entry      *entry
@@ -669,6 +674,11 @@ func (m *Manager) Close() {
 		p.wg.Wait()
 	}
 	m.manual.Wait()
+	if m.o.Unloaded != nil {
+		for _, p := range running {
+			m.o.Unloaded(p.name, TaskShutdown)
+		}
+	}
 }
 
 // Load reconciles installed Root/<name> trees with settings. Unchanged
@@ -798,6 +808,11 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 			m.stopTasks(func(t *task) bool { return t.plugin == e.settings.Name }, reason)
 		}
 		e.p.wg.Wait()
+		if reason != "" && m.o.Unloaded != nil {
+			e.p.forwardMu.Lock()
+			m.o.Unloaded(e.settings.Name, reason)
+			e.p.forwardMu.Unlock()
+		}
 		if replacement != nil && replacement.p != nil {
 			m.mu.Lock()
 			replacement.started = e.started
