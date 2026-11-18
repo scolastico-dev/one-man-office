@@ -73,7 +73,10 @@ test('one sample uses declarations and the public facade across routes, configur
   await expect(task.locator('pre')).toContainText('\\u{202E}')
   expect(await task.textContent()).not.toContain('fixture-secret-value')
   await detail.getByRole('combobox', { name: 'Sample mode' }).selectOption('two')
+  // The save reloads the plugin and cancels the old runtime's context: an action started before the save has completed can be cancelled with it.
+  const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok())
   await detail.getByRole('button', { name: 'Save', exact: true }).click()
+  await saved
   await expect.poll(() => status(omo)).toBe('starts=1 running=1 mode=two')
   await expect(task.locator('[data-task-stop]')).toBeEnabled()
   await task.locator('[data-task-stop]').click()
@@ -92,7 +95,10 @@ test('one sample uses declarations and the public facade across routes, configur
   await detail.locator('[data-plugin-enabled]').click()
   await expect(page.locator('script[data-omo-plugin="sample"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Dynamic status', exact: true })).toHaveCount(0)
+  // Enabling reloads the plugin: wait for the saved response before the status action.
+  const enabled = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok())
   await detail.locator('[data-plugin-enabled]').click()
+  await enabled
   await expect.poll(() => status(omo)).toBe('starts=2 running=0 mode=two')
   await expect(page.locator('script[data-omo-plugin="sample"]')).toHaveCount(1)
   tree = await start(omo, n)
