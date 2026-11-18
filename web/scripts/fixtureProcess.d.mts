@@ -34,6 +34,8 @@ export interface EndOptions {
   /** Replaces the whole platform step on every platform (a test seam that fails or holds the kill); it is called only for a process that is still running. */
   kill?: (child: { pid?: number; kill(signal?: string): boolean }, options: { tree: boolean }) => void
 }
+/** Throws when `killGroup` or `killTree` is given without `platform`. */
+export function checkEndOptions(options?: EndOptions): void
 /** Ends a running process without waiting for it (the caller waits for its close); a failure to end it throws. */
 export function endProcess(child: { pid?: number; exitCode: number | null; signalCode: string | null; kill(signal?: string): boolean }, options?: EndOptions): void
 /** True for a program that launches others (go, npm, npx, a shell); `startFixture` refuses it as the helper. */

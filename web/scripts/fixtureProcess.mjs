@@ -49,6 +49,16 @@ function taskkill(pid) {
 const exited = (child) => child.exitCode !== null || child.signalCode !== null
 
 /**
+ * A test that replaces one platform's kill step must say which platform it replaces: with the host left to choose, the
+ * other platforms would never run the step it injected. Refused wherever the options come from.
+ */
+export function checkEndOptions(options = {}) {
+  if (options.platform === undefined && (options.killGroup !== undefined || options.killTree !== undefined)) {
+    throw new Error('end.killGroup and end.killTree replace one platform\'s step: give end.platform too, or use end.kill, which replaces the step on every platform')
+  }
+}
+
+/**
  * Ends a process that is still running, without waiting; the caller waits for its
  * close. A process that has ended (or never started) needs nothing. A failure to
  * end a running one is an error, never "already gone":
@@ -66,7 +76,9 @@ const exited = (child) => child.exitCode !== null || child.signalCode !== null
  * platform. `killTree` and `killGroup` replace one platform's step only, and are
  * for a test that also sets `platform`, never for one that leaves it to the host.
  */
-export function endProcess(child, { tree = false, platform = process.platform, killTree = taskkill, killGroup = (pid) => process.kill(-pid, 'SIGKILL'), kill } = {}) {
+export function endProcess(child, options = {}) {
+  checkEndOptions(options)
+  const { tree = false, platform = process.platform, killTree = taskkill, killGroup = (pid) => process.kill(-pid, 'SIGKILL'), kill } = options
   if (child.pid === undefined || exited(child)) return
   if (kill) {
     kill(child, { tree })
@@ -195,6 +207,7 @@ export async function startFixture({
   if (command !== undefined && isLauncher(command)) {
     throw new Error(`the helper must be the program that owns the servers, not the launcher ${command}: build a binary and run it directly`)
   }
+  checkEndOptions(end)
   const root = cwd instanceof URL ? fileURLToPath(cwd) : cwd
   let dir
   let current // the process that is running now: the build, then the helper

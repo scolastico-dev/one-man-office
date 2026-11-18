@@ -15,15 +15,15 @@ import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
-const CLAUDE = [
-  '#!/bin/sh',
-  'export OMO_FAKEAGENT=1 GIT_AUTHOR_NAME=Agent GIT_AUTHOR_EMAIL=agent@example.invalid GIT_COMMITTER_NAME=omo GIT_COMMITTER_EMAIL=omo@example.invalid',
-  `exec '${FAKE_AGENT_BINARY}' "$@"`,
-  '',
-].join('\n')
+// A native launcher: a shell script where programs are found by their mode bit, a .cmd file where Windows finds them by extension.
+const WINDOWS = process.platform === 'win32'
+const CLAUDE_FILE = WINDOWS ? 'claude.cmd' : 'claude'
+const AGENT_ENV = { OMO_FAKEAGENT: '1', GIT_AUTHOR_NAME: 'Agent', GIT_AUTHOR_EMAIL: 'agent@example.invalid', GIT_COMMITTER_NAME: 'omo', GIT_COMMITTER_EMAIL: 'omo@example.invalid' }
+const CLAUDE = WINDOWS
+  ? ['@echo off', ...Object.entries(AGENT_ENV).map(([k, v]) => `set ${k}=${v}`), `"${FAKE_AGENT_BINARY}" %*`, ''].join('\r\n')
+  : ['#!/bin/sh', `export ${Object.entries(AGENT_ENV).map(([k, v]) => `${k}=${v}`).join(' ')}`, `exec '${FAKE_AGENT_BINARY}' "$@"`, ''].join('\n')
 
-test.use({ omoOptions: { firstStart: true, programs: { files: { claude: CLAUDE }, git: true }, noProject: true, paused: false }, viewport: { width: 1440, height: 1200 } })
-test.skip(process.platform === 'win32', 'the fake agent program is a shell script')
+test.use({ omoOptions: { firstStart: true, programs: { files: { [CLAUDE_FILE]: CLAUDE }, git: true }, noProject: true, paused: false }, viewport: { width: 1440, height: 1200 } })
 
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
@@ -35,7 +35,7 @@ async function shot(page: Page, name: string) {
 test('a new user goes from the printed address to a first task done by an agent', async ({ page, omo, repo }) => {
   test.setTimeout(120_000)
   // omo says what it found and prints the address with the login key.
-  expect(omo.output()).toContain(`agent detection: found claude at ${join(omo.programs, 'claude')}`)
+  expect(omo.output()).toContain(`agent detection: found claude at ${join(omo.programs, CLAUDE_FILE)}`)
   expect(omo.output()).toMatch(/^omo: http:\/\/omo\.localhost:\d+\/#[0-9a-f]{64}$/m)
   expect(omo.output()).toContain('Open the address in your browser. The part after # is your login key: keep it to yourself.')
 

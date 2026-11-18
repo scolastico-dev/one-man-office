@@ -496,10 +496,11 @@ on stderr). `startFixture` refuses a launcher (`go`, `npm`, `npx`, a shell) as
 its `command`.
 The tests of its cleanup inject through `end.kill(child, {tree})`, which replaces the whole
 platform step and so runs the same branch on every platform; `killGroup`/`killTree`
-replace one platform's step and are accepted in tests only together with an explicit
-`platform` (`fixtureProcess.test.ts` scans every test for it). The interrupt sequence runs
+replace one platform's step, and `endProcess`/`startFixture` throw when one is given without an
+explicit `platform`. The interrupt sequence runs
 on every platform through an emitted `SIGINT` in the driver; only the delivery of a real
-signal is skipped on Windows, which has none to deliver.
+signal is skipped on Windows, which has none to deliver. `fixtureProcess.test.ts` scans every web test file (unit tests, browser specs, driver tests) and
+fails on a platform skip that is not in its inventory.
 `web/src/processOwnership.guard.test.ts` lists every tooling launcher under
 `web/` with its lifecycle and fails on a new one; it also checks the specs and
 unit tests (only the guard itself and the two tests of the helper and runner

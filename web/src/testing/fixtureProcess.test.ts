@@ -318,6 +318,22 @@ describe('ending a process', () => {
     expect(() => endProcess(running(), { kill: denied })).toThrow(/not permitted/)
   })
 
+  it('refuses a one-platform kill step without an explicit platform, wherever the call is written and whatever the process', () => {
+    const step = () => {}
+    for (const options of [{ killGroup: step }, { killTree: step }, { killGroup: step, killTree: step, tree: true }]) {
+      expect(() => endProcess(running(), options)).toThrow(/platform/)
+      expect(() => endProcess(running({ exitCode: 0 }), options)).toThrow(/platform/)
+    }
+    expect(() => endProcess(running(), { platform: 'linux', killGroup: step })).not.toThrow()
+    expect(() => endProcess(running(), { kill: () => {} })).not.toThrow()
+  })
+
+  it('refuses it at the start of a fixture too, before anything is built or started', async () => {
+    const tmp = own()
+    await expect(startFixture({ command: process.execPath, tmp, end: { killGroup: () => {} } })).rejects.toThrow(/platform/)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
   it('does not call a refused kill "already gone": only an empty group is', () => {
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
     const empty = () => { throw Object.assign(new Error('no such process'), { code: 'ESRCH' }) }
@@ -424,36 +440,46 @@ setInterval(() => {}, 1 << 30)
   }, 120_000)
 })
 
-// ---- platform seams in tests ----
+// ---- platform skips in tests ----
 
-describe('tests that inject one platform\'s behaviour', () => {
+describe('tests that skip for a platform', () => {
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') return []
       const path = join(dir, e.name)
       return e.isDirectory() ? walk(path) : /\.(test|spec)\.(ts|mjs)$/.test(e.name) ? [path] : []
     })
+  // Every web test file: unit tests, browser specs and the standalone drivers.
   const files = walk(resolve('.')).map((path) => ({ path: path.slice(resolve('.').length + 1).split('\\').join('/'), text: readFileSync(path, 'utf8') }))
+  const SKIP = /(?:skipIf|runIf|\.skip)\s*\(/g
+  const platformSkips = (text: string) =>
+    [...text.matchAll(SKIP)].filter((m) => /process\.platform|win32|linux|darwin|platform/.test(text.slice(m.index, m.index + 200).split('\n').slice(0, 3).join('\n')))
 
-  it('never give a platform-specific kill step to a call that does not also say the platform', () => {
-    // killGroup/killTree replace one platform's step; with the host's platform left to choose, the other branch would never run it.
-    const bad: string[] = []
+  // The whole inventory: a skip for a platform needs a capability the platform truly lacks, named here.
+  const allowed: Record<string, { count: number; reason: string }> = {
+    'src/testing/fixtureProcess.test.ts': {
+      count: 1,
+      reason: 'a real SIGINT cannot be delivered to a process on Windows (process.kill ends it at once); the same handler sequence runs everywhere through an emitted event',
+    },
+  }
+
+  it('are found only in the inventory, in every web test file', () => {
+    const found: Record<string, number> = {}
     for (const { path, text } of files) {
-      for (const line of text.split('\n')) {
-        if (/\bendProcess\(\w+\(|\bend:\s*\{/.test(line) && /kill(Group|Tree)\s*[:=,}]/.test(line) && !/platform\s*[:,}]/.test(line)) bad.push(`${path}: ${line.trim().slice(0, 100)}`)
-      }
+      const n = platformSkips(text).length
+      if (n > 0 && !path.endsWith('.guard.test.ts')) found[path] = n
     }
-    expect(bad).toEqual([])
+    expect(found).toEqual(Object.fromEntries(Object.entries(allowed).map(([path, { count }]) => [path, count])))
   })
 
-  it('skip a test for a missing platform capability only where it is inventoried, with its reason', () => {
-    // The whole inventory of host-platform skips in the unit tests; a new one needs a stated absent capability.
-    const allowed: Record<string, string> = {
-      'src/testing/fixtureProcess.test.ts': 'a real SIGINT cannot be delivered to a process on Windows; the same handler sequence runs everywhere through an emitted event',
-    }
-    const found = files.filter(({ path, text }) => path.startsWith('src/') && !path.endsWith('.guard.test.ts') && path !== 'src/testing/fixtureProcess.test.ts' ? /skipIf\(|runIf\(|\.skip\(/.test(text) : false).map((f) => f.path)
-    expect(found.filter((path) => !(path in allowed))).toEqual([])
-    const mine = files.find((f) => f.path === 'src/testing/fixtureProcess.test.ts')!.text
-    expect(mine.match(/\bskipIf\(/g)).toHaveLength(1)
+  it('see the spec-wide skip and the skip in a script test, not only src/', () => {
+    // Written in pieces so that this file's own text holds no skip for the scan above to count.
+    const skip = 'test.' + 'skip('
+    const skipIf = 'it.skip' + 'If('
+    expect(platformSkips(skip + "process.platform === 'win32', 'x')")).toHaveLength(1)
+    expect(platformSkips(skipIf + "\n  process.platform === 'win32',\n)('x')")).toHaveLength(1)
+    expect(platformSkips(skip + "shots === '', 'screenshots only')")).toHaveLength(0)
+    expect(files.some((f) => f.path.startsWith('e2e/') && f.path.endsWith('.spec.ts'))).toBe(true)
+    expect(files.some((f) => f.path.startsWith('scripts/') && f.path.endsWith('.test.mjs'))).toBe(true)
   })
 })
