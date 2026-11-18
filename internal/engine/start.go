@@ -611,15 +611,24 @@ func sameWorktree(at, dir string) bool {
 	return filepath.Join(parent, filepath.Base(at)) == real
 }
 
-// samePath reports whether a and b name the same folder.
-func samePath(a, b string) bool {
-	clean := func(p string) string {
-		if real, err := filepath.EvalSymlinks(p); err == nil {
-			return real
-		}
-		return filepath.Clean(p)
+// samePath reports whether a and b name the same folder, whether or not it
+// exists.
+func samePath(a, b string) bool { return realPath(a) == realPath(b) }
+
+// realPath is p with its links resolved. Of a path that does not exist, the
+// part that exists is resolved: git names a worktree whose folder is gone
+// by its real path, while omo may know it through a link or, on Windows,
+// under a short name (RUNNER~1 for runneradmin).
+func realPath(p string) string {
+	p = filepath.Clean(p)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
 	}
-	return clean(a) == clean(b)
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(realPath(parent), filepath.Base(p))
 }
 
 // fail ends a start that cannot go on: a problem a person must solve

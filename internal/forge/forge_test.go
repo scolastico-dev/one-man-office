@@ -259,3 +259,24 @@ func TestCheckAddress(t *testing.T) {
 		}
 	}
 }
+
+// A folder on this machine is a remote without a forge in the platform's own
+// spelling too: on Windows a path with a drive. Elsewhere a backslash is in
+// no address omo accepts, and "c:/repos" names the host c.
+func TestParseLocalFolderOfThePlatform(t *testing.T) {
+	for _, raw := range []string{`C:\repos\origin.git`, `C:/repos/origin.git`} {
+		got, err := Parse(raw)
+		if runtime.GOOS == "windows" {
+			if err != nil || got != (Remote{}) {
+				t.Errorf("Parse(%q) = %+v, %v; want a local folder", raw, got, err)
+			}
+			continue
+		}
+		if err == nil && got == (Remote{}) {
+			t.Errorf("Parse(%q) was read as a local folder off Windows", raw)
+		}
+	}
+	if _, err := Parse(`C:\repos\my app.git`); err == nil {
+		t.Error("a path with a space was accepted")
+	}
+}

@@ -158,7 +158,7 @@ func TestExportNeverPushesOntoAForeignRemoteBranch(t *testing.T) {
 	if tk.Projects[0].Branch != "export-me" {
 		t.Fatalf("branch %q", tk.Projects[0].Branch)
 	}
-	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman || !strings.Contains(tk.Attention, "the remote has a branch of that name") {
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman || !h.flagged(n, "the remote has a branch of that name") {
 		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
 	}
 	if got := remoteHead(t, bare, "export-me"); got != foreign {
