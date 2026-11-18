@@ -326,6 +326,39 @@ describe('TerminalView', () => {
     expect(conn().send.mock.calls).toEqual([['\x1b[?1;2c'], ['ls\r']])
   })
 
+  test('what the user types or pastes while history replays reaches the process; the emulator\'s answers in a later turn still do not', async () => {
+    const w = view()
+    const bytes = (t: string) => new TextEncoder().encode(t)
+    conn().o.onData(bytes('old\x1b[c'), true)
+    // A key: the emulator asks the key handler and hands over the key's text in the same turn.
+    for (const key of ['e', 'c']) {
+      expect(term().keyHandler(new KeyboardEvent('keypress', { key }))).toBe(true)
+      term().dataHandler(key)
+    }
+    expect(conn().send.mock.calls).toEqual([['e'], ['c']])
+    // The turn of the key is over: an answer to a replayed query is not the user's.
+    await Promise.resolve()
+    term().dataHandler('\x1b[?1;2c')
+    expect(conn().send.mock.calls).toEqual([['e'], ['c']])
+    // A key without text (Shift alone) leaves nothing behind for a later answer either.
+    expect(term().keyHandler(new KeyboardEvent('keydown', { key: 'Shift' }))).toBe(true)
+    await Promise.resolve()
+    term().dataHandler('\x1b[?1;2c')
+    expect(conn().send.mock.calls).toEqual([['e'], ['c']])
+    // A paste: the emulator hands the text over while it is being pasted.
+    term().paste = (d: string) => term().dataHandler(d)
+    const ev = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'clipboardData', { value: { getData: () => 'ho', files: [] } })
+    w.find('.tv__screen').element.dispatchEvent(ev)
+    expect(conn().send.mock.calls).toEqual([['e'], ['c'], ['ho']])
+    term().dataHandler('\x1b[?1;2c')
+    expect(conn().send.mock.calls).toEqual([['e'], ['c'], ['ho']])
+    // Still replaying until the emulator has parsed the chunk.
+    term().parse()
+    term().dataHandler('\r')
+    expect(conn().send.mock.calls).toEqual([['e'], ['c'], ['ho'], ['\r']])
+  })
+
   test('output is written to the emulator only, never into the page', () => {
     const w = view()
     conn().o.onData(new TextEncoder().encode('<img src=x onerror=alert(1)>'))

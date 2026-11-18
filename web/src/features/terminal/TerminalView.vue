@@ -173,9 +173,30 @@ function clipboardKeyPressed(t: Terminal, ev: KeyboardEvent): boolean | undefine
 
 /** Typed input on its way to the program. */
 function sendInput(data: string): void {
-  if (props.readonly || state.value === 'ended' || replaying > 0) return
+  if (props.readonly || state.value === 'ended') return
+  if (replaying > 0 && fromUser === 0) return
   inputError.value = ''
   connection?.send(data)
+}
+
+/** Runs `act`; what the emulator hands over while it runs is the user's own input. */
+function asUser(act: () => void): void {
+  fromUser++
+  try {
+    act()
+  } finally {
+    fromUser--
+  }
+}
+
+/**
+ * A key the emulator is handling: it hands the key's text over in the same
+ * turn, before any microtask runs, and it parses output only in turns of its
+ * own, so until then what arrives is the user's.
+ */
+function keyTurn(): void {
+  fromUser++
+  queueMicrotask(() => fromUser--)
 }
 
 /** Images dropped or pasted into the terminal: stored by omo, their paths pasted. */
@@ -208,7 +229,8 @@ async function takeFiles(list: File[]): Promise<void> {
   }
   if (unmounted || !term) return
   if (paths.length > 0) {
-    term.paste(cleanPaste(pastedPaths(paths)))
+    const text = cleanPaste(pastedPaths(paths))
+    asUser(() => term?.paste(text))
     term.focus()
   }
   if (problems.length > 0) {
@@ -249,9 +271,17 @@ function onDropEnd(): void {
 /**
  * Replayed chunks the emulator has not finished parsing. Its answers to
  * queries in old output (device attributes, cursor position) would reach the
- * live process as if typed, so input is dropped while this is above zero.
+ * live process as if typed, so what the emulator hands over is dropped while
+ * this is above zero, unless the user is typing or pasting right then.
  */
 let replaying = 0
+
+/**
+ * Above zero while a key or a paste of the user is being handled. Without it
+ * the first keys typed into a terminal that just opened are lost whenever its
+ * replay is still being parsed.
+ */
+let fromUser = 0
 
 /** A link whose text is not its address, waiting for the user to confirm the address. */
 const pendingLink = shallowRef<{ url: string; shown: string } | null>(null)
@@ -437,7 +467,7 @@ function start(el: HTMLElement): void {
   const box = screen.value ?? el
   stopPaste = guardPaste(
     box,
-    (text) => t.paste(text),
+    (text) => asUser(() => t.paste(text)),
     (list) => void takeFiles(list),
   )
   const onPointer = () => {
@@ -467,6 +497,7 @@ function start(el: HTMLElement): void {
     t.textarea.setAttribute('aria-describedby', hintId)
   }
   t.attachCustomKeyEventHandler((ev) => {
+    keyTurn()
     if (ev.type === 'keydown') lastInput = performance.now()
     if (ev.key === 'F6') {
       if (ev.type === 'keydown') {
