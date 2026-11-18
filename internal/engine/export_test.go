@@ -170,82 +170,102 @@ func TestExportCheckRunsOnRescanInterval(t *testing.T) {
 // then waits in Review with attention naming what could not be exported.
 // Exporting again pushes and opens pull requests only for the rest.
 func TestExportGoesOnPerProject(t *testing.T) {
-	h := gitHarness(t, withProjects(3))
-	a, b, c := h.ids[0], h.ids[1], h.ids[2]
-	bareA := h.origin(a)
-	h.origin(c)
-	s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Three", Projects: []string{a, b, c},
-		Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
-	h.startStory(s)
-	for _, p := range []string{a, b} {
-		task := h.storyTask(s, p, "In "+p)
-		h.finishTask(task, p, "new.txt", p+"\n")
-		h.steps(2)
-	}
-	h.handIn(s)
-	h.steps(2)
-	tk := h.ticket(s)
-	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageExporting {
-		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
-	}
-	if n := h.commentsWith(s, "leaves out"); n != 1 || h.commentsWith(s, c+": no commits of its own") != 1 {
-		t.Fatalf("left-out comments:\n%s", strings.Join(h.comments(s), "\n---\n"))
-	}
-	// b has no remote: it failed at once, while a's job goes on.
-	h.wantExportStates(s, api.ExportExporting, api.ExportFailedState, api.ExportLeftOut)
-	job, ok := h.exportSession(s)
-	if !ok || job.Project != a {
-		t.Fatalf("export job %+v (%v), want one for %s", job, ok, a)
-	}
-	branchA := tk.Projects[0].Branch
-	pushedA := remoteHead(t, bareA, branchA)
-	if pushedA == "" {
-		t.Fatal("project a was not pushed")
-	}
-	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/a/pull/1"}); err != nil {
-		t.Fatal(err)
-	}
-	h.steps(2)
-	tk = h.ticket(s)
-	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman ||
-		!strings.Contains(tk.Attention, "Export of "+b+" failed") || strings.Contains(tk.Attention, a) && !strings.Contains(tk.Attention, b) {
-		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
-	}
-	if tk.Projects[0].ExportURL != "https://example.invalid/a/pull/1" {
-		t.Fatalf("projects %+v", tk.Projects)
-	}
-	h.wantExportStates(s, api.ExportExported, api.ExportFailedState, api.ExportLeftOut)
-	if e := tk.Projects[1].ExportError; e == "" || !strings.Contains(tk.Attention, e) {
-		t.Fatalf("the failed project's reason %q, attention %q", e, tk.Attention)
-	}
-	if h.liveCount() != 1 { // the story's pm, parked
-		t.Fatalf("%d sessions live", h.liveCount())
-	}
+	for _, longRemote := range []bool{false, true} {
+		t.Run(fmt.Sprintf("long_remote=%v", longRemote), func(t *testing.T) {
+			if longRemote {
+				useLongTempRoot(t)
+			}
+			h := gitHarness(t, withProjects(3))
+			a, b, c := h.ids[0], h.ids[1], h.ids[2]
+			if longRemote {
+				gitRun(t, h.repos[b], "remote", "add", "origin", filepath.Join(t.TempDir(), "missing.git"))
+			}
+			bareA := h.origin(a)
+			h.origin(c)
+			s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Three", Projects: []string{a, b, c},
+				Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
+			h.startStory(s)
+			for _, p := range []string{a, b} {
+				task := h.storyTask(s, p, "In "+p)
+				h.finishTask(task, p, "new.txt", p+"\n")
+				h.steps(2)
+			}
+			h.handIn(s)
+			h.steps(2)
+			tk := h.ticket(s)
+			if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageExporting {
+				t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
+			}
+			if n := h.commentsWith(s, "leaves out"); n != 1 || h.commentsWith(s, c+": no commits of its own") != 1 {
+				t.Fatalf("left-out comments:\n%s", strings.Join(h.comments(s), "\n---\n"))
+			}
+			// b has no usable remote: it failed at once, while a's job goes on.
+			h.wantExportStates(s, api.ExportExporting, api.ExportFailedState, api.ExportLeftOut)
+			job, ok := h.exportSession(s)
+			if !ok || job.Project != a {
+				t.Fatalf("export job %+v (%v), want one for %s", job, ok, a)
+			}
+			branchA := tk.Projects[0].Branch
+			pushedA := remoteHead(t, bareA, branchA)
+			if pushedA == "" {
+				t.Fatal("project a was not pushed")
+			}
+			if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/a/pull/1"}); err != nil {
+				t.Fatal(err)
+			}
+			h.steps(2)
+			tk = h.ticket(s)
+			if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman ||
+				!strings.Contains(tk.Attention, "Export of "+b+" failed") || strings.Contains(tk.Attention, a) && !strings.Contains(tk.Attention, b) {
+				t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
+			}
+			if tk.Projects[0].ExportURL != "https://example.invalid/a/pull/1" {
+				t.Fatalf("projects %+v", tk.Projects)
+			}
+			h.wantExportStates(s, api.ExportExported, api.ExportFailedState, api.ExportLeftOut)
+			reason := h.exportFailureReason(s, b)
+			if longRemote {
+				if !strings.Contains(reason, "missing.git") || !strings.Contains(reason, "asking the remote failed") {
+					t.Fatalf("missing full remote refusal: %q", reason)
+				}
+			} else if reason != "not a remote omo pushes to: the repository names no address for the remote origin" {
+				t.Fatalf("unexpected no-remote refusal: %q", reason)
+			}
+			wantReasonSummary(t, tk.Projects[1].ExportError, reason)
+			wantReasonSummary(t, tk.Attention, "Export of "+b+" failed: "+reason)
+			if h.liveCount() != 1 { // the story's pm, parked
+				t.Fatalf("%d sessions live", h.liveCount())
+			}
 
-	// The user gives b a remote and exports again: only b is pushed and
-	// gets a job; a keeps its pull request and is not pushed again.
-	bareB := h.origin(b)
-	pushes := h.commentsWith(s, "Pushed `")
-	h.exportNow(s)
-	h.step()
-	job, ok = h.exportSession(s)
-	if !ok || job.Project != b {
-		t.Fatalf("export job %+v (%v), want one for %s", job, ok, b)
+			// The user gives b a remote and exports again: only b is pushed and
+			// gets a job; a keeps its pull request and is not pushed again.
+			if longRemote {
+				gitRun(t, h.repos[b], "remote", "remove", "origin")
+			}
+			bareB := h.origin(b)
+			pushes := h.commentsWith(s, "Pushed `")
+			h.exportNow(s)
+			h.step()
+			job, ok = h.exportSession(s)
+			if !ok || job.Project != b {
+				t.Fatalf("export job %+v (%v), want one for %s", job, ok, b)
+			}
+			if got := h.commentsWith(s, "Pushed `"); got != pushes+1 || remoteHead(t, bareB, tk.Projects[1].Branch) == "" {
+				t.Fatalf("%d push comments, before %d", got, pushes)
+			}
+			h.wantExportStates(s, api.ExportExported, api.ExportExporting, api.ExportLeftOut)
+			if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/b/pull/2"}); err != nil {
+				t.Fatal(err)
+			}
+			h.steps(2)
+			tk = h.ticket(s)
+			if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported ||
+				tk.ExportURL != "https://example.invalid/a/pull/1\nhttps://example.invalid/b/pull/2" {
+				t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
+			}
+			h.wantExportStates(s, api.ExportExported, api.ExportExported, api.ExportLeftOut)
+		})
 	}
-	if got := h.commentsWith(s, "Pushed `"); got != pushes+1 || remoteHead(t, bareB, tk.Projects[1].Branch) == "" {
-		t.Fatalf("%d push comments, before %d", got, pushes)
-	}
-	h.wantExportStates(s, api.ExportExported, api.ExportExporting, api.ExportLeftOut)
-	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/b/pull/2"}); err != nil {
-		t.Fatal(err)
-	}
-	h.steps(2)
-	tk = h.ticket(s)
-	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported ||
-		tk.ExportURL != "https://example.invalid/a/pull/1\nhttps://example.invalid/b/pull/2" {
-		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
-	}
-	h.wantExportStates(s, api.ExportExported, api.ExportExported, api.ExportLeftOut)
 }
 
 // wantExportStates fails unless the export states of ticket n's projects,
