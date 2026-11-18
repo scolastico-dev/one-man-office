@@ -230,3 +230,37 @@ func TestSecondStopHurries(t *testing.T) {
 	}
 	done <- nil // let cleanup observe the completed server, too
 }
+
+// A stop request that was accepted is answered before the server can go away:
+// the handler is held after it signalled the stop until the server function has
+// returned, the latest moment Run may begin to close the control server. Without
+// the answer being sent first, the caller got no response at all (EOF).
+func TestAnAcceptedStopIsAnsweredBeforeTheServerGoesAway(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	served := make(chan struct{})
+	previous := stopSignalled
+	stopSignalled = func() { <-served }
+	t.Cleanup(func() { stopSignalled = previous })
+	serving := make(chan struct{})
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(runCtx, io.Discard, "", func(ctx context.Context, _ io.Writer, ready func(string) error) error {
+			if err := ready("http://x/"); err != nil {
+				return err
+			}
+			close(serving)
+			<-ctx.Done()
+			close(served)
+			return nil
+		})
+	}()
+	<-serving
+	if err := Stop(context.Background()); err != nil && !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("an accepted stop was not answered: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
