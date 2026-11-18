@@ -382,12 +382,12 @@ test.describe('working on the page', () => {
     await ticketPage(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
     const term = terminalIn(ticketPage(page))
     await expectTerminalText(term, 'hello from the page')
-    // It fills the height the tab has left (a tall window): its screen ends just above the bottom of the window, and nothing scrolls.
+    // It fills the height the tab has left (a tall window): the terminal with its message box ends just above the bottom of the window, and nothing scrolls.
     await page.setViewportSize({ width: 1440, height: 1100 })
     await expect
       .poll(async () =>
         page.evaluate(() => {
-          const screen = document.querySelector('[data-ticket-page] .tv__screen')!.getBoundingClientRect()
+          const screen = document.querySelector('[data-ticket-page] .tv')!.getBoundingClientRect()
           const panel = document.querySelector('[data-ticket-page] .tabs__panel')!
           return {
             reachesBottom: window.innerHeight - screen.bottom >= 0 && window.innerHeight - screen.bottom < 100,

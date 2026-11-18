@@ -229,7 +229,7 @@ file**. Large diffs are cut and say so.
 The sidebar next to the board has three tabs. On a narrow screen it opens as a
 sheet from the top bar.
 
-**CEO**: the CEO's terminal ("Typing here types into the CEO."). Choosing the
+**CEO**: the CEO's terminal (read-only; "Write to the CEO in the box below the terminal."). Choosing the
 tab starts the CEO when it is not running, unless you stopped it. **Stop…**
 stops it until you press **Start the CEO**: mentions and questions for it wait
 until then, also across a restart of omo. **New session…** ends its session

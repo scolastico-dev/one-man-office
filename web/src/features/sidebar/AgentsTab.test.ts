@@ -72,12 +72,12 @@ test('a row opens the agent with a way back and a link to its ticket; an ended a
   expect(w.find('[data-agent-row]').exists()).toBe(false)
   expect(w.get('[data-agent-ticket]').attributes('href')).toBe('/ticket/12')
   expect(w.get('[data-agent-ticket]').text()).toBe('Open #12')
-  expect(w.text()).toContain('Typing here types into the agent.')
+  expect(w.text()).toContain('Write to the agent in the box below the terminal.')
 
   emitAgent(hn.omo, 'agent.ended', agent({ id: 'a', ticket: 12, state: 'ended' }))
   await flushPromises()
   expect(w.get('[data-agent-ended]').text()).toBe('This agent ended.')
-  expect(w.text()).not.toContain('Typing here')
+  expect(w.text()).not.toContain('in the box below')
 
   await w.get('[data-agent-back]').trigger('click')
   await flushPromises()

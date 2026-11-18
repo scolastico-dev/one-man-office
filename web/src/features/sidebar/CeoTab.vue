@@ -202,7 +202,7 @@ const view = computed<'live' | 'starting' | 'failed' | 'stopped' | 'ended' | 'id
   <div class="ceo" data-ceo-tab :data-ceo-view="view">
     <template v-if="view === 'live'">
       <div class="ceo__bar">
-        <p class="ceo__note">Typing here types into the CEO.</p>
+        <p class="ceo__note">Write to the CEO in the box below the terminal.</p>
         <div class="ceo__actions">
           <UiButton size="sm" data-ceo-new @click="((askNew = true), (newError = ''))">New session…</UiButton>
           <UiButton size="sm" data-ceo-stop @click="((askStop = true), (stopError = ''))">Stop…</UiButton>

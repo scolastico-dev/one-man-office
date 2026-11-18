@@ -19,11 +19,19 @@ const (
 	// EnvDeafFor is a duration: input arriving that long after the start
 	// is dropped without showing, as during a start-up notice.
 	EnvDeafFor = "OMO_FAKE_DEAF_FOR"
+	// EnvBracketedPaste, set to 1, makes the fake ask for bracketed paste
+	// like the agent CLIs do: text between the paste markers is one input
+	// whose line breaks do not submit (they show as "⏎" in the line), and
+	// Enter after it does.
+	EnvBracketedPaste = "OMO_FAKE_BRACKETED_PASTE"
 )
 
 // composerSettings reads EnvSwallowEnters and EnvDeafFor; ok is false
 // when neither is set.
-func composerSettings() (swallow int, deaf time.Duration, ok bool) {
+func composerSettings() (swallow int, deaf time.Duration, paste, ok bool) {
+	if strings.TrimSpace(os.Getenv(EnvBracketedPaste)) == "1" {
+		paste, ok = true, true
+	}
 	if v := strings.TrimSpace(os.Getenv(EnvSwallowEnters)); v != "" {
 		swallow, _ = strconv.Atoi(v)
 		ok = true
@@ -32,7 +40,7 @@ func composerSettings() (swallow int, deaf time.Duration, ok bool) {
 		deaf, _ = time.ParseDuration(v)
 		ok = true
 	}
-	return max(swallow, 0), max(deaf, 0), ok
+	return max(swallow, 0), max(deaf, 0), paste, ok
 }
 
 // composer turns raw terminal input into submitted lines the way a
@@ -42,9 +50,23 @@ func composerSettings() (swallow int, deaf time.Duration, ok bool) {
 // arriving before deafUntil is dropped. Submitted lines come out of the
 // returned reader, one per line.
 func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time) io.Reader {
+	return pasteComposer(in, echo, swallow, deafUntil, false)
+}
+
+// lineBreakMark stands for a line break inside a pasted message.
+const lineBreakMark = "⏎"
+
+// pasteComposer is composer that, with paste set, asks for bracketed paste and
+// takes what comes between the markers as part of the line.
+func pasteComposer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time, paste bool) io.Reader {
 	pr, pw := io.Pipe()
+	if paste {
+		_, _ = echo.Write([]byte("\x1b[?2004h"))
+	}
 	go func() {
 		var line []byte
+		var esc []byte // an escape sequence being read
+		pasting := false
 		buf := make([]byte, 256)
 		for {
 			n, err := in.Read(buf)
@@ -52,7 +74,27 @@ func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time) io
 				n = 0
 			}
 			for _, b := range buf[:n] {
+				if len(esc) > 0 {
+					esc = append(esc, b)
+					switch string(esc) {
+					case "\x1b[200~":
+						pasting, esc = paste, nil
+					case "\x1b[201~":
+						pasting, esc = false, nil
+					default:
+						// Anything but a prefix of a paste marker is dropped.
+						if !strings.HasPrefix("\x1b[200~", string(esc)) && !strings.HasPrefix("\x1b[201~", string(esc)) {
+							esc = nil
+						}
+					}
+					continue
+				}
 				switch {
+				case b == 0x1b:
+					esc = []byte{b}
+				case (b == '\r' || b == '\n') && pasting:
+					line = append(line, lineBreakMark...)
+					_, _ = echo.Write([]byte(lineBreakMark))
 				case b == '\r' || b == '\n':
 					if len(line) == 0 {
 						continue

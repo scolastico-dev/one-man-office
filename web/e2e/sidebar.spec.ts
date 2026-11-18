@@ -101,7 +101,7 @@ test.describe('a running developer', () => {
     // The row is a button; it shows the agent with a way back and a link to the ticket.
     await row.click()
     await expect(sidebar(page).getByRole('button', { name: 'Back' })).toBeFocused()
-    await expect(sidebar(page).getByText('Typing here types into the agent.')).toBeVisible()
+    await expect(sidebar(page).getByText('Write to the agent in the box below the terminal.')).toBeVisible()
     // The terminal is the agent's own: what it printed shows.
     await expectTerminalText(terminalIn(sidebar(page)), 'working')
     const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
