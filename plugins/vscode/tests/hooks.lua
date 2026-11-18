@@ -37,6 +37,7 @@ local function fixture()
   function f:run(action,project,ticket)
     local selected_ticket=self.ticket;if ticket==false then selected_ticket=nil end
     local env={omo=self.omo,config=self.config,event={event='manual',host=self.host,data={action=action,ticket=selected_ticket,project={id=project or 'alpha',kind=ticket==false and 'repository' or 'worktree',path='/repo/'..(project or 'alpha'),available=true}}}}
+    if project==false then env.event.data.project=nil end
     setmetatable(env,{__index=_G}); local fn=assert(loadstring(source));setfenv(fn,env);return fn()
   end
   function f:ready() self.artifacts[self.artifact_options.key]={state='ready',phase='ready',path='/verified cache',verification='sha256'} end
@@ -337,6 +338,32 @@ test('legacy tuple records also refuse another editor through a canonical alias'
   f.config.editor=editor=='code-server' and 'openvscode' or 'code-server';f.ticket.folders[1].path='/alias/shared'
   f:run('open-ticket');f:ready();assert_stop_required(f:run('status-ticket'));assert_owner_preserved(f,owner)
  end
+end)
+
+
+
+test('projectless folder unavailable messages describe a working directory before installation',function()
+ for _,action in ipairs({'open-ticket','status-ticket'}) do
+  local f=fixture();f.ticket={number=7,projects={},folders={{project='',kind='working_directory',path='',available=false,reason='folder_unavailable'}}}
+  local r=f:run(action,false);contains(r.message,'working folder');contains(r.message,'unavailable')
+  assert(not r.message:find('worktree',1,true),r.message)
+  same(f.installs,0);same(#f.starts,0);same(#f.forwards,0);same(f.ports,0)
+ end
+end)
+
+test('closed projectless ticket refuses before artifacts and processes despite retained folder',function()
+ local f=fixture();f.ticket={number=7,column='done',projects={},folders={{project='',kind='working_directory',path='/work/7',available=true,reason=''}}}
+ for _,action in ipairs({'open-ticket','status-ticket'}) do
+  contains(f:run(action,false).message,'finished');same(f.installs,0);same(#f.starts,0);same(#f.forwards,0)
+ end
+end)
+
+test('projectless working directory uses exact folder ticket binding and canonical exclusion',function()
+ local f=fixture();f.ticket={number=7,column='in_progress',projects={},folders={{project='',kind='working_directory',path='/work/7',available=true,reason=''}}}
+ local r=f:opened('open-ticket',false)
+ same(f.identity,'/work/7');same(f.starts[1].args[5],'/work/7');same(f.starts[1].ticket,7);same(f.forward_options.ticket,7)
+ same(f:run('open-ticket',false).forward_id,r.forward_id);same(#f.starts,1);same(#f.forwards,1)
+ f.ticket.number=8;f:run('open-ticket',false);f:ready();contains(f:run('status-ticket',false).message,'Stop');same(#f.starts,1);same(#f.forwards,1)
 end)
 
 print(passed..' tests passed')

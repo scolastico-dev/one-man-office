@@ -1,10 +1,11 @@
 import type { Locator, Page } from '@playwright/test'
 import { dirname, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, symlinkSync, unlinkSync } from 'node:fs'
 import { expect, type Omo } from './support/omo'
 import { test, configure, tasks, forwards, expectClean, processTree, expectTreeGone, IDLE_SECONDS } from './support/editor'
 import { openBoard, expectBoardLive } from './support/board'
-import { script, waitForSession } from './support/agents'
+import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
+import { expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
 import { initRepo } from './support/git'
 
 // The runtime bridge in the archive is a POSIX fixture, not a native publisher
@@ -237,5 +238,130 @@ test.describe('worktree context', () => {
     await expectClean(omo)
     for (const tree of trees) await expectTreeGone(tree)
     await first.close(); await other.close(); await changed.close()
+  })
+})
+
+test.describe('projectless working folder', () => {
+  test.use({ omoOptions: async ({ editor }, use) => { await use({ tlsCA: editor.ca, agents: { developer: script('ready', 'print|editor-gate', 'await-line|finish-editor|10m', 'done|folder ready', 'wait-loop|10m'), reviewer: script('ready', 'verdict|approve|checked', 'wait-loop|10m'), ceo: 'hang' } }) } })
+  for (const ending of ['cancelled', 'completed']) {
+    test(`enabled panel and page controls open the recorded projectless folder and reuse its ticket binding until ${ending}`, async ({ page, omo, editor }) => {
+      if (ending === 'completed') {
+        await omo.stop()
+        expect((await omo.cli(['config', 'set', 'proxy_base_host', 'apps.localhost'])).code).toBe(0)
+        await omo.start()
+      }
+      const n = await omo.createTicket({ title: 'Projectless editor', projects: [] })
+      await omo.moveTicket(n, 'ready')
+      const dev = await waitForSession(omo, n, 'developer')
+      const ticket = await omo.api<{ workdir: string; projects: unknown[] }>('GET', `/api/tickets/${n}`)
+      expect(ticket.projects).toEqual([])
+      expect(ticket.workdir).toBe(dev.workdir)
+      expect(existsSync(ticket.workdir)).toBe(true)
+      await editor.install(omo)
+      await configure(omo, 'vscode', { config: { editor: ending === 'completed' ? 'openvscode' : 'code-server', idle_minutes: 1 } })
+      await openBoard(page, omo)
+      await page.goto(omo.url(`/${n}`))
+      const button = page.locator('[data-plugin-controls="ticket"]').getByRole('button', { name: 'Open in VS Code', exact: true })
+      await expect(button).toBeEnabled()
+      const hook = page.waitForResponse(r => r.url().endsWith('/api/plugins/vscode/actions/open-ticket'))
+      const popup = page.context().waitForEvent('page')
+      await button.click()
+      const initialAnswer = await (await hook).json() as { message: string }
+      expect(initialAnswer.message).toMatch(/^VS Code pending:/)
+      const first = await popup
+      await expect(first.getByRole('heading', { name: 'Editor stand-in' })).toBeVisible({ timeout: 30_000 })
+      await expect(first.locator('#asset')).toHaveText('Asset loaded')
+      await expect(first.locator('#socket')).toHaveText('connected')
+      await expect(first.locator('#folder')).toHaveText(ticket.workdir)
+      const initial = (await tasks(omo)).find(t => t.state === 'running')!
+      expect(initial.ticket).toBe(n)
+      const forward = (await forwards(omo))[0]!
+      expect(forward.ticket).toBe(n)
+      expect(forward.host).toBe('127.0.0.1')
+      expect(new URL(first.url()).hostname.endsWith('.apps.localhost')).toBe(ending === 'completed')
+      expect(editor.requests).toHaveLength(1)
+      const tree = await runningTree(omo)
+      await page.locator('[data-open-page]').click()
+      const second = await openEditor(page, page.locator('[data-plugin-controls="ticket"]').getByRole('button', { name: 'Open in VS Code', exact: true }))
+      await expect(second.locator('#folder')).toHaveText(ticket.workdir)
+      expect((await tasks(omo)).filter(t => t.state === 'running').map(t => t.id)).toEqual([initial.id])
+      expect(await forwards(omo)).toHaveLength(1)
+      const runtime = JSON.parse(initial.output.find(line => line.startsWith('Runtime: '))!.slice(9)) as string
+      if (ending === 'cancelled') {
+        await omo.api('POST', `/api/tickets/${n}/cancel`, { delete_branch: false })
+      } else {
+        await page.goto(omo.url(`/${n}?tab=agents`))
+        const view = page.locator('[data-ticket-panel]')
+        await view.locator(`[data-session="${dev.id}"] [data-agent-row]`).click()
+        const terminal = terminalIn(view)
+        await expectTerminalText(terminal, 'editor-gate')
+        await typeInTerminal(page, terminal, 'finish-editor')
+        await expect.poll(async () => (await omo.api<{ review_stage: string }>('GET', `/api/tickets/${n}`)).review_stage).toBe('human')
+        await omo.api('POST', `/api/tickets/${n}/approve`, {})
+      }
+      await expectClean(omo)
+      await expectTreeGone(tree)
+      expect((await tasks(omo)).find(t => t.id === initial.id)?.reason).toBe('ticket_done')
+      expect(existsSync(runtime)).toBe(false)
+      await first.close(); await second.close()
+      const closed = await omo.api<{ message: string }>('POST', '/api/plugins/vscode/actions/open-ticket', { ticket: n })
+      expect(closed.message).toContain('finished')
+      expect(editor.requests).toHaveLength(1)
+      await expectClean(omo)
+      await expectNoAgentProcesses(omo)
+    })
+  }
+
+  test('stale and foreign projectless folders refuse in panel and page before downloads or resources', async ({ page, omo, editor, repo }) => {
+    const n = await omo.createTicket({ title: 'Unavailable projectless editor', projects: [] })
+    await omo.moveTicket(n, 'ready')
+    const dev = await waitForSession(omo, n, 'developer')
+    await editor.install(omo)
+    await openBoard(page, omo)
+    const saved = dev.workdir + '-saved'
+    renameSync(dev.workdir, saved)
+    try {
+      for (const foreign of [false, true]) {
+        if (foreign) symlinkSync(repo, dev.workdir)
+        for (const path of [`/${n}`, `/ticket/${n}`]) {
+          await page.goto(omo.url(path))
+          const controls = page.locator('[data-plugin-controls="ticket"]')
+          const button = controls.getByRole('button', { name: 'Open in VS Code', exact: true })
+          await expect(button).toBeEnabled() // The board's recorded path can go stale.
+          const popup = page.context().waitForEvent('page')
+          await button.click()
+          const blank = await popup
+          await expect(controls.locator('[data-plugin-control-answer]')).toContainText('ticket working folder is unavailable')
+          await expect.poll(() => blank.isClosed()).toBe(true)
+          expect(editor.requests).toEqual([])
+          expect(await tasks(omo)).toEqual([])
+          expect(await forwards(omo)).toEqual([])
+        }
+        if (foreign) unlinkSync(dev.workdir)
+      }
+    } finally {
+      if (existsSync(dev.workdir)) unlinkSync(dev.workdir)
+      renameSync(saved, dev.workdir)
+    }
+    // Repository selection cannot redirect a projectless ticket to the sidebar repository.
+    await expect(omo.api('POST', '/api/plugins/vscode/actions/open-ticket', { ticket: n, project: omo.project })).rejects.toMatchObject({ status: 422 })
+    for (const field of ['path', 'workdir']) {
+      await expect(omo.api('POST', '/api/plugins/vscode/actions/open-ticket', { ticket: n, [field]: repo })).rejects.toMatchObject({ status: 400 })
+    }
+    await omo.api('POST', `/api/tickets/${n}/cancel`, { delete_branch: false })
+    await expect(async () => { await omo.api('POST', `/api/tickets/${n}/remove-workdir`, {}) }).toPass({ timeout: 15_000 })
+    await page.goto(omo.url(`/${n}`))
+    await expect(page.locator('[data-plugin-controls="ticket"]').getByRole('button', { name: 'Open in VS Code', exact: true })).toBeDisabled()
+    // A folder at the expected path without its record is still unavailable.
+    mkdirSync(dev.workdir)
+    const missing = await omo.createTicket({ title: 'Unrecorded folder', projects: [] })
+    const unrecorded = join(omo.home, 'omo', 'workdirs', String(missing))
+    mkdirSync(unrecorded)
+    const refused = await omo.api<{ message: string }>('POST', '/api/plugins/vscode/actions/open-ticket', { ticket: missing })
+    expect(refused.message).toContain('ticket working folder is unavailable')
+    expect(editor.requests).toEqual([])
+    expect(await tasks(omo)).toEqual([])
+    await expectClean(omo)
+    await expectNoAgentProcesses(omo)
   })
 })

@@ -214,7 +214,7 @@ never null) and `content_id`: SHA-256 of exact manifest bytes and sorted public
 paths/content, recomputed on load, independent of installation directory/config.
 It changes on frontend edits even without a version/commit change.
 `PluginRun.project` optionally selects a registered project (with ticket: must
-belong to it); manual payload includes selected `project: {id, kind, path, available, reason}` or null. Server `plugin_context.go` reuses terminal folder/gitfile checks and adds ordered `ticket.folders` without changing `ticket.projects` identifiers (delayed historical events match current folders by ID in snapshot order); unavailable paths are empty with a fixed reason. Selected unknown/disabled projects fail 404, mismatch 422, unavailable folder 409. Every event adds host OS/arch/path-separator/process-tree metadata, never session/environment identity. `TriggerAction`
+belong to it); manual payload includes selected `project: {id, kind, path, available, reason}` or null. Server `plugin_context.go` reuses terminal folder/gitfile checks and adds ordered `ticket.folders` without changing `ticket.projects` identifiers. A projectless task gets one `{project:"", kind:"working_directory", path, available, reason}` entry through `shellSpec`/`workdirShell`; the recorded exact task directory must exist without a link, with no Git checks. Projectless stories have no folders. Delayed historical events match current folders by ID and kind in snapshot order; unavailable paths are empty with a fixed reason. Generic context permits retained working directories after Done, like terminals; ticket-bound resources still require a live ticket. Selected unknown/disabled projects fail 404, mismatch 422, unavailable folder 409. Every event adds host OS/arch/path-separator/process-tree metadata, never session/environment identity. `TriggerAction`
 returns `api.PluginRunResult`; `Trigger` retains its text-only interface.
 `plugins/answers.go` handles command/Lua messages and optional `url` or
 `forward_id`; messages alone are redacted/escaped/cut, URLs validated then
@@ -242,7 +242,10 @@ once after unlock. Identical context updates are ignored. Frontend labels use
 15s. Registration disposers cannot remove a later replacement of the same id.
 Shared PluginControls renders ticket/sidebar/project buttons and text/image
 panels; per-worktree controls send ticket+project for recorded worktrees or
-explicitly explain missing folders, with no repository fallback. Legacy ticket
+send ticket alone for projectless tasks with a recorded working directory, or
+explicitly explain missing records, with no repository fallback. Live server
+checks report stale/replaced folders unavailable even if a recorded-path button
+was enabled. Legacy ticket
 hooks remain unless a declaration replaces them; settings retain global hooks.
 All action-result sinks use pluginNavigation/openForward to reserve a detached
 tab synchronously, wait through plugin-controlled polling, and acquire proxy
@@ -264,7 +267,8 @@ launches preserve the exact non-root prefix, including its trailing slash.
 platform URLs/SHA-256 live in editor.lua. Microsoft remains a visible unavailable
 choice pending affirmative licence permission; no checkbox/old saved consent can
 enable it and no Microsoft artifact is fetched. Hidden manual open/status hooks
-use authoritative selected ticket/project folders, async artifact start/status,
+use authoritative selected ticket/project folders (including projectless task
+working directories), refuse finished tickets before installation, and use async artifact start/status,
 canonical folder/editor/version instance keys, stable task/forward identities,
 readiness and three bounded bind attempts. The frontend polls using its facade,
 returns only the final forward ID to the gesture-reserved tab and does not retry

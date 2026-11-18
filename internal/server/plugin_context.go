@@ -17,14 +17,21 @@ func (s *Server) pluginFolder(ctx context.Context, ticket int, project string) m
 	if ticket > 0 {
 		req.Ticket = &ticket
 		out["kind"] = "worktree"
+		if project == "" {
+			out["kind"] = "working_directory"
+		}
 	}
-	p, ok := s.settings.Project(project)
-	if !ok || !p.Enabled {
-		out["reason"] = "project_unavailable"
-		return out
+	if project != "" {
+		p, ok := s.settings.Project(project)
+		if !ok || !p.Enabled {
+			out["reason"] = "project_unavailable"
+			return out
+		}
 	}
 	spec, err := s.shellSpec((&http.Request{}).WithContext(ctx), req)
-	if err != nil {
+	// An empty selection means a projectless directory here, not the shell's
+	// convenient inference of a newly associated single project.
+	if err != nil || spec.Project != project {
 		out["reason"] = "folder_unavailable"
 		return out
 	}
@@ -37,6 +44,9 @@ func (s *Server) pluginTicketPayload(ctx context.Context, t api.TicketSummary) m
 	folders := make([]any, 0, len(t.Projects))
 	for _, p := range t.Projects {
 		folders = append(folders, s.pluginFolder(ctx, t.Number, p.Project))
+	}
+	if len(t.Projects) == 0 && t.Type == api.TypeTask {
+		folders = append(folders, s.pluginFolder(ctx, t.Number, ""))
 	}
 	out["folders"] = folders
 	return out
