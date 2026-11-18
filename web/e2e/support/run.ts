@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 
 export interface CliResult {
   code: number
@@ -13,9 +13,18 @@ export interface CliResult {
  * killed, and the rejection comes only once the process is closed, so a test never
  * goes on while its program still writes to the home. A kill that fails arrives as
  * the child's `error` event and rejects as well; `child.kill` answers false only
- * for a process that is already gone.
+ * for a process that is already gone. `kill` is a test seam that replaces the kill
+ * (it may hold it back): the run must not settle before the process is closed.
  */
-export function run(bin: string, args: string[], env: NodeJS.ProcessEnv, stdin?: string, timeoutMs = 60_000, limit?: AbortSignal): Promise<CliResult> {
+export function run(
+  bin: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  stdin?: string,
+  timeoutMs = 60_000,
+  limit?: AbortSignal,
+  kill: (child: ChildProcess) => void = (child) => { child.kill('SIGKILL') },
+): Promise<CliResult> {
   return new Promise((res, rej) => {
     const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
@@ -23,7 +32,7 @@ export function run(bin: string, args: string[], env: NodeJS.ProcessEnv, stdin?:
     let late = false
     const expire = () => {
       late = true
-      child.kill('SIGKILL')
+      kill(child)
     }
     const timer = setTimeout(expire, timeoutMs)
     limit?.addEventListener('abort', () => {

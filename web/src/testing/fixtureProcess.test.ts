@@ -246,6 +246,14 @@ describe('the helper must be the process that owns the servers', () => {
   })
 })
 
+/** A server the helper connects to: the kernel closes that connection when the helper's process is gone, so `gone` is the exact end of the process. */
+async function endWatch(): Promise<{ port: number; gone: Promise<void>; close(): void }> {
+  const server = createServer()
+  const gone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+  return { port: (server.address() as { port: number }).port, gone, close: () => { server.close() } }
+}
+
 describe('a kill that fails', () => {
   it('is reported by stop, and the build folder and the interrupt handlers are released all the same', async () => {
     const tmp = own()
@@ -255,6 +263,7 @@ describe('a kill that fails', () => {
     const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
     await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
     let held = 0
+    // `end.kill` replaces the whole platform step (group kill, child.kill, taskkill), so this runs the same on every platform.
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
     try {
       const run = await startFixture({
@@ -262,18 +271,89 @@ describe('a kill that fails', () => {
         build: { pkg: '.' },
         args: [...HELPER_ARGS, '--', `127.0.0.1:${(server.address() as { port: number }).port}`],
         tmp,
-        end: { killGroup: denied },
+        end: { kill: denied },
         onSpawn: (pid) => { held = pid },
       })
       expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
-      await expect(run.stop()).rejects.toThrow(/not permitted/)
-      expect(readdirSync(tmp)).toEqual([])
+      const failure = await run.stop().then(() => new Error('stop did not reject'), (error: Error) => error)
+      expect(failure.message).toMatch(/not permitted/)
+      // The process still runs. Where a running executable can be deleted the folder is gone; where it cannot (Windows)
+      // the folder stays, and then the failure must say so: a folder is never left behind without being reported.
+      expect(readdirSync(tmp).length === 0 || /could not remove the build folder/.test(failure.message), failure.message).toBe(true)
       expect(process.listenerCount('SIGINT')).toBe(listeners)
     } finally {
-      // The refused kill left the helper running: end it for real.
-      if (held > 0) process.kill(-held, 'SIGKILL')
+      // The refused kill left the helper running: end it for real (a directly owned process, ended the same way on every platform).
+      if (held > 0) process.kill(held, 'SIGKILL')
       await helperGone
       server.close()
+    }
+  }, 120_000)
+
+  it('is reported by stop for a helper that has no folder of its own, and the handlers are released', async () => {
+    const listeners = process.listenerCount('SIGINT')
+    const watch = await endWatch()
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    // The fixtures line is printed only once the connection exists, so the server certainly sees it close when the process is gone.
+    const script = `require('node:net').connect(${watch.port}, '127.0.0.1', () => process.stdout.write('PROXY_BROWSER_FIXTURES []\\n')); process.stdin.resume()`
+    const run = await startFixture({ command: process.execPath, args: ['-e', script], end: { kill: denied }, onSpawn: (pid) => { held = pid } })
+    try {
+      expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+      await expect(run.stop()).rejects.toThrow(/not permitted/)
+      expect(process.listenerCount('SIGINT')).toBe(listeners)
+      expect(alive(held)).toBe(true)
+    } finally {
+      process.kill(held, 'SIGKILL')
+      await watch.gone
+      watch.close()
+    }
+  })
+})
+
+describe('a build folder that cannot be removed', () => {
+  it('is reported by stop after the helper was closed, with the handlers released', async () => {
+    const tmp = own()
+    const listeners = process.listenerCount('SIGINT')
+    let held = 0
+    let runningWhenRemoved: boolean | undefined
+    const remove = () => {
+      runningWhenRemoved = alive(held)
+      throw Object.assign(new Error('the folder is in use'), { code: 'EBUSY' })
+    }
+    const run = await startFixture({ cwd: goHelper(), build: { pkg: '.' }, args: HELPER_ARGS, tmp, remove, onSpawn: (pid) => { held = pid } })
+    expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+    await expect(run.stop()).rejects.toThrow(/could not remove the build folder.*in use/s)
+    // The removal was tried only once the process was closed, and the failure did not keep the handlers.
+    expect(runningWhenRemoved).toBe(false)
+    expect(process.listenerCount('SIGINT')).toBe(listeners)
+    // A failure that persists is reported again, not forgotten.
+    await expect(run.stop()).rejects.toThrow(/could not remove the build folder/)
+  }, 120_000)
+
+  it('is reported together with a kill that failed', async () => {
+    const tmp = own()
+    const watch = await endWatch()
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    const stuck = () => { throw Object.assign(new Error('the folder is in use'), { code: 'EBUSY' }) }
+    const run = await startFixture({
+      cwd: goHelper(),
+      build: { pkg: '.' },
+      args: [...HELPER_ARGS, '--', `127.0.0.1:${watch.port}`],
+      tmp,
+      end: { kill: denied },
+      remove: stuck,
+      onSpawn: (pid) => { held = pid },
+    })
+    try {
+      const failure = await run.stop().then(() => new Error('stop did not reject'), (error: Error) => error)
+      expect(failure.message).toMatch(/not permitted/)
+      expect(failure.message).toMatch(/could not remove the build folder.*in use/s)
+    } finally {
+      // The test returns, and its folder is removed, only after the process has really ended.
+      process.kill(held, 'SIGKILL')
+      await watch.gone
+      watch.close()
     }
   }, 120_000)
 })
@@ -302,6 +382,37 @@ describe('ending a process', () => {
     expect(groups).toEqual([4242])
   })
 
+  it('hands the kill to an injected end.kill on every platform, and only for a process that is still running', () => {
+    for (const platform of ['win32', 'linux', 'darwin'] as const) {
+      const asked: Array<[number, boolean]> = []
+      const kill = (child: { pid?: number }, options: { tree: boolean }) => { asked.push([child.pid!, options.tree]) }
+      const real = () => { throw new Error('the platform step must not run') }
+      endProcess(running(), { platform, tree: true, kill, killTree: real, killGroup: real })
+      endProcess(running({ kill: real }), { platform, kill, killTree: real, killGroup: real })
+      endProcess(running({ exitCode: 0 }), { platform, kill, killTree: real, killGroup: real })
+      endProcess(running({ pid: undefined }), { platform, kill, killTree: real, killGroup: real })
+      expect(asked, platform).toEqual([[4242, true], [4242, false]])
+    }
+    const denied = () => { throw new Error('operation not permitted') }
+    expect(() => endProcess(running(), { kill: denied })).toThrow(/not permitted/)
+  })
+
+  it('refuses a one-platform kill step without an explicit platform, wherever the call is written and whatever the process', () => {
+    const step = () => {}
+    for (const options of [{ killGroup: step }, { killTree: step }, { killGroup: step, killTree: step, tree: true }]) {
+      expect(() => endProcess(running(), options)).toThrow(/platform/)
+      expect(() => endProcess(running({ exitCode: 0 }), options)).toThrow(/platform/)
+    }
+    expect(() => endProcess(running(), { platform: 'linux', killGroup: step })).not.toThrow()
+    expect(() => endProcess(running(), { kill: () => {} })).not.toThrow()
+  })
+
+  it('refuses it at the start of a fixture too, before anything is built or started', async () => {
+    const tmp = own()
+    await expect(startFixture({ command: process.execPath, tmp, end: { killGroup: () => {} } })).rejects.toThrow(/platform/)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
   it('does not call a refused kill "already gone": only an empty group is', () => {
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
     const empty = () => { throw Object.assign(new Error('no such process'), { code: 'ESRCH' }) }
@@ -311,25 +422,55 @@ describe('ending a process', () => {
   })
 })
 
+describe('stopping while the process end is held back', () => {
+  // The kill is asked for through the seam and takes effect only when the test lets it: the process is certainly still running
+  // while the folder is checked, so a stop that removed the folder before the close would fail here on every run, fast or slow machine.
+  it('keeps the build folder until the held kill took effect and the process is closed', async () => {
+    const tmp = own()
+    let release!: () => void
+    let helper = 0
+    let asked!: () => void
+    const kill = new Promise<void>((ok) => { asked = ok })
+    const run = await startFixture({
+      cwd: goHelper(),
+      build: { pkg: '.' },
+      args: HELPER_ARGS,
+      tmp,
+      end: { kill: (child) => { release = () => { child.kill('SIGKILL') }; asked() } },
+      onSpawn: (pid) => { helper = pid },
+    })
+    const stopping = run.stop()
+    await kill
+    expect(alive(helper)).toBe(true)
+    expect(readdirSync(tmp)).toHaveLength(1)
+    release()
+    expect(await stopping).toBeNull()
+    expect(alive(helper)).toBe(false)
+    expect(readdirSync(tmp)).toEqual([])
+  }, 120_000)
+})
+
 describe('a driver that is interrupted', () => {
   // The Go helper connects to this test (its address after `--`); the kernel closes that connection when the helper's
   // process is gone, so the close is the proof that it ended: no sleeping, and no lookup of a process nobody reaped.
-  // The driver's kill is held back (`end.killGroup`) until the test lets it through, as if the platform ended the
-  // process late: the folder of a running program must stay until the close has been awaited, and then go.
-  it.skipIf(process.platform === 'win32')('waits for the helper to be closed, removes the build folder, then ends itself with the signal', async () => {
-    // Windows does not deliver a catchable interrupt signal to a process (process.kill ends it at once), so the handler cannot run there.
+  // The driver's kill is held back (`end.kill`) until the test lets it through, as if the platform ended the process
+  // late: the folder of a running program must stay until the close has been awaited, and then go.
+  //
+  // `emit` runs the driver's own interrupt handler by emitting the event inside the driver, which works on every platform;
+  // `signal` delivers a real SIGINT to the driver process.
+  async function interrupt(how: 'emit' | 'signal'): Promise<string | null> {
     const tmp = own()
     const module = goHelper('io.Copy(io.Discard, os.Stdin)')
     const driver = join(own(), 'driver.mjs')
     writeFileSync(
       driver,
       `import { startFixture } from ${JSON.stringify(new URL('../../scripts/fixtureProcess.mjs', import.meta.url).href)}
-const held = []
 await startFixture({
   cwd: process.argv[3], build: { pkg: '.' }, tmp: process.argv[4],
   args: ['-test.run=^TestHelper$', '-test.count=1', '--', '127.0.0.1:' + process.argv[2]],
-  end: { killGroup: (pid) => { process.stdout.write('KILL-HELD\\n'); process.stdin.once('data', () => process.kill(-pid, 'SIGKILL')) } },
+  end: { kill: (child) => { process.stdout.write('KILL-HELD\\n'); process.stdin.once('data', () => child.kill('SIGKILL')) } },
 })
+if (process.argv[5] === 'emit') process.stdin.once('data', () => process.emit('SIGINT', 'SIGINT'))
 process.stdout.write('READY\\n')
 setInterval(() => {}, 1 << 30)
 `,
@@ -338,7 +479,7 @@ setInterval(() => {}, 1 << 30)
     const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
     await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
     const port = (server.address() as { port: number }).port
-    const child = spawn(process.execPath, [driver, String(port), module, tmp], { stdio: ['pipe', 'pipe', 'inherit'] })
+    const child = spawn(process.execPath, [driver, String(port), module, tmp, how], { stdio: ['pipe', 'pipe', 'inherit'] })
     const closed = new Promise<string | null>((ok) => child.once('close', (_code, signal) => ok(signal)))
     const printed = (word: string) => new Promise<void>((ok, bad) => {
       let seen = ''
@@ -350,16 +491,88 @@ setInterval(() => {}, 1 << 30)
       const held = printed('KILL-HELD')
       await ready
       expect(readdirSync(tmp)).toHaveLength(1)
-      child.kill('SIGINT')
+      if (how === 'emit') child.stdin.write('interrupt')
+      else child.kill('SIGINT')
       await held
       // The kill was asked for and has not taken effect: the process is running, so its folder is still there.
       expect(readdirSync(tmp)).toHaveLength(1)
       child.stdin.write('go')
-      expect(await closed).toBe('SIGINT')
+      const signal = await closed
       await helperGone
       expect(readdirSync(tmp)).toEqual([])
+      return signal
     } finally {
       server.close()
     }
+  }
+
+  it('waits for the helper to be closed, removes the build folder, then ends itself', async () => {
+    const signal = await interrupt('emit')
+    // Windows reports no signal name for a process that process.kill ended, so the re-raised SIGINT cannot be read back there.
+    if (process.platform !== 'win32') expect(signal).toBe('SIGINT')
   }, 120_000)
+
+  // Windows has no catchable interrupt signal for process.kill to deliver (it ends the process at once), so a real signal
+  // cannot reach the handler there; the handler's sequencing is covered above on every platform.
+  it.skipIf(process.platform === 'win32')('does the same when a real SIGINT is delivered to the driver', async () => {
+    expect(await interrupt('signal')).toBe('SIGINT')
+  }, 120_000)
+})
+
+// ---- conditional skips in tests ----
+
+describe('tests that are skipped', () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') return []
+      const path = join(dir, e.name)
+      return e.isDirectory() ? walk(path) : /\.(test|spec)\.(ts|mjs)$/.test(e.name) ? [path] : []
+    })
+  // Every web test file, guards included: unit tests, browser specs and the standalone drivers.
+  const files = walk(resolve('.')).map((path) => ({ path: path.slice(resolve('.').length + 1).split('\\').join('/'), text: readFileSync(path, 'utf8') }))
+  // Every way a test is left out, whatever its condition says or hides: a variable, a helper, an import, a platform name.
+  const SKIPS = /(?:\.(?:skipIf|runIf|skip|fixme|todo)|\b(?:xit|xtest|xdescribe))\s*\(/g
+  const skipsIn = (text: string) => text.match(SKIPS) ?? []
+
+  // The whole inventory. A skip that is not here fails until someone states why; a platform skip needs a capability the platform truly lacks.
+  const allowed: Record<string, { count: number; reason: string }> = {
+    'src/testing/fixtureProcess.test.ts': {
+      count: 1,
+      reason: 'platform capability: a real SIGINT cannot be delivered to a process on Windows (process.kill ends it at once); the same handler sequence runs everywhere through an emitted event',
+    },
+    'e2e/filters.spec.ts': {
+      count: 1,
+      reason: 'not a platform skip: the screenshot-only test runs only when OMO_SCREENSHOTS names a folder to write to',
+    },
+  }
+
+  it('are found only in the inventory, in every web test file, whatever their condition', () => {
+    const found: Record<string, number> = {}
+    for (const { path, text } of files) {
+      const n = skipsIn(text).length
+      if (n > 0) found[path] = n
+    }
+    expect(found).toEqual(Object.fromEntries(Object.entries(allowed).map(([path, { count }]) => [path, count])))
+    for (const [path, { reason }] of Object.entries(allowed)) expect(reason.length, path).toBeGreaterThan(20)
+  })
+
+  it('see a skip whose condition is a variable, a helper or a platform name, in one line or several', () => {
+    // Written in pieces so that this file's own text holds no skip for the scan above to count.
+    const dot = (name: string) => `it.${name}` + '('
+    const forms = [
+      "const WINDOWS = process.platform === 'win32'\n" + dot('skipIf') + "WINDOWS)('x', () => {})",
+      dot('skipIf') + "isWindows())('x', () => {})",
+      dot('skipIf') + "\n  process.platform === 'win32',\n)('x', () => {})",
+      dot('runIf') + "IS_LINUX)('x', () => {})",
+      'test.skip' + "(WINDOWS, 'x')",
+      'test.fix' + "me(WINDOWS, 'x')",
+      'describe.skip' + "('x', () => {})",
+      'x' + "it('x', () => {})",
+    ]
+    for (const form of forms) expect(skipsIn(form), form).toHaveLength(1)
+    expect(skipsIn('expect(skipped).toBe(1); const skipIfNot = 1; items.skipped(2)')).toHaveLength(0)
+    expect(files.some((f) => f.path.startsWith('e2e/') && f.path.endsWith('.spec.ts'))).toBe(true)
+    expect(files.some((f) => f.path.startsWith('scripts/') && f.path.endsWith('.test.mjs'))).toBe(true)
+    expect(files.some((f) => f.path.endsWith('.guard.test.ts'))).toBe(true)
+  })
 })

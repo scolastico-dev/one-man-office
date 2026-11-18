@@ -19,6 +19,8 @@ export interface FixtureOptions {
   env?: NodeJS.ProcessEnv
   /** Test seam: replaces the kill steps of `endProcess` for the helper. */
   end?: EndOptions
+  /** Test seam: removes the build folder (default a recursive, forced `rmSync`). A failure is reported with the folder named. */
+  remove?: (folder: string) => void
   /** Called with the process id as soon as the helper is started. */
   onSpawn?: (pid: number) => void
   /** Called after each piece of output with everything so far and a way to write to the helper's input. */
@@ -31,7 +33,11 @@ export interface EndOptions {
   platform?: NodeJS.Platform
   killTree?: (pid: number) => void
   killGroup?: (pid: number) => void
+  /** Replaces the whole platform step on every platform (a test seam that fails or holds the kill); it is called only for a process that is still running. */
+  kill?: (child: { pid?: number; kill(signal?: string): boolean }, options: { tree: boolean }) => void
 }
+/** Throws when `killGroup` or `killTree` is given without `platform`. */
+export function checkEndOptions(options?: EndOptions): void
 /** Ends a running process without waiting for it (the caller waits for its close); a failure to end it throws. */
 export function endProcess(child: { pid?: number; exitCode: number | null; signalCode: string | null; kill(signal?: string): boolean }, options?: EndOptions): void
 /** True for a program that launches others (go, npm, npx, a shell); `startFixture` refuses it as the helper. */
