@@ -635,3 +635,14 @@ func TestConsentWarnsAboutTheLocalhostRedirectInUse(t *testing.T) {
 		}
 	}
 }
+
+func TestMetadataRedirectDropsSourceReferer(t *testing.T) {
+	next, _ := http.NewRequest(http.MethodGet, "https://cdn.example/doc", nil)
+	next.Header.Set("Referer", "https://source.example/doc?token=source-secret")
+	if err := checkRedirect(next, nil); err != nil {
+		t.Fatal(err)
+	}
+	if next.Referer() != "" {
+		t.Fatal("source query disclosed through Referer")
+	}
+}

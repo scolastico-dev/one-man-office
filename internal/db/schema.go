@@ -248,4 +248,9 @@ CREATE TABLE mcp_upstream_auth (
 );
 CREATE INDEX proxy_forwards_ticket ON proxy_forwards(ticket_id);
 `,
+	// Version 9: plugin ownership is assigned only by server-bound helpers.
+	`ALTER TABLE proxy_forwards ADD COLUMN plugin_owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE proxy_forwards ADD COLUMN task_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX proxy_forwards_plugin ON proxy_forwards(plugin_owner,task_id);
+`,
 }

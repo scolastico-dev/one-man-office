@@ -477,6 +477,8 @@ type Options struct {
 	Socket func() string
 	// HTTP is the client of omo.http; nil uses a fresh client per run.
 	HTTP *http.Client
+	// ArtifactHTTP supplies a trusted artifact transport; Lua HTTP limits stay separate.
+	ArtifactHTTP *http.Client
 	// Log receives the manager's own problems (a failed database write);
 	// nil discards them. Plugin output never goes there.
 	Log *log.Logger
@@ -485,7 +487,10 @@ type Options struct {
 	Changed func(api.PluginInfo)
 	// Agents is what omo.agents and omo.send_to_agent reach; nil makes
 	// both answer that omo runs no agents.
-	Agents AgentDesk
+	Agents   AgentDesk
+	Forwards ForwardDesk
+	// Unloaded releases plugin resources after hooks have been cancelled.
+	Unloaded func(plugin, reason string)
 	// TaskTicketLive checks that a ticket exists and is nonterminal; nil
 	// refuses every ticket-bound task. Called before and after registration.
 	TaskTicketLive func(context.Context, int) bool
@@ -516,12 +521,16 @@ type Manager struct {
 	entries    []*entry // by name, every plugin of the last Load
 	known      map[string]db.PluginRuntime
 
-	tasksWG      sync.WaitGroup
-	tasksMu      sync.Mutex
-	tasks        map[string]*task
-	taskSequence uint64
-	exitSequence uint64
-	manual       sync.WaitGroup // running manual actions
+	artifactsWG    sync.WaitGroup
+	artifactsMu    sync.Mutex
+	artifacts      map[string]map[string]*artifactJob
+	artifactLimits *artifactLimits // tests override finite production bounds
+	tasksWG        sync.WaitGroup
+	tasksMu        sync.Mutex
+	tasks          map[string]*task
+	taskSequence   uint64
+	exitSequence   uint64
+	manual         sync.WaitGroup // running manual actions
 
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
@@ -548,6 +557,8 @@ type entry struct {
 // plugin is a loaded plugin: its hooks, configuration, queue and the
 // goroutines that deliver to it.
 type plugin struct {
+	// forwardMu joins resource operations with unload cleanup after cancellation.
+	forwardMu  sync.Mutex
 	name       string
 	dir        string
 	entry      *entry
@@ -655,6 +666,8 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 	m.stopTasks(func(*task) bool { return true }, TaskShutdown)
 	m.tasksWG.Wait()
+	m.stopArtifacts("", false)
+	m.artifactsWG.Wait()
 	m.cancel()
 	for _, p := range running {
 		p.cancel()
@@ -663,6 +676,11 @@ func (m *Manager) Close() {
 		p.wg.Wait()
 	}
 	m.manual.Wait()
+	if m.o.Unloaded != nil {
+		for _, p := range running {
+			m.o.Unloaded(p.name, TaskShutdown)
+		}
+	}
 }
 
 // Load reconciles installed Root/<name> trees with settings. Unchanged
@@ -788,9 +806,15 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 			reason = TaskPluginReplaced
 		}
 		if reason != "" {
+			m.stopArtifacts(e.settings.Name, false)
 			m.stopTasks(func(t *task) bool { return t.plugin == e.settings.Name }, reason)
 		}
 		e.p.wg.Wait()
+		if reason != "" && m.o.Unloaded != nil {
+			e.p.forwardMu.Lock()
+			m.o.Unloaded(e.settings.Name, reason)
+			e.p.forwardMu.Unlock()
+		}
 		if replacement != nil && replacement.p != nil {
 			m.mu.Lock()
 			replacement.started = e.started
@@ -803,6 +827,7 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 			continue
 		}
 		m.stopTasks(func(t *task) bool { return t.plugin == name }, TaskPluginRemoved)
+		m.stopArtifacts(name, true)
 		m.tasksMu.Lock()
 		for id, t := range m.tasks {
 			if t.plugin == name {

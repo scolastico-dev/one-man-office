@@ -280,7 +280,7 @@ refused with their replacement guidance.
 ### Events
 
 A command hook gets the event as JSON on standard input,
-`{"event": "<name>", "at": "<RFC 3339 time>", "data": {...}}`; a Lua hook gets
+`{"event": "<name>", "at": "<RFC 3339 time>", "host": {...}, "data": {...}}`; a Lua hook gets
 the same as the global table `event`.
 
 | Event | `data` |
@@ -294,12 +294,31 @@ the same as the global table `event`.
 | `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
 | `omo_started` | `at` (readiness/enable time) |
 | `timer` | `at` |
-| `manual` | `action`, `ticket` (null without a ticket), `project` (`{id}` for a selected project, otherwise null) |
+| `manual` | `action`, `ticket` (null without a ticket), `project` (selected folder context below, otherwise null) |
 
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
-`supervisor`, `attention` and `url` (the ticket's address on the board, without
-the login token). No event carries a session id, terminal id, environment
-value or file path. Text written by people or agents (titles, comments,
+`supervisor`, `attention`, `url` (without the login token) and `folders`.
+`projects` remains an array of project **identifiers**, compatible with existing
+plugins. `folders` is an ordered array, one entry per project:
+`{project: string, kind: "worktree", path: string, available: boolean, reason: string}`.
+Available entries contain the absolute, resolved recorded worktree path and
+`reason: ""`. Unavailable entries have `path: ""` and a fixed reason:
+`project_unavailable` (unknown/disabled project) or `folder_unavailable` (not
+started, removed, closed ticket, or failed worktree/gitfile checks). Empty
+projects produce `folders: []`. Delayed events retain their historical project
+IDs/order; current folders are matched by ID, with removed associations marked
+unavailable. A project's repository is never substituted for
+a missing ticket worktree. Paths use the same trusted records, confinement and
+`.git` checks as **Open terminal**; the server never follows an agent-written
+`.git` lookup. Folder availability is a snapshot; validate readiness before
+launch and handle a folder disappearing afterwards.
+
+Every event has `host: {os: string, arch: string, path_separator: string,
+task_process_trees: true}`. `os` and `arch` are Go platform names, for example
+`linux` / `amd64`, `darwin` / `arm64`, `windows` / `amd64`. This describes omo's
+host, not the browser. It does not certify native editor/libc/OS-version
+compatibility; the plugin checks its distribution's prerequisites. No event
+carries a session id, terminal id or arbitrary inherited environment values. Text written by people or agents (titles, comments,
 attention texts) is only ever in `data`, never in arguments, environment values
 or file names.
 
@@ -338,6 +357,9 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `config` | the plugin's configuration |
 | `omo.exec(program, args...)` | runs a program without a shell in the plugin's folder, with the environment of a command hook; returns its output (standard output and error, at most 1 MiB) and `""` or an error text |
 | `omo.http{method, url, headers, json \| form \| body, timeout}` | an HTTP request: https to any host, http only to localhost; at most 8 per run, bodies at most 1 MiB, 10 s by default and at most 30 s, redirects only to the same host. Returns `{status, body, headers}`, or `nil` and an error text |
+| `omo.artifact_start{ key, url, sha256, format, strip_components, retry }` | starts or reuses an asynchronous plugin-owned artifact install; returns a status or `nil, error`; see Artifact installs |
+| `omo.artifact_status(key)` | polls this plugin's in-memory artifact status, or `nil, error` |
+| `omo.runtime_info()` | `{os, arch}` using Go platform names, e.g. `linux`, `darwin`, `windows` and `amd64`, `arm64`; no external command |
 | `omo.task_start{ name, command, args, cwd, env, ticket }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
 | `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
 | `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
@@ -352,6 +374,123 @@ A run ends at the hook's time limit, and memory is watched. Every configuration
 string of six characters or more is replaced by `[redacted]` in the log, in
 error texts and in answer messages, and so are the header values the hook sent with
 `omo.http`.
+
+### Artifact installs
+
+Lua plugins can install standalone tools without a host Node, Python, shell,
+curl, tar or zip program. The plugin chooses every tool URL, version, platform,
+checksum, executable path, argument and licence policy. `omo.http` retains its
+existing request/redirect/body limits; artifact downloads use a separate Go
+helper that outlives the short hook.
+
+```lua
+local job, err = omo.artifact_start{
+  key = "worker", url = config.pinned_url, sha256 = config.pinned_sha256,
+  format = "tar.gz", strip_components = 1
+}
+if not job then return {message = err} end
+-- Return now, then poll omo.artifact_status("worker") from later hooks.
+-- Only a ready job has path; use job.path .. "/bin/worker" with task_start.
+return {message = "Installing: " .. job.phase}
+```
+
+`artifact_start` accepts this strict options table:
+
+| Field | Meaning |
+|---|---|
+| `key` | required plugin-local name: 1–64 ASCII letters/digits/dots/underscores/hyphens, starting alphanumeric |
+| `url` | required HTTPS URL, at most 8192 bytes; no user information or fragment |
+| `sha256` | optional expected 64-hex SHA-256 (case insensitive); omitted/empty explicitly means no publisher checksum |
+| `format` | required `tar.gz` or `zip`, on every OS |
+| `strip_components` | optional integer 0–32, default 0; removes leading archive path components after path validation |
+| `retry` | optional boolean, default false; explicitly retries a failed/cancelled job with the same identity |
+
+Unknown fields and wrong types fail with `nil, error`. No destination, headers,
+other plugin name or general filesystem operation is accepted. Keys containing
+known configuration or URL query secrets are refused. Every call is bound to
+the executing plugin; another plugin cannot inspect its jobs.
+
+Both helpers return a snapshot with these fields:
+
+| Field | Meaning |
+|---|---|
+| `id`, `key` | opaque job identity and plugin-local key |
+| `state` | `running`, `ready`, `failed` or `cancelled` |
+| `phase` | while running: `checking`, `downloading`, `verifying` or `extracting`; otherwise the terminal state |
+| `bytes` | compressed bytes received so far, zero before downloading and for cache-only checks |
+| `total_bytes` | advertised compressed length, or zero when unknown |
+| `verification` | `sha256` when an expected digest was supplied; `unverified` otherwise (describes the requested check while running; only ready means it completed) |
+| `path` | present only when ready: absolute extracted tool folder |
+| `error` | present on failure/cancellation: bounded fixed diagnostic without URL, response body, headers or filesystem paths |
+
+Simultaneous calls with the same plugin/key and URL/digest/extraction options
+reuse the active job and its id. Different options under an active key return
+an identity-conflict error. Once terminal, changed options start a fresh job;
+the former valid installation stays intact. Failed/cancelled jobs keep their
+id/error until an explicit `retry=true` or changed identity. There is no retry
+loop. At most four jobs and 64 retained keys belong to one plugin. Removal
+forgets its in-memory records; disable and server stop retain terminal status
+until the manager ends. No artifact polling endpoint or persisted job queue is
+added: a frontend polls through a normal hook.
+
+Calling `artifact_start` on a ready key also returns promptly in
+`running/checking`, without a path, while the full cache is checked. Poll
+`artifact_status` until it is ready. Polling reports the most recent result;
+it does not itself rehash the tree. Request a new `artifact_start` and await
+ready before reusing an installed executable. New servers have no job status;
+an explicit start can discover and validate a completed disk cache.
+
+Every install has a 30-minute overall deadline, including cache checks, download
+and extraction. Downloads allow five redirects, including cross-host HTTPS
+CDNs, and refuse an HTTP downgrade or credentials in redirects. No cookies or
+Authorization headers are forwarded. The default transport bounds response
+headers to 64 KiB and waiting for headers to 30 seconds. Compressed bytes are
+at most **512 MiB**, extracted file bytes **2 GiB**, one regular file **512 MiB**,
+and archive/tree entries **50,000**, including implicit directories (archive
+headers are counted too). Paths are at most 4096 bytes, components 255 bytes.
+ZIP central-directory metadata is preflighted before entry allocations: at most
+32 MiB, with actual counts checked independently of the advertised count;
+bounded single-disk ZIP64 directories are supported.
+These bounds admit the researched standalone editor pins. Expanded metadata and
+trailing tar data are also bounded. A supplied digest is checked over downloaded
+bytes **before extraction**; mismatch fails closed. Without a publisher checksum,
+ready remains explicitly `unverified`, even though local integrity is recorded.
+
+Downloads/extraction use private staging under
+`plugins/.data/<plugin>/.artifacts-v1/<key>/`. Completed generations contain
+`tree/` and `complete.json`; an identity-hashed reference selects a completed
+generation. Metadata stores identity and full-tree hashes, never source URLs.
+The tree and completion publish together by rename on the same filesystem,
+then the reference updates atomically. Cache checks require matching completion
+and reference metadata and rehash **every** file's bytes, paths, file types,
+permissions and link targets. Extra, missing or altered files/executables and
+incomplete metadata force a fresh download before ready. Metadata is local
+integrity bookkeeping, not a signature or a security boundary against someone
+who can rewrite both data and metadata as the user.
+
+Extraction rejects absolute/drive/UNC paths, `..`, percent-encoded path ambiguity,
+Windows device/ADS names, case aliases, link traversal during writes, devices,
+FIFOs, dangling/cyclic links and targets outside the extracted root. Files use
+private 0600 or executable 0700 modes; directories use 0700, with no archive
+ownership/setuid/setgid/sticky bits imported. Contained **file** symlinks and
+hardlinks are resolved only after regular files exist. Unix preserves relative
+symlinks (including Node realpath semantics); Windows copies their target bytes
+and executable mode without requiring symlink privileges. That fallback can
+change Node's realpath/relative-import behavior, so plugins must launch a
+verified real entry point rather than assume a copied `.bin` shim has identical
+semantics. Directory links are refused. Tests cover the twelve contained
+`node_modules/.bin` file links observed in the code-server archive; other
+platform archive layouts still need native validation by the plugin.
+
+Failure/cancellation removes only its private staging and never replaces an
+existing valid generation or deletes unrelated plugin data. Completed/obsolete
+generations remain on disk for explicit user maintenance; disk use can therefore
+grow with explicit version/identity changes. Installs are cancelled and reaped
+on disable, removal, code/install replacement and shutdown; ordinary
+configuration refresh preserves them. Ending a hook does not cancel its job.
+Nothing resumes automatically after restart. Artifact completion authorizes no
+licence acceptance or process start: the plugin handles those before invoking
+`task_start` with the ready path.
 
 ### Background tasks
 
@@ -400,7 +539,8 @@ Each task record has `id`, `name`, optional `ticket`, `started_at` (RFC 3339),
 `state` (`running` or `exited`) and `output` (an array, never null). A terminal
 record also has `ended_at`, `reason` and, for a failed natural exit, `error`.
 Reasons are `exited`, `stopped`, `ticket_done`, `plugin_disabled`,
-`plugin_removed`, `plugin_replaced` and `shutdown`; the first stop reason wins.
+`plugin_removed`, `plugin_replaced`, `shutdown`, `idle` and `forward_removed`;
+the first stop reason wins. The last two are the forward-watch policies below.
 No commands, arguments, environments or PIDs appear in records. A failed start
 returns a fixed error and retains no task or child. A quick nonzero exit keeps
 its status and diagnostic output in the terminal record.
@@ -560,6 +700,123 @@ per enabled lifetime (except an explicit retry). Entering OAuth consent ends
 that frontend context; returning to the board initializes it again. Updating
 assets or entry bytes gives a new address/lifetime.
 
+### Owned Web UI forwards
+
+These Lua helpers are bound to the executing plugin. A plugin cannot select an
+owner, list another plugin's forwards, or attach another plugin's task. Command
+hooks keep their existing user-level socket access; there is no additional
+command-side plugin identity.
+
+| Helper | Result |
+|---|---|
+| `omo.forward_add(options)` | forward record, or `nil, error` |
+| `omo.forward_list()` | own forward array (including activity), or `nil, error`; empty is `{}` in Lua / `[]` in JSON |
+| `omo.forward_remove(id)` | `true`, or `nil, error` for unknown/wrong owner |
+| `omo.forward_attach(id, task_id)` | `true`, or `nil, error`; associates an existing forward with a running stable task ID |
+| `omo.forward_idle_watch(id, idle_seconds)` | `true`, or `nil, error`; schedules idle stop for the attached running task |
+| `omo.free_loopback_port()` | integer port candidate on IPv4 `127.0.0.1`, or `nil, error` |
+
+`forward_add` strictly accepts `{name: string, port: integer, ticket?: integer|null,
+host?: string, scheme?: "http"|"https", start_path?: string,
+strip_prefix?: boolean, verify_tls?: boolean, task_id?: string}`. Name and port
+are required. Omitted/null ticket is global (it does **not** inherit the hook's
+ticket); pass `event.data.ticket.number` explicitly when binding. Defaults and
+normal host/port/name/path validation are the [forward registry's](proxy.md).
+Credentials, known hook secrets and authentication query keys are refused in
+destinations. Registration never starts or probes a target.
+
+Each record contains `{id, ticket, host, port, scheme, name, start_path,
+strip_prefix, verify_tls, base_path, address, plugin, task_id?, activity}`.
+`id` is the existing opaque forward ID. `base_path` stays `/proxy/ID/`; `address`
+includes `start_path` and prefers a configured subdomain. It contains no omo
+token or grant and is an address hint, not a sign-in link. Return
+`{forward_id = f.id}` from the manual hook; the frontend must obtain the opaque
+URL from the existing **user-only Open API** and navigate that URL unchanged.
+
+Task attachment requires the **stable task ID**, not a reusable name. Forward
+and task ticket bindings must match exactly (global means no ticket for both).
+A forward's task binding is immutable; attaching the same live ID is idempotent.
+Either supply `task_id` at creation, or register first to obtain a base path,
+start the task with that base, then call `forward_attach(f.id, task.id)`. If the
+task exits during attachment, the attachment fails or its exit callback removes
+the forward. Remove a still-unattached forward if task startup fails.
+
+Natural exit and every stop reason remove all forwards attached to that run,
+including idle, Stop, ticket completion/cancellation, disable/remove, replacement
+and shutdown. Unattached owned forwards also disappear on plugin disable,
+removal, code replacement and shutdown. Configuration-only reloads preserve
+forwards and tasks. Restart removes **all** stale plugin-owned forwards before
+loading plugins; persistent generic user/agent forwards retain their normal
+behavior. Removing an **unwatched** forward alone does not stop its task.
+Removing a **watched** forward stops its attached stable task with reason
+`forward_removed`, even while WebSockets remain open or a deadline callback is
+pending. User DELETE and `forward_remove` wait for task reaping; direct board
+removal is handled by the reliable event follower, before droppable hook delivery.
+Done/cancel/cascade cleanup retains reason `ticket_done`. The first termination
+reason wins if exit/expiry/removal are already racing. Task-exit and plugin
+lifecycle callbacks release registrations without waiting on their own task;
+repeated cleanup cannot stop a later task reusing the name.
+
+Ordinary already open proxy streams retain the transport's existing behavior;
+stopping the watched task terminates its process tree and thus any connections
+it serves. An independent upstream may keep an old stream open, but the task
+is already reaped and closing that stream cannot resurrect its removed watch.
+
+`activity` is `{active_requests: integer, active_websockets: integer,
+ever_connected: boolean, no_client_since: string, revision: integer}`.
+Counters begin only after proxy authentication and a live lookup, in both path
+and subdomain modes. `active_requests` includes pending/upgraded/streaming
+requests until the reverse-proxy handler finishes. `active_websockets` counts
+only accepted upstream WebSocket upgrades with successful downstream hijacks,
+until that full handler ends (including disconnect, cancellation or failure).
+Failed authentication and refused upgrades cannot extend the idle interval.
+HTTP/SSE/health/status requests are counted as requests but never reset that
+interval. This policy fits browser tools which maintain WebSockets; tools whose
+presence uses another protocol must implement their own policy.
+
+At registration, `ever_connected=false`, `active_websockets=0` and
+`no_client_since` is the registration timestamp. On upgrade, it becomes empty
+and `ever_connected=true`; any live socket prevents idle stop regardless of its
+age. Only the **last** socket closing starts a new no-client interval. Reconnect
+clears it and invalidates any prior deadline. `revision` increases on WS
+open/close and watch-policy changes. The timestamp is RFC 3339 nanoseconds for
+inspection; elapsed time/deadlines use Go's monotonic clock, not wall-clock
+subtraction in Lua. Counts reflect **observed** connection closure, not the
+instant a laptop loses physical connectivity; upstream protocol heartbeats or
+network failure detection determine when a dead connection is observed.
+
+`forward_idle_watch` accepts a finite duration from **0.01 to 604800 seconds**
+(seven days). It creates/replaces one watch per forward, measured from its
+current no-client interval, and requires a running attached task. Call it after
+readiness; if registration/startup already consumed the interval, it expires
+immediately. No watch or idle default exists until the plugin chooses one.
+It uses a deadline timer, not the one-minute sweep. At expiration, revision,
+zero sockets and the deadline are checked atomically with closing upgrade
+admission, then the stable task is stopped with reason `idle`. A reconnect that
+wins admission invalidates the old timer; one arriving after stop was committed
+is refused. Scheduling may run late under load, but never stops early against
+an obsolete revision. Policy replacement preserves the current interval;
+repeated calls/polls do not reset it. A watch stops its attached task even if
+that task has another forward, so plugins should choose one presence forward
+per task. Removal stops a watched task, then cancels its watch; exit/unload also
+cancels watches. Deletion and watched identity capture serialize with expiry;
+`StopTaskID` waits outside that lock. Expiry rechecks persisted registration,
+including before removal events are consumed, and applies `forward_removed`
+when the registration has vanished rather than dropping the task's policy.
+
+The loopback helper closes its temporary listener before returning: it is
+**not a reservation**. Launch on `127.0.0.1:PORT`, detect bind collisions and
+retry with a new candidate a bounded number of times. Never substitute a public
+listener or claim that a closed candidate is race-free.
+
+Runtime adapters: `Options.Forwards` implements `plugins.ForwardDesk`;
+`Options.Unloaded(plugin, reason)` releases unbound resources after cancellation
+and in-flight helper operations, outside manager locks. Stable task cleanup
+uses `Options.TaskExited`. Persisted registry ownership is assigned only by
+system board adapters; public create JSON accepts neither `plugin` nor `task_id`.
+The board emits ordinary add/remove events and `proxy.forward_updated` on first
+task attachment. All carry the public record with a relative address.
+
 ### Buttons (manual hooks)
 
 A manual hook with `scope: ticket` adds a legacy button to every ticket unless
@@ -578,7 +835,12 @@ action per plugin runs at a time, bounded by its timeout.
 `ticket` is a positive ticket number when supplied (zero/omitted means none);
 `project` is an optional registered project id. With a ticket it must belong
 to that ticket. Ticket-scope actions still require a ticket. The hook receives
-`event.data.project = {id = "…"}` or null; folder resolution is separate.
+`event.data.project = {id: string, kind: "worktree"|"repository", path: string,
+available: true, reason: ""}` or null. With a ticket this selects its checked
+worktree; without one it selects the enabled project's configured repository
+folder, resolved through its user-owned links. Unknown/disabled projects return
+404, ticket/project mismatches 422, and unavailable selected folders 409 before
+the hook runs. A request accepts identifiers, never a filesystem path.
 Existing request bodies remain valid.
 
 Lua may return a string, nil, or a table containing `message`, `url`

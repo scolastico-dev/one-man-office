@@ -3,6 +3,8 @@ package plugins
 import (
 	"encoding/json"
 	"net/url"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +73,7 @@ func (e Event) wire() map[string]any {
 	if data == nil {
 		data = map[string]any{}
 	}
-	return map[string]any{"event": e.Name, "at": e.At.UTC().Format(time.RFC3339), "data": data}
+	return map[string]any{"event": e.Name, "at": e.At.UTC().Format(time.RFC3339), "data": data, "host": HostPayload()}
 }
 
 // MarshalJSON writes the event as plugins see it.
@@ -184,4 +186,9 @@ func cutText(s string, n int) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// HostPayload exposes capabilities without inheriting process/session identity.
+func HostPayload() map[string]any {
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "path_separator": string(os.PathSeparator), "task_process_trees": true}
 }
