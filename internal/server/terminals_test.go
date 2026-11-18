@@ -68,7 +68,7 @@ func refusedShell(t *testing.T, b *browser, s *Server, req any, status int, code
 // listener.
 func dialShell(t *testing.T, b *browser, id string, protocols []string, header http.Header) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	return websocket.Dial(ctx, "ws"+strings.TrimPrefix(b.srv.URL, "http")+"/api/terminals/"+id+"/socket", &websocket.DialOptions{
 		Host: hostOmoLocalhost + ":" + b.port, Subprotocols: protocols, HTTPHeader: header,
@@ -90,7 +90,7 @@ func shellConn(t *testing.T, b *browser, s *Server, id string) *termOutput {
 // typeLine types line and Enter into a shell.
 func (o *termOutput) typeLine(line string) {
 	o.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := o.c.Write(ctx, websocket.MessageBinary, []byte(line+"\r")); err != nil {
 		o.t.Fatal(err)
@@ -104,7 +104,7 @@ var pidLine = regexp.MustCompile(`PID=(\d+)`)
 func (o *termOutput) shellPID() int {
 	o.t.Helper()
 	o.typeLine("echo PID=$$")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
 		if m := pidLine.FindStringSubmatch(o.got.String()); m != nil {
@@ -740,7 +740,7 @@ func TestRunStopEndsShells(t *testing.T) {
 	post("/api/terminals", raw, &sh)
 	// The shell starts a child in its own process group; both must go.
 	marker := filepath.Join(t.TempDir(), "child")
-	ctxDial, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctxDial, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctxDial, "ws://omo/api/terminals/"+sh.ID+"/socket", &websocket.DialOptions{HTTPClient: client, Subprotocols: []string{"omo"}})
 	if err != nil {

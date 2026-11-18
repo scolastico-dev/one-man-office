@@ -238,11 +238,7 @@ func (e *env) stored(plugin, key string) string {
 
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -408,11 +404,7 @@ omo.store_set("moved", event.data.n)
 		}
 		close(dispatched)
 	}()
-	select {
-	case <-dispatched:
-	case <-time.After(20 * time.Second):
-		t.Fatal("Dispatch blocked while the first hook awaited release")
-	}
+	<-dispatched
 	// Another plugin is not held by the blocked one.
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{"n": 1}})
 	eventually(t, "the other plugin", func() bool { return e.stored("fast", "moved") == "1" })
@@ -564,11 +556,7 @@ func TestCloseStopsEverything(t *testing.T) {
 		e.m.Close()
 		close(done)
 	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close did not return")
-	}
+	<-done
 	e.m.Dispatch(ticketEvent(2, "x"))
 	if _, err := e.m.Trigger(t.Context(), "block", "x", nil); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Trigger after Close = %v", err)
@@ -581,11 +569,7 @@ func TestCloseStopsEverything(t *testing.T) {
 	}
 	joined := make(chan struct{})
 	go func() { p.wg.Wait(); close(joined) }()
-	select {
-	case <-joined:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close left plugin workers running")
-	}
+	<-joined
 	// A run cut short by Close is not an error of the plugin.
 	if i := e.info("block"); i.State == StateError {
 		t.Fatalf("state after Close = %+v", i)

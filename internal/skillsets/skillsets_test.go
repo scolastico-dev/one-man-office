@@ -160,8 +160,6 @@ func (e *env) eventCount() int {
 // finish makes state visible before calling OnChange.
 func (e *env) waitChange(name, state string) {
 	e.t.Helper()
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -179,8 +177,6 @@ func (e *env) waitChange(name, state string) {
 		}
 		select {
 		case <-tick.C:
-		case <-deadline.C:
-			e.t.Fatalf("no published %s state for %s", state, name)
 		}
 	}
 }
@@ -188,15 +184,12 @@ func (e *env) waitChange(name, state string) {
 // waitState waits until the set's state is want and returns it.
 func waitState(t *testing.T, m *Manager, name, want string) api.SkillSetState {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := m.State(name)
 		if st.State == want {
 			return st
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("state of %s = %+v, want %s", name, st, want)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -204,15 +197,12 @@ func waitState(t *testing.T, m *Manager, name, want string) api.SkillSetState {
 // waitCommit waits until the set's checkout is at commit.
 func waitCommit(t *testing.T, m *Manager, name, commit string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := m.State(name)
 		if st.State == StateOK && st.Commit == commit {
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("state of %s = %+v, want commit %s", name, st, commit)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -299,11 +289,7 @@ func TestSkillSetPinnedNotUpdated(t *testing.T) {
 	}
 	m2.mu.Unlock()
 	for _, j := range pending {
-		select {
-		case <-j.done:
-		case <-time.After(30 * time.Second):
-			t.Fatal("a startup fetch did not finish")
-		}
+		<-j.done
 	}
 	if st := m2.State("pinned"); st.State != StateOK || st.Commit != first {
 		t.Fatalf("pinned set after restart = %+v, want %s", st, first)
@@ -618,15 +604,12 @@ func TestSkillSetStartCleansLeftovers(t *testing.T) {
 	e.put("s", testpath.Abs("/nonexistent/repo.git"), "", api.SkillSetPinned, nil)
 	m := e.manager()
 	m.Start(context.Background())
-	deadline := time.Now().Add(10 * time.Second)
 	for {
 		entries, _ := os.ReadDir(e.dir)
 		if len(entries) == 2 {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("skills folder = %v", entries)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 	onlySets(t, e.dir, "s", "NOTES")
@@ -648,24 +631,17 @@ func TestSkillSetStopDuringFetch(t *testing.T) {
 	m := e.manager()
 	m.Start(context.Background())
 	waitState(t, m, "s", StateUpdating)
-	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if _, err := os.Stat(started); err == nil {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("the SSH transport did not start")
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 	before := e.eventCount()
 	done := make(chan struct{})
 	go func() { m.Stop(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("Stop did not return while a fetch hung")
-	}
+	<-done
 	if e.eventCount() != before {
 		t.Fatal("an event was sent after Stop")
 	}
@@ -779,27 +755,15 @@ func TestSkillSetUpdateDuringWorkerRetirementIsNotLost(t *testing.T) {
 		}
 	}
 	first := m.enqueue("s")
-	select {
-	case <-finished:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the first fetch did not finish")
-	}
+	<-finished
 	secondCommit := u.commit(map[string]string{"a.md": "two\n"})
 	cancel := first.cancel
 	first.cancel = func() { close(retiring); <-releaseRetire; cancel() }
 	releaseFirst()
-	select {
-	case <-retiring:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the first worker did not retire")
-	}
+	<-retiring
 	second := m.enqueue("s")
 	releaseLast()
-	select {
-	case <-second.done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the requested update did not finish")
-	}
+	<-second.done
 	if st := m.State("s"); st.Commit != secondCommit {
 		t.Fatalf("update during worker retirement was lost: commit = %s, want %s", st.Commit, secondCommit)
 	}

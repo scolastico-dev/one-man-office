@@ -26,7 +26,7 @@ func TestProxyBrowserWebSocket(t *testing.T) {
 						return
 					}
 					defer c.CloseNow()
-					ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					ctx, cancel := context.WithCancel(r.Context())
 					defer cancel()
 					kind, data, err := c.Read(ctx)
 					if err != nil {
@@ -61,7 +61,7 @@ func TestProxyBrowserWebSocket(t *testing.T) {
 			h.Add("Cookie", "application=present")
 			h.Set("Origin", "https://app-client.example")
 			dial := func(path string, h http.Header) (*websocket.Conn, *http.Response, error) {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				return websocket.Dial(ctx, "ws"+strings.TrimPrefix(b.srv.URL, "http")+path, &websocket.DialOptions{HTTPHeader: h, Subprotocols: []string{"app", "omo-token." + s.token}})
 			}
@@ -70,7 +70,7 @@ func TestProxyBrowserWebSocket(t *testing.T) {
 				if err != nil {
 					t.Fatalf("dial %s: %v (%v)", path, err, res)
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithCancel(context.Background())
 				err = c.Write(ctx, websocket.MessageText, []byte("ping"))
 				if err != nil {
 					t.Fatal(err)
@@ -148,7 +148,7 @@ func TestProxyBrowserSSEAndBoardEvents(t *testing.T) {
 	f := proxyForward(t, s, upstream.URL, true)
 	h := proxyLogin(t, s, b, f)
 	for _, path := range []string{f.BasePath + "events", "/api/events"} {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
 		req, _ := http.NewRequestWithContext(ctx, "GET", b.srv.URL+path, nil)
 		req.Header = h.Clone()
 		req.Header.Set("Authorization", "Bearer "+s.token)

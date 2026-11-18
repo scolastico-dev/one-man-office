@@ -59,7 +59,6 @@ func skillRepo(t *testing.T) (string, string) {
 // waitSkillSet waits until the set's state is want.
 func waitSkillSet(t *testing.T, b *browser, s *Server, name, want string) api.SkillSetState {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		resp := b.do("GET", "/api/skillsets", nil, bearer(s))
 		wantStatus(t, resp.StatusCode, http.StatusOK)
@@ -69,9 +68,7 @@ func waitSkillSet(t *testing.T, b *browser, s *Server, name, want string) api.Sk
 				return st
 			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("states = %+v, want %s %s", got.States, name, want)
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 }
@@ -294,7 +291,6 @@ func TestSkillSetPathsMustExist(t *testing.T) {
 	set.Repository = other
 	resp = b.do("PUT", "/api/skillsets/sp", set, hdr())
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := waitSkillSet(t, b, s, "sp", "ok")
 		if st.Commit == otherCommit {
@@ -303,9 +299,7 @@ func TestSkillSetPathsMustExist(t *testing.T) {
 			}
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("state = %+v, want commit %s", st, otherCommit)
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 }

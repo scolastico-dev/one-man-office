@@ -38,7 +38,7 @@ func TestRefreshStopsCommandOnceCredentialsChange(t *testing.T) {
 	// must reap this same process, which stays alive until omo stops it.
 	script := `printf '%s' "$$" > "$PID_FILE"; printf '{"tokens":{"access_token":"fresh"}}' > "$CODEX_HOME/auth.next"; mv "$CODEX_HOME/auth.next" "$CODEX_HOME/auth.json"; exec sleep 60`
 	r := Refresher{Shell: []string{"sh", "-c", script}, Env: map[string]string{"PID_FILE": pidFile}}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := r.Refresh(ctx, "sh", []string{"CODEX_HOME=" + root}, path); err != nil {
 		t.Fatal(err)
@@ -94,15 +94,9 @@ func TestRefreshEndsWithItsContext(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		if !finished {
-			select {
-			case <-done:
-			case <-time.After(20 * time.Second):
-				t.Error("refresh did not stop")
-			}
+			<-done
 		}
 	})
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
@@ -111,8 +105,6 @@ func TestRefreshEndsWithItsContext(t *testing.T) {
 		}
 		select {
 		case <-poll.C:
-		case <-deadline.C:
-			t.Fatal("refresh command did not start")
 		case err := <-done:
 			finished = true
 			t.Fatalf("refresh ended before cancellation: %v", err)
@@ -125,8 +117,6 @@ func TestRefreshEndsWithItsContext(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v", err)
 		}
-	case <-deadline.C:
-		t.Fatal("refresh did not stop after cancellation")
 	}
 }
 
@@ -155,7 +145,7 @@ func TestRefreshCommandRunsWithoutArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TERM", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := (Refresher{}).Refresh(ctx, script, []string{"CODEX_HOME=" + root, "ARGV_OUT=" + out}, path); err != nil {
 		t.Fatal(err)

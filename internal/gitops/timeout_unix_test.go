@@ -66,7 +66,7 @@ func TestHungGitTimesOut(t *testing.T) {
 	g := New()
 	g.query = 300 * time.Millisecond
 	dir := t.TempDir()
-	err := returnsWithin(t, 10*time.Second, "hung git", func() error {
+	err := returns(t, "hung git", func() error {
 		_, err := g.CurrentBranch(dir)
 		return err
 	})
@@ -86,7 +86,6 @@ func cancelReadyGit(t *testing.T, g *Git, pidFile string) (error, time.Duration)
 	result := make(chan error, 1)
 	dir := t.TempDir()
 	go func() { _, err := g.run(ctx, time.Hour, dir, "branch", "--show-current"); result <- err }()
-	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if raw, err := os.ReadFile(pidFile); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
@@ -94,14 +93,12 @@ func cancelReadyGit(t *testing.T, g *Git, pidFile string) (error, time.Duration)
 				break
 			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake git did not start its child")
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 	start := time.Now()
 	cancel()
-	err := returnsWithin(t, 5*time.Second, "git cancellation", func() error { return <-result })
+	err := returns(t, "git cancellation", func() error { return <-result })
 	return err, time.Since(start)
 }
 

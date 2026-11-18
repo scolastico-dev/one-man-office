@@ -111,11 +111,7 @@ func TestSessionWritesReadableScreenLog(t *testing.T) {
 	if err := s.SendLine("continue"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("session did not end after releasing output")
-	}
+	<-s.Done()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

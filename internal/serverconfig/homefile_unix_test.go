@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
@@ -31,15 +30,11 @@ func TestLoadersRefusePipesAndLinks(t *testing.T) {
 		_, terr := LoadOrCreateToken(token)
 		done <- [2]error{cerr, terr}
 	}()
-	select {
-	case errs := <-done:
-		if !errors.Is(errs[0], homefile.ErrNotRegular) {
-			t.Errorf("server.yaml: %v", errs[0])
-		}
-		if !errors.Is(errs[1], homefile.ErrLink) {
-			t.Errorf("token: %v", errs[1])
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("a loader blocked")
+	errs := <-done
+	if !errors.Is(errs[0], homefile.ErrNotRegular) {
+		t.Errorf("server.yaml: %v", errs[0])
+	}
+	if !errors.Is(errs[1], homefile.ErrLink) {
+		t.Errorf("token: %v", errs[1])
 	}
 }

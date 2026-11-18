@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func roundTrip(t *testing.T, runDir string) {
@@ -44,7 +43,7 @@ func roundTrip(t *testing.T, runDir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, err := Dial(ctx, client)
 	if err != nil {

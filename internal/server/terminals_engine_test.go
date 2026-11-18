@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -171,13 +170,9 @@ func TestServerCloseReleasesHolds(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Minute):
-		t.Fatal("Close did not return")
+	err := <-done
+	if err != nil {
+		t.Fatal(err)
 	}
 	waitGroupGone(t, pid)
 

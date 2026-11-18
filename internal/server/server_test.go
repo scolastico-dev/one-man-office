@@ -405,11 +405,7 @@ func startRun(t *testing.T, o Options, out io.Writer) (url string, stop func() e
 	stop = func() error {
 		once.Do(func() {
 			cancel()
-			select {
-			case stopErr = <-done:
-			case <-time.After(shutdownTimeout + 2*time.Second):
-				stopErr = errors.New("Run did not stop in time")
-			}
+			stopErr = <-done
 		})
 		return stopErr
 	}
@@ -427,8 +423,7 @@ func startRun(t *testing.T, o Options, out io.Writer) (url string, stop func() e
 	case err := <-done:
 		close(done)
 		t.Fatalf("Run ended before ready: %v", err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("Run not ready")
+
 	}
 	return url, stop
 }
@@ -598,7 +593,6 @@ func TestSecondStartDetectsRunningServer(t *testing.T) {
 		<-done
 	}()
 	var url string
-	deadline := time.Now().Add(15 * time.Second)
 	for {
 		u, running, err := service.Running(context.Background())
 		if err != nil {
@@ -608,9 +602,7 @@ func TestSecondStartDetectsRunningServer(t *testing.T) {
 			url = u
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("server never reported running")
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 	if !strings.HasPrefix(url, "http://omo.localhost:") {

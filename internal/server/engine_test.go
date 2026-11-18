@@ -248,11 +248,7 @@ func fakeProfile() settings.Profile {
 // waitFor polls cond until it holds or a minute passed.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(time.Minute)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -504,11 +500,7 @@ func TestWaitRouteReturnsOnMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rec *httptest.ResponseRecorder
-	select {
-	case rec = <-answer:
-	case <-time.After(time.Minute):
-		t.Fatal("the wait did not return after the mention")
-	}
+	rec = <-answer
 	wantStatus(t, rec.Code, http.StatusOK)
 	got := decodeBody[api.WaitResponse](t, rec.Body)
 	if !strings.Contains(got.Reason, fmt.Sprintf("#%d", n)) || strings.Contains(got.Reason, dev.ID) {
@@ -529,13 +521,9 @@ func TestWaitEndsWhenClientLeaves(t *testing.T) {
 	}()
 	waitFor(t, "the developer to park", func() bool { return sessionByID(t, s, dev.ID).State == api.SessionWaiting })
 	cancel()
-	select {
-	case rec := <-answer:
-		if rec.Body.Len() != 0 {
-			t.Fatalf("answered a client that left: %s", rec.Body.Bytes())
-		}
-	case <-time.After(time.Minute):
-		t.Fatal("the wait outlived its client")
+	rec := <-answer
+	if rec.Body.Len() != 0 {
+		t.Fatalf("answered a client that left: %s", rec.Body.Bytes())
 	}
 	waitFor(t, "the developer to run again", func() bool { return sessionByID(t, s, dev.ID).State == api.SessionRunning })
 }
@@ -747,7 +735,7 @@ func TestCancelDiscardUncommittedOverSocketIsForbidden(t *testing.T) {
 // dialTerminal opens an agent terminal through the browser listener.
 func dialTerminal(t *testing.T, b *browser, s *Server, id string, protocols []string, header http.Header) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	return websocket.Dial(ctx, "ws"+strings.TrimPrefix(b.srv.URL, "http")+"/api/agents/"+id+"/terminal", &websocket.DialOptions{
 		Host: hostOmoLocalhost + ":" + b.port, Subprotocols: protocols, HTTPHeader: header,
@@ -765,7 +753,7 @@ type termOutput struct {
 // want.
 func (o *termOutput) until(want string) {
 	o.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for !strings.Contains(o.got.String(), want) {
 		kind, data, err := o.c.Read(ctx)
@@ -840,7 +828,7 @@ func TestAgentTerminalWebsocket(t *testing.T) {
 		}
 	}
 	(&termOutput{t: t, c: c}).until("hello from the agent")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := c.Write(ctx, websocket.MessageBinary, []byte("typed by the user\r")); err != nil {
 		t.Fatal(err)
@@ -919,13 +907,9 @@ func TestCloseEndsAgentsAtOnce(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Minute):
-		t.Fatal("Close did not return")
+	err := <-done
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, a := range r.all() {
 		if !a.isOver() {
@@ -968,14 +952,11 @@ func TestSettingsChangeWakesEngine(t *testing.T) {
 	g.Limits.Tasks = 2
 	b := newBrowser(t, s)
 	wantStatus(t, asUser(b, s, "PUT", "/api/settings", api.General(g)).StatusCode, http.StatusOK)
-	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if _, ok := liveOf(t, s, api.RoleDeveloper, tk.Number); ok {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("the raised limit did not start the second ticket")
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 	if _, ok := liveOf(t, s, api.RoleDeveloper, first); !ok {

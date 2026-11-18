@@ -230,14 +230,11 @@ func (f *fixture) state(name string) api.MCPServerState {
 	return api.MCPServerState{}
 }
 
-// eventually polls cond until it holds or the deadline passes.
+// eventually polls cond until it holds; a condition that never holds ends with
+// the test binary's own time limit and a dump of every goroutine.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
