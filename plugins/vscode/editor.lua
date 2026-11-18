@@ -95,14 +95,21 @@ local opening=data.action=='open-ticket' or data.action=='open-project'
 local folder,binding
 if ticket_action then
   if not ticket then return message('The ticket folder is unavailable.') end
+  if ticket.column=='done' then return message('Work on this ticket is finished; its editor cannot be started again.') end
   for _,f in ipairs(ticket.folders or {}) do
     if (project and f.project==project.id) or (not project and #(ticket.folders or {})==1) then
       if f.available and f.path~='' then folder=f.path;binding=ticket.number end
     end
   end
-elseif ticket then return message('Use the ticket action for a worktree; a project action requires repository context without a ticket.')
+elseif ticket then return message('Use the ticket action for a ticket folder; a project action requires repository context without a ticket.')
 elseif project and project.available and project.path~='' then folder=project.path end
-if not folder then return message('The selected project folder is unavailable. Start work to create its worktree first.') end
+if not folder then
+  if ticket_action and #(ticket.projects or {})==0 and not project then
+    return message('The ticket working folder is unavailable. It may not have been created, may have been removed, or may no longer match its recorded directory.')
+  end
+  if ticket_action then return message('The selected ticket worktree is unavailable. It may not have been created, may have been removed, or may no longer match its recorded worktree.') end
+  return message('The selected project repository folder is unavailable.')
+end
 local versions={['code-server']='4.145.2',openvscode='1.109.5'}
 local version=versions[editor]
 local artifact_key=omo.sha256_hex(editor..'\0'..version..'\0'..platform)

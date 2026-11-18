@@ -86,3 +86,16 @@ test('answers and errors survive replacement objects for the same ticket and cle
   await flushPromises()
   expect(w.find('[data-plugin-control-error]').exists()).toBe(false)
 })
+
+test('a projectless recorded folder sends only the ticket identity and becomes unavailable when its record is removed', async () => {
+  const { w, h, props } = await setup({ place: 'ticket', ticket: ticket({ number: 7, projects: [], workdir: '/work/7' }) })
+  expect(w.findAll('button').map(b => b.text())).toEqual(['Edit'])
+  expect(w.get('button').attributes('disabled')).toBeUndefined()
+  await w.get('button').trigger('click')
+  await flushPromises()
+  expect(h.sent).toEqual([{ method: 'POST', path: '/api/plugins/editor/actions/edit', body: { ticket: 7 } }])
+  props.ticket = { ...props.ticket!, workdir: '' }
+  await flushPromises()
+  expect(w.get('button').attributes('disabled')).toBeDefined()
+  expect(w.text()).toContain('no available working folder')
+})

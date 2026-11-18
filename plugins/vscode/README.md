@@ -2,8 +2,11 @@
 
 Install **vscode** from omo's official plugin list and enable it. **Open in VS
 Code** on each sidebar project opens its repository; on a ticket it opens the
-selected project's worktree (one button per worktree). Start ticket work first
-if its folder is unavailable. Editors write directly into those folders,
+selected project's worktree (one button per worktree), or the recorded working
+directory of a task without a project. Start ticket work to create its folder.
+Missing, removed or replaced folders are reported as unavailable; the plugin
+never substitutes a repository. Finished tickets cannot start an editor, even
+when their working directory remains available for inspection with a terminal. Editors write directly into those folders,
 including alongside an agent. There is no lock or separate copy.
 
 The first click reserves a new tab, checks/downloads the pinned editor, shows

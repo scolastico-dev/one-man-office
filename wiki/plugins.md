@@ -77,7 +77,7 @@ it). The plugin's log keeps its last 500 lines, newest last.
 |---|---|
 | [pushover](../plugins/pushover/README.md) | A Pushover notification on your phone when a ticket needs your attention or an agent asks you a question. Button: "Send a test notification". |
 | [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
-| [vscode](../plugins/vscode/README.md) | Opens ticket worktrees and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
+| [vscode](../plugins/vscode/README.md) | Opens ticket worktrees, projectless task working directories and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
 
 The VS Code plugin edits folders directly alongside agents, with no locking.
@@ -350,19 +350,34 @@ the same as the global table `event`.
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
 `supervisor`, `attention`, `url` (without the login token) and `folders`.
 `projects` remains an array of project **identifiers**, compatible with existing
-plugins. `folders` is an ordered array, one entry per project:
+plugins. For a ticket with projects, `folders` is an ordered array, one entry
+per project:
 `{project: string, kind: "worktree", path: string, available: boolean, reason: string}`.
-Available entries contain the absolute, resolved recorded worktree path and
-`reason: ""`. Unavailable entries have `path: ""` and a fixed reason:
+A task without projects instead has one entry with `project: ""` and
+`kind: "working_directory"`; its `projects` stays `[]`. A projectless story
+has `folders: []`. Available entries contain the absolute resolved folder
+path and `reason: ""`. Unavailable entries have `path: ""` and a fixed reason:
 `project_unavailable` (unknown/disabled project) or `folder_unavailable` (not
-started, removed, closed ticket, or failed worktree/gitfile checks). Empty
-projects produce `folders: []`. Delayed events retain their historical project
-IDs/order; current folders are matched by ID, with removed associations marked
-unavailable. A project's repository is never substituted for
-a missing ticket worktree. Paths use the same trusted records, confinement and
-`.git` checks as **Open terminal**; the server never follows an agent-written
-`.git` lookup. Folder availability is a snapshot; validate readiness before
-launch and handle a folder disappearing afterwards.
+started, unrecorded, removed, foreign/replaced folder, closed project worktree,
+or failed worktree/gitfile checks).
+
+Working directories reuse **Open terminal**'s recorded-folder checks: the
+record must name exactly the directory omo makes for that task under its
+working-folder root, and the directory must exist and be a plain directory,
+not a link. No repository or `.git` check applies to this folder kind. A
+retained working directory remains available in generic hook context after
+Done or cancellation, as it does for terminals; ticket-bound tasks/forwards
+still require a live ticket. The VS Code plugin refuses finished tickets
+before downloading or starting an editor.
+
+Delayed events retain their historical project IDs/order and folder kind;
+current folders are matched by project ID, with removed or changed
+associations marked unavailable. A project's repository/worktree is never
+substituted for a missing projectless directory or ticket worktree. Worktrees
+use the same trusted records, confinement and `.git` checks as **Open terminal**;
+the server never follows an agent-written `.git` lookup. Folder availability
+is a snapshot; validate readiness before launch and handle a folder
+disappearing afterwards.
 
 A `comment` is `{id, author: {role, name}, body, question, to, mentions}`.
 `question` is boolean; `to` is the asked role (empty for ordinary comments),
@@ -996,8 +1011,11 @@ in the sidebar. Declared sidebar controls appear in the expanded sidebar and
 its mobile sheet; project controls have one row for each enabled project.
 `per_worktree` ticket buttons expand for recorded nonempty worktree paths,
 sending both ticket and selected project. A projectless ticket with a recorded
-working folder sends ticket alone. Without a usable folder the control is
-disabled with an explanation, never redirected to another repository. Project
+working folder sends ticket alone, and hooks receive its `working_directory`
+entry in `ticket.folders` with `project: null` in the action context. Without a
+recorded folder the control is disabled with an explanation. Folder availability
+is checked again by the server when the action runs; stale or replaced paths
+produce unavailable context, never another repository. Project
 sidebar controls send project alone. Only you press them. One
 action per plugin runs at a time, bounded by its timeout.
 

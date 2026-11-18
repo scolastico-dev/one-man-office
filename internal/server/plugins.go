@@ -1176,6 +1176,13 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 				folders = append(folders, map[string]any{"project": project.Project, "kind": "worktree", "path": "", "available": false, "reason": "folder_unavailable"})
 			}
 		}
+		if len(t.Projects) == 0 && t.Type == api.TypeTask {
+			if f, ok := available[""]; ok && f["kind"] == "working_directory" {
+				folders = append(folders, f)
+			} else {
+				folders = append(folders, map[string]any{"project": "", "kind": "working_directory", "path": "", "available": false, "reason": "folder_unavailable"})
+			}
+		}
 		out["folders"] = folders
 		return out
 	}
