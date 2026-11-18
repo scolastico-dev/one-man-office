@@ -494,6 +494,12 @@ best effort: Node cannot wait there, so on Windows, where a running `.exe`
 cannot be deleted, a crash of the driver can leave the folder behind (reported
 on stderr). `startFixture` refuses a launcher (`go`, `npm`, `npx`, a shell) as
 its `command`.
+The tests of its cleanup inject through `end.kill(child, {tree})`, which replaces the whole
+platform step and so runs the same branch on every platform; `killGroup`/`killTree`
+replace one platform's step and are accepted in tests only together with an explicit
+`platform` (`fixtureProcess.test.ts` scans every test for it). The interrupt sequence runs
+on every platform through an emitted `SIGINT` in the driver; only the delivery of a real
+signal is skipped on Windows, which has none to deliver.
 `web/src/processOwnership.guard.test.ts` lists every tooling launcher under
 `web/` with its lifecycle and fails on a new one; it also checks the specs and
 unit tests (only the guard itself and the two tests of the helper and runner

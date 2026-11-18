@@ -60,9 +60,18 @@ const exited = (child) => child.exitCode !== null || child.signalCode !== null
  *  - Windows, a program that starts other programs itself (`tree`, the Go build:
  *    the go command runs compilers and linker): `taskkill /T /F`, which a
  *    Windows `child.kill` cannot replace because it ends the go command alone.
+ *
+ * Test seams: `kill(child, { tree })` replaces the whole platform step, so a test
+ * that makes the kill fail or holds it back runs the same branch on every
+ * platform. `killTree` and `killGroup` replace one platform's step only, and are
+ * for a test that also sets `platform`, never for one that leaves it to the host.
  */
-export function endProcess(child, { tree = false, platform = process.platform, killTree = taskkill, killGroup = (pid) => process.kill(-pid, 'SIGKILL') } = {}) {
+export function endProcess(child, { tree = false, platform = process.platform, killTree = taskkill, killGroup = (pid) => process.kill(-pid, 'SIGKILL'), kill } = {}) {
   if (child.pid === undefined || exited(child)) return
+  if (kill) {
+    kill(child, { tree })
+    return
+  }
   if (platform === 'win32') {
     if (!tree) {
       child.kill('SIGKILL')
