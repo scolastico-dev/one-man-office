@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -62,6 +63,9 @@ type pluginFeature struct {
 	// to the goroutine that reloads the runtime; one pending signal stands
 	// for any number.
 	reload chan struct{}
+	// cursor is the last board event handed to the plugin runtime. It is
+	// advanced only after every mapped event has been dispatched.
+	cursor atomic.Int64
 
 	// mu serializes loading the runtime and removing a plugin. loaded is
 	// the name and revision of every plugin of the last load; valid is
@@ -95,6 +99,9 @@ type pluginFeature struct {
 	// by address. listMu is held while they are fetched.
 	listMu sync.Mutex
 	lists  map[string]listRead
+	// listContext replaces a list fetch's deadline in tests. Each fetch
+	// gets its own context, so expiry never cuts another list short.
+	listContext func(context.Context, string) (context.Context, context.CancelFunc)
 }
 
 // listRead is one additional list as last fetched: the list or the failure
@@ -104,9 +111,6 @@ type listRead struct {
 	list pluginmanager.List
 	err  error
 }
-
-// listFetchBound bounds one fetch of an additional list; tests shorten it.
-var listFetchBound = pluginmanager.ListTimeout
 
 // registerPlugins registers the /api/plugins routes. Every one is the
 // user's alone: a plugin is code that runs as the user, and its settings,
@@ -152,10 +156,11 @@ func (s *Server) startPlugins(ctx context.Context) {
 	})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)
+	f.cursor.Store(after)
 	s.background(f.m.Run)
 	s.background(s.writePluginEvents)
 	s.background(s.runPluginReloads)
-	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att, after) })
+	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att) })
 }
 
 // pluginAgents is the plugins' view of the agents the engine runs
@@ -754,7 +759,7 @@ func utcPtr(t time.Time) *time.Time {
 
 // readLists answers the additional lists at addresses, in their order: each
 // as fetched last while it is fresh (a failure while it is recent), else
-// fetched now, all of them side by side, each bounded by listFetchBound;
+// fetched now, all of them side by side, each bounded by ListTimeout;
 // refresh fetches every one. Lists no longer named are forgotten. A fetch
 // cut short by ctx is not kept.
 func (s *Server) readLists(ctx context.Context, addresses []string, refresh bool) []listRead {
@@ -786,7 +791,13 @@ func (s *Server) readLists(ctx context.Context, addresses []string, refresh bool
 		}
 		fetched[i] = true
 		wg.Go(func() {
-			fctx, cancel := context.WithTimeout(ctx, listFetchBound)
+			var fctx context.Context
+			var cancel context.CancelFunc
+			if f.listContext != nil {
+				fctx, cancel = f.listContext(ctx, a)
+			} else {
+				fctx, cancel = context.WithTimeout(ctx, pluginmanager.ListTimeout)
+			}
 			defer cancel()
 			l, err := pluginmanager.FetchList(fctx, a)
 			out[i] = listRead{at: time.Now(), list: l, err: err}
@@ -1041,7 +1052,7 @@ func (s *Server) pluginStartPoint(ctx context.Context) (att map[int]string, afte
 // board costs no database reads. It never slows the board down: it reads
 // the committed log on its own goroutine, nothing in the board's write
 // path waits for it, and Dispatch never blocks.
-func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, after int64) {
+func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string) {
 	ticket := func(n int) map[string]any {
 		t, err := s.board.Get(ctx, board.User, int64(n))
 		if err != nil {
@@ -1057,12 +1068,14 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 			return
 		case <-tick.C:
 		}
+		after := s.plugins.cursor.Load()
 		if after < 0 {
 			last, err := db.LastEventID(s.db)
 			if err != nil {
 				continue
 			}
 			after = last
+			s.plugins.cursor.Store(after)
 		}
 		// The broker has fanned out every event it read; nothing newer
 		// than what was handled here means nothing to read.
@@ -1076,10 +1089,11 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 				break
 			}
 			for _, e := range evs {
-				after = e.ID
 				for _, pe := range pluginEvents(toAPIEvent(e), att, ticket, s.Address()) {
 					s.plugins.m.Dispatch(pe)
 				}
+				after = e.ID
+				s.plugins.cursor.Store(after)
 			}
 			if len(evs) < pluginFollowBatch {
 				break

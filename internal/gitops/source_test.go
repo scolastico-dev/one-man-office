@@ -3,6 +3,8 @@ package gitops
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,11 +253,23 @@ func TestFetchSourceTooLarge(t *testing.T) {
 	}
 }
 
+// failedHTTPRemote owns its endpoint for the whole test; assuming a fixed
+// local port has no listener can accidentally talk to an unrelated service.
+func failedHTTPRemote(t *testing.T) (credentialed, address string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	return strings.Replace(srv.URL, "http://", "http://user:SECRET@", 1) + "/x.git", srv.URL + "/x.git"
+}
+
 func TestFetchSourceHidesCredentials(t *testing.T) {
 	g := testGit(t)
-	_, err := g.FetchSource(context.Background(), "https://user:SECRET@127.0.0.1:1/x.git", "", filepath.Join(t.TempDir(), "c"))
+	remote, _ := failedHTTPRemote(t)
+	_, err := g.FetchSource(context.Background(), remote, "", filepath.Join(t.TempDir(), "c"))
 	if err == nil {
-		t.Fatal("fetching from a closed port succeeded")
+		t.Fatal("fetching from a failing server succeeded")
 	}
 	if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "user:") {
 		t.Fatalf("the error repeats the credentials: %v", err)

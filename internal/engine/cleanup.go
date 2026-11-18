@@ -60,6 +60,7 @@ func (e *Engine) cleanup(ctx context.Context, t board.EngineTicket) {
 // cleanProject cleans up the worktree and branch of t in project p.
 func (e *Engine) cleanProject(ctx context.Context, t board.EngineTicket, snap board.EngineSnapshot, p board.EngineProject) {
 	dir := p.Worktree
+	e.at("cleanup-started")
 	if e.held(dir) {
 		return
 	}

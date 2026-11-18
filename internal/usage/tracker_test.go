@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -779,15 +780,26 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 }
 
+// The default deadline is checked against virtual time so receiving the run
+// cannot consume the scheduling slack of a wall-clock deadline assertion.
+func TestTrackerUsesDefaultRunTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
+		h.start()
+		c := h.next()
+		deadline, ok := c.ctx.Deadline()
+		if want := time.Now().Add(RunTimeout); !ok || !deadline.Equal(want) {
+			t.Fatalf("run deadline %v (%v), want %v", deadline, ok, want)
+		}
+		h.stop()
+	})
+}
+
 func TestTrackerRefreshThatHangs(t *testing.T) {
 	h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
 	before := runtime.NumGoroutine()
 	h.start()
 	c := h.next() // never answered
-	deadline, ok := c.ctx.Deadline()
-	if !ok || time.Until(deadline) > RunTimeout || time.Until(deadline) < RunTimeout-guard {
-		t.Fatalf("the run is not bounded by %v: %v %v", RunTimeout, deadline, ok)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	answer := make(chan api.UsageState, 1)
 	go func() { answer <- h.tr.Refresh(ctx) }()

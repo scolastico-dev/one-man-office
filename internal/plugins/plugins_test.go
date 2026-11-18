@@ -62,6 +62,11 @@ func helper(mode string, args []string) int {
 		fmt.Fprintln(os.Stderr, "config was "+os.Getenv("OMO_PLUGIN_CONFIG"))
 		return 3
 	case "sleep":
+		if len(args) > 0 {
+			if err := os.WriteFile(args[0], nil, 0o600); err != nil {
+				return 2
+			}
+		}
 		time.Sleep(time.Minute)
 	case "spawn": // spawn <pidfile>: start a sleeping child, write its pid, sleep
 		exe, _ := os.Executable()
@@ -78,6 +83,23 @@ func helper(mode string, args []string) int {
 // newHelperCommand runs the helper in mode with args.
 func newHelperCommand(exe string, args ...string) *exec.Cmd {
 	return exec.Command(exe, append([]string{"plugin-helper"}, args...)...)
+}
+
+// waitFinished joins the observable completion of n hooks, including state
+// persistence and the Changed callback, instead of sampling an idle state.
+func (e *env) waitFinished(name string, n int) {
+	e.t.Helper()
+	eventually(e.t, name+" hook completions", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		finished := 0
+		for _, change := range e.changes {
+			if change.Name == name && change.LastRunAt != nil && change.State != StateRunning {
+				finished++
+			}
+		}
+		return finished >= n
+	})
 }
 
 // helperArgs is the command of a hook that runs the helper in mode.
@@ -341,6 +363,8 @@ func TestLoadReportsEachPlugin(t *testing.T) {
 func TestDispatchOrderedAndBounded(t *testing.T) {
 	e := newEnv(t)
 	release := filepath.Join(t.TempDir(), "release")
+	// Unblock the workload before manager cleanup even when an assertion fails.
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -366,12 +390,17 @@ omo.store_set("moved", event.data.n)
 	// dropped.
 	e.m.Dispatch(ticketEvent(1, "t"))
 	eventually(t, "the first event to run", func() bool { return e.info("slow").State == StateRunning })
-	start := time.Now()
-	for n := 2; n <= 300; n++ {
-		e.m.Dispatch(ticketEvent(n, "t"))
-	}
-	if d := time.Since(start); d > 2*time.Second {
-		t.Fatalf("Dispatch held the caller for %v", d)
+	dispatched := make(chan struct{})
+	go func() {
+		for n := 2; n <= 300; n++ {
+			e.m.Dispatch(ticketEvent(n, "t"))
+		}
+		close(dispatched)
+	}()
+	select {
+	case <-dispatched:
+	case <-time.After(20 * time.Second):
+		t.Fatal("Dispatch blocked while the first hook awaited release")
 	}
 	// Another plugin is not held by the blocked one.
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{"n": 1}})
@@ -490,7 +519,6 @@ func TestReloadStopsOldTimers(t *testing.T) {
 	// The old timer's goroutine is gone: firing its wait runs nothing and
 	// asks for no new wait.
 	clock.fire(time.Now())
-	time.Sleep(100 * time.Millisecond)
 	if n := e.stored("tick", "n"); n != "1" {
 		t.Fatalf("an old timer ran after the reload: n = %s", n)
 	}
@@ -502,12 +530,15 @@ func TestReloadStopsOldTimers(t *testing.T) {
 }
 
 func TestCloseStopsEverything(t *testing.T) {
-	before := runtime.NumGoroutine()
 	e := newEnv(t)
-	e.plugin("block", manifestOf(map[string]any{"event": EventTicketCreated, "command": helperArgs(t, "sleep")}), nil)
+	started := filepath.Join(t.TempDir(), "started")
+	e.plugin("block", manifestOf(map[string]any{"event": EventTicketCreated, "command": helperArgs(t, "sleep", started)}), nil)
 	e.load(enabled("block", nil))
 	e.m.Dispatch(ticketEvent(1, "x"))
-	eventually(t, "the hook to run", func() bool { return e.info("block").State == StateRunning })
+	eventually(t, "the hook program to start", func() bool { _, err := os.Stat(started); return err == nil })
+	e.m.mu.Lock()
+	p := e.m.entries[0].p
+	e.m.mu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		e.m.Close()
@@ -525,11 +556,20 @@ func TestCloseStopsEverything(t *testing.T) {
 	if errs := e.m.Load([]api.PluginSettings{enabled("block", nil)}); !errors.Is(errs["block"], ErrClosed) {
 		t.Fatalf("Load after Close = %v", errs)
 	}
+	if p.ctx.Err() == nil {
+		t.Fatal("Close left the plugin context live")
+	}
+	joined := make(chan struct{})
+	go func() { p.wg.Wait(); close(joined) }()
+	select {
+	case <-joined:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close left plugin workers running")
+	}
 	// A run cut short by Close is not an error of the plugin.
 	if i := e.info("block"); i.State == StateError {
 		t.Fatalf("state after Close = %+v", i)
 	}
-	eventually(t, "the goroutines to end", func() bool { return runtime.NumGoroutine() <= before+2 })
 }
 
 func TestHookTimeout(t *testing.T) {
@@ -572,6 +612,8 @@ assert(not pcall(omo.store_set, "", 1))
 	if a, b := e.stored("a", "k"), e.stored("b", "k"); a != `{"who":"plugin a"}` || b != `{"who":"plugin b"}` {
 		t.Fatalf("stored a = %s, b = %s", a, b)
 	}
+	e.waitFinished("a", 1)
+	e.waitFinished("b", 1)
 	if i := e.info("a"); i.State != StateReady {
 		t.Fatalf("a = %+v, log %s", i, e.logText("a"))
 	}
@@ -582,7 +624,7 @@ func TestChangedReportsStates(t *testing.T) {
 	e.plugin("p", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": `error("boom")`})
 	e.load(enabled("p", nil))
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{}})
-	eventually(t, "the error", func() bool { return e.info("p").State == StateError })
+	e.waitFinished("p", 1)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var states []string

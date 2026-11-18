@@ -32,12 +32,6 @@ func leftover(t *testing.T, helper string) (*exec.Cmd, <-chan struct{}) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if helper == "stubborn" {
-		// Wait until it ignores SIGTERM.
-		if _, err := bufio.NewReader(stdout).ReadString('\n'); err != nil {
-			t.Fatal(err)
-		}
-	}
 	exited := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
@@ -47,6 +41,19 @@ func leftover(t *testing.T, helper string) (*exec.Cmd, <-chan struct{}) {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-exited
 	})
+	if helper == "stubborn" {
+		// Register cleanup before waiting for its signal-handler readiness.
+		ready := make(chan error, 1)
+		go func() { _, err := bufio.NewReader(stdout).ReadString('\n'); ready <- err }()
+		select {
+		case err := <-ready:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("helper did not install its signal handler")
+		}
+	}
 	return cmd, exited
 }
 

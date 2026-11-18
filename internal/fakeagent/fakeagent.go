@@ -86,7 +86,14 @@ func Main() int {
 			fmt.Fprintf(os.Stdout, "fake: %v\n", err)
 			return ExitFailed
 		}
-		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf))
+		drop, _ := strconv.Atoi(os.Getenv(EnvDropPrompts))
+		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf), max(drop, 0))
+		if path := os.Getenv(EnvRawReadyFile); path != "" {
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				fmt.Fprintf(os.Stdout, "fake: %v\n", err)
+				return ExitFailed
+			}
+		}
 	}
 	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: in, Stdout: os.Stdout})
 }

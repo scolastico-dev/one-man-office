@@ -30,12 +30,13 @@ var recordCommand = []string{"sh", "-c", `cat >> "$OMO_PLUGIN_DATA/events.jsonl"
 // action answers "hello #<n>", a global action answers "pong" and logs a
 // line, a global action "mark" writes the file ran in its data folder.
 func recordManifest(name string, events ...string) map[string]any {
-	hooks := []any{}
+	// Record the configuration first, so an observed event also proves its
+	// associated configuration write has completed.
+	hooks := []any{map[string]any{"event": plugins.EventTicketCreated, "command": []string{"sh", "-c", `printf '%s\n' "$OMO_PLUGIN_CONFIG" >> "$OMO_PLUGIN_DATA/config.txt"`}}}
 	for _, ev := range events {
 		hooks = append(hooks, map[string]any{"event": ev, "command": recordCommand})
 	}
 	hooks = append(hooks,
-		map[string]any{"event": plugins.EventTicketCreated, "command": []string{"sh", "-c", `printf '%s\n' "$OMO_PLUGIN_CONFIG" >> "$OMO_PLUGIN_DATA/config.txt"`}},
 		map[string]any{"event": "manual", "name": "hello", "description": "Say hello", "scope": "ticket", "lua": "hello.lua"},
 		map[string]any{"event": "manual", "name": "ping", "description": "Ping", "scope": "global", "lua": "ping.lua"},
 		map[string]any{"event": "manual", "name": "mark", "description": "Mark", "scope": "global", "command": []string{"sh", "-c", `echo ran >> "$OMO_PLUGIN_DATA/ran"; printf marked`}},
@@ -183,6 +184,23 @@ func waitTicketRecorded(t *testing.T, path string, n int) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// waitPluginDispatch waits for the dispatch decision for every committed
+// board event. Disabled and removed runtimes cannot enqueue a hook after
+// this barrier. Hook completion, when needed, has its own recorded marker.
+func waitPluginDispatch(t *testing.T, s *Server) {
+	t.Helper()
+	events, err := db.EventsSince(s.db, 0, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		return
+	}
+	id := events[len(events)-1].ID
+	s.events.Wake()
+	waitFor(t, "plugin dispatch through the latest event", func() bool { return s.plugins.cursor.Load() >= id })
 }
 
 // recordedEvents decodes the lines of events.jsonl.
@@ -355,7 +373,7 @@ func TestPluginSettingsReload(t *testing.T) {
 		t.Fatalf("state %s", info.State)
 	}
 	m.create()
-	time.Sleep(300 * time.Millisecond)
+	waitPluginDispatch(t, s)
 	if n := len(readLines(t, events)); n != 1 {
 		t.Fatalf("a disabled plugin got events: %d lines", n)
 	}
@@ -418,7 +436,8 @@ func TestPluginNotInstalledThenUpdate(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// StateNotInstalled is published by the completed settings reload;
+	// reloading a settings file never starts an install.
 	if _, err := os.Lstat(filepath.Join(s.opts.Layout.Plugins, "hand")); err == nil {
 		t.Fatal("a plugin was installed without the user asking")
 	}
@@ -556,7 +575,7 @@ func TestPluginDeleteRoute(t *testing.T) {
 		t.Fatalf("the runtime still has %d plugins", n)
 	}
 	m.create()
-	time.Sleep(300 * time.Millisecond)
+	waitPluginDispatch(t, s)
 	if _, err := os.Stat(events); err == nil {
 		t.Fatal("a removed plugin got an event")
 	}
@@ -584,6 +603,7 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 	s.waitSettingsEvents(context.Background())
 	// The sessions' own events reach the plugin before the marker ticket's.
 	waitTicketRecorded(t, events, newTicketMaker(t, s).create())
+	waitFor(t, "the recorder to finish its marker", func() bool { return s.pluginInfo("rec").State == plugins.StateReady })
 	repo := pluginRepo(t, recordManifest("evil", allBoardEvents...))
 	cur, _ := s.settings.Plugin("rec")
 	changed := cur
@@ -636,7 +656,8 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 	if rows != 8 {
 		t.Fatalf("%d plugin rows in the route table, want 8", rows)
 	}
-	time.Sleep(300 * time.Millisecond)
+	s.waitSettingsEvents(t.Context())
+	waitPluginDispatch(t, s)
 	if after := snapshotPluginFiles(t, s); !maps.Equal(before, after) {
 		t.Fatalf("agents changed plugin files:\nbefore %v\nafter  %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
 	}

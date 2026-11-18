@@ -35,6 +35,9 @@ type setupState struct {
 	// envCheckLimit when set; tests only.
 	commandTimeout time.Duration
 	checkLimit     time.Duration
+	// checkExpired replaces the check timer in tests, so expiry can follow
+	// a command-start barrier instead of racing process scheduling.
+	checkExpired <-chan time.Time
 }
 
 // registerSetup adds the routes that detect agent programs, check the agent
@@ -312,9 +315,13 @@ func (s *Server) checkEnv(env map[string]string) (_ api.AgentEnvReport, ok bool)
 	}
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
+	expired := timer.C
+	if s.setup.checkExpired != nil {
+		expired = s.setup.checkExpired
+	}
 	select {
 	case <-finished:
-	case <-timer.C:
+	case <-expired:
 	}
 	progress.mu.Lock()
 	defer progress.mu.Unlock()

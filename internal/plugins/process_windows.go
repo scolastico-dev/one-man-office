@@ -21,6 +21,7 @@ type processGroup struct {
 	mu       sync.Mutex
 	process  *os.Process
 	assigned bool
+	stopped  bool
 }
 
 // newProcessGroup prepares cmd to run in its own job object. Call started
@@ -47,7 +48,12 @@ func newProcessGroup(cmd *exec.Cmd) (*processGroup, error) {
 func (g *processGroup) started(cmd *exec.Cmd) error {
 	g.mu.Lock()
 	g.process = cmd.Process
+	stopped := g.stopped
 	g.mu.Unlock()
+	if stopped {
+		_ = cmd.Process.Kill()
+		return nil
+	}
 	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
 		return err
@@ -66,6 +72,9 @@ func (g *processGroup) started(cmd *exec.Cmd) error {
 // not end it.
 func (g *processGroup) killUnassigned() {
 	g.mu.Lock()
+	// A cancellation of an empty job must also cover the process that
+	// started publishes after the cancellation callback returns.
+	g.stopped = true
 	process, assigned := g.process, g.assigned
 	g.mu.Unlock()
 	if process != nil && !assigned {

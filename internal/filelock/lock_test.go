@@ -37,7 +37,13 @@ func TestLockChildProcess(t *testing.T) {
 	if path == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	// Only the contended-lock case tests a deadline. A successful fresh
+	// acquisition uses a liveness guard, independent of process scheduling.
+	guard := 20 * time.Second
+	if os.Getenv("OMO_LOCK_TEST_WANT") == "timeout" {
+		guard = 150 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), guard)
 	defer cancel()
 	lock, err := Acquire(ctx, path)
 	if os.Getenv("OMO_LOCK_TEST_WANT") == "timeout" {

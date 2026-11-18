@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -31,27 +33,36 @@ func TestRefreshStopsCommandOnceCredentialsChange(t *testing.T) {
 	skipWindows(t)
 	root := t.TempDir()
 	path := writeAuth(t, root, `{"tokens":{"access_token":"stale"}}`)
-	marker := filepath.Join(root, "still-running")
-	// A refreshing CLI rewrites its credentials shortly after start and then
-	// keeps running as an interactive TUI would.
-	script := `sleep 0.2; printf '{"tokens":{"access_token":"fresh"}}' > "$CODEX_HOME/auth.json"; sleep 30; touch "$MARKER"`
-	r := Refresher{Shell: []string{"sh", "-c", script}, Env: map[string]string{"MARKER": marker}}
+	pidFile := filepath.Join(root, "pid")
+	// Publish the PID before the atomic credential replacement. Refresh
+	// must reap this same process, which stays alive until omo stops it.
+	script := `printf '%s' "$$" > "$PID_FILE"; printf '{"tokens":{"access_token":"fresh"}}' > "$CODEX_HOME/auth.next"; mv "$CODEX_HOME/auth.next" "$CODEX_HOME/auth.json"; exec sleep 60`
+	r := Refresher{Shell: []string{"sh", "-c", script}, Env: map[string]string{"PID_FILE": pidFile}}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	start := time.Now()
 	if err := r.Refresh(ctx, "sh", []string{"CODEX_HOME=" + root}, path); err != nil {
 		t.Fatal(err)
-	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatalf("refresh waited %s after the credentials changed", time.Since(start))
 	}
 	raw, _ := os.ReadFile(path)
 	if string(raw) != `{"tokens":{"access_token":"fresh"}}` {
 		t.Fatalf("credentials = %s", raw)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("refresh command kept running after credentials changed")
+	rawPID, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(string(rawPID))
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid refresh PID %q: %v", rawPID, err)
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Release()
+	if err := p.Signal(syscall.Signal(0)); err == nil {
+		_ = p.Kill()
+		t.Fatal("refresh returned before its command ended")
 	}
 }
 
@@ -73,16 +84,49 @@ func TestRefreshEndsWithItsContext(t *testing.T) {
 	skipWindows(t)
 	root := t.TempDir()
 	path := writeAuth(t, root, `{}`)
-	r := Refresher{Shell: []string{"sh", "-c", "sleep 30"}}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	started := filepath.Join(root, "started")
+	r := Refresher{Shell: []string{"sh", "-c", `printf started > "$STARTED"; exec sleep 60`}, Env: map[string]string{"STARTED": started}}
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start := time.Now()
-	err := r.Refresh(ctx, "sh", nil, path)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err = %v", err)
+	done := make(chan error, 1)
+	go func() { done <- r.Refresh(ctx, "sh", nil, path) }()
+	finished := false
+	t.Cleanup(func() {
+		cancel()
+		if !finished {
+			select {
+			case <-done:
+			case <-time.After(20 * time.Second):
+				t.Error("refresh did not stop")
+			}
+		}
+	})
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("refresh command did not start")
+		case err := <-done:
+			finished = true
+			t.Fatalf("refresh ended before cancellation: %v", err)
+		}
 	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatalf("refresh took %s after its context ended", time.Since(start))
+	cancel()
+	select {
+	case err := <-done:
+		finished = true
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
+	case <-deadline.C:
+		t.Fatal("refresh did not stop after cancellation")
 	}
 }
 

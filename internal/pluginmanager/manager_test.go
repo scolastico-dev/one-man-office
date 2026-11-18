@@ -2,10 +2,13 @@ package pluginmanager
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -332,9 +336,23 @@ func TestInstallRefusesBadSource(t *testing.T) {
 
 func TestInstallErrorsHideCredentials(t *testing.T) {
 	e := newEnv(t)
-	_, _, err := e.install(api.PluginSettings{Name: "demo", Source: "https://someone:s3cr3t-pass@127.0.0.1:1/x.git"})
+	var requests atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.o.Git.SetEnvironment(append(gitEnv(t), "GIT_SSL_CAINFO="+ca))
+	_, _, err := e.install(api.PluginSettings{Name: "demo", Source: strings.Replace(srv.URL, "https://", "https://someone:s3cr3t-pass@", 1) + "/x.git"})
 	if err == nil {
 		t.Fatal("install succeeded")
+	}
+	if requests.Load() == 0 {
+		t.Fatal("the fetch did not reach the failing server")
 	}
 	if strings.Contains(err.Error(), "s3cr3t-pass") {
 		t.Fatalf("err = %v holds the password", err)
@@ -387,13 +405,21 @@ func TestInstallConcurrentlyKeepsOneWholeTree(t *testing.T) {
 	e := newEnv(t)
 	var wg sync.WaitGroup
 	errs := make([]error, 4)
+	start := make(chan struct{})
+	ready := make(chan struct{}, len(errs))
 	for i := range errs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			ready <- struct{}{}
+			<-start
 			_, _, errs[i] = Install(context.Background(), e.o, api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo"})
 		}(i)
 	}
+	for range errs {
+		<-ready
+	}
+	close(start)
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -191,16 +192,21 @@ func TestRunningIsFalseWhenNothingRuns(t *testing.T) {
 func TestSecondStopHurries(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	serving := make(chan struct{})
+	firstStop := make(chan struct{})
 	hurried := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	runCtx, runCancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(context.Background(), io.Discard, "", func(ctx context.Context, _ io.Writer, ready func(string) error) error {
+		done <- Run(runCtx, io.Discard, "", func(ctx context.Context, _ io.Writer, ready func(string) error) error {
 			if err := ready("http://x/"); err != nil {
 				return err
 			}
 			close(serving)
 			<-ctx.Done()
+			close(firstStop)
 			select {
 			case <-Hurry(ctx):
 				close(hurried)
@@ -210,12 +216,29 @@ func TestSecondStopHurries(t *testing.T) {
 			return nil
 		})
 	}()
-	<-serving
+	t.Cleanup(func() {
+		runCancel()
+		unblock()
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			t.Error("server did not stop")
+		}
+	})
+	select {
+	case <-serving:
+	case <-time.After(20 * time.Second):
+		t.Fatal("server did not start")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	stopped := make(chan error, 2)
 	go func() { stopped <- Stop(ctx) }()
-	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-firstStop:
+	case <-time.After(20 * time.Second):
+		t.Fatal("server did not receive the first stop")
+	}
 	select {
 	case <-hurried:
 		t.Fatal("the first stop hurried")
@@ -227,7 +250,7 @@ func TestSecondStopHurries(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second stop did not hurry")
 	}
-	close(release)
+	unblock()
 	for i := 0; i < 2; i++ {
 		if err := <-stopped; err != nil && !errors.Is(err, ErrNotRunning) {
 			t.Fatalf("stop: %v", err)
@@ -236,4 +259,5 @@ func TestSecondStopHurries(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	done <- nil // let cleanup observe the completed server, too
 }

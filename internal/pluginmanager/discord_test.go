@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -127,10 +128,12 @@ func (f *fakeDiscord) next(t *testing.T) map[string]any {
 }
 
 type discordRun struct {
-	t    *testing.T
-	m    *plugins.Manager
-	fake *fakeDiscord
-	db   *sql.DB
+	t          *testing.T
+	m          *plugins.Manager
+	fake       *fakeDiscord
+	db         *sql.DB
+	dispatched int64
+	completed  *atomic.Int64
 }
 
 // newDiscordRun installs the shipped discord plugin from a repository laid
@@ -153,7 +156,12 @@ func newDiscordRun(t *testing.T, config map[string]any) *discordRun {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := plugins.New(plugins.Options{Root: e.root, DB: d, HTTP: fake.client(), Socket: func() string { return "" }})
+	completed := &atomic.Int64{}
+	m := plugins.New(plugins.Options{Root: e.root, DB: d, HTTP: fake.client(), Socket: func() string { return "" }, Changed: func(info api.PluginInfo) {
+		if info.LastRunAt != nil && info.State != plugins.StateRunning && info.LastEvent != plugins.EventManual {
+			completed.Add(1)
+		}
+	}})
 	t.Cleanup(func() {
 		m.Close()
 		_ = d.Close()
@@ -161,15 +169,17 @@ func newDiscordRun(t *testing.T, config map[string]any) *discordRun {
 	if errs := m.Load([]api.PluginSettings{s}); errs["discord"] != nil {
 		t.Fatal(errs["discord"])
 	}
-	return &discordRun{t: t, m: m, fake: fake, db: d}
+	return &discordRun{t: t, m: m, fake: fake, db: d, completed: completed}
 }
 
 func (r *discordRun) attention(n int, title, reason string) {
+	r.dispatched++
 	r.m.Dispatch(plugins.Event{Name: plugins.EventNeedsAttention, At: time.Date(2026, 11, 16, 9, 30, 0, 0, time.UTC),
 		Data: map[string]any{"ticket": ticket(n, title, reason), "reason": reason}})
 }
 
 func (r *discordRun) question(n int, title, body string, to api.Role) {
+	r.dispatched++
 	c := api.Comment{ID: 5, Ticket: n, Author: api.Actor{Role: api.RoleDeveloper, Name: "dev-1"}, Body: body, QuestionTo: to}
 	r.m.Dispatch(plugins.Event{Name: plugins.EventQuestionAsked, At: time.Now(),
 		Data: map[string]any{"ticket": ticket(n, title, ""), "comment": plugins.CommentPayload(c)}})
@@ -177,22 +187,24 @@ func (r *discordRun) question(n int, title, body string, to api.Role) {
 
 func (r *discordRun) settle() string {
 	r.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if r.state().State != plugins.StateRunning {
-			var b strings.Builder
-			for _, l := range r.m.LogLines("discord", plugins.LogLines) {
-				b.WriteString(l.Message + "\n")
-			}
-			return b.String()
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for r.completed.Load() < r.dispatched {
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			r.t.Fatalf("the plugin completed %d of %d dispatched hooks", r.completed.Load(), r.dispatched)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	r.t.Fatal("the plugin did not settle")
-	return ""
+	var b strings.Builder
+	for _, l := range r.m.LogLines("discord", plugins.LogLines) {
+		b.WriteString(l.Message + "\n")
+	}
+	return b.String()
 }
 
-// waitLog waits until the plugin's log holds text and returns the log.
 func (r *discordRun) waitLog(text string) string {
 	r.t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

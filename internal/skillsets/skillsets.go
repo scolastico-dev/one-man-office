@@ -390,11 +390,6 @@ func (m *Manager) run(ctx context.Context, name string, j *job) {
 	defer m.wg.Done()
 	defer func() {
 		j.cancel()
-		m.mu.Lock()
-		if m.jobs[name] == j {
-			delete(m.jobs, name)
-		}
-		m.mu.Unlock()
 		close(j.done)
 	}()
 	for {
@@ -406,6 +401,11 @@ func (m *Manager) run(ctx context.Context, name string, j *job) {
 			st := m.stateLocked(name)
 			st.State, st.Message = StateUpdating, ""
 			m.states[name] = st
+		} else if m.jobs[name] == j {
+			// Retire under the same lock as the final rerun decision. An
+			// enqueue after this point must start a new worker rather than
+			// add a rerun to a worker that has already decided to stop.
+			delete(m.jobs, name)
 		}
 		m.mu.Unlock()
 		if !again {

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -240,15 +241,20 @@ func TestWalkBounds(t *testing.T) {
 		t.Fatalf("cancelled: state = %q %q", res.State, res.Message)
 	}
 
-	// The deadline stops a walk whose reads are slow.
-	slow := func(dir string) ([]os.DirEntry, error) {
-		time.Sleep(20 * time.Millisecond)
-		return os.ReadDir(dir)
-	}
-	res = Walk(context.Background(), Root{Path: root, MaxDepth: 4}, Options{Deadline: 50 * time.Millisecond, ReadDir: slow})
-	if res.State != StateCut || !strings.Contains(res.Message, "time limit") {
-		t.Fatalf("deadline: state = %q %q", res.State, res.Message)
-	}
+	// Hold the read until the walk returns. Virtual time expires the whole
+	// walk deadline without relying on relative filesystem/scheduler speed.
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		slow := func(dir string) ([]os.DirEntry, error) {
+			<-release
+			return os.ReadDir(dir)
+		}
+		res := Walk(context.Background(), Root{Path: root, MaxDepth: 4}, Options{Deadline: time.Second, ReadDir: slow})
+		if res.State != StateCut || !strings.Contains(res.Message, "time limit") {
+			t.Fatalf("deadline: state = %q %q", res.State, res.Message)
+		}
+	})
 }
 
 func TestWalkHungFolder(t *testing.T) {
@@ -257,19 +263,18 @@ func TestWalkHungFolder(t *testing.T) {
 	mkRepo(t, root, "hung/inside")
 	mkRepo(t, root, "z/two")
 	hung := filepath.Join(root, "hung")
-	release := make(chan struct{})
-	defer close(release)
-	read := func(dir string) ([]os.DirEntry, error) {
-		if dir == hung {
-			<-release
+	var res Result
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		read := func(dir string) ([]os.DirEntry, error) {
+			if dir == hung {
+				<-release
+			}
+			return os.ReadDir(dir)
 		}
-		return os.ReadDir(dir)
-	}
-	start := time.Now()
-	res := Walk(context.Background(), Root{Path: root, MaxDepth: 4}, Options{ReadTimeout: 50 * time.Millisecond, ReadDir: read})
-	if time.Since(start) > 5*time.Second {
-		t.Fatal("walk waited for the hung folder")
-	}
+		res = Walk(context.Background(), Root{Path: root, MaxDepth: 4}, Options{ReadTimeout: time.Second, ReadDir: read})
+	})
 	if res.State != StateOK {
 		t.Fatalf("state = %q %q", res.State, res.Message)
 	}

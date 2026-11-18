@@ -48,8 +48,9 @@ func commitAndHandIn(t *testing.T, s *Server, n int, dev api.AgentSession) {
 	wantStatus(t, socketDo(t, s, "POST", "/api/ai/done", api.DoneRequest{Comment: "finished"}, dev.ID).Code, http.StatusOK)
 }
 
-// waitDoneAndIdle waits until ticket n is Done and no agent works on it, so
-// that its cleanup has had its turn.
+// waitDoneAndIdle waits until ticket n is Done and no agent works on it.
+// The engine's deterministic hold tests cover cleanup attempts while held;
+// these route tests cover real shell acquisition, release and final removal.
 func waitDoneAndIdle(t *testing.T, s *Server, n int) {
 	t.Helper()
 	waitFor(t, "the ticket to be done without agents", func() bool {
@@ -60,11 +61,6 @@ func waitDoneAndIdle(t *testing.T, s *Server, n int) {
 		_, live := liveOf(t, s, api.RoleDeveloper, n)
 		return !live
 	})
-	// The cleanup runs in the pass after the agents ended; give it several.
-	for range 5 {
-		s.engine.Wake()
-		time.Sleep(100 * time.Millisecond)
-	}
 }
 
 func worktreeOf(t *testing.T, s *Server, n int) api.TicketProject {
@@ -116,10 +112,6 @@ func TestShellHoldsWorktreeUntilClosed(t *testing.T) {
 		}
 		return false
 	})
-	for range 5 {
-		s.engine.Wake()
-		time.Sleep(100 * time.Millisecond)
-	}
 	if !exists(dir) {
 		t.Fatal("the worktree went while a second shell was still open there")
 	}

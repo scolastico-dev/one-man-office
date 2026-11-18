@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+// completeWithin bounds a stalled operation; it is a watchdog, not a speed
+// assertion. Behavioral deadlines remain configured on the operation itself.
+func completeWithin(t *testing.T, guard time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	select {
+	case <-done:
+	case <-time.After(guard):
+		t.Fatalf("operation did not complete within %v", guard)
+	}
+}
+
 type recordingProcess struct {
 	writes [][]byte
 }
@@ -25,6 +38,18 @@ func (p *recordingProcess) Wait() error                 { return nil }
 func (p *recordingProcess) Close() error                { return nil }
 func (p *recordingProcess) Exited() <-chan struct{}     { return nil }
 func (p *recordingProcess) Pid() int                    { return 0 }
+
+func cleanupSession(t *testing.T, s *Session) {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = s.Kill()
+		select {
+		case <-s.Done():
+		case <-time.After(5 * time.Second):
+			t.Error("session still running after cleanup")
+		}
+	})
+}
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -44,6 +69,7 @@ func TestScreenAndLogCaptureOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "hello-omo") {
 		t.Fatalf("screen missing output:\n%s", s.Screen())
@@ -67,6 +93,7 @@ func TestPublishesDeduplicatedLogLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	<-s.Done()
 	select {
 	case line := <-lines:
@@ -84,6 +111,7 @@ func TestSendLineReachesProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	if err := s.SendLine("ping"); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +192,7 @@ func TestKillClosesDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	if err := s.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +210,7 @@ func TestEnvInjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "id=developer-jason") {
 		t.Fatalf("env not injected:\n%s", s.Screen())
@@ -203,6 +233,7 @@ func TestOnOutputReceivesRawBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	select {
 	case <-s.Done():
 	case <-time.After(10 * time.Second):

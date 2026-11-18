@@ -20,7 +20,7 @@ const module = "github.com/scolastico-dev/one-man-office/"
 // tests' helper programs below web/e2e import them, the product never does.
 var testSupport = []string{
 	"internal/fakeagent", "internal/mcprelay/fakemcp", "internal/gittest",
-	"internal/testpath", "internal/childenv/childenvtest",
+	"internal/testpath", "internal/testport", "internal/childenv/childenvtest",
 }
 
 // importedOnlyBy names, for packages at the top of the layering, the only

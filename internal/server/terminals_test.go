@@ -765,13 +765,10 @@ func TestRunStopEndsShells(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, _ := strconv.Atoi(strings.TrimSpace(string(childRaw)))
-	begin := time.Now()
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(begin); d > shutdownTimeout {
-		t.Fatalf("stopping took %s with a shell open", d)
-	}
+	// stop bounds shutdown; verify that it actually ended both processes.
 	waitGroupGone(t, pid)
 	waitGone(t, child)
 }

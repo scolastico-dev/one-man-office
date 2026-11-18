@@ -19,34 +19,27 @@ func TestSlowSubscriberIsDisconnectedNotBlocking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer slow.Cancel()
 	fast, err := s.events.Subscribe(-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fast.Cancel()
-	got := make(chan []int64, 1)
-	go func() {
-		var ids []int64
-		for ev := range fast.Events {
-			if ev.Kind == api.KindTicketCreated {
-				ids = append(ids, ev.ID)
-				if len(ids) == 300 {
-					break
-				}
-			}
-		}
-		got <- ids
-	}()
-
 	// A write must never wait for the slow subscriber, which reads nothing
 	// here: a write that did would hang for good once its buffer is full.
-	// The bound only tells that from a slow disk, so it is generous; a loaded
-	// machine takes more than 100 ms for a single write now and then.
+	// Acknowledge each fast delivery before writing again: scheduling the
+	// consumer late must not accidentally turn it into a slow subscriber too.
+	var prev int64
 	for i := range 300 {
-		start := time.Now()
-		m.create()
-		if d := time.Since(start); d > streamTimeout {
-			t.Fatalf("write %d took %v", i, d)
+		n := m.create()
+		select {
+		case ev, ok := <-fast.Events:
+			if !ok || ev.Kind != api.KindTicketCreated || ev.Ticket == nil || *ev.Ticket != n || ev.ID <= prev {
+				t.Fatalf("event %d: %+v (open %v), want ticket %d after event %d", i, ev, ok, n, prev)
+			}
+			prev = ev.ID
+		case <-time.After(streamTimeout):
+			t.Fatalf("event %d was blocked by the slow subscriber", i)
 		}
 	}
 	waitFanOut(t, s, lastEventID(t, s))
@@ -70,21 +63,6 @@ func TestSlowSubscriberIsDisconnectedNotBlocking(t *testing.T) {
 		t.Fatalf("slow subscriber received %d events, buffer is %d", n, subscriberBuffer)
 	}
 	slow.Cancel() // after disconnect: no panic
-
-	// The fast subscriber got every event, in order.
-	select {
-	case ids := <-got:
-		for i := 1; i < len(ids); i++ {
-			if ids[i] <= ids[i-1] {
-				t.Fatalf("ids not increasing at %d: %v", i, ids[i-1:i+1])
-			}
-		}
-		if len(ids) != 300 {
-			t.Fatalf("fast subscriber got %d events", len(ids))
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("fast subscriber did not get all events")
-	}
 }
 
 func TestBrokerPollsWithoutWake(t *testing.T) {

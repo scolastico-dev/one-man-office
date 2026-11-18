@@ -93,7 +93,7 @@ func TestForcedKillStopsChildProcessTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer i.Kill()
-	waitOutput(t, i, "CHILD:")
+	waitOutput(t, i, "\n")
 	initial, _, detach := i.subscribe()
 	detach()
 	line := strings.Split(strings.Split(string(initial.replay), "CHILD:")[1], "\r")[0]
@@ -216,7 +216,7 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 }
 
 func TestServeWebSocketRejectsWhenLimitIsFull(t *testing.T) {
-	term := Own("limit", terminalFixture(), nil)
+	term := Own("limit", terminalFixture(t), nil)
 	limit := NewConnectionLimit(1)
 	limit.slots <- struct{}{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

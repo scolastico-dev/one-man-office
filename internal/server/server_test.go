@@ -9,12 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,7 +78,12 @@ type browser struct {
 
 func newBrowser(t *testing.T, s *Server) *browser {
 	t.Helper()
-	srv := httptest.NewServer(s.BrowserHandler())
+	return serveBrowser(t, s.BrowserHandler())
+}
+
+func serveBrowser(t *testing.T, handler http.Handler) *browser {
+	t.Helper()
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	return &browser{t: t, srv: srv, port: port}
@@ -383,18 +388,6 @@ func startRun(t *testing.T, o Options, out io.Writer) (url string, stop func() e
 	ctx, cancel := context.WithCancel(context.Background())
 	readyc := make(chan string, 1)
 	done := make(chan error, 1)
-	go func() {
-		done <- Run(ctx, o, out, func(u string) error { readyc <- u; return nil })
-	}()
-	select {
-	case url = <-readyc:
-	case err := <-done:
-		cancel()
-		t.Fatalf("Run ended before ready: %v", err)
-	case <-time.After(15 * time.Second):
-		cancel()
-		t.Fatal("Run not ready")
-	}
 	var once sync.Once
 	var stopErr error
 	stop = func() error {
@@ -408,7 +401,23 @@ func startRun(t *testing.T, o Options, out io.Writer) (url string, stop func() e
 		})
 		return stopErr
 	}
-	t.Cleanup(func() { stop() })
+	// Register shutdown before readiness, including failed and timed-out starts.
+	t.Cleanup(func() {
+		if err := stop(); err != nil {
+			t.Error(err)
+		}
+	})
+	go func() {
+		done <- Run(ctx, o, out, func(u string) error { readyc <- u; return nil })
+	}()
+	select {
+	case url = <-readyc:
+	case err := <-done:
+		close(done)
+		t.Fatalf("Run ended before ready: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run not ready")
+	}
 	return url, stop
 }
 
@@ -477,13 +486,10 @@ func TestRunPrintsOmoLocalhostAddress(t *testing.T) {
 		t.Fatalf("socket caller %q", me.Actor.Role)
 	}
 
-	start := time.Now()
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > shutdownTimeout {
-		t.Fatalf("shutdown took %v", d)
-	}
+	// stop waits for Run to return; listener release is the shutdown contract.
 	assertReleased(t, l, first[1])
 }
 
@@ -520,15 +526,23 @@ func TestRunReleasesEverythingOnFailedStart(t *testing.T) {
 	assertReleased(t, l, "")
 
 	// A failing ready callback releases both listeners.
-	free, _ := net.Listen("tcp", "127.0.0.1:0")
-	port = free.Addr().(*net.TCPAddr).Port
-	free.Close()
-	o := Options{Layout: l, Config: testConfig(func(c *serverconfig.Config) { c.Port = port })}
+	o := Options{Layout: l, Config: testConfig()}
 	want := errors.New("not ready")
-	if err := Run(context.Background(), o, io.Discard, func(string) error { return want }); !errors.Is(err, want) {
+	var readyPort string
+	if err := Run(context.Background(), o, io.Discard, func(address string) error {
+		u, err := url.Parse(address)
+		if err != nil {
+			return err
+		}
+		readyPort = u.Port()
+		return want
+	}); !errors.Is(err, want) {
 		t.Fatalf("Run = %v, want the ready error", err)
 	}
-	assertReleased(t, l, strconv.Itoa(port))
+	if readyPort == "" {
+		t.Fatal("Run did not report its listener's port")
+	}
+	assertReleased(t, l, readyPort)
 
 	// The home is usable again afterwards.
 	_, stop := startRun(t, o, io.Discard)

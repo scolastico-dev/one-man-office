@@ -91,7 +91,10 @@ func TestPauseNoticePlugin(t *testing.T) {
 			t.Fatalf("%s got %q, want %q", term, got, want)
 		}
 	}
-	eventually(t, "the log", func() bool { return strings.Contains(e.logText("pause-notice"), "told 3 agents to continue") })
+	e.waitFinished("pause-notice", 2)
+	if !strings.Contains(e.logText("pause-notice"), "told 3 agents to continue") {
+		t.Fatalf("resume log = %s", e.logText("pause-notice"))
+	}
 	if got := e.stored("pause-notice", "halted"); got != "" {
 		t.Fatalf("halted kept after the resume: %s", got)
 	}
@@ -99,7 +102,7 @@ func TestPauseNoticePlugin(t *testing.T) {
 	// A second resume (nothing was halted) sends nothing.
 	e.m.Dispatch(Event{Name: EventResumed, At: time.Now()})
 	e.m.Dispatch(Event{Name: EventTicketCreated, At: time.Now()})
-	time.Sleep(200 * time.Millisecond)
+	e.waitFinished("pause-notice", 3)
 	if desk.total() != 7 {
 		t.Fatalf("%d texts after a second resume", desk.total())
 	}

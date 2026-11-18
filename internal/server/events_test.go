@@ -380,20 +380,16 @@ func TestStreamOverSocket(t *testing.T) {
 	}()
 	st := &stream{t: t, resp: &http.Response{Body: pr}, frames: make(chan frame, 64), done: make(chan struct{})}
 	go st.read()
-	// Create the ticket only once the stream is subscribed: a subscription
-	// starts after the newest event, so a ticket created earlier is missed.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		s.events.mu.Lock()
-		subscribed := len(s.events.subs) > 0
-		s.events.mu.Unlock()
-		if subscribed {
-			break
+	defer pr.Close()
+	// The initial retry frame is written after Subscribe. Receiving it is
+	// the barrier before creating an event that starts after the newest id.
+	select {
+	case f := <-st.frames:
+		if f.retry != "3000" {
+			t.Fatalf("first frame %+v, want the retry hint", f)
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("stream never subscribed")
-		}
-		time.Sleep(time.Millisecond)
+	case <-time.After(streamTimeout):
+		t.Fatal("stream never subscribed")
 	}
 	n := m.create()
 	if ev := st.nextEvent(); *ev.Ticket != n {

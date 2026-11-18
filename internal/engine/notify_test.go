@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -140,11 +141,21 @@ func TestMentionTypesLineIntoRunningAgent(t *testing.T) {
 
 func TestTypedLineWaitsForTheGracePeriod(t *testing.T) {
 	h := newHarness(t)
-	h.e.nt.grace = 20 * time.Millisecond
+	h.e.nt.grace = time.Hour
 	task, dev := h.readyDeveloper("one")
 	h.comment(board.User, task, api.CommentRequest{Body: "@developer please"})
-	h.notifyNow()
-	h.waitFor("the line to be typed", func() bool { return len(h.agent(dev.ID).typed()) == 1 })
+	synctest.Test(t, func(t *testing.T) {
+		h.notifyNow()
+		synctest.Wait()
+		if got := h.agent(dev.ID).typed(); len(got) != 0 {
+			t.Fatalf("typed before the grace period: %q", got)
+		}
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := h.agent(dev.ID).typed(); len(got) != 1 {
+			t.Fatalf("typed after the grace period: %q", got)
+		}
+	})
 }
 
 func TestMentionReachesEveryLiveReviewer(t *testing.T) {

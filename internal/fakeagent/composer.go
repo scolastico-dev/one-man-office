@@ -19,6 +19,11 @@ const (
 	// EnvDeafFor is a duration: input arriving that long after the start
 	// is dropped without showing, as during a start-up notice.
 	EnvDeafFor = "OMO_FAKE_DEAF_FOR"
+	// EnvDropPrompts drops this many complete submitted prompts without echo.
+	// It models a startup notice without tying the test to process startup time.
+	EnvDropPrompts = "OMO_FAKE_DROP_PROMPTS"
+	// EnvRawReadyFile is created once the terminal has raw input without echo.
+	EnvRawReadyFile = "OMO_FAKE_RAW_READY_FILE"
 )
 
 // composerSettings reads EnvSwallowEnters and EnvDeafFor; ok is false
@@ -32,6 +37,7 @@ func composerSettings() (swallow int, deaf time.Duration, ok bool) {
 		deaf, _ = time.ParseDuration(v)
 		ok = true
 	}
+	ok = ok || os.Getenv(EnvDropPrompts) != "" || os.Getenv(EnvRawReadyFile) != ""
 	return max(swallow, 0), max(deaf, 0), ok
 }
 
@@ -39,9 +45,9 @@ func composerSettings() (swallow int, deaf time.Duration, ok bool) {
 // full-screen CLI does: typed characters are echoed into an input line that
 // stays put, Enter submits it (a new line follows), Backspace deletes. The
 // first swallow Enter presses with text in the line do nothing, and input
-// arriving before deafUntil is dropped. Submitted lines come out of the
+// arriving before deafUntil or in the first drop submitted prompts is dropped. Submitted lines come out of the
 // returned reader, one per line.
-func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time) io.Reader {
+func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time, drop int) io.Reader {
 	pr, pw := io.Pipe()
 	go func() {
 		var line []byte
@@ -52,6 +58,12 @@ func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time) io
 				n = 0
 			}
 			for _, b := range buf[:n] {
+				if drop > 0 {
+					if b == '\r' || b == '\n' {
+						drop--
+					}
+					continue
+				}
 				switch {
 				case b == '\r' || b == '\n':
 					if len(line) == 0 {

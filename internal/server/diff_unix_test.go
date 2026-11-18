@@ -9,7 +9,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // An agent replaced its worktree's index by a named pipe: every read of the
@@ -30,7 +29,9 @@ func TestDiffRouteIndexPipeReleasesSlot(t *testing.T) {
 	if err := syscall.Mkfifo(index, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
+	// Bound each request as a watchdog; wall time spent on all the git and
+	// HTTP requests together is not evidence that a pipe read blocked.
+	e.u.b.srv.Client().Timeout = streamTimeout
 	for i := 0; i < diffSlots+2; i++ {
 		p := e.diff(e.u, task.Number).Projects[0]
 		if !strings.Contains(p.Message, "could not be read") {
@@ -41,7 +42,6 @@ func TestDiffRouteIndexPipeReleasesSlot(t *testing.T) {
 			t.Fatalf("round %d: the file route answered 200", i)
 		}
 	}
-	if d := time.Since(start); d > 10*time.Second {
-		t.Fatalf("took %s", d)
-	}
+	// Every request completed, including more than the available slots. A
+	// pipe read that blocked or leaked its slot would prevent these results.
 }
