@@ -793,3 +793,38 @@ func TestComposerWithoutBracketedPasteSubmitsEveryLine(t *testing.T) {
 		t.Fatalf("lines %q", got)
 	}
 }
+
+// save-prompt never shows a file that is not complete: a test that waits for
+// the file to exist and then reads it gets the whole prompt.
+func TestSavePromptNeverShowsAPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "prompt.txt")
+	held := 0
+	beforeRename = func(final string) {
+		held++
+		if final != target {
+			t.Errorf("renaming to %s, want %s", final, target)
+		}
+		// The temporary file is complete, and the name is still free.
+		if _, err := os.Stat(final); !os.IsNotExist(err) {
+			t.Errorf("the final name existed before the content was complete: %v", err)
+		}
+	}
+	t.Cleanup(func() { beforeRename = nil })
+	w := startWorld(t)
+	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")
+	res := runFake(t, Options{Dir: dir, Script: "ready\nsave-prompt|" + target})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	if held != 1 {
+		t.Fatalf("held %d times", held)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("saved prompt %q: %v", got, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".prompt.txt.tmp-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
+	}
+}

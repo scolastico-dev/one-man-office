@@ -244,7 +244,39 @@ func opSavePrompt(_ context.Context, r *runner, s Step) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(r.o.Dir, path)
 	}
-	return os.WriteFile(path, []byte(r.prompt), 0o644)
+	// A test that waits for this file to exist reads it right away: it must
+	// never exist half-written, which os.WriteFile (create, then fill) allows.
+	return writeFileAtomic(path, []byte(r.prompt), 0o644)
+}
+
+// beforeRename is called, in tests, once a temporary file holds all of its
+// content and before it takes its final name.
+var beforeRename func(final string)
+
+// writeFileAtomic gives path its complete content in one step: the content is
+// written to a temporary file in the same folder, which then takes the name.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), perm)
+	}
+	if err == nil {
+		if beforeRename != nil {
+			beforeRename(path)
+		}
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
 }
 
 func opWrite(_ context.Context, r *runner, s Step) error {
