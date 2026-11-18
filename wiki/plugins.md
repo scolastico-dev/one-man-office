@@ -402,7 +402,8 @@ Each task record has `id`, `name`, optional `ticket`, `started_at` (RFC 3339),
 `state` (`running` or `exited`) and `output` (an array, never null). A terminal
 record also has `ended_at`, `reason` and, for a failed natural exit, `error`.
 Reasons are `exited`, `stopped`, `ticket_done`, `plugin_disabled`,
-`plugin_removed`, `plugin_replaced` and `shutdown`; the first stop reason wins.
+`plugin_removed`, `plugin_replaced`, `shutdown`, `idle` and `forward_removed`;
+the first stop reason wins. The last two are the forward-watch policies below.
 No commands, arguments, environments or PIDs appear in records. A failed start
 returns a fixed error and retains no task or child. A quick nonzero exit keeps
 its status and diagnostic output in the terminal record.
@@ -520,9 +521,20 @@ and shutdown. Unattached owned forwards also disappear on plugin disable,
 removal, code replacement and shutdown. Configuration-only reloads preserve
 forwards and tasks. Restart removes **all** stale plugin-owned forwards before
 loading plugins; persistent generic user/agent forwards retain their normal
-behavior. Removing a forward alone does not stop its task. Ordinary already
-open proxy streams retain the transport's existing behavior; stopping the task
-terminates its process tree and thus its upstream connections.
+behavior. Removing an **unwatched** forward alone does not stop its task.
+Removing a **watched** forward stops its attached stable task with reason
+`forward_removed`, even while WebSockets remain open or a deadline callback is
+pending. User DELETE and `forward_remove` wait for task reaping; direct board
+removal is handled by the reliable event follower, before droppable hook delivery.
+Done/cancel/cascade cleanup retains reason `ticket_done`. The first termination
+reason wins if exit/expiry/removal are already racing. Task-exit and plugin
+lifecycle callbacks release registrations without waiting on their own task;
+repeated cleanup cannot stop a later task reusing the name.
+
+Ordinary already open proxy streams retain the transport's existing behavior;
+stopping the watched task terminates its process tree and thus any connections
+it serves. An independent upstream may keep an old stream open, but the task
+is already reaped and closing that stream cannot resurrect its removed watch.
 
 `activity` is `{active_requests: integer, active_websockets: integer,
 ever_connected: boolean, no_client_since: string, revision: integer}`.
@@ -560,8 +572,11 @@ is refused. Scheduling may run late under load, but never stops early against
 an obsolete revision. Policy replacement preserves the current interval;
 repeated calls/polls do not reset it. A watch stops its attached task even if
 that task has another forward, so plugins should choose one presence forward
-per task. Removal/exit/unload cancels the watch. Expiry rechecks persisted registration
-before stopping, including the interval before removal events are consumed.
+per task. Removal stops a watched task, then cancels its watch; exit/unload also
+cancels watches. Deletion and watched identity capture serialize with expiry;
+`StopTaskID` waits outside that lock. Expiry rechecks persisted registration,
+including before removal events are consumed, and applies `forward_removed`
+when the registration has vanished rather than dropping the task's policy.
 
 The loopback helper closes its temporary listener before returning: it is
 **not a reservation**. Launch on `127.0.0.1:PORT`, detect bind collisions and

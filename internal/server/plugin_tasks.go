@@ -60,8 +60,9 @@ func (s *Server) stopTasksForEvent(ev api.Event) {
 		var f api.ProxyForward
 		if json.Unmarshal(ev.Data, &f) == nil {
 			s.pluginForwards.Lock()
-			s.forgetPluginForwardLocked(f.ID)
+			task := s.takeWatchedForwardLocked(f.ID)
 			s.pluginForwards.Unlock()
+			s.stopRemovedForward(task)
 		}
 		return
 	}

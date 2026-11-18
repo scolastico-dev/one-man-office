@@ -20,6 +20,7 @@ type pluginForwardRegistry struct {
 }
 type pluginForwardState struct {
 	plugin, task string
+	ticket       int
 	activity     plugins.ForwardActivity
 	since        time.Time // Carries Go's monotonic clock; wire time is informational.
 	closing      bool
@@ -76,6 +77,9 @@ func (s *Server) AddForward(ctx context.Context, plugin string, req plugins.Forw
 	}
 	now := time.Now()
 	st := &pluginForwardState{plugin: plugin, task: req.TaskID, since: now, activity: plugins.ForwardActivity{NoClientSince: now.UTC().Format(time.RFC3339Nano), Revision: 1}}
+	if f.Ticket != nil {
+		st.ticket = *f.Ticket
+	}
 	if reg.entries == nil {
 		reg.entries = map[string]*pluginForwardState{}
 	}
@@ -101,13 +105,52 @@ func (s *Server) ListForwards(ctx context.Context, plugin string) ([]plugins.For
 }
 
 func (s *Server) RemoveForward(ctx context.Context, plugin, id string) error {
-	reg := &s.pluginForwards
-	reg.Lock()
-	defer reg.Unlock()
-	if err := s.board.DeletePluginForward(ctx, board.System, plugin, id); err != nil {
-		return err
+	return s.removeForwardRecord(id, func() error { return s.board.DeletePluginForward(ctx, board.System, plugin, id) })
+}
+
+type watchedForwardTask struct {
+	plugin, id string
+	ticket     int
+}
+
+// takeWatchedForwardLocked separates external removal from callback cleanup.
+// Task/lifecycle callbacks use forget directly: waiting for their own task
+// from inside its exit callback would deadlock.
+func (s *Server) takeWatchedForwardLocked(id string) watchedForwardTask {
+	var task watchedForwardTask
+	if st := s.pluginForwards.entries[id]; st != nil && st.idle > 0 && st.task != "" {
+		task = watchedForwardTask{plugin: st.plugin, id: st.task, ticket: st.ticket}
 	}
 	s.forgetPluginForwardLocked(id)
+	return task
+}
+
+func (s *Server) stopRemovedForward(task watchedForwardTask) {
+	if task.id == "" {
+		return
+	}
+	reason := plugins.TaskForwardRemoved
+	if task.ticket > 0 && !s.pluginTaskTicketLive(context.Background(), task.ticket) {
+		reason = plugins.TaskTicketDone
+	}
+	_ = s.plugins.m.StopTaskID(task.plugin, task.id, reason)
+}
+
+// removeForwardRecord commits deletion and captures the stable watched identity
+// atomically with expiry, then awaits the task outside the resource lock.
+func (s *Server) removeForwardRecord(id string, remove func() error) error {
+	reg := &s.pluginForwards
+	reg.Lock()
+	err := remove()
+	var task watchedForwardTask
+	if err == nil {
+		task = s.takeWatchedForwardLocked(id)
+	}
+	reg.Unlock()
+	if err != nil {
+		return err
+	}
+	s.stopRemovedForward(task)
 	return nil
 }
 

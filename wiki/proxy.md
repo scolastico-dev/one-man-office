@@ -11,7 +11,8 @@ On a ticket, find **Forwards** beneath the description in the panel, or in
 **Overview** on the full page.
 Choose **Add forward**, enter its name and target port, then copy the returned
 base path before starting the app. **Open** opens its start path in a new
-browser tab. **Remove** unregisters it without stopping the app. The topbar's
+browser tab. **Remove** unregisters it without stopping the app, except that a plugin forward
+with an idle watch also stops its attached task (see Plugin ownership below). The topbar's
 **Forwards** button lists all ticket and global forwards, with the same actions
 and links to their tickets. A target that is offline stays listed; opening it
 shows an explanation with a link back to the board. TLS connection failures
@@ -201,7 +202,9 @@ adds no sign-in. Proxy cookies do not authenticate the board API.
 
 Removing a forward or completing/cancelling its ticket prevents new proxied
 requests. Existing WebSocket, SSE and other streaming connections are not
-forcibly closed; they can continue until the app or client closes them.
+forcibly closed by the transport; they can continue until the app or client closes
+them. Removing a watched plugin forward additionally stops its attached task,
+which closes any connections served by that task.
 
 omo removes its reserved cookies, recognized omo Authorization, internal
 identity headers and omo WebSocket token protocols before forwarding. App
@@ -261,7 +264,14 @@ Stable background-task attachment removes the forward on every task exit,
 including natural exit and idle stop. Unattached plugin resources end on
 disable/remove, code replacement and shutdown too. Restart removes stale
 plugin-owned records before loading hooks. Generic persistent forwards are
-preserved. Registration and attachment emit normal board events, including
+preserved. Removing a watched attached forward stops its stable task with reason
+`forward_removed`, including while a WebSocket remains open or expiry is pending.
+User DELETE and the Lua removal helper wait for reaping outside the registry
+lock; direct board removal uses the reliable event follower. Done/cancel/cascade
+retains `ticket_done`; exit/removal races keep the first termination reason.
+Unwatched/generic removal continues to unregister without stopping a process.
+Task/lifecycle cleanup stays idempotent and never stops a reused task name.
+Registration and attachment emit normal board events, including
 `proxy.forward_updated` for the first task binding.
 
 Plugins can inspect authenticated request/WebSocket counts and schedule a

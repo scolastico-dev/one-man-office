@@ -67,11 +67,14 @@ func (s *Server) expireForward(id string, st *pluginForwardState, revision uint6
 		return
 	}
 	// Persistence may have removed the forward before its reliable event was
-	// consumed. A vanished registration cannot retain a task's idle policy.
+	// consumed. Stop its watched task rather than silently discarding its policy.
 	if _, err := s.board.LiveProxyForward(context.Background(), board.System, id); err != nil {
 		var apiErr *api.Error
 		if errors.As(err, &apiErr) && apiErr.Code == api.CodeNotFound {
-			s.forgetPluginForwardLocked(id)
+			task := s.takeWatchedForwardLocked(id)
+			reg.Unlock()
+			s.stopRemovedForward(task)
+			return
 		} else {
 			// Do not stop on an uncertain read. Retry this same guarded deadline.
 			st.timer = time.AfterFunc(time.Second, func() { s.expireForward(id, st, revision) })

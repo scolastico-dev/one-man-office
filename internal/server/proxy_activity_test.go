@@ -272,7 +272,7 @@ func TestPluginForwardNeverConnectedDeadline(t *testing.T) {
 	}
 }
 
-func TestPluginRemovedForwardCannotExpireTask(t *testing.T) {
+func TestPluginRemovedWatchedForwardStopsTaskBeforeStaleExpiry(t *testing.T) {
 	s := newTestServer(t)
 	installTaskPlugin(t, s, "one")
 	cmd, args := taskSleeper(t)
@@ -296,7 +296,7 @@ func TestPluginRemovedForwardCannotExpireTask(t *testing.T) {
 	}
 	expiry.expireForward(f.ID, st, revision)
 	tasks, _ := s.plugins.m.Tasks("one")
-	if tasks[0].State != "running" {
-		t.Fatalf("removed forward stopped task: %+v", tasks[0])
+	if tasks[0].State != "exited" || tasks[0].Reason != "forward_removed" {
+		t.Fatalf("removed watched forward retained task: %+v", tasks[0])
 	}
 }

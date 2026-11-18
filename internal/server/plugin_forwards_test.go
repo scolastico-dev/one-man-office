@@ -144,6 +144,9 @@ func TestPluginForwardEveryTaskAndPluginExit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := s.WatchForward(t.Context(), "one", f.ID, 3600); err != nil {
+				t.Fatal(err)
+			}
 			// Unattached forwards also belong to their plugin's enabled/code lifecycle.
 			if reason == "plugin_disabled" || reason == "plugin_removed" || reason == "plugin_replaced" || reason == "shutdown" {
 				if _, err := s.AddForward(t.Context(), "one", plugins.ForwardAdd{CreateProxyForward: api.CreateProxyForward{Port: 3456, Name: "unbound"}}); err != nil {

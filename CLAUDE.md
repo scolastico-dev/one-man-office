@@ -322,8 +322,16 @@ closing admission under that same lock before waiting for the task callback.
 `forward_idle_watch` takes 0.01..604800 finite seconds, requires an attached live
 task, replaces its forward's policy without resetting the interval, and stops
 with reason `idle`. No hardcoded editor policy/default. Observed closure depends
-on protocol/network detection. Removal/exit/unload cancels timers; existing
-streams retain generic proxy behavior until upstream task shutdown. The free
+on protocol/network detection. Removing a watched forward stops its stable task
+with `forward_removed` (even with active WS or pending expiry); unwatched/generic
+removal preserves the process. `removeForwardRecord` commits deletion and captures
+the watched identity under the registry lock, then awaits `StopTaskID` outside it.
+Reliable removal-event delivery covers direct board deletion and transactional
+Done/cancel/cascade (`ticket_done`); expiry's missing-record check covers the
+pre-event window. Task/lifecycle callbacks use plain forget, avoiding self-join,
+and stable IDs keep repeated cleanup from stopping a reused name. Exit/unload
+cancels timers; existing streams retain generic proxy behavior until their
+upstream task shutdown; independent streams cannot resurrect removed state. The free
 IPv4 `127.0.0.1` port helper `free_loopback_port()` returns a closed-listener
 candidate, never a reservation; plugins must bound bind-collision retries.
 Addresses contain no credentials; frontend still opens via user-only Open.
