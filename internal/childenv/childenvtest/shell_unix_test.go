@@ -43,15 +43,18 @@ func TestShellEnvPreventsHostileShellConfiguration(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			shell, err := exec.LookPath(tc.shell)
 			if err != nil {
-				t.Skip(tc.shell + " is not installed")
+				t.Fatalf("this test drives a real %s; install it (CI installs bash and zsh in its setup step): %v", tc.shell, err)
 			}
 			// The control HOME is empty; ZDOTDIR points to a separate owned home.
 			base := append(ShellEnv(nil, t.TempDir()), "PATH="+os.Getenv("PATH"))
 			base = append(base, tc.extra...)
 			if tc.name == "BashGlobOptions" {
-				// BASHOPTS appeared in Bash 4.1; macOS still ships Bash 3.2.
-				// Probe without the injected variable so an ordinary imported
-				// environment value cannot look like native shell support.
+				// The one retained capability skip: BASHOPTS appeared in Bash
+				// 4.1 and macOS still ships Bash 3.2, which cannot consume it.
+				// TestShellEnvDropsConfigurationAndOwnsHome (portable, no
+				// shell needed) still checks its removal. Probe without the
+				// injected variable so an ordinary imported environment value
+				// cannot look like native shell support.
 				probe := exec.Command(shell, "--norc", "-c", `test "${BASHOPTS+x}" = x`)
 				probe.Env = ShellEnv(base, t.TempDir())
 				if err := probe.Run(); err != nil {

@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { devNull, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve, sep } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanEnv, terminalShell } from '../../e2e/support/env'
+import { cleanEnv, findGit, installGit, terminalShell } from '../../e2e/support/env'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -20,21 +20,55 @@ it('keeps only test-owned omo variables in server, CLI and seed environments', (
   })
 })
 
-it.skipIf(process.platform === 'win32')('uses a shell with line editing and bracketed paste, regardless of the runner login shell', () => {
+it('uses a shell with line editing and bracketed paste, regardless of the runner login shell', () => {
   vi.stubEnv('SHELL', '/a/non-POSIX/login-shell')
   const env = cleanEnv('/temporary/omo-test', '/test/programs')
-  expect(env.SHELL).toMatch(/(?:^|\/)bash$/)
-})
-
-it.skipIf(process.platform === 'win32')('preserves compatible interactive shells and resolves Bash for other login shells', () => {
-  for (const shell of ['/opt/bin/bash', '/opt/bin/zsh']) {
-    expect(terminalShell(shell, '/tools', (p) => p === shell)).toBe(shell)
+  if (process.platform === 'win32') {
+    // Windows has no login-shell variable of its own: the harness leaves it alone and the terminal specs find Bash through PATH.
+    expect(env.SHELL).toBe('/a/non-POSIX/login-shell')
+  } else {
+    expect(env.SHELL).toMatch(/(?:^|\/)bash$/)
   }
-  expect(terminalShell('/bin/fish', '/tools:/elsewhere', (p) => p === '/tools/bash')).toBe('/tools/bash')
-  expect(terminalShell('/bin/sh', '', (p) => p === '/bin/bash')).toBe('/bin/bash')
-  expect(() => terminalShell('/bin/fish', '', () => false)).toThrow('Bash with line editing and bracketed paste')
 })
 
+// Native absolute paths: the injected `executable` never touches the disk, so
+// these checks hold on every platform, including drive-letter paths.
+const at = (...parts: string[]) => resolve(sep, ...parts)
+
+it('preserves compatible interactive shells and resolves Bash for other login shells', () => {
+  for (const shell of [at('opt', 'bin', 'bash'), at('opt', 'bin', 'zsh')]) {
+    expect(terminalShell(shell, at('tools'), (p) => p === shell)).toBe(shell)
+  }
+  expect(terminalShell(at('bin', 'fish'), [at('tools'), at('elsewhere')].join(delimiter), (p) => p === at('tools', 'bash'))).toBe(at('tools', 'bash'))
+  expect(terminalShell(at('bin', 'sh'), '', (p) => p === '/bin/bash')).toBe('/bin/bash')
+  expect(() => terminalShell(at('bin', 'fish'), '', () => false)).toThrow('Bash with line editing and bracketed paste')
+})
+
+it('finds Bash and git under their native executable names', () => {
+  const dir = at('tools')
+  expect(terminalShell(undefined, dir, (p) => p === join(dir, 'bash.exe'), 'win32')).toBe(join(dir, 'bash.exe'))
+  expect(findGit(dir, 'win32', (p) => p === join(dir, 'git.exe'))).toBe(join(dir, 'git.exe'))
+  expect(findGit(dir, 'linux', (p) => p === join(dir, 'git'))).toBe(join(dir, 'git'))
+  expect(() => findGit(dir, 'win32', () => false)).toThrow('git is not on the PATH')
+})
+
+it('puts git into a program folder by link, or by a launcher where a link is refused', () => {
+  const real = at('Git', 'cmd', 'git.exe')
+  const made: string[] = []
+  const link = (target: string, file: string) => { made.push(`link ${target} ${file}`) }
+  const refuse = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+  const write = (file: string, text: string) => { made.push(`write ${file} ${text}`) }
+  expect(installGit(at('p'), real, 'linux', link, write)).toBe('git')
+  expect(installGit(at('p'), real, 'win32', link, write)).toBe('git.exe')
+  expect(installGit(at('p'), real, 'win32', refuse, write)).toBe('git.cmd')
+  expect(made).toEqual([
+    `link ${real} ${join(at('p'), 'git')}`,
+    `link ${real} ${join(at('p'), 'git.exe')}`,
+    `write ${join(at('p'), 'git.cmd')} @"${real}" %*\r\n`,
+  ])
+  // A refused link is only expected on Windows; on other systems it is a real error.
+  expect(() => installGit(at('p'), real, 'linux', refuse, write)).toThrow('operation not permitted')
+})
 
 it('removes inherited shell startup, editor, option, prompt, history and function overrides', () => {
   const names = [
@@ -58,7 +92,7 @@ it('removes inherited shell startup, editor, option, prompt, history and functio
   expect(env.LANG).toBe('en_US.UTF-8')
 })
 
-it.skipIf(process.platform === 'win32')('isolates real Bash startup code and Readline from hostile runner files', () => {
+it('isolates real Bash startup code and Readline from hostile runner files', () => {
   const root = mkdtempSync(join(tmpdir(), 'omo-shell-env-'))
   try {
     const home = join(root, 'home')
@@ -110,4 +144,15 @@ it('all browser child environments inherit through the central shell-config filt
     if (/\bprocess\s*\.\s*env\b(?!\s*(?:\.|\[))/.test(text)) failures.push(name)
   }
   expect(failures).toEqual([])
+})
+
+it('does not skip whole fixture tests for a platform; only single POSIX-only assertions are conditional', () => {
+  // omo-fixture.spec.ts and this file cover the program folder, the shell
+  // resolution and the environment boundary on every platform: they are pure,
+  // or use native names and paths. A skip of a whole test would drop all of it.
+  for (const file of [resolve('e2e/omo-fixture.spec.ts'), resolve('src/testing/omoEnv.test.ts')]) {
+    const text = readFileSync(file, 'utf8')
+    const gates = text.split('\n').filter((line) => /\b(?:it|test|describe)\s*\.\s*skip(?:If)?\s*\(/.test(line))
+    expect(gates, file).toEqual([])
+  }
 })

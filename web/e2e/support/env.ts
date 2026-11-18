@@ -1,4 +1,4 @@
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 
@@ -57,11 +57,15 @@ function isExecutable(file: string): boolean {
 }
 
 /** POSIX syntax plus interactive line editing and bracketed paste, including on macOS. */
-export function terminalShell(inherited: string | undefined, path: string | undefined, executable = isExecutable): string {
-  if (inherited && isAbsolute(inherited) && ['bash', 'zsh'].includes(basename(inherited)) && executable(inherited)) return inherited
+export function terminalShell(inherited: string | undefined, path: string | undefined, executable = isExecutable, platform: NodeJS.Platform = process.platform): string {
+  const bashNames = platform === 'win32' ? ['bash.exe', 'bash'] : ['bash']
+  const shellNames = [...bashNames, ...(platform === 'win32' ? ['zsh.exe'] : []), 'zsh']
+  if (inherited && isAbsolute(inherited) && shellNames.includes(basename(inherited)) && executable(inherited)) return inherited
   for (const dir of (path ?? '').split(delimiter).filter(Boolean)) {
-    const bash = resolve(dir, 'bash')
-    if (executable(bash)) return bash
+    for (const name of bashNames) {
+      const bash = resolve(dir, name)
+      if (executable(bash)) return bash
+    }
   }
   if (executable('/bin/bash')) return '/bin/bash'
   throw new Error('Browser terminal tests require Bash with line editing and bracketed paste; install Bash or set SHELL to an executable Bash or Zsh')
@@ -104,11 +108,36 @@ export function pluginListPath(home: string): string {
   return join(home, 'plugin-list.git')
 }
 
-/** The runner's git, found on its own PATH: fake program folders link it in, because omo needs git to start. */
-export function findGit(path: string | undefined = process.env.PATH): string {
+/** The runner's git, found on its own PATH under the executable name of the platform. */
+export function findGit(path: string | undefined = process.env.PATH, platform: NodeJS.Platform = process.platform, executable = isExecutable): string {
   for (const dir of (path ?? '').split(delimiter)) {
-    const git = join(dir, 'git')
-    if (isExecutable(git)) return git
+    for (const name of platform === 'win32' ? ['git.exe', 'git'] : ['git']) {
+      const git = join(dir, name)
+      if (executable(git)) return git
+    }
   }
   throw new Error('git is not on the PATH of the test runner')
+}
+
+/**
+ * Fake program folders hold the runner's git, because omo needs git to start.
+ * It is linked in; where a link is refused (Windows without the privilege), a
+ * launcher script takes its place. Returns the name of the file made.
+ */
+export function installGit(
+  dir: string,
+  git: string,
+  platform: NodeJS.Platform = process.platform,
+  link: (target: string, file: string) => void = symlinkSync,
+  write: (file: string, text: string) => void = writeFileSync,
+): string {
+  const name = platform === 'win32' ? 'git.exe' : 'git'
+  try {
+    link(git, join(dir, name))
+    return name
+  } catch (e) {
+    if (platform !== 'win32') throw e
+  }
+  write(join(dir, 'git.cmd'), `@"${git}" %*\r\n`)
+  return 'git.cmd'
 }
