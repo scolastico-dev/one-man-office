@@ -135,3 +135,21 @@ all artifacts for 14 days, including on failure. The 3/2 guard is smaller than t
 campaign, on a stable final commit. Focused selectors and dirty trees are clearly
 recorded and do not establish final full-suite acceptance. Historical calibration
 and its exact provenance are documented in [stress calibration](stress-calibration.md).
+
+A resource lives exactly as long as its consumers. In a browser spec nothing is
+made while the file loads: module scope runs once per process (also in the runner
+that only lists the tests, which never cleans up) while a `test.afterAll` runs per
+group of tests, so a fixture made at load and removed in `afterAll` is created
+for nobody or gone for a later group. Make it a Playwright fixture or part of the
+test's own home: `omoOptions.programs` gives a test fake programs (and git) in
+`<home>/programs`, first on its PATH, `repo` and `dirname(repo)` hold more
+repositories, and `omo.home` holds anything else (a file a fake agent writes goes
+there through a relative path). Hooks may create and remove a resource only when
+both sit in the same hook scope and every consumer runs inside it. Constants and
+scripts' text may stay at module scope; their folders and files may not.
+`web/src/fixtureLifetime.guard.test.ts` fails on a module-load allocation (direct,
+through a helper, or in a `describe` callback), on a spec that names its own folder
+in the shared temporary folder (`tmpdir()`, `process.pid`), and when
+`playwright test --list` leaves anything behind. In Go the same rule is
+`t.TempDir()` / `t.Cleanup` in the test that uses the resource, never a package
+variable or a deferred removal in a parent of parallel subtests.

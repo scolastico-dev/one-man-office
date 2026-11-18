@@ -4,10 +4,9 @@
 // ticket page, in the sidebar (open, collapsed and the phone's sheet) and the
 // diff's project switcher, in both themes. With OMO_SCREENSHOTS=<folder> it
 // writes ticket-tabs-<theme>-<width>.png there.
-import { mkdirSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import type { Locator, Page } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { Locator } from '@playwright/test'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
 import { expect, test } from './support/omo'
@@ -45,19 +44,19 @@ async function expectOneRule(list: Locator, where: string): Promise<void> {
 
 const tabsIn = (root: Locator, name: RegExp | string) => root.getByRole('tablist', { name })
 
-async function secondProject(page: Page, omo: import('./support/omo').Omo): Promise<string> {
-  void page
-  const dir = join(realpathSync(tmpdir()), `omo-e2e-tabs-${process.pid}-${Date.now()}`)
+async function secondProject(omo: import('./support/omo').Omo, repo: string): Promise<string> {
+  // Next to the test's own repository, in the folder the `repo` fixture removes.
+  const dir = join(dirname(repo), 'second')
   initRepo(dir)
   return (await omo.api<{ id: string }>('POST', '/api/projects', { path: dir, name: 'second' })).id
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`every tab strip has no edge before its first tab and none after its last (${theme}, 1440 px)`, async ({ page, omo }) => {
+  test(`every tab strip has no edge before its first tab and none after its last (${theme}, 1440 px)`, async ({ page, omo, repo }) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.addInitScript(() => localStorage.setItem('omo.sidebar', JSON.stringify({ open: true, width: 420, tab: 'agents' })))
     await page.setViewportSize({ width: 1440, height: 900 })
-    const second = await secondProject(page, omo)
+    const second = await secondProject(omo, repo)
     const story = await omo.createTicket({ title: 'A story with a task', type: 'story', projects: [omo.project, second] })
     await omo.createTicket({ title: 'The task', story })
 

@@ -1,6 +1,4 @@
-import { accessSync, chmodSync, constants, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expectCardIn } from './support/board'
 import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
@@ -17,33 +15,14 @@ import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
-const programs = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-first-run-'))
-writeFileSync(
-  join(programs, 'claude'),
-  [
-    '#!/bin/sh',
-    'export OMO_FAKEAGENT=1 GIT_AUTHOR_NAME=Agent GIT_AUTHOR_EMAIL=agent@example.invalid GIT_COMMITTER_NAME=omo GIT_COMMITTER_EMAIL=omo@example.invalid',
-    `exec '${FAKE_AGENT_BINARY}' "$@"`,
-    '',
-  ].join('\n'),
-)
-chmodSync(join(programs, 'claude'), 0o755)
-symlinkSync(findGit(), join(programs, 'git'))
-test.afterAll(() => rmSync(programs, { recursive: true, force: true }))
+const CLAUDE = [
+  '#!/bin/sh',
+  'export OMO_FAKEAGENT=1 GIT_AUTHOR_NAME=Agent GIT_AUTHOR_EMAIL=agent@example.invalid GIT_COMMITTER_NAME=omo GIT_COMMITTER_EMAIL=omo@example.invalid',
+  `exec '${FAKE_AGENT_BINARY}' "$@"`,
+  '',
+].join('\n')
 
-function findGit(): string {
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    try {
-      accessSync(join(dir, 'git'), constants.X_OK)
-      return join(dir, 'git')
-    } catch {
-      // not here
-    }
-  }
-  throw new Error('git is not on the PATH of the test runner')
-}
-
-test.use({ omoOptions: { firstStart: true, path: programs, noProject: true, paused: false }, viewport: { width: 1440, height: 1200 } })
+test.use({ omoOptions: { firstStart: true, programs: { files: { claude: CLAUDE }, git: true }, noProject: true, paused: false }, viewport: { width: 1440, height: 1200 } })
 test.skip(process.platform === 'win32', 'the fake agent program is a shell script')
 
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
@@ -56,7 +35,7 @@ async function shot(page: Page, name: string) {
 test('a new user goes from the printed address to a first task done by an agent', async ({ page, omo, repo }) => {
   test.setTimeout(120_000)
   // omo says what it found and prints the address with the login key.
-  expect(omo.output()).toContain(`agent detection: found claude at ${join(programs, 'claude')}`)
+  expect(omo.output()).toContain(`agent detection: found claude at ${join(omo.programs, 'claude')}`)
   expect(omo.output()).toMatch(/^omo: http:\/\/omo\.localhost:\d+\/#[0-9a-f]{64}$/m)
   expect(omo.output()).toContain('Open the address in your browser. The part after # is your login key: keep it to yourself.')
 

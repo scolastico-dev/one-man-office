@@ -1,8 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Locator, Page } from '@playwright/test'
-import { accessSync, chmodSync, constants, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { openBoard } from './support/board'
 import { expect, FAKE_AGENT_BINARY, ServerError, test, type Omo } from './support/omo'
 
@@ -303,30 +302,13 @@ test('a broken profile file shows the callout and can be saved over after "Save 
 // Detection looks at PATH only. The server here gets a PATH with nothing but
 // git (omo needs it to start) and this test's own fake `claude` and `agy`
 // (empty files with the execute bit; detection never runs them), so the test neither
-// depends on nor shows which agent programs are installed on this machine.
-const fakePrograms = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-path-'))
-for (const program of ['claude', 'agy']) {
-  writeFileSync(join(fakePrograms, program), '')
-  chmodSync(join(fakePrograms, program), 0o755)
-}
-symlinkSync(findGit(), join(fakePrograms, 'git'))
-
-function findGit(): string {
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    const git = join(dir, 'git')
-    try {
-      accessSync(git, constants.X_OK)
-      return git
-    } catch {
-      // not here
-    }
-  }
-  throw new Error('git is not on the PATH of the test runner')
-}
-test.afterAll(() => rmSync(fakePrograms, { recursive: true, force: true }))
+// depends on nor shows which agent programs are installed on this machine. The
+// programs are made in the test's own home (`omoOptions.programs`), so they exist
+// exactly as long as the server that looks for them.
+const FAKE_PROGRAMS = { files: { claude: '', agy: '' }, git: true }
 
 test.describe('detection', () => {
-  test.use({ omoOptions: { path: fakePrograms, noProject: true } })
+  test.use({ omoOptions: { programs: FAKE_PROGRAMS, noProject: true } })
 
   test('Detect says what it does first and then lists exactly what the server answered', async ({ page, omo }) => {
     await openAgents(page, omo)
@@ -336,7 +318,7 @@ test.describe('detection', () => {
 
     await page.getByRole('button', { name: 'Detect agent programs' }).click()
     const result = page.locator('[data-detect-result]')
-    await expect(result.locator('[data-detect-found]')).toHaveText([`claude: ${join(fakePrograms, 'claude')}`, `agy: ${join(fakePrograms, 'agy')}`])
+    await expect(result.locator('[data-detect-found]')).toHaveText([`claude: ${join(omo.programs, 'claude')}`, `agy: ${join(omo.programs, 'agy')}`])
     await expect(result.locator('[data-detect-created]')).toHaveText('Profiles written: claude, agy.')
     await expect(result.locator('[data-detect-assigned]')).toContainText('Roles that got models:')
     await expect(page.locator('[data-profile="claude"]')).toContainText('Claude Code')
@@ -369,7 +351,7 @@ test.describe('detection', () => {
     // A Claude Code profile of the fake program, with one model of its own under a catalog name.
     await omo.api('PUT', '/api/profiles/work', {
       cli: 'claude',
-      command: join(fakePrograms, 'claude'),
+      command: join(omo.programs, 'claude'),
       args: [],
       env: {},
       account_dir: '',
