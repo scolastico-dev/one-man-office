@@ -114,9 +114,11 @@ test.describe('images dropped onto an agent terminal', () => {
     const terminal = terminalIn(panel)
     await expectTerminalText(terminal, 'hello from fake')
     const folder = join(omo.home, 'omo', 'images', 'terminal')
+    // The stored images. omo writes a file under a temporary name (`.omo-write-…`)
+    // and renames it when it is complete; a file still being written is not one.
     const stored = () => {
       try {
-        return readdirSync(folder)
+        return readdirSync(folder).filter((name) => !name.startsWith('.omo-write-'))
       } catch {
         return []
       }
