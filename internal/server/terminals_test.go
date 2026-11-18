@@ -22,7 +22,6 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
-	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 )
@@ -34,15 +33,6 @@ func shellServer(t *testing.T, mutate ...func(*serverconfig.Config)) (*Server, *
 	isolateShells(t)
 	s := newTestServer(t, mutate...)
 	return s, newBrowser(t, s)
-}
-
-// isolateShells keeps the user shells a test opens away from the
-// developer's home and shell configuration.
-func isolateShells(t *testing.T) {
-	t.Helper()
-	isolateAgents(t)
-	childenvtest.ClearShell(t)
-	t.Setenv("SHELL", "/bin/sh")
 }
 
 // openShell opens a user shell through the browser listener and expects 201.

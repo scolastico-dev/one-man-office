@@ -1,6 +1,6 @@
 // Exercise resource acquisition against real children. A bind collision may be
 // retried before the test begins; an assertion or an unrelated error may not.
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import { BINARY, createOmo, expect, test } from './support/omo'
@@ -71,17 +71,29 @@ test('a server executable that disappears after configuration fails and can be d
 })
 
 test('fake programs exist for the whole life of the test server and go with its home', async ({ repo }) => {
-  test.skip(process.platform === 'win32', 'the fake programs are executable files made with POSIX modes')
-  const handle = await createOmo({ programs: { files: { claude: '#!/bin/sh\n', agy: '' }, git: true } }, repo)
+  // Native program files: a Windows program is found by its extension, not by a mode bit.
+  const win = process.platform === 'win32'
+  const file = (name: string) => (win ? `${name}.cmd` : name)
+  const script = win ? '@echo off\r\n' : '#!/bin/sh\n'
+  const handle = await createOmo({ programs: { files: { [file('claude')]: script, [file('agy')]: '' }, git: true } }, repo)
   try {
     const dir = handle.omo.programs
     expect(dir).toBe(join(handle.omo.home, 'programs'))
-    expect(readdirSync(dir).sort()).toEqual(['agy', 'claude', 'git'])
-    for (const name of ['agy', 'claude', 'git']) expect(() => accessSync(join(dir, name), constants.X_OK)).not.toThrow()
+    const listed = () => {
+      const names = readdirSync(dir).sort()
+      const git = names.filter((name) => /^git(\.|$)/.test(name))
+      expect(git, 'exactly one git program').toHaveLength(1)
+      return { names, git: git[0] }
+    }
+    const { names, git } = listed()
+    expect(names).toEqual([file('agy'), file('claude'), git].sort())
+    for (const name of names) expect(() => accessSync(join(dir, name), constants.X_OK)).not.toThrow()
+    // Only POSIX has a mode bit to read back; Windows has no execute permission to assert (the X_OK check above is existence there).
+    if (!win) for (const name of names) expect(statSync(join(dir, name)).mode & 0o111, name).not.toBe(0)
     await handle.omo.start()
     await handle.omo.stop()
     await handle.omo.start()
-    expect(readdirSync(dir).sort(), 'a restart of the server finds the same programs').toEqual(['agy', 'claude', 'git'])
+    expect(listed().names, 'a restart of the server finds the same programs').toEqual(names)
   } finally {
     await handle.dispose()
   }

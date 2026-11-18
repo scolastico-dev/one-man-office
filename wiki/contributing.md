@@ -153,3 +153,17 @@ in the shared temporary folder (`tmpdir()`, `process.pid`), and when
 `playwright test --list` leaves anything behind. In Go the same rule is
 `t.TempDir()` / `t.Cleanup` in the test that uses the resource, never a package
 variable or a deferred removal in a parent of parallel subtests.
+
+### Gates, skips and missing programs
+
+A test is never skipped to get green. The only skip allowed is one single
+assertion of something the platform truly lacks, with a comment saying what
+(a POSIX mode bit on Windows, `BASHOPTS` in Bash 3.2), and it is listed in the
+hand-in. A missing program is not a platform without a capability: a test that
+drives a real Bash or Zsh fails with the way to install it (CI installs both in
+its setup step; locally `bash` and `zsh` are required). A boundary that is
+only a map of variables, or a pure resolution of paths, is tested on every
+platform with native paths and file names (`resolve(sep, ...)`, `bash.exe`,
+`git.exe`), never behind a Unix build tag or a whole-test skip.
+`internal/testguard/gates_test.go` and `web/src/testing/omoEnv.test.ts` guard
+the shell fixtures against a regrown gate.

@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
-import { cleanEnv, findGit, holdsAgentProgram, pathWithoutAgentPrograms } from './env'
+import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentPrograms } from './env'
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
 import { isPortCollision } from './startup'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
@@ -211,7 +211,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
       writeFileSync(join(programs, name), content)
       chmodSync(join(programs, name), 0o755)
     }
-    if (opts.programs.git) symlinkSync(findGit(), join(programs, 'git'))
+    if (opts.programs.git) installGit(programs, findGit())
   }
   const ownPath = opts.programs === undefined ? opts.path : opts.programs.inheritPath ? [programs, pathWithoutAgentPrograms()].join(delimiter) : programs
   const env = cleanEnv(home, ownPath)
