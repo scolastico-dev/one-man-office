@@ -19,8 +19,12 @@ from datetime import datetime, timezone
 
 def child_env(inherited, state, caches):
     # Never inspect, print or propagate inherited omo credentials/socket overrides.
+    # Dry-run flags or an npm script-shell override can report success on stale artifacts.
+    build_controls = {'NO_WEB', 'MAKEFLAGS', 'GNUMAKEFLAGS', 'MFLAGS', 'MAKEOVERRIDES',
+                      'MAKEFILES', 'MAKELEVEL', 'MAKE_RESTARTS', 'MAKE'}
     env = {k: v for k, v in inherited.items()
            if not k.upper().startswith('OMO_')
+           and k.upper() not in build_controls and not k.upper().startswith('NPM_CONFIG_')
            and (not k.upper().startswith('GIT_') or k.upper() == 'GIT_CONFIG_PARAMETERS')
            and not k.upper().startswith(('PLAYWRIGHT_', 'PW_TEST_', 'PWTEST', 'PWDEBUG'))}
     homes = {'HOME': 'home', 'USERPROFILE': 'home', 'APPDATA': 'config',
@@ -449,7 +453,7 @@ def main(argv=None):
                     browser_preflight(args.source)
                     build_folder = folder / 'browser-build'
                     build_folder.mkdir()
-                    build = execute(['make', 'build'], args.source, env, cpus, build_folder, args.attempt_timeout)
+                    build = execute(['make', 'build', 'NO_WEB='], args.source, env, cpus, build_folder, args.attempt_timeout)
                     metadata['browser_build'] = build
                     write_json(folder / 'metadata.json', metadata)
                     if build['returncode'] or build['timed_out'] or not build['cleaned']:

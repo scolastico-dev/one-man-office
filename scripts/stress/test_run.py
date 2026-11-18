@@ -343,5 +343,56 @@ sys.exit(3)
             self.assertFalse(any(k.startswith(('PW_TEST_', 'PLAYWRIGHT_', 'PWTEST', 'PWDEBUG')) for k in env))
 
 
+    def test_browser_preparation_rebuilds_stale_assets_despite_inherited_build_controls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'bin').mkdir()
+            (root / 'web/dist').mkdir(parents=True)
+            (root / 'web/package.json').write_text(json.dumps({'scripts': {
+                'build': 'node -e "require(\'fs\').writeFileSync(\'dist/index.html\', \'current-web\')"'}}))
+            (root / 'Makefile').write_text(
+                '.PHONY: build web\nWEB_DEPS := $(if $(NO_WEB),,web)\n'
+                'build: $(WEB_DEPS)\n\t@printf current-binary > bin/omo\n'
+                'web:\n\t@npm --prefix web run build\n')
+            (root / 'override.mk').write_text('override NO_WEB = 1\n')
+            (root / 'injected.npmrc').write_text('script-shell=/bin/true\n')
+            controls = [
+                {'NO_WEB': '1'}, {'MAKEFLAGS': 'n'}, {'GNUMAKEFLAGS': 'n'},
+                {'MAKEFLAGS': 't'}, {'MAKEFLAGS': 'e', 'WEB_DEPS': ''},
+                {'MAKEFILES': str(root / 'override.mk')},
+                {'npm_config_script_shell': '/bin/true'},
+                {'NPM_CONFIG_SCRIPT_SHELL': '/bin/true'},
+                {'NPM_CONFIG_USERCONFIG': str(root / 'injected.npmrc')},
+            ]
+            for number, override in enumerate(controls):
+                with self.subTest(override=override):
+                    (root / 'bin/omo').write_text('stale-binary')
+                    (root / 'web/dist/index.html').write_text('stale-web')
+                    folder = root / str(number)
+                    folder.mkdir()
+                    env = runner.child_env(dict(os.environ, **override), folder / 'state', {})
+                    result = runner.execute(['make', 'build'], root, env,
+                                            sorted(os.sched_getaffinity(0))[:2], folder, 20)
+                    self.assertEqual(result['returncode'], 0, (folder / 'stderr.log').read_text())
+                    self.assertEqual((root / 'web/dist/index.html').read_text(), 'current-web')
+                    self.assertEqual((root / 'bin/omo').read_text(), 'current-binary')
+
+    def test_make_dry_run_cannot_hide_failed_preparation_with_stale_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Makefile').write_text('.PHONY: build\nbuild:\n\tfalse\n')
+            (root / 'bin').mkdir()
+            (root / 'bin/omo').write_text('stale-binary')
+            for number, variable in enumerate(['MAKEFLAGS', 'GNUMAKEFLAGS']):
+                with self.subTest(variable=variable):
+                    folder = root / str(number)
+                    folder.mkdir()
+                    env = runner.child_env(dict(os.environ, **{variable: 'n'}), folder / 'state', {})
+                    result = runner.execute(['make', 'build'], root, env,
+                                            sorted(os.sched_getaffinity(0))[:2], folder, 10)
+                    self.assertNotEqual(result['returncode'], 0)
+                    self.assertEqual((root / 'bin/omo').read_text(), 'stale-binary')
+
+
 if __name__ == '__main__':
     unittest.main()

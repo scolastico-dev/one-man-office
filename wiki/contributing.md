@@ -77,7 +77,7 @@ Each checkout needs its own dependencies; linked node_modules are rejected to
 keep preparation from mutating another checkout.
 
 ```bash
-make stress-check                 # accounting, isolation and cleanup contract checks
+make stress-check                 # Linux/Python/Go/Node/npm: runner contract checks
 make stress                       # full suites: 20 Go + 10 browser attempts
 make stress STRESS_ARGS='--suite go --go-runs 3'
 make stress STRESS_ARGS='--suite browser --browser-runs 2 --throttle 6'
@@ -92,7 +92,9 @@ package/test workers, GOMAXPROCS=4 and a recorded shuffle seed per attempt;
 `--seed` fixes the base (attempt n uses base+n-1). Playwright uses four workers,
 `--repeat-each=1 --retries=0`, Chromium CDP CPU rate 4 by default, and retains
 failure traces/screenshots. Inherited GOFLAGS are cleared and full-test selectors
-are explicit, so a developer's shell flags cannot silently narrow a campaign. Playwright runtime/report
+are explicit, so a developer's shell flags cannot silently narrow a campaign.
+Make flags/includes, NO_WEB and npm configuration overrides are removed so preparation always builds
+the current web app and binary. Playwright runtime/report
 overrides are removed, the source config is explicit, and a separate `--list`
 collection must match every browser attempt. Go top-level inventories must stay
 consistent across attempts. Browser order remains Playwright's normal declaration

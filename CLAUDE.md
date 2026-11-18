@@ -19,7 +19,7 @@ make test          # tests only
 make cross         # all supported OS/architecture binaries
 make web-check     # type-check and unit-test the board app
 make e2e           # build omo and run the browser tests
-make stress-check  # Linux stress harness accounting/isolation/cleanup checks
+make stress-check  # Linux stress harness checks (Python 3, Go, Node/npm)
 make stress        # Linux: full 20 Go race + 10 throttled browser attempts (Python 3)
 make notices       # bin/THIRD_PARTY_NOTICES: licences of the Go modules and the bundled npm packages
 ```
