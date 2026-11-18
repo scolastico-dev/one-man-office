@@ -41,6 +41,7 @@ export const general: General = {
   stop: { handoff_timeout: '1m' },
   workspace_roots: [],
   rescan_interval: '1h',
+  export_check_interval: '10m',
   agent_env: {},
   usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 }

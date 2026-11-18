@@ -9,8 +9,9 @@ import (
 )
 
 type Group struct {
-	mu  sync.Mutex
-	pid int
+	mu     sync.Mutex
+	pid    int
+	killed bool
 }
 
 func New(cmd *exec.Cmd) (*Group, error) {
@@ -28,19 +29,28 @@ func New(cmd *exec.Cmd) (*Group, error) {
 func (g *Group) Start(cmd *exec.Cmd) error { return cmd.Start() }
 
 // Started records the PID after Start, preserving the callers' cancellation
-// registration order. Setpgid already took effect before the child ran.
+// registration order. Setpgid already took effect before the child ran. A
+// Kill that came between Start and Started found no PID to signal: it is
+// remembered and carried out here, so a cancellation in that window cannot
+// leave the program running.
 func (g *Group) Started(cmd *exec.Cmd) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pid = cmd.Process.Pid
+	if g.killed {
+		_ = syscall.Kill(-g.pid, syscall.SIGKILL)
+	}
 	return nil
 }
+
+// Kill holds mu while it signals, so Started cannot record the PID between
+// the check and the note that the group was killed.
 func (g *Group) Kill() error {
 	g.mu.Lock()
-	pid := g.pid
-	g.mu.Unlock()
-	if pid > 0 {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+	defer g.mu.Unlock()
+	g.killed = true
+	if g.pid > 0 {
+		_ = syscall.Kill(-g.pid, syscall.SIGKILL)
 	}
 	return nil
 }

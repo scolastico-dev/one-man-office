@@ -39,7 +39,28 @@ func (s *Server) registerTickets(mux *http.ServeMux) {
 		// The user and the CEO; the board refuses every other role.
 		{"POST /api/tickets/{n}/remove-project", s.removeTicketProject, agentWrite},
 		{"POST /api/tickets/{n}/remove-workdir", s.removeTicketWorkdir, userOnly},
+		{"POST /api/tickets/{n}/check-export", s.checkExport, userOnly},
 	})
+}
+
+// checkExport accepts a manual check through the same coalesced round as
+// the timer, including when periodic checks are disabled.
+func (s *Server) checkExport(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req struct{}
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	err = s.engine.CheckExport(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusAccepted, map[string]bool{"checking": true}, err)
 }
 
 // removeTicketWorkdir removes the working folder of a done task without a

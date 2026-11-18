@@ -45,7 +45,7 @@ function omoWithBoard(): FakeOmo {
   omo.projects = [project('ui', 'acme-corp/ui')]
   omo.tickets = [
     ticket({ number: 1, type: 'story', title: 'Story one', rank: 1 }),
-    ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] }),
+    ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] }),
     ticket({ number: 3, title: 'Ready task', column: 'ready', rank: 1 }),
     ticket({ number: 4, title: 'Closed', column: 'done', closed_at: '2026-11-14T10:00:00Z' }),
   ]
@@ -97,8 +97,9 @@ test('renders five columns from the snapshot with counts', async () => {
 test('a ticket.moved event moves the card without a reload', async () => {
   const omo = omoWithBoard()
   const { wrapper } = await boot(omo)
-  const reads = omo.reads.length
   omo.stream!.onState('live')
+  await flushPromises()
+  const reads = omo.reads.length
 
   omo.change('ticket.moved', ticket({ ...omo.tickets[1]!, column: 'ready', rank: 0 }))
   await flushPromises()

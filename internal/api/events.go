@@ -32,11 +32,13 @@ const (
 	KindProjectsScanned     = "projects.scanned"
 	KindUsageChanged        = "usage.changed"         // data UsageState
 	KindSkillSetChanged     = "skillset.changed"      // data SkillSetState
+	KindPluginTasksChanged  = "plugin.tasks_changed"  // data PluginTasksChangedData
 	KindPluginChanged       = "plugin.changed"        // data PluginInfo
 	KindImageAdded          = "image.added"           // data ImageEventData
 	KindImageDeleted        = "image.deleted"         // data ImageEventData
 	KindImageExpired        = "image.expired"         // data ImageEventData
 	KindProxyForwardAdded   = "proxy.forward_added"   // data ProxyForward (relative address)
+	KindProxyForwardUpdated = "proxy.forward_updated" // data ProxyForward (relative address)
 	KindProxyForwardRemoved = "proxy.forward_removed" // data ProxyForward (relative address)
 	KindMCPChanged          = "mcp.changed"           // data MCPServerState
 	// KindMCPToolsChanged has no data: the tools omo offers over MCP

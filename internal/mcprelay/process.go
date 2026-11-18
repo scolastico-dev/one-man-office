@@ -16,6 +16,7 @@ func newProcessGroup(cmd *exec.Cmd) (*processGroup, error) {
 	return &processGroup{Group: g}, nil
 }
 func (g *processGroup) started(cmd *exec.Cmd) error { return g.Started(cmd) }
+func (g *processGroup) kill()                       { _ = g.Kill() }
 func (g *processGroup) close() {
 	if g.Group != nil {
 		g.Close()

@@ -71,6 +71,7 @@ func TestSeedBuildsEveryColumn(t *testing.T) {
 			{"ref": "agentrev", "type": "task", "title": "Agent review one", "projects": []string{"demo"}, "to": "review", "review": "agent"},
 			{"ref": "done", "type": "task", "title": "Done one", "projects": []string{"demo"}, "to": "done", "review": "human", "branch": "omo/6-done"},
 			{"ref": "doneagent", "type": "task", "title": "Done after agents", "projects": []string{"demo"}, "to": "done", "review": "agent_then_human"},
+			{"ref": "doneexport", "type": "task", "title": "Done after exported merge", "projects": []string{"demo"}, "to": "done", "review": "human", "when_approved": "export"},
 			{"ref": "st", "type": "story", "title": "Story", "projects": []string{"demo"}, "to": "in_progress", "review": "human"},
 			{"ref": "sttask", "type": "task", "title": "Story task", "projects": []string{"demo"}, "story": "st", "to": "review", "review": "human"},
 		},
@@ -98,15 +99,16 @@ func TestSeedBuildsEveryColumn(t *testing.T) {
 		col   api.Column
 		stage api.ReviewStage
 	}{
-		"plan":      {api.ColumnPlanning, ""},
-		"ready":     {api.ColumnReady, ""},
-		"prog":      {api.ColumnInProgress, ""},
-		"rev":       {api.ColumnReview, api.ReviewStageHuman},
-		"agentrev":  {api.ColumnReview, api.ReviewStageAgent},
-		"done":      {api.ColumnDone, ""},
-		"doneagent": {api.ColumnDone, ""},
-		"st":        {api.ColumnInProgress, ""},
-		"sttask":    {api.ColumnReview, api.ReviewStageHuman},
+		"plan":       {api.ColumnPlanning, ""},
+		"ready":      {api.ColumnReady, ""},
+		"prog":       {api.ColumnInProgress, ""},
+		"rev":        {api.ColumnReview, api.ReviewStageHuman},
+		"agentrev":   {api.ColumnReview, api.ReviewStageAgent},
+		"done":       {api.ColumnDone, ""},
+		"doneagent":  {api.ColumnDone, ""},
+		"doneexport": {api.ColumnDone, ""},
+		"st":         {api.ColumnInProgress, ""},
+		"sttask":     {api.ColumnReview, api.ReviewStageHuman},
 	}
 	for ref, w := range want {
 		n, ok := refs[ref]

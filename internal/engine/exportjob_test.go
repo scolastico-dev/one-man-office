@@ -30,6 +30,7 @@ func (h *harness) origin(project string) string {
 	bare := filepath.Join(h.t.TempDir(), "origin.git")
 	gitRun(h.t, h.t.TempDir(), "init", "-q", "--bare", bare)
 	gitRun(h.t, repo, "remote", "add", "origin", bare)
+	gitRun(h.t, repo, "push", "-q", "origin", "refs/heads/main:refs/heads/main")
 	return bare
 }
 
@@ -301,6 +302,7 @@ func TestExportFailureHidesCredentials(t *testing.T) {
 	bare := filepath.Join(t.TempDir(), "origin.git")
 	gitRun(t, t.TempDir(), "init", "-q", "--bare", bare)
 	gitRun(t, h.repo, "remote", "set-url", "origin", bare)
+	gitRun(t, h.repo, "push", "-q", "origin", "refs/heads/main:refs/heads/main")
 	h.exportNow(n)
 	if got := remoteHead(t, bare, branch); got != reviewed {
 		t.Fatalf("the retry pushed %q, want %s", got, reviewed)
@@ -365,14 +367,14 @@ func TestExportJobRunsOutsideWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.steps(3)
-	if h.ticket(n).Column != api.ColumnDone {
-		t.Fatal("not done")
+	if h.ticket(n).ReviewStage != api.ReviewStageAwaitingMerge {
+		t.Fatal("not waiting for the merge")
 	}
 	if pathExists(folder) || pathExists(stray) {
 		t.Fatal("export folders stayed after the export")
 	}
-	if _, ok, _ := h.e.pins.pushed(n, h.project); ok {
-		t.Fatal("the push stays recorded after the export")
+	if _, ok, _ := h.e.pins.pushed(n, h.project); !ok {
+		t.Fatal("the push must stay recorded until the merge")
 	}
 }
 

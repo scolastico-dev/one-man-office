@@ -96,3 +96,18 @@ func TestPrintedAuthorTextShowsHiddenCharacters(t *testing.T) {
 		t.Errorf("printBody = %q, want %q", got, want)
 	}
 }
+
+func TestExportWaitingOutput(t *testing.T) {
+	summary := api.TicketSummary{Number: 7, Type: api.TypeTask, Title: "Ship", Column: api.ColumnReview, ReviewStage: api.ReviewStageAwaitingMerge,
+		Projects: []api.TicketProject{{Project: "app", ExportRemote: "https://example.test/repo", ExportBranch: "work", ExportBase: "main", ExportCommit: strings.Repeat("b", 40)}}}
+	if got := ticketLine(summary); !strings.Contains(got, "exported, waiting for the merge") {
+		t.Fatalf("list hides merge wait: %s", got)
+	}
+	var out bytes.Buffer
+	showTicket(&out, api.Ticket{TicketSummary: summary})
+	for _, want := range []string{"exported, waiting for the merge", "https://example.test/repo", "work -> main"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("show lacks %q:\n%s", want, out.String())
+		}
+	}
+}

@@ -367,7 +367,9 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 // nothing: the tree a merge of the two gives is target's own tree. It
 // creates no commit, signs nothing and writes nothing into the
 // repository: the trees the merge builds go to a temporary object folder
-// that is removed afterwards. A merge that conflicts is not applied.
+// that is removed afterwards. The proof ignores configured merge drivers
+// and attributes: a policy that discards source content is not evidence
+// of inclusion. A merge that conflicts is not applied.
 func (g *Git) SquashApplied(repo, target, source string) (bool, error) {
 	l := g.repoLock(repo)
 	l.Lock()
@@ -380,25 +382,10 @@ func (g *Git) SquashApplied(repo, target, source string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	common, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	tree, err := g.containmentTree(repo, "", t, src)
 	if err != nil {
 		return false, err
 	}
-	objects := filepath.Join(fromGitPath(strings.TrimSpace(common)), "objects")
-	quarantine, err := os.MkdirTemp("", "omo-objects-")
-	if err != nil {
-		return false, err
-	}
-	defer os.RemoveAll(quarantine)
-	out, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo, env: []string{
-		"GIT_OBJECT_DIRECTORY=" + quarantine, "GIT_ALTERNATE_OBJECT_DIRECTORIES=" + objects,
-	}}, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", t, src)
-	if code := exitCode(err); err != nil && code == 1 {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	tree := strings.TrimSpace(strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")[0])
 	targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", "--end-of-options", t+"^{tree}")
 	if err != nil {
 		return false, err

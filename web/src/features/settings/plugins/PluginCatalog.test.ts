@@ -33,7 +33,7 @@ const LIST: CatalogPlugin[] = [
   entry({ name: 'notes', tag: 'community', description: 'Notes ‮ here', source: 'git@example.org:me/notes.git', ref: '', subpath: 'plugin' }),
 ]
 const catalog = (o: Partial<Catalog> = {}): Catalog => ({ available: true, message: '', source: REPO, ref: 'release', fetched_at: '2026-11-16T09:00:00Z', plugins: LIST, lists: [], ...o })
-const info = (name: string): PluginInfo => ({ name, version: '1.0.0', description: '', state: 'ready', message: '', commit: 'a'.repeat(40), last_event: '', last_run_at: null, hooks: [] })
+const info = (name: string): PluginInfo => ({ name, version: '1.0.0', description: '', state: 'ready', message: '', commit: 'a'.repeat(40), last_event: '', last_run_at: null, hooks: [], buttons: [], frontend: {}, config_fields: [], content_id: '' })
 
 /** Mounts the section with the page's dialog scope; `answers` answers each read of the list in turn (the last one repeats). */
 async function open(answers: Catalog[], props: { settings?: PluginSettings[]; names?: string[] } = {}) {

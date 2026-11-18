@@ -727,3 +727,37 @@ func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 		t.Fatalf("input during the deaf time came through: %q", got)
 	}
 }
+
+func TestComposerTakesAPasteAsOneLine(t *testing.T) {
+	var echo syncBuffer
+	in, feed := io.Pipe()
+	lines := pasteComposer(in, &echo, 0, time.Time{}, true)
+	go func() {
+		// The markers may be split across reads; the line breaks inside the
+		// paste do not submit, the Enter after it does.
+		feed.Write([]byte("\x1b[20"))
+		feed.Write([]byte("0~alpha\rbeta\n\x1b[201"))
+		feed.Write([]byte("~\r"))
+		feed.Write([]byte("plain\r"))
+		feed.Close()
+	}()
+	got, _ := io.ReadAll(lines)
+	if want := "alpha⏎beta⏎\nplain\n"; string(got) != want {
+		t.Fatalf("lines %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(echo.String(), "\x1b[?2004h") {
+		t.Fatalf("bracketed paste was not asked for: %q", echo.String())
+	}
+}
+
+func TestComposerWithoutBracketedPasteSubmitsEveryLine(t *testing.T) {
+	in, feed := io.Pipe()
+	lines := composer(in, io.Discard, 0, time.Time{})
+	go func() {
+		feed.Write([]byte("alpha\rbeta\r"))
+		feed.Close()
+	}()
+	if got, _ := io.ReadAll(lines); string(got) != "alpha\nbeta\n" {
+		t.Fatalf("lines %q", got)
+	}
+}

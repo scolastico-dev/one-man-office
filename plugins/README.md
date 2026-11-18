@@ -6,6 +6,13 @@ repository; omo reads the list from there and shows it on the Plugins page
 under "Available plugins". Plugins are not built into omo: every plugin,
 official or not, is installed from a git source.
 
+Official plugins include [Pushover](pushover/README.md),
+[Discord](discord/README.md), [pause notices](pause-notice/README.md) and
+[browser VS Code](vscode/README.md). The editor plugin downloads pinned,
+SHA-256-verified code-server/OpenVSCode builds and opens project repositories
+or ticket worktrees through omo's proxy. Microsoft's editor stays visibly
+unavailable until its terms are confirmed for this integration.
+
 ## The tags
 
 | Tag | Meaning | Installing |

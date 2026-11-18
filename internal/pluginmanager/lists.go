@@ -72,6 +72,7 @@ func ListOrigin(address string) string {
 var listClient = &http.Client{
 	Transport: http.DefaultTransport.(*http.Transport).Clone(),
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		req.Header.Del("Referer")
 		if len(via) > maxListRedirects {
 			return fmt.Errorf("the address answered with more than %d redirects", maxListRedirects)
 		}

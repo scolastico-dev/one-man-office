@@ -47,7 +47,9 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,11 +156,17 @@ func ValidName(name string) bool { return namePattern.MatchString(name) }
 
 // Manifest is a plugin's plugin.json.
 type Manifest struct {
-	Name          string        `json:"name,omitempty"`
-	Version       string        `json:"version,omitempty"`
-	Description   string        `json:"description,omitempty"`
-	DefaultConfig DefaultConfig `json:"default_config,omitempty"`
-	Hooks         []Hook        `json:"hooks"`
+	Name          string                  `json:"name,omitempty"`
+	Version       string                  `json:"version,omitempty"`
+	Description   string                  `json:"description,omitempty"`
+	DefaultConfig DefaultConfig           `json:"default_config,omitempty"`
+	Hooks         []Hook                  `json:"hooks"`
+	Buttons       []api.PluginButton      `json:"buttons,omitempty"`
+	Frontend      api.PluginFrontend      `json:"frontend,omitzero"`
+	ConfigFields  []api.PluginConfigField `json:"config_fields,omitempty"`
+	contentID     string
+	manifestHash  [32]byte
+	frontendFiles map[string]frontendFile // immutable per-file digests computed at load
 }
 
 var (
@@ -203,40 +211,47 @@ type Hook struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Scope       string `json:"scope,omitempty"`
+	// Hidden suppresses automatic manual-action controls; explicit buttons and
+	// direct invocation remain available. It is presentation, not authorization.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // removedFields are manifest fields the engine had once, with what to say
 // about them. A manifest that uses one does not load.
 var removedFields = map[string]string{
+	"startup":     "use hooks with event omo_started",
+	"load":        "use hooks with event omo_started",
+	"unload":      "there is no shutdown event; use omo_started for start-up",
+	"shutdown":    "there is no shutdown event; use omo_started for start-up",
 	"requires":    "plugins have no dependencies any more; install each plugin by itself",
 	"roles":       "only the user runs manual actions",
 	"manual_args": "manual actions take no arguments",
-	"javascript":  "plugins cannot add code to the web app",
-	"files":       "plugins cannot add code to the web app",
+	"javascript":  "use frontend.script and frontend.assets",
+	"files":       "use frontend.script and frontend.assets",
 }
 
 // removedEvents are events the engine had once, with what to use instead.
 var removedEvents = map[string]string{
 	"prompt_render":    "plugins cannot change prompts",
-	"company_load":     "plugins cannot add code to the web app",
+	"company_load":     "use frontend.script and frontend.assets",
 	"agent_log_line":   "plugins do not see agents' output",
 	"job_create":       "use agent_started",
 	"agent_start":      "use agent_started",
 	"cron":             "use timer",
 	"chron":            "use timer",
-	"load":             "plugins have no lifecycle events",
-	"unload":           "plugins have no lifecycle events",
-	"startup":          "plugins have no lifecycle events",
-	"shutdown":         "plugins have no lifecycle events",
-	"company_startup":  "plugins have no lifecycle events",
-	"company_shutdown": "plugins have no lifecycle events",
+	"load":             "use omo_started for start-up; there is no shutdown event",
+	"unload":           "use omo_started for start-up; there is no shutdown event",
+	"startup":          "use omo_started for start-up; there is no shutdown event",
+	"shutdown":         "use omo_started for start-up; there is no shutdown event",
+	"company_startup":  "use omo_started for start-up; there is no shutdown event",
+	"company_shutdown": "use omo_started for start-up; there is no shutdown event",
 }
 
-var manifestFields = map[string]bool{"name": true, "version": true, "description": true, "default_config": true, "hooks": true}
+var manifestFields = map[string]bool{"name": true, "version": true, "description": true, "default_config": true, "hooks": true, "buttons": true, "frontend": true, "config_fields": true}
 
 var hookFields = map[string]bool{
 	"event": true, "lua": true, "command": true, "timeout": true, "interval": true,
-	"interval_config": true, "name": true, "description": true, "scope": true,
+	"interval_config": true, "name": true, "description": true, "scope": true, "hidden": true,
 }
 
 // quoted is text from a manifest as it may appear in an error: cut, quoted
@@ -244,7 +259,8 @@ var hookFields = map[string]bool{
 func quoted(s string) string { return strconv.QuoteToASCII(cutRunes(s, 40)) }
 
 // ReadManifest reads and checks dir/plugin.json: a regular file (no link)
-// of at most 64 KiB, strict JSON with the fields of Manifest and Hook only.
+// of at most 64 KiB, strict JSON with the declared nested schema only.
+// Public frontend files must exist and pass confinement and resource checks.
 // Fields and events the engine no longer has are refused with a message
 // that names them. A missing manifest gives an error that wraps
 // ErrNotInstalled.
@@ -259,11 +275,22 @@ func ReadManifest(dir string) (Manifest, error) {
 		}
 		return Manifest{}, errors.New("plugin.json cannot be read")
 	}
-	return ParseManifest(raw)
+	man, err := ParseManifest(raw)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if err := man.readFrontend(dir, raw); err != nil {
+		return Manifest{}, err
+	}
+	return man, nil
 }
 
-// ParseManifest checks a manifest's text as ReadManifest does.
+// ParseManifest checks a manifest's text and path syntax. ReadManifest also
+// validates the frontend files on disk and computes the content identity.
 func ParseManifest(raw []byte) (Manifest, error) {
+	if len(raw) > MaxManifestBytes {
+		return Manifest{}, errors.New("plugin.json is larger than 64 KiB")
+	}
 	var fields map[string]json.RawMessage
 	top := json.NewDecoder(bytes.NewReader(raw))
 	if err := top.Decode(&fields); err != nil || fields == nil {
@@ -288,6 +315,19 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		if err := checkFields(h, hookFields, fmt.Sprintf("hook %d: ", i+1)); err != nil {
 			return Manifest{}, err
 		}
+		if hidden, ok := h["hidden"]; ok {
+			value := string(bytes.TrimSpace(hidden))
+			if value != "true" && value != "false" {
+				return Manifest{}, fmt.Errorf("hook %d: hidden must be a boolean", i+1)
+			}
+			var event string
+			if err := json.Unmarshal(h["event"], &event); err == nil && event != EventManual {
+				return Manifest{}, fmt.Errorf("hook %d: hidden is for manual hooks only", i+1)
+			}
+		}
+	}
+	if err := checkDeclarationJSON(fields); err != nil {
+		return Manifest{}, err
 	}
 	var m Manifest
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -327,6 +367,9 @@ func ParseManifest(raw []byte) (Manifest, error) {
 			}
 			actions[h.Name] = true
 		}
+	}
+	if err := checkDeclarations(&m, fields); err != nil {
+		return Manifest{}, err
 	}
 	return m, nil
 }
@@ -447,6 +490,8 @@ type Options struct {
 	Socket func() string
 	// HTTP is the client of omo.http; nil uses a fresh client per run.
 	HTTP *http.Client
+	// ArtifactHTTP supplies a trusted artifact transport; Lua HTTP limits stay separate.
+	ArtifactHTTP *http.Client
 	// Log receives the manager's own problems (a failed database write);
 	// nil discards them. Plugin output never goes there.
 	Log *log.Logger
@@ -455,7 +500,23 @@ type Options struct {
 	Changed func(api.PluginInfo)
 	// Agents is what omo.agents and omo.send_to_agent reach; nil makes
 	// both answer that omo runs no agents.
-	Agents AgentDesk
+	Agents   AgentDesk
+	Forwards ForwardDesk
+	// Unloaded releases plugin resources after hooks have been cancelled.
+	Unloaded func(plugin, reason string)
+	// TaskTicketLive checks that a ticket exists and is nonterminal; nil
+	// refuses every ticket-bound task. Called before and after registration.
+	TaskTicketLive func(context.Context, int) bool
+	// TaskExited is called exactly once per successful start after reaping,
+	// outside locks, before Stop returns. It must not wait for its own task
+	// or call Close. Configure callbacks before using the manager.
+	TaskExited func(string, api.PluginTask)
+	// TasksChanged invalidates a plugin's task snapshot on start/exit.
+	// It may be concurrent and must not block.
+	TasksChanged func(string)
+	// TaskOutputChanged invalidates a changed visible output tail. Adapters
+	// should throttle these separately from lifecycle changes.
+	TaskOutputChanged func(string)
 }
 
 // Manager runs the loaded plugins. Its methods are safe for concurrent use.
@@ -466,12 +527,25 @@ type Manager struct {
 
 	loadMu sync.Mutex // one Load at a time
 
-	mu      sync.Mutex
-	closed  bool
-	entries []*entry // by name, every plugin of the last Load
-	known   map[string]db.PluginRuntime
+	mu         sync.Mutex
+	ready      bool
+	closed     bool
+	closedDone chan struct{}
+	entries    []*entry // by name, every plugin of the last Load
+	known      map[string]db.PluginRuntime
 
-	manual sync.WaitGroup // running manual actions
+	artifactsWG    sync.WaitGroup
+	artifactsMu    sync.Mutex
+	artifacts      map[string]map[string]*artifactJob
+	artifactLimits *artifactLimits // tests override finite production bounds
+	taskTempDirsWG sync.WaitGroup
+	taskTempDirs   map[string]*taskTempDir // unattached leases; guarded by tasksMu
+	tasksWG        sync.WaitGroup
+	tasksMu        sync.Mutex
+	tasks          map[string]*task
+	taskSequence   uint64
+	exitSequence   uint64
+	manual         sync.WaitGroup // running manual actions
 
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
@@ -486,24 +560,30 @@ type entry struct {
 	manifest Manifest
 	p        *plugin // nil unless loaded
 
-	state     string
-	message   string
-	lastEvent string
-	lastRun   *time.Time
-	running   int
+	state       string
+	message     string
+	lastEvent   string
+	lastRun     *time.Time
+	running     int
+	started     bool
+	startQueued bool
 }
 
 // plugin is a loaded plugin: its hooks, configuration, queue and the
 // goroutines that deliver to it.
 type plugin struct {
+	// forwardMu joins resource operations with unload cleanup after cancellation.
+	forwardMu  sync.Mutex
 	name       string
 	dir        string
 	entry      *entry
 	config     map[string]any
 	configJSON string
+	codeID     string
 	secrets    []string
 	hooks      []*hook
 
+	startup chan job
 	queue   chan job
 	dropped atomic.Int64
 	busy    atomic.Bool // a manual action runs
@@ -567,7 +647,7 @@ type job struct {
 // New returns a manager without plugins. Load them with Load.
 func New(o Options) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{o: o, ctx: ctx, cancel: cancel, now: time.Now, after: time.After, perMinute: DefaultHookRunsPerMinute}
+	return &Manager{o: o, ctx: ctx, cancel: cancel, closedDone: make(chan struct{}), now: time.Now, after: time.After, perMinute: DefaultHookRunsPerMinute}
 }
 
 // Run blocks until ctx ends, then closes the manager. Plugins deliver and
@@ -587,10 +667,11 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		m.manual.Wait()
+		<-m.closedDone
 		return
 	}
 	m.closed = true
+	defer close(m.closedDone)
 	var running []*plugin
 	for _, e := range m.entries {
 		if e.p != nil {
@@ -598,6 +679,11 @@ func (m *Manager) Close() {
 		}
 	}
 	m.mu.Unlock()
+	m.releaseTaskTempDirs(nil)
+	m.stopTasks(func(*task) bool { return true }, TaskShutdown)
+	m.tasksWG.Wait()
+	m.stopArtifacts("", false)
+	m.artifactsWG.Wait()
 	m.cancel()
 	for _, p := range running {
 		p.cancel()
@@ -606,14 +692,20 @@ func (m *Manager) Close() {
 		p.wg.Wait()
 	}
 	m.manual.Wait()
+	m.taskTempDirsWG.Wait()
+	if m.o.Unloaded != nil {
+		for _, p := range running {
+			m.o.Unloaded(p.name, TaskShutdown)
+		}
+	}
 }
 
-// Load replaces the loaded plugins by the enabled plugins of settings, each
-// read from Root/<name>. Hooks of the plugins it replaces are cancelled
-// and their timers stop before the new ones start; events still queued for
-// them are not delivered. A plugin that cannot load stays off; its error is
-// in the result (by name) and in Infos. Disabled plugins are not in the
-// result.
+// Load reconciles installed Root/<name> trees with settings. Unchanged
+// runtimes survive. Config changes cancel old hooks/timers while preserving
+// tasks and startup lifecycle; code changes stop the old runtime's tasks.
+// Replaced queued events are discarded except undelivered startup, which is
+// scheduled on the replacement. Invalid plugins stay off with an error in the
+// result and Infos; disabled plugins are omitted from the error result.
 func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 	m.loadMu.Lock()
 	defer m.loadMu.Unlock()
@@ -647,6 +739,9 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 		if old := previous[s.Name]; old != nil {
 			m.mu.Lock()
 			e.lastEvent, e.lastRun = old.lastEvent, old.lastRun
+			if s.Enabled && old.settings.Enabled {
+				e.started = old.started
+			}
 			m.mu.Unlock()
 		} else if r, ok := known[s.Name]; ok {
 			e.lastEvent = r.LastEvent
@@ -675,8 +770,17 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 				e.state, e.message = StateInvalid, cutRunes(err.Error(), maxErrorRunes)
 				errs[s.Name] = err
 			default:
-				p.entry = e
-				e.p = p
+				old := previous[s.Name]
+				if old != nil && old.p != nil && old.p.codeID == p.codeID && old.p.configJSON == p.configJSON {
+					p.cancel()
+					m.mu.Lock()
+					old.settings = s
+					m.mu.Unlock()
+					e = old
+				} else {
+					p.entry = e
+					e.p = p
+				}
 			}
 		}
 		entries = append(entries, e)
@@ -693,25 +797,75 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 		return errs
 	}
 	old := m.entries
-	m.entries = entries
 	m.mu.Unlock()
 
-	for _, e := range old {
+	kept := map[*plugin]bool{}
+	next := map[string]*entry{}
+	for _, e := range entries {
+		next[e.settings.Name] = e
 		if e.p != nil {
-			e.p.cancel()
+			kept[e.p] = true
 		}
 	}
 	for _, e := range old {
-		if e.p != nil {
-			e.p.wg.Wait()
+		if e.p == nil || kept[e.p] {
+			continue
+		}
+		m.mu.Lock()
+		e.p.cancel()
+		m.releaseTaskTempDirs(e.p)
+		m.mu.Unlock()
+		replacement := next[e.settings.Name]
+		reason := ""
+		switch {
+		case replacement == nil:
+			reason = TaskPluginRemoved
+		case !replacement.settings.Enabled:
+			reason = TaskPluginDisabled
+		case replacement.p == nil || replacement.p.codeID != e.p.codeID:
+			reason = TaskPluginReplaced
+		}
+		if reason != "" {
+			m.stopArtifacts(e.settings.Name, false)
+			m.stopTasks(func(t *task) bool { return t.plugin == e.settings.Name }, reason)
+		}
+		e.p.wg.Wait()
+		if reason != "" && m.o.Unloaded != nil {
+			e.p.forwardMu.Lock()
+			m.o.Unloaded(e.settings.Name, reason)
+			e.p.forwardMu.Unlock()
+		}
+		if replacement != nil && replacement.p != nil {
+			m.mu.Lock()
+			replacement.started = e.started
+			m.mu.Unlock()
 		}
 	}
+	// Forget removed namespaces, including bounded terminal history.
+	for name := range previous {
+		if next[name] != nil {
+			continue
+		}
+		m.stopTasks(func(t *task) bool { return t.plugin == name }, TaskPluginRemoved)
+		m.stopArtifacts(name, true)
+		m.tasksMu.Lock()
+		for id, t := range m.tasks {
+			if t.plugin == name {
+				delete(m.tasks, id)
+			}
+		}
+		m.tasksMu.Unlock()
+	}
+	m.mu.Lock()
+	m.entries = entries
+	m.mu.Unlock()
 	m.syncRuntimes(entries)
 	for _, e := range entries {
-		if e.p != nil {
+		if e.p != nil && previous[e.settings.Name] != e {
 			m.start(e.p)
 		}
 	}
+	m.queueStartup()
 	for _, e := range entries {
 		m.changed(e)
 	}
@@ -764,7 +918,7 @@ func (m *Manager) open(s api.PluginSettings) (*plugin, Manifest, error) {
 	}
 	p := &plugin{
 		name: s.Name, dir: dir, config: config, configJSON: string(configJSON),
-		secrets: configSecrets(config), queue: make(chan job, QueueSize),
+		secrets: configSecrets(config), queue: make(chan job, QueueSize), startup: make(chan job, 1),
 	}
 	p.ctx, p.cancel = context.WithCancel(m.ctx)
 	ok := false
@@ -800,6 +954,18 @@ func (m *Manager) open(s api.PluginSettings) (*plugin, Manifest, error) {
 		}
 		p.hooks = append(p.hooks, lh)
 	}
+	identity := sha256.New()
+	identity.Write([]byte(man.contentID))
+	marker, markerErr := homefile.Read(filepath.Join(dir, ".omo-install.json"), MaxManifestBytes)
+	if markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
+		return nil, man, errors.New("the plugin install record cannot be read")
+	}
+	identity.Write(marker)
+	identity.Write([]byte(s.Source + "\x00" + s.Subpath + "\x00" + s.Ref))
+	for _, h := range p.hooks {
+		identity.Write([]byte("\x00" + h.source))
+	}
+	p.codeID = hex.EncodeToString(identity.Sum(nil))
 	ok = true
 	return p, man, nil
 }
@@ -890,7 +1056,7 @@ func (m *Manager) start(p *plugin) {
 // log. timer and manual events are not dispatched. ev.Data must not be
 // changed after the call.
 func (m *Manager) Dispatch(ev Event) {
-	if ev.Name == EventTimer || ev.Name == EventManual {
+	if ev.Name == EventTimer || ev.Name == EventManual || ev.Name == EventOmoStarted {
 		return
 	}
 	if ev.At.IsZero() {
@@ -926,23 +1092,44 @@ func (p *plugin) wants(event string) bool {
 func (m *Manager) deliver(p *plugin) {
 	defer p.wg.Done()
 	for {
+		var j job
+		// Startup has its own reserved slot, never competing for hook capacity.
 		select {
-		case <-p.ctx.Done():
-			return
-		case j := <-p.queue:
-			if n := p.dropped.Swap(0); n > 0 {
-				m.logLine(p.name, fmt.Sprintf("%d events dropped: the plugin's queue of %d was full", n, QueueSize))
+		case j = <-p.startup:
+		default:
+			select {
+			case <-p.ctx.Done():
+				return
+			case j = <-p.startup:
+			case j = <-p.queue:
 			}
-			if j.only == nil && !m.allowRun(p, j.ev.Name) {
+		}
+		if p.ctx.Err() != nil {
+			return
+		}
+		if j.ev.Name == EventOmoStarted {
+			m.mu.Lock()
+			already := p.entry.started
+			if !already {
+				p.entry.started = true
+				p.entry.startQueued = false
+			}
+			m.mu.Unlock()
+			if already {
 				continue
 			}
-			for _, h := range p.hooks {
-				if p.ctx.Err() != nil {
-					return
-				}
-				if (j.only == nil && h.Event == j.ev.Name) || j.only == h {
-					_, _ = m.runHook(p.ctx, p, h, j.ev)
-				}
+		} else if j.only == nil && !m.allowRun(p, j.ev.Name) {
+			continue
+		}
+		if n := p.dropped.Swap(0); n > 0 {
+			m.logLine(p.name, fmt.Sprintf("%d events dropped: the plugin's queue of %d was full", n, QueueSize))
+		}
+		for _, h := range p.hooks {
+			if p.ctx.Err() != nil {
+				return
+			}
+			if (j.only == nil && h.Event == j.ev.Name) || j.only == h {
+				_, _ = m.runHook(p.ctx, p, h, j.ev)
 			}
 		}
 	}
@@ -1179,20 +1366,24 @@ func (m *Manager) Infos() []api.PluginInfo {
 
 func (e *entry) infoLocked() api.PluginInfo {
 	info := api.PluginInfo{
-		Name:        e.settings.Name,
-		Version:     e.manifest.Version,
-		Description: e.manifest.Description,
-		State:       e.state,
-		Message:     e.message,
-		LastEvent:   e.lastEvent,
-		Hooks:       []api.PluginHook{},
+		Name:         e.settings.Name,
+		Version:      e.manifest.Version,
+		Description:  e.manifest.Description,
+		State:        e.state,
+		Message:      e.message,
+		LastEvent:    e.lastEvent,
+		Hooks:        []api.PluginHook{},
+		Buttons:      append([]api.PluginButton{}, e.manifest.Buttons...),
+		Frontend:     e.manifest.Frontend,
+		ConfigFields: append([]api.PluginConfigField{}, e.manifest.ConfigFields...),
+		ContentID:    e.manifest.contentID,
 	}
 	if e.lastRun != nil {
 		at := *e.lastRun
 		info.LastRunAt = &at
 	}
 	for _, h := range e.manifest.Hooks {
-		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval}
+		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval, Hidden: h.Hidden}
 		if h.Event == EventTimer && h.Interval == "" && e.p != nil {
 			for _, lh := range e.p.hooks {
 				if lh.Event == EventTimer && lh.IntervalConfig == h.IntervalConfig {

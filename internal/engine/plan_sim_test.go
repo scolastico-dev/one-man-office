@@ -395,7 +395,7 @@ func (w *sim) waitingFor(st *simTicket) []api.Waiting {
 		switch {
 		case o.Resolution == api.ResolutionCompleted:
 		case o.Resolution == api.ResolutionExported && o.ExportMerged:
-		case o.Resolution == api.ResolutionExported:
+		case o.ReviewStage == api.ReviewStageAwaitingMerge || o.Resolution == api.ResolutionExported:
 			out = append(out, api.Waiting{Ticket: int(d), Reason: api.WaitingExportNotMerged})
 		case o.Resolution == api.ResolutionCancelled:
 			out = append(out, api.Waiting{Ticket: int(d), Reason: api.WaitingCancelled})
@@ -943,6 +943,8 @@ func (w *sim) explained(in planInput, t board.EngineTicket, blocked map[int64]ap
 		return true
 	case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageHuman:
 		return true
+	case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAwaitingMerge:
+		return true // the remote merge and the engine's check happen later
 	case t.Column == api.ColumnReady && len(t.WaitingFor) > 0:
 		return true
 	case t.Column == api.ColumnReady && (blocked[t.ID] == api.StartBlockedNoModel || blocked[t.ID] == api.StartBlockedPaused):
@@ -1139,6 +1141,14 @@ func (w *sim) finished(st *simTicket, res api.Resolution) {
 	w.logf("#%d done (%s)", st.t.ID, res)
 }
 
+// waitExport models the board's successful export: the ticket keeps its
+// active slot and agents until the remote work lands and a check sees it.
+func (w *sim) waitExport(st *simTicket) {
+	st.t.ReviewStage, st.t.Resolution, st.t.ExportMerged = api.ReviewStageAwaitingMerge, "", false
+	st.mergeAt = w.tick + 1 + w.rng.IntN(20)
+	w.logf("#%d exported, waiting for the merge", st.t.ID)
+}
+
 func (w *sim) approvedStage(st *simTicket) api.ReviewStage {
 	if st.t.StoryID != 0 || st.exportFail || st.t.WhenApproved != api.WhenApprovedExport {
 		return api.ReviewStageMerging
@@ -1213,7 +1223,11 @@ func (w *sim) work(k *simWorker) bool {
 					}
 				}
 			}
-			w.finished(st, api.ResolutionCompleted)
+			if slices.ContainsFunc(st.t.Projects, func(p board.EngineProject) bool { return p.ExportURL != "" }) {
+				w.waitExport(st)
+			} else {
+				w.finished(st, api.ResolutionCompleted)
+			}
 		}
 		return false
 	case actCleanup:
@@ -1414,8 +1428,7 @@ func (w *sim) act(s *simSession) {
 			t.Projects[i].ExportURL = "https://example.test/pr/" + s.s.Project
 		}
 		if !slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ExportURL == "" }) {
-			w.finished(st, api.ResolutionExported)
-			st.mergeAt = w.tick + 1 + w.rng.IntN(20)
+			w.waitExport(st)
 		}
 	case s.s.Role == api.RolePM:
 		if t.Column != api.ColumnInProgress {
@@ -1570,8 +1583,7 @@ func (w *sim) settleExports() {
 			st.exportFailed = map[string]bool{}
 			w.logf("#%d export failed", id)
 		case exported > 0:
-			w.finished(st, api.ResolutionExported)
-			st.mergeAt = w.tick + 1 + w.rng.IntN(20)
+			w.waitExport(st)
 		default:
 			w.finished(st, api.ResolutionCompleted)
 		}
@@ -1635,7 +1647,8 @@ func (w *sim) user() {
 				w.finished(st, api.ResolutionCancelled)
 			}
 		}
-		if t.Resolution == api.ResolutionExported && !t.ExportMerged && w.tick >= st.mergeAt {
+		if t.ReviewStage == api.ReviewStageAwaitingMerge && !w.paused && w.tick >= st.mergeAt {
+			w.finished(st, api.ResolutionExported)
 			t.ExportMerged = true
 		}
 	}

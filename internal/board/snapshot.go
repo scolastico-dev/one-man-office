@@ -93,7 +93,8 @@ func reviewKeysOf(ids []string) []string {
 
 // EngineProject is one project of a ticket.
 type EngineProject struct {
-	ID, Base, Branch, Worktree, ExportURL string
+	ID, Base, Branch, Worktree, ExportURL                                    string
+	ExportRemote, ExportBranch, ExportBase, ExportCommit, ExportTargetCommit string
 	// Start and End are the commits recorded for the project's diff (see
 	// RecordCommits); "" until the ticket is first merged or exported.
 	Start, End string
@@ -171,11 +172,11 @@ func (b *Board) engineSnapshot(q db.Queryer) (EngineSnapshot, error) {
 		if err != nil {
 			return out, err
 		}
-		if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, start_commit, end_commit FROM ticket_projects
+		if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, start_commit, end_commit, export_remote, export_branch, export_base, export_commit, export_target_commit FROM ticket_projects
 			WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, raw, func(rows *sql.Rows) error {
 			var id int64
 			var ep EngineProject
-			if err := rows.Scan(&id, &ep.ID, &ep.Base, &ep.Branch, &ep.Worktree, &ep.ExportURL, &ep.Start, &ep.End); err != nil {
+			if err := rows.Scan(&id, &ep.ID, &ep.Base, &ep.Branch, &ep.Worktree, &ep.ExportURL, &ep.Start, &ep.End, &ep.ExportRemote, &ep.ExportBranch, &ep.ExportBase, &ep.ExportCommit, &ep.ExportTargetCommit); err != nil {
 				return err
 			}
 			byID[id].Projects = append(byID[id].Projects, ep)
@@ -183,18 +184,19 @@ func (b *Board) engineSnapshot(q db.Queryer) (EngineSnapshot, error) {
 		}); err != nil {
 			return out, err
 		}
-		if err := each(q, `SELECT d.ticket_id, d.depends_on_id, o.resolution, o.export_merged
+		if err := each(q, `SELECT d.ticket_id, d.depends_on_id, o.resolution, o.export_merged, o.review_stage
 			FROM dependencies d JOIN tickets o ON o.id = d.depends_on_id
 			WHERE d.ticket_id`+idsIn+` ORDER BY d.ticket_id, d.depends_on_id`, raw, func(rows *sql.Rows) error {
 			var id, dep int64
 			var res api.Resolution
 			var merged bool
-			if err := rows.Scan(&id, &dep, &res, &merged); err != nil {
+			var stage api.ReviewStage
+			if err := rows.Scan(&id, &dep, &res, &merged, &stage); err != nil {
 				return err
 			}
 			t := byID[id]
 			t.DependsOn = append(t.DependsOn, dep)
-			if reason, waiting := waitingReason(res, merged); waiting {
+			if reason, waiting := waitingReason(res, merged, stage); waiting {
 				t.WaitingFor = append(t.WaitingFor, api.Waiting{Ticket: int(dep), Reason: reason})
 				t.Waiting = true
 			}

@@ -136,7 +136,7 @@ func TestEngineSnapshotContents(t *testing.T) {
 		t.Fatalf("done task %+v", wt)
 	}
 	ex, _ := snapTicket(s, exported)
-	if ex.Resolution != api.ResolutionExported || ex.ExportMerged || ex.WhenApproved != api.WhenApprovedExport {
+	if ex.Column != api.ColumnReview || ex.ReviewStage != api.ReviewStageAwaitingMerge || ex.Resolution != "" || ex.ExportMerged || ex.WhenApproved != api.WhenApprovedExport {
 		t.Fatalf("exported %+v", ex)
 	}
 	cn, _ := snapTicket(s, cancelled)

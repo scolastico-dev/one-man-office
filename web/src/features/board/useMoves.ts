@@ -73,6 +73,8 @@ export const NOTICE_MS = 10_000
 /** A move in a few words, for announcements: `approves`, `stops the agent`. */
 export function actionWords(t: Target): string {
   switch (t.action) {
+    case 'move':
+      return 'marks as merged'
     case 'reorder':
       return 'changes priority'
     case 'approve':
@@ -91,6 +93,8 @@ export function actionWords(t: Target): string {
 /** What a column that accepts the dragged card says it will do. */
 export function dropHint(t: Target): string {
   switch (t.action) {
+    case 'move':
+      return 'Drop to mark the export as merged and complete the ticket.'
     case 'reorder':
       return 'Drop to change the priority.'
     case 'approve':

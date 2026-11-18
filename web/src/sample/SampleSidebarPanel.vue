@@ -63,7 +63,7 @@ const ceoSince = minutesAgo(48)
         </p>
         <UiButton size="sm">New session</UiButton>
       </div>
-      <SampleTerminal label="Terminal of the CEO" title="claude · CEO" screen="agent" note="Typing here types into the CEO." fill />
+      <SampleTerminal label="Terminal of the CEO" title="claude · CEO" screen="agent" note="Write to the CEO in the box below the terminal." fill />
     </template>
 
     <template v-else>

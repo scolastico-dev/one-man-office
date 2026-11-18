@@ -3,6 +3,7 @@ package webterm
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +32,54 @@ type Info struct {
 type terminalInput struct {
 	data    []byte
 	written func(error)
+	// message, when set, is written as one piece through Messenger (see there)
+	// instead of data.
+	message *terminalMessage
+}
+
+type terminalMessage struct{ text, keys string }
+
+// pasted is the message as a terminal takes a paste: without control
+// characters (so it cannot end its own paste early or act on the program),
+// line breaks as the Enter key sends them, and between the paste markers when
+// the program has asked for bracketed paste, which is read now, from what the
+// program has written so far.
+func (i *Terminal) pasted(m terminalMessage) terminalMessage {
+	i.mu.Lock()
+	bracketed := i.modes.state(2004) == terminalModeSet
+	i.mu.Unlock()
+	body := cleanMessage(m.text)
+	if bracketed {
+		body = "\x1b[200~" + body + "\x1b[201~"
+	}
+	return terminalMessage{text: body, keys: m.keys}
+}
+
+// cleanMessage drops every control character except tab, and turns each line
+// break (LF, CR LF, CR) into a CR, as a terminal emulator does for a paste.
+func cleanMessage(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r':
+			b.WriteByte('\r')
+		case r == '\t':
+			b.WriteByte('\t')
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// Messenger is a process that takes a whole message: text, then keys (the
+// Enter that submits it), written in one go with nothing else getting between
+// them. Without it a message is written as its text and then its keys, which
+// anything else writing to the process may split.
+type Messenger interface {
+	SendMessage(text, keys string) error
 }
 
 type terminalInitial struct {
@@ -90,11 +139,19 @@ func Own(id string, p Process, onExit func(*Terminal, error)) *Terminal {
 			case <-i.stopInput:
 				return
 			case input := <-i.inputQueue:
-				err := writeTerminalInput(p, input.data)
+				var err error
+				if input.message != nil {
+					err = writeTerminalMessage(p, i.pasted(*input.message))
+				} else {
+					err = writeTerminalInput(p, input.data)
+				}
 				if input.written != nil {
 					input.written(err)
 				}
-				if err != nil {
+				// A failed message is answered to its sender; the process may
+				// still be fine, so the writer goes on. A failed write of typed
+				// input ends it, as before.
+				if err != nil && input.message == nil {
 					return
 				}
 			}
@@ -219,6 +276,18 @@ func (i *Terminal) queueInput(data []byte, written func(error)) error {
 	if len(data) > terminalInputLimit {
 		return fmt.Errorf("terminal input exceeds 64 KiB")
 	}
+	return i.enqueue(terminalInput{data: append([]byte(nil), data...), written: written})
+}
+
+// queueMessage queues text and keys to be written as one message.
+func (i *Terminal) queueMessage(text, keys string, written func(error)) error {
+	if len(text) > terminalInputLimit || len(keys) > 16 {
+		return fmt.Errorf("terminal message exceeds 64 KiB")
+	}
+	return i.enqueue(terminalInput{message: &terminalMessage{text: text, keys: keys}, written: written})
+}
+
+func (i *Terminal) enqueue(in terminalInput) error {
 	select {
 	case <-i.stopInput:
 		return fmt.Errorf("terminal has exited")
@@ -227,7 +296,7 @@ func (i *Terminal) queueInput(data []byte, written func(error)) error {
 	default:
 	}
 	select {
-	case i.inputQueue <- terminalInput{data: append([]byte(nil), data...), written: written}:
+	case i.inputQueue <- in:
 		return nil
 	default:
 		return fmt.Errorf("terminal input queue is full")
@@ -297,4 +366,14 @@ func writeTerminalInput(w io.Writer, data []byte) error {
 		data = data[n:]
 	}
 	return nil
+}
+
+func writeTerminalMessage(p io.Writer, m terminalMessage) error {
+	if messenger, ok := p.(Messenger); ok {
+		return messenger.SendMessage(m.text, m.keys)
+	}
+	if err := writeTerminalInput(p, []byte(m.text)); err != nil {
+		return err
+	}
+	return writeTerminalInput(p, []byte(m.keys))
 }

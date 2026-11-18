@@ -141,6 +141,7 @@ type Server struct {
 	plugins        pluginFeature
 	proxyAuth      proxyAuthState
 	proxyTransport *proxy.Transport
+	pluginForwards pluginForwardRegistry
 	mcpAuth        mcpAuthFeature // tokens and OAuth server of /mcp (mcp_auth.go)
 	mcpConf        mcpSettingsFeature
 	// imageStore is the images folder; imageStray the number of files in it
@@ -261,7 +262,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.terminals = webterm.NewConnectionLimit(terminalConnections)
 	s.startUsage(ctx)
 	s.startSkillSets(ctx)
-	s.startPlugins(ctx)
+	if err := s.startPlugins(ctx); err != nil {
+		return nil, err
+	}
 	if o.Runner != nil {
 		// The engine gets a git client of its own: it carries the agents'
 		// environment, and its long operations do not hold up the board's
@@ -480,6 +483,7 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 		}
 	}
 	if ctx.Err() == nil {
+		s.PluginsReady()
 		s.StartEngine()
 	}
 	select {

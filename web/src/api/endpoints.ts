@@ -68,6 +68,7 @@ import type {
   PluginInfo,
   PluginInstall,
   PluginLogLine,
+  PluginTasks,
   PluginRun,
   PluginRunResult,
   PluginsResponse,
@@ -143,6 +144,11 @@ export function approveTicket(c: ApiClient, n: number, opts: { export?: boolean;
 export function rejectTicket(c: ApiClient, n: number, comment: string): R<Ticket> {
   const body: RejectRequest = { comment }
   return c.send('POST', `${ticketPath(n)}/reject`, body)
+}
+
+/** Requests a shared asynchronous merge check; ticket updates arrive on the event stream. */
+export function checkExport(c: ApiClient, n: number): R<{ checking: boolean }> {
+  return c.send('POST', `${ticketPath(n)}/check-export`, {})
 }
 
 /** Never asks the server to discard uncommitted work. */
@@ -527,8 +533,17 @@ export function getPluginLog(c: ApiClient, name: string): R<PluginLogLine[]> {
   return c.get(`/api/plugins/${seg(name)}/log`)
 }
 
-export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number): R<PluginRunResult> {
-  const body: PluginRun = ticket === undefined ? {} : { ticket }
+export function getPluginTasks(c: ApiClient, name: string): R<PluginTasks> {
+  return c.get(`/api/plugins/${seg(name)}/tasks`)
+}
+
+/** Stops the latest run under a plugin-local name; retained exited runs succeed. */
+export function stopPluginTask(c: ApiClient, name: string, task: string): R<unknown> {
+  return c.send('POST', `/api/plugins/${seg(name)}/tasks/${seg(task)}/stop`, {})
+}
+
+export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number, project?: string): R<PluginRunResult> {
+  const body: PluginRun = { ...(ticket === undefined ? {} : { ticket }), ...(project === undefined ? {} : { project }) }
   return c.send('POST', `/api/plugins/${seg(name)}/actions/${seg(action)}`, body)
 }
 

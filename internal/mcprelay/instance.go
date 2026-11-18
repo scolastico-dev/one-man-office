@@ -616,9 +616,10 @@ func (i *instance) startProcess() (*process, error) {
 	if err != nil {
 		return nil, err
 	}
-	handedOff := false
+	// Keep ownership until all pipes and registration succeed.
+	transferred := false
 	defer func() {
-		if !handedOff {
+		if !transferred {
 			group.close()
 		}
 	}()
@@ -643,7 +644,7 @@ func (i *instance) startProcess() (*process, error) {
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR, outW, errW
-	err = group.Start(cmd)
+	err = startGrouped(cmd, group)
 	inR.Close()
 	outW.Close()
 	errW.Close()
@@ -654,9 +655,7 @@ func (i *instance) startProcess() (*process, error) {
 		group.close()
 		return nil, fmt.Errorf("cannot start: %w", err)
 	}
-	if err := group.started(cmd); err != nil {
-		i.st.log.printf("cannot put the process into its own group: %s", err)
-	}
+	transferred = true
 	pr := &process{cmd: cmd, group: group, stdin: inW, stdout: outR, exited: make(chan struct{})}
 	go func() {
 		i.st.log.copyLines(errR, "stderr: ")
@@ -666,6 +665,5 @@ func (i *instance) startProcess() (*process, error) {
 		pr.err = cmd.Wait()
 		close(pr.exited)
 	}()
-	handedOff = true
 	return pr, nil
 }

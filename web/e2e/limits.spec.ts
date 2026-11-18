@@ -93,6 +93,27 @@ test('a value out of bounds is refused under its field, with the server sentence
   expect(onDisk(omo)).toMatch(/limits:\n\s+tasks: 64\b/)
 })
 
+test('export checks default to ten minutes, reject shorter intervals and can be disabled', async ({ page, omo }) => {
+  await openLimits(page, omo)
+  const interval = page.getByRole('textbox', { name: 'Export check interval' })
+  await expect(interval).toHaveValue('10m')
+  await interval.fill('59s')
+  await saveButton(page).click()
+  await expect(interval).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('.omo-field__error')).toContainText('export_check_interval must be 0 (disabled) or at least 1m')
+  await interval.fill('1m')
+  await saveButton(page).click()
+  await expect(bar(page)).toContainText('Saved')
+  await page.reload()
+  await expect(interval).toHaveValue('1m')
+  await interval.fill('0')
+  await saveButton(page).click()
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toContain('export_check_interval: 0s')
+  await page.reload()
+  await expect(interval).toHaveValue('0s')
+})
+
 test('a refused duration shows the server message under its field', async ({ page, omo }) => {
   await openLimits(page, omo)
   await silentAfter(page).fill('1s')

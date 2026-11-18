@@ -175,6 +175,7 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 			"DELETE /api/images/{id}":              "/api/images/" + id,
 			"POST /api/tickets/{n}/remove-project": "/api/tickets/" + strconv.Itoa(n) + "/remove-project",
 			"POST /api/tickets/{n}/remove-workdir": "/api/tickets/" + strconv.Itoa(n) + "/remove-workdir",
+			"POST /api/tickets/{n}/check-export":   "/api/tickets/" + strconv.Itoa(n) + "/check-export",
 		}
 		forward := socketDo(t, s, "POST", "/api/proxy/forwards", api.CreateProxyForward{Ticket: sess.Ticket, Port: 5173, Name: "access fixture"}, "")
 		wantStatus(t, forward.Code, http.StatusCreated)
@@ -328,6 +329,7 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"GET /api/folders":            userOnly,
 		// The working folder of a done task without a project.
 		"POST /api/tickets/{n}/remove-workdir": userOnly,
+		"POST /api/tickets/{n}/check-export":   userOnly,
 		"GET /api/proxy/forwards":              agentRead,
 		"POST /api/proxy/forwards":             agentWrite,
 		"DELETE /api/proxy/forwards/{id}":      agentWrite,

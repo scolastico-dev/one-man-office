@@ -27,7 +27,7 @@ const fallback = useId()
 const rows = computed<PluginInfo[]>(() => {
   const out = [...props.plugins]
   for (const s of props.settings) {
-    if (!out.some((p) => p.name === s.name)) out.push({ name: s.name, version: '', description: '', state: 'not_installed', message: '', commit: '', last_event: '', last_run_at: null, hooks: [] })
+    if (!out.some((p) => p.name === s.name)) out.push({ name: s.name, version: '', description: '', state: 'not_installed', message: '', commit: '', last_event: '', last_run_at: null, hooks: [], buttons: [], frontend: {}, config_fields: [], content_id: '' })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
 })
