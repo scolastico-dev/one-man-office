@@ -88,6 +88,8 @@ func (g *Git) FetchTarget(ctx context.Context, repo string, r Remote, base strin
 // match covers ordinary/fast-forward merges; otherwise a merge using the
 // recorded start as its base must leave target's tree unchanged. This also
 // recognizes rebases and squash merges after unrelated target advances.
+// Content proof uses the built-in text merger independently of configured
+// merge drivers, union policies, attributes and normalization settings.
 // Conflicts are inconclusive (false, nil). Missing commits and git failures
 // are errors. All arguments must be full object IDs. Temporary merge objects
 // are discarded; no refs, index, HEAD or working files are changed.
@@ -117,45 +119,9 @@ func (g *Git) ExportContained(repo, start, commit, target string) (bool, error) 
 	if ok, err := g.isAncestor(repo, commit, target); err != nil || ok {
 		return ok, err
 	}
-	common, err := g.commonDir(context.Background(), repo)
+	tree, err := g.containmentTree(repo, start, target, commit)
 	if err != nil {
 		return false, err
-	}
-	quarantine, err := os.MkdirTemp("", "omo-export-objects-")
-	if err != nil {
-		return false, err
-	}
-	defer os.RemoveAll(quarantine)
-	o := cmdOpts{timeout: g.op, dir: repo, env: []string{
-		"GIT_OBJECT_DIRECTORY=" + quarantine,
-		"GIT_ALTERNATE_OBJECT_DIRECTORIES=" + filepath.Join(common, "objects"),
-	}}
-	out, _, err := g.exec(o, "merge-tree", "--write-tree", "--no-messages", "--merge-base="+start, target, commit)
-	if exitCode(err) == 129 {
-		// Git 2.38/2.39 have merge-tree but no --merge-base. Give two
-		// temporary commits the same sole parent, forcing that base.
-		tips := make([]string, 2)
-		o.stdin = "omo: temporary export containment check\n"
-		o.env = append(o.env, "GIT_AUTHOR_NAME=omo", "GIT_AUTHOR_EMAIL=omo@localhost", "GIT_COMMITTER_NAME=omo", "GIT_COMMITTER_EMAIL=omo@localhost")
-		for i, tree := range []string{trees[2], trees[1]} {
-			id, _, err := g.exec(o, "commit-tree", tree, "-p", start, "--no-gpg-sign", "-F", "-")
-			if err != nil {
-				return false, err
-			}
-			tips[i] = strings.TrimSpace(id)
-		}
-		o.stdin = ""
-		out, _, err = g.exec(o, "merge-tree", "--write-tree", "--no-messages", tips[0], tips[1])
-	}
-	if exitCode(err) == 1 {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	tree := strings.TrimSpace(out)
-	if !fullID(tree) {
-		return false, fmt.Errorf("git merge-tree returned no tree")
 	}
 	return tree == trees[2], nil
 }

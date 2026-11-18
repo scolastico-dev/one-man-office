@@ -115,7 +115,9 @@ branch changes do not change what is checked. Fetching the recorded target
 keeps the checkout, index, local branches and remote-tracking branches intact.
 A normal merge can be found by
 commit ancestry; squash and rebase merges can be found by checking that the
-exported content is present. Content checks are conservative: later rewrites,
+exported content is present. These content checks use Git's built-in text
+merge independently of the project's merge-driver policies. Content checks
+are conservative: later rewrites,
 reverts or conflicts can leave a merged ticket waiting. A failed or unavailable
 remote also leaves the ticket waiting.
 

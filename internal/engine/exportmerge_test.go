@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -247,5 +248,35 @@ func TestExportCheckUsesRecordedRemoteAfterConfigChanges(t *testing.T) {
 				t.Fatalf("recorded destination lost after %s: %+v", change, tk.TicketSummary)
 			}
 		})
+	}
+}
+
+// Merge policies may discard incoming changes successfully. That is not
+// evidence the remote actually contains the reviewed work.
+func TestExportCheckDoesNotTrustCustomMergeDrivers(t *testing.T) {
+	h := gitHarness(t)
+	commit(t, h.repo, ".gitattributes", "b.txt merge=keep\n")
+	commit(t, h.repo, "b.txt", "base\n")
+	gitRun(t, h.repo, "config", "merge.keep.driver", "true")
+	n, job, dir, _ := h.exportedTask("Still unmerged")
+	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	dep := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Needs the export", DependsOn: []int{int(n)}})
+	remote := h.origin(h.project)
+	other := filepath.Join(t.TempDir(), "other")
+	gitRun(t, h.repo, "clone", "-q", "-b", "main", remote, other)
+	commit(t, other, "b.txt", "unrelated target edit\n")
+	gitRun(t, other, "push", "-q", "origin", "refs/heads/main:refs/heads/main")
+	h.e.checkExportsMerged(h.ctx)
+	if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
+		t.Fatalf("merge driver falsely completed unmerged work: %+v", got.TicketSummary)
+	}
+	if !slices.ContainsFunc(h.ticket(dep).WaitingFor, func(w api.Waiting) bool { return w.Ticket == int(n) && w.Reason == api.WaitingExportNotMerged }) {
+		t.Fatal("unmerged work stopped blocking its dependent")
+	}
+	if !pathExists(dir) {
+		t.Fatal("unmerged work lost its worktree")
 	}
 }
