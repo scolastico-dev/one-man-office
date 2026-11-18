@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 // MergeStyle selects how PrepareMerge combines two branches.
@@ -198,7 +200,7 @@ func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error)
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	afterWait := killWithChildren(cmd, g.grace)
 	cmd.WaitDelay = g.grace
-	err = cmd.Run()
+	err = processtree.Run(cmd)
 	afterWait()
 	if err != nil {
 		if perr := parent.Err(); perr != nil {

@@ -6,58 +6,28 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
-	"unsafe"
-
-	"github.com/UserExistsError/conpty"
-	"golang.org/x/sys/windows"
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 type conptyProcess struct {
-	terminal *conpty.ConPty
-	job      windows.Handle
+	terminal *processtree.PTY
 	mu       sync.Mutex
 	closed   bool
 	closeErr error
 }
 
 func startProcess(command string, args []string, dir string, env []string) (Process, error) {
-	argv := append([]string{command}, args...)
-	for i := range argv {
-		argv[i] = windows.EscapeArg(argv[i])
-	}
 	if env == nil {
 		env = childenv.Inherited()
 	}
-	job, err := windows.CreateJobObject(nil, nil)
+	p, err := processtree.StartPTY(command, args, dir, env, 100, 30)
 	if err != nil {
 		return nil, err
 	}
-	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	p, err := conpty.Start(strings.Join(argv, " "), conpty.ConPtyDimensions(100, 30), conpty.ConPtyWorkDir(dir), conpty.ConPtyEnv(env))
-	if err != nil {
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid()))
-	if err == nil {
-		err = windows.AssignProcessToJobObject(job, proc)
-		windows.CloseHandle(proc)
-	}
-	if err != nil {
-		p.Close()
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	return &conptyProcess{terminal: p, job: job}, nil
+	return &conptyProcess{terminal: p}, nil
 }
 
 func (p *conptyProcess) Read(b []byte) (int, error)  { return p.terminal.Read(b) }
@@ -76,7 +46,7 @@ func (p *conptyProcess) Kill() error {
 	if p.closed {
 		return nil
 	}
-	return windows.TerminateJobObject(p.job, 1)
+	return p.terminal.Kill()
 }
 func (p *conptyProcess) Close() error {
 	p.mu.Lock()
@@ -85,7 +55,6 @@ func (p *conptyProcess) Close() error {
 		p.closed = true
 		// Close the job first so descendants cannot retain console handles
 		// and prevent the pseudo-console close from completing.
-		_ = windows.CloseHandle(p.job)
 		p.closeErr = p.terminal.Close()
 	}
 	return p.closeErr

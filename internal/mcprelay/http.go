@@ -226,7 +226,7 @@ func (p *Pool) runHeadersCommand(ctx context.Context, s api.MCPServer, st *serve
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	if err := group.Start(cmd); err != nil {
 		return nil, fmt.Errorf("the header command cannot start: %w", err)
 	}
 	if err := group.started(cmd); err != nil {

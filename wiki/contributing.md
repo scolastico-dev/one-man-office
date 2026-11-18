@@ -28,6 +28,11 @@ export OMO_HOME=$(mktemp -d)
 PATH="$PWD/bin:$PATH" ./bin/omo
 ```
 
+Pull-request CI also runs `go vet ./...` and `go test ./... -timeout 900s`
+on `windows-latest`. The Windows process-containment tests exercise immediate
+descendants, suspended startup, cancellation and ConPTY cleanup. Cross-building
+a Windows test binary does not execute these tests.
+
 No test calls a real model, forge or usage service: agents in tests are a
 scripted fake agent, and every test uses a temporary home.
 

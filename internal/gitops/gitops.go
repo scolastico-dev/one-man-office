@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/branchname"
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
@@ -226,7 +227,7 @@ func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...stri
 	afterWait := killWithChildren(cmd, g.grace)
 	// Children that outlive git must not keep the output pipe open forever.
 	cmd.WaitDelay = g.grace
-	out, err := cmd.CombinedOutput()
+	out, err := processtree.CombinedOutput(cmd)
 	afterWait()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

@@ -6,7 +6,6 @@ ignore ./web/node_modules
 
 require (
 	github.com/Microsoft/go-winio v0.6.4
-	github.com/UserExistsError/conpty v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24

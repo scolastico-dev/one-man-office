@@ -39,6 +39,27 @@ jobs:
       - name: Build all platforms
         run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
 
+  windows-test:
+    name: Test Windows process containment
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet Windows code
+        run: go vet ./...
+
+      - name: Test on Windows
+        run: go test ./... -timeout 900s
+
   container-build:
     name: Test container (${{ matrix.arch }})
     needs: test-and-build

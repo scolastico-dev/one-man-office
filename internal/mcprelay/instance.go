@@ -616,6 +616,12 @@ func (i *instance) startProcess() (*process, error) {
 	if err != nil {
 		return nil, err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			group.close()
+		}
+	}()
 	// The process is ended by closeProcess, not by a context.
 	cmd.Cancel = nil
 	inR, inW, err := os.Pipe()
@@ -637,7 +643,7 @@ func (i *instance) startProcess() (*process, error) {
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR, outW, errW
-	err = cmd.Start()
+	err = group.Start(cmd)
 	inR.Close()
 	outW.Close()
 	errW.Close()
@@ -660,5 +666,6 @@ func (i *instance) startProcess() (*process, error) {
 		pr.err = cmd.Wait()
 		close(pr.exited)
 	}()
+	handedOff = true
 	return pr, nil
 }
