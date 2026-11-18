@@ -1223,6 +1223,30 @@ export interface PluginHook {
   interval: string
 }
 
+export interface PluginButton {
+  label: string
+  place: 'ticket' | 'sidebar' | 'project'
+  action: string
+  per_worktree?: boolean
+}
+
+export interface PluginFrontend {
+  script?: string
+  assets?: string
+}
+
+export interface PluginConfigChoice {
+  value: string
+  label: string
+}
+
+export interface PluginConfigField {
+  key: string
+  label: string
+  type: 'select' | 'boolean' | 'string' | 'number'
+  choices?: PluginConfigChoice[]
+}
+
 export type PluginState = 'ready' | 'running' | 'error' | 'disabled' | 'not_installed' | 'invalid'
 
 export interface PluginInfo {
@@ -1237,6 +1261,11 @@ export interface PluginInfo {
   last_event: string
   last_run_at: string | null
   hooks: PluginHook[]
+  buttons: PluginButton[]
+  frontend: PluginFrontend
+  config_fields: PluginConfigField[]
+  /** Manifest and public file SHA-256, recomputed on load. */
+  content_id: string
 }
 
 /** How far omo's maintainers vouch for a plugin of omo's list; a source the list does not name counts as `community`. */
@@ -1312,10 +1341,13 @@ export interface PluginLogLine {
 
 export interface PluginRun {
   ticket?: number
+  project?: string
 }
 
 export interface PluginRunResult {
   message: string
+  url?: string
+  forward_id?: string
 }
 
 /** How long uploaded images are kept once their ticket is done; 0 keeps them. */

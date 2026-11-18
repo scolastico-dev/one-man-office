@@ -25,6 +25,7 @@ const info = (name: string, o: Partial<PluginInfo> = {}): PluginInfo => ({
   last_event: '',
   last_run_at: null,
   hooks: [manual('mark', 'Mark this ticket')],
+  buttons: [], frontend: {}, config_fields: [], content_id: '',
   ...o,
 })
 const response = (plugins: PluginInfo[]): PluginsResponse => ({

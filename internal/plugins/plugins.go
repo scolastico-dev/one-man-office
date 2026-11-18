@@ -154,11 +154,15 @@ func ValidName(name string) bool { return namePattern.MatchString(name) }
 
 // Manifest is a plugin's plugin.json.
 type Manifest struct {
-	Name          string        `json:"name,omitempty"`
-	Version       string        `json:"version,omitempty"`
-	Description   string        `json:"description,omitempty"`
-	DefaultConfig DefaultConfig `json:"default_config,omitempty"`
-	Hooks         []Hook        `json:"hooks"`
+	Name          string                  `json:"name,omitempty"`
+	Version       string                  `json:"version,omitempty"`
+	Description   string                  `json:"description,omitempty"`
+	DefaultConfig DefaultConfig           `json:"default_config,omitempty"`
+	Hooks         []Hook                  `json:"hooks"`
+	Buttons       []api.PluginButton      `json:"buttons,omitempty"`
+	Frontend      api.PluginFrontend      `json:"frontend,omitzero"`
+	ConfigFields  []api.PluginConfigField `json:"config_fields,omitempty"`
+	contentID     string
 }
 
 var (
@@ -208,31 +212,35 @@ type Hook struct {
 // removedFields are manifest fields the engine had once, with what to say
 // about them. A manifest that uses one does not load.
 var removedFields = map[string]string{
+	"startup":     "use hooks with event omo_started",
+	"load":        "use hooks with event omo_started",
+	"unload":      "there is no shutdown event; use omo_started for start-up",
+	"shutdown":    "there is no shutdown event; use omo_started for start-up",
 	"requires":    "plugins have no dependencies any more; install each plugin by itself",
 	"roles":       "only the user runs manual actions",
 	"manual_args": "manual actions take no arguments",
-	"javascript":  "plugins cannot add code to the web app",
-	"files":       "plugins cannot add code to the web app",
+	"javascript":  "use frontend.script and frontend.assets",
+	"files":       "use frontend.script and frontend.assets",
 }
 
 // removedEvents are events the engine had once, with what to use instead.
 var removedEvents = map[string]string{
 	"prompt_render":    "plugins cannot change prompts",
-	"company_load":     "plugins cannot add code to the web app",
+	"company_load":     "use frontend.script and frontend.assets",
 	"agent_log_line":   "plugins do not see agents' output",
 	"job_create":       "use agent_started",
 	"agent_start":      "use agent_started",
 	"cron":             "use timer",
 	"chron":            "use timer",
-	"load":             "plugins have no lifecycle events",
-	"unload":           "plugins have no lifecycle events",
-	"startup":          "plugins have no lifecycle events",
-	"shutdown":         "plugins have no lifecycle events",
-	"company_startup":  "plugins have no lifecycle events",
-	"company_shutdown": "plugins have no lifecycle events",
+	"load":             "use omo_started for start-up; there is no shutdown event",
+	"unload":           "use omo_started for start-up; there is no shutdown event",
+	"startup":          "use omo_started for start-up; there is no shutdown event",
+	"shutdown":         "use omo_started for start-up; there is no shutdown event",
+	"company_startup":  "use omo_started for start-up; there is no shutdown event",
+	"company_shutdown": "use omo_started for start-up; there is no shutdown event",
 }
 
-var manifestFields = map[string]bool{"name": true, "version": true, "description": true, "default_config": true, "hooks": true}
+var manifestFields = map[string]bool{"name": true, "version": true, "description": true, "default_config": true, "hooks": true, "buttons": true, "frontend": true, "config_fields": true}
 
 var hookFields = map[string]bool{
 	"event": true, "lua": true, "command": true, "timeout": true, "interval": true,
@@ -244,7 +252,8 @@ var hookFields = map[string]bool{
 func quoted(s string) string { return strconv.QuoteToASCII(cutRunes(s, 40)) }
 
 // ReadManifest reads and checks dir/plugin.json: a regular file (no link)
-// of at most 64 KiB, strict JSON with the fields of Manifest and Hook only.
+// of at most 64 KiB, strict JSON with the declared nested schema only.
+// Public frontend files must exist and pass confinement and resource checks.
 // Fields and events the engine no longer has are refused with a message
 // that names them. A missing manifest gives an error that wraps
 // ErrNotInstalled.
@@ -259,11 +268,22 @@ func ReadManifest(dir string) (Manifest, error) {
 		}
 		return Manifest{}, errors.New("plugin.json cannot be read")
 	}
-	return ParseManifest(raw)
+	man, err := ParseManifest(raw)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if err := man.readFrontend(dir, raw); err != nil {
+		return Manifest{}, err
+	}
+	return man, nil
 }
 
-// ParseManifest checks a manifest's text as ReadManifest does.
+// ParseManifest checks a manifest's text and path syntax. ReadManifest also
+// validates the frontend files on disk and computes the content identity.
 func ParseManifest(raw []byte) (Manifest, error) {
+	if len(raw) > MaxManifestBytes {
+		return Manifest{}, errors.New("plugin.json is larger than 64 KiB")
+	}
 	var fields map[string]json.RawMessage
 	top := json.NewDecoder(bytes.NewReader(raw))
 	if err := top.Decode(&fields); err != nil || fields == nil {
@@ -288,6 +308,9 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		if err := checkFields(h, hookFields, fmt.Sprintf("hook %d: ", i+1)); err != nil {
 			return Manifest{}, err
 		}
+	}
+	if err := checkDeclarationJSON(fields); err != nil {
+		return Manifest{}, err
 	}
 	var m Manifest
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -327,6 +350,9 @@ func ParseManifest(raw []byte) (Manifest, error) {
 			}
 			actions[h.Name] = true
 		}
+	}
+	if err := checkDeclarations(&m, fields); err != nil {
+		return Manifest{}, err
 	}
 	return m, nil
 }
@@ -1179,13 +1205,17 @@ func (m *Manager) Infos() []api.PluginInfo {
 
 func (e *entry) infoLocked() api.PluginInfo {
 	info := api.PluginInfo{
-		Name:        e.settings.Name,
-		Version:     e.manifest.Version,
-		Description: e.manifest.Description,
-		State:       e.state,
-		Message:     e.message,
-		LastEvent:   e.lastEvent,
-		Hooks:       []api.PluginHook{},
+		Name:         e.settings.Name,
+		Version:      e.manifest.Version,
+		Description:  e.manifest.Description,
+		State:        e.state,
+		Message:      e.message,
+		LastEvent:    e.lastEvent,
+		Hooks:        []api.PluginHook{},
+		Buttons:      append([]api.PluginButton{}, e.manifest.Buttons...),
+		Frontend:     e.manifest.Frontend,
+		ConfigFields: append([]api.PluginConfigField{}, e.manifest.ConfigFields...),
+		ContentID:    e.manifest.contentID,
 	}
 	if e.lastRun != nil {
 		at := *e.lastRun

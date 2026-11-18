@@ -26,6 +26,7 @@ const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({
   last_event: '',
   last_run_at: null,
   hooks: [{ event: 'ticket_moved', name: '', description: '', scope: '', interval: '' }, manual('sum', 'Write a summary'), manual('mark', 'Mark it', 'ticket')],
+  buttons: [], frontend: {}, config_fields: [], content_id: '',
   ...o,
 })
 

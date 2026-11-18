@@ -354,7 +354,14 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 		{SkillSearchResolved{Paths: []string{}}, []string{"repository", "ref", "paths", "found", "commit"}},
 		{PluginSettings{Config: map[string]any{}}, []string{"name", "source", "subpath", "ref", "enabled", "config"}},
 		{PluginHook{}, []string{"event", "name", "description", "scope", "interval"}},
-		{PluginInfo{Hooks: []PluginHook{}}, []string{"name", "version", "description", "state", "message", "commit", "last_event", "last_run_at", "hooks"}},
+		{PluginButton{}, []string{"label", "place", "action"}},
+		{PluginButton{PerWorktree: true}, []string{"label", "place", "action", "per_worktree"}},
+		{PluginFrontend{}, nil},
+		{PluginFrontend{Script: "ui/main.js", Assets: "ui/assets"}, []string{"script", "assets"}},
+		{PluginConfigChoice{}, []string{"value", "label"}},
+		{PluginConfigField{}, []string{"key", "label", "type"}},
+		{PluginConfigField{Choices: []PluginConfigChoice{{Value: "code", Label: "Code"}}}, []string{"key", "label", "type", "choices"}},
+		{PluginInfo{Hooks: []PluginHook{}, Buttons: []PluginButton{}, ConfigFields: []PluginConfigField{}}, []string{"name", "version", "description", "state", "message", "commit", "last_event", "last_run_at", "hooks", "buttons", "frontend", "config_fields", "content_id"}},
 		{PluginsResponse{Plugins: []PluginInfo{}, Settings: []PluginSettings{}, Errors: []FileError{}}, []string{"plugins", "settings", "errors"}},
 		{CatalogPlugin{}, []string{"name", "description", "tag", "source", "ref", "subpath", "list", "origin"}},
 		{PluginListState{Notes: []string{}}, []string{"url", "origin", "available", "message", "notes", "fetched_at"}},
@@ -366,7 +373,11 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 		{PluginLogLine{}, []string{"at", "message"}},
 		{PluginRun{}, nil},
 		{PluginRun{Ticket: 3}, []string{"ticket"}},
+		{PluginRun{Project: "demo"}, []string{"project"}},
+		{PluginRun{Ticket: 3, Project: "demo"}, []string{"ticket", "project"}},
 		{PluginRunResult{}, []string{"message"}},
+		{PluginRunResult{URL: "https://example.test/"}, []string{"message", "url"}},
+		{PluginRunResult{ForwardID: "0123456789abcdef0123456789abcdef"}, []string{"message", "forward_id"}},
 	}
 	for _, c := range cases {
 		b, err := json.Marshal(c.v)

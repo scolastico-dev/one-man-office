@@ -24,12 +24,13 @@ const (
 	EventResumed        = "omo_resumed"
 	EventTimer          = "timer"
 	EventManual         = "manual"
+	EventOmoStarted     = "omo_started"
 )
 
 // Events lists every event a hook can name.
 var Events = []string{
 	EventTicketCreated, EventTicketMoved, EventCommentWritten, EventQuestionAsked,
-	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual,
+	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual, EventOmoStarted,
 }
 
 // The reasons of agent_exited.

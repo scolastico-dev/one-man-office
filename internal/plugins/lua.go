@@ -28,6 +28,13 @@ const (
 // hook's answer. The name is not one a sandbox global can have.
 const hookFunction = "omo_plugin_hook__"
 
+// luaAnswer carries the run's collected secrets to the manual answer boundary.
+// Keeping this redactor avoids losing HTTP header secrets when the box closes.
+type luaAnswer struct {
+	value    any
+	redactor *luabox.Redactor
+}
+
 // runLua runs a Lua hook in a fresh sandbox: the globals event (the event
 // as plugins see it) and config (the plugin's configuration), the helpers of
 // the package doc, the hook's time limit. It returns the script's answer,
@@ -78,6 +85,9 @@ func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any
 	}
 	if err != nil {
 		return nil, lines, luabox.ErrorText(err, red)
+	}
+	if ev.Name == EventManual {
+		return luaAnswer{result, red}, lines, ""
 	}
 	return result, lines, ""
 }
