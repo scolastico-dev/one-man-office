@@ -208,11 +208,13 @@ test.describe('with a remote that is a folder on this machine', () => {
     const t = await reviewed(omo, 'Export to a folder')
     const n = t.number
     const branch = t.projects[0]!.branch
+    const commit = head(repo, branch)
 
     await openBoard(page, omo)
     await exportFromPanel(page, n)
-    await expect.poll(() => head(origin, branch), { timeout: 30_000 }).toBe(head(repo, branch))
-    expect(await comments(omo, n)).toContain(`Pushed \`${head(repo, branch).slice(0, 12)}\` to \`origin\` (\`${origin}\`) as \`${branch}\`.`)
+    // The remote ref can move before git returns and omo records its comment.
+    await expect.poll(() => comments(omo, n)).toContain(`Pushed \`${commit.slice(0, 12)}\` to \`origin\` (\`${origin}\`) as \`${branch}\`.`)
+    expect(head(origin, branch)).toBe(commit)
 
     const attention = panel(page).locator('[data-attention]')
     await expect(attention).toContainText(LOCAL)

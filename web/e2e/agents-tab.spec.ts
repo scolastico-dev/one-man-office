@@ -9,8 +9,9 @@ test.use({ viewport: { width: 1440, height: 900 } })
 const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
 
 test.describe('a developer that waits for a line, answers it and exits', () => {
+  // Keep the reply in a live terminal until the test explicitly lets the agent exit.
   test.use({
-    omoOptions: { agents: { developer: script('ready', 'print|hello from fake', 'await-line|ping|10m', 'print|got it', 'exit|0') } },
+    omoOptions: { agents: { developer: script('ready', 'print|hello from fake', 'await-line|ping|10m', 'print|got it', 'await-line|finish|10m', 'exit|0') } },
   })
 
   test("the running developer's terminal shows its output and takes typed input", async ({ page, omo }) => {
@@ -31,6 +32,8 @@ test.describe('a developer that waits for a line, answers it and exits', () => {
     await expectTerminalText(term, 'hello from fake')
     await typeInTerminal(page, term, 'ping')
     await expectTerminalText(term, 'got it')
+    await typeInTerminal(page, term, 'finish')
+    await expect(panel(page).locator(`[data-session="${session.id}"] [data-ended]`)).toBeVisible()
 
     expectNoTokenInUrls(seen, omo.token)
     expect(seen.pageErrors).toEqual([])
@@ -50,6 +53,7 @@ test.describe('a developer that waits for a line, answers it and exits', () => {
     const term = terminalIn(panel(page))
     await expectTerminalText(term, 'hello from fake')
     await typeInTerminal(page, term, 'ping')
+    await typeInTerminal(page, term, 'finish')
 
     const item = panel(page).locator(`[data-session="${session.id}"]`)
     await expect(item.locator('[data-ended]')).toBeVisible({ timeout: 30_000 })
