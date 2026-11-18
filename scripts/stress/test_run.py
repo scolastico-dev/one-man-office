@@ -127,8 +127,22 @@ class Contracts(unittest.TestCase):
         self.assertEqual(caught.exception.tests, {'p::A': 'failed'})
 
     def test_campaign_exit_failure_and_reports_survive_later_success(self):
+        self.check_fake_go_campaign()
+
+    def test_campaign_respects_custom_temporary_root_with_spaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temporary_root = Path(tmp) / 'temporary root with spaces'
+            temporary_root.mkdir(mode=0o700)
+            linked_root = Path(tmp) / 'linked temporary root'
+            linked_root.symlink_to(temporary_root, target_is_directory=True)
+            for configured in [temporary_root, linked_root]:
+                with self.subTest(temporary_root=configured):
+                    self.check_fake_go_campaign(configured)
+
+    def check_fake_go_campaign(self, temporary_root=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            expected_root = (temporary_root or Path(tempfile.gettempdir())).resolve()
             tools = root / 'tools'
             tools.mkdir()
             counter = root / 'counter'
@@ -150,7 +164,26 @@ counter = Path({str(counter)!r})
 n = int(counter.read_text()) + 1 if counter.exists() else 1
 counter.write_text(str(n))
 assert not any(k.upper().startswith('OMO_') and k != 'OMO_HOME' for k in os.environ)
-assert os.environ['HOME'].startswith('/tmp/ost-')
+home = Path(os.environ['HOME'])
+state = home.parent
+assert home.name == 'home'
+assert state.parent.resolve() == Path({str(expected_root)!r})
+assert state.name.startswith('ost-')
+assert state.stat().st_uid == os.getuid()
+assert state.stat().st_mode & 0o777 == 0o700
+for key, name in {{'HOME': 'home', 'USERPROFILE': 'home', 'APPDATA': 'config',
+                  'LOCALAPPDATA': 'data', 'XDG_CONFIG_HOME': 'config',
+                  'XDG_DATA_HOME': 'data', 'XDG_CACHE_HOME': 'cache',
+                  'XDG_STATE_HOME': 'state', 'XDG_RUNTIME_DIR': 'runtime',
+                  'OMO_HOME': 'omo'}}.items():
+ path = Path(os.environ[key])
+ assert path == state / name
+ assert path.is_dir()
+ assert path.stat().st_uid == os.getuid()
+ assert path.stat().st_mode & 0o777 == 0o700
+assert os.environ['GIT_CONFIG_GLOBAL'] == '/dev/null'
+assert os.environ['GIT_CONFIG_NOSYSTEM'] == '1'
+assert os.environ.get('GIT_CONFIG_PARAMETERS') == {os.environ.get('GIT_CONFIG_PARAMETERS')!r}
 assert len(os.sched_getaffinity(0)) == 2
 assert os.environ['GOFLAGS'] == ''
 for action in ['start', 'run', 'fail' if n == 1 else 'pass', 'fail' if n == 1 else 'pass']:
@@ -163,6 +196,8 @@ sys.exit(1 if n == 1 else 0)
 """)
             fake.chmod(0o755)
             env = {k: v for k, v in os.environ.items() if not k.upper().startswith('OMO_')}
+            if temporary_root is not None:
+                env['TMPDIR'] = str(temporary_root)
             env['PATH'] = str(tools) + os.pathsep + os.environ['PATH']
             env.update(GOFLAGS='-run=WrongSubset -short', GOENV=str(root / 'inherited-goenv'),
                        GOWORK=str(root / 'external.work'), GO111MODULE='off', GOCACHEPROG='/bin/false')
@@ -173,12 +208,25 @@ sys.exit(1 if n == 1 else 0)
             campaign = next((root / 'reports').iterdir())
             summary = json.loads((campaign / 'summary.json').read_text())
             self.assertEqual(summary['completed'], {'go': 2})
-            self.assertEqual(summary['tests']['go::contract::TestContract']['failed'], 1)
-            self.assertEqual(summary['tests']['go::contract::TestContract']['passed'], 1)
+            self.assertEqual(summary['tests'], {'go::contract::TestContract':
+                             {'attempts': 2, 'failed': 1, 'passed': 1, 'skipped': 0}})
+            for number, status in [(1, 1), (2, 0)]:
+                attempt = json.loads((campaign / f'go-{number:03d}' / 'attempt.json').read_text())
+                self.assertEqual(attempt['returncode'], status)
+                self.assertEqual(attempt['actual_returncode'], status)
+                self.assertEqual(attempt['reported_tests'], 1)
             # Running the same output destination creates a distinct campaign.
             again = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
-            self.assertEqual(len(list((root / 'reports').iterdir())), 2)
+            campaigns = set((root / 'reports').iterdir())
+            self.assertEqual(len(campaigns), 2)
+            second = (campaigns - {campaign}).pop()
+            summary = json.loads((second / 'summary.json').read_text())
+            self.assertTrue(summary['ok'])
+            self.assertEqual(summary['completed'], {'go': 2})
+            self.assertEqual(summary['tests'], {'go::contract::TestContract':
+                             {'attempts': 2, 'failed': 0, 'passed': 2, 'skipped': 0}})
+            self.assertEqual(counter.read_text(), '4')
             self.assertFalse(json.loads((campaign / 'summary.json').read_text())['ok'])
 
     def test_signal_stops_adopted_detached_child_and_reports_interruption(self):
