@@ -2,6 +2,7 @@
 // with a ticket link on a ticket that opens as a page, the diff's hidden lines
 // beside the remote-base switch, and the settings pages that share one
 // settings document and must each save only their own keys.
+import { withoutShellConfig } from './support/env'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -20,7 +21,7 @@ const lightbox = (page: Page) => page.locator('dialog[data-image-lightbox]')
 const bar = (page: Page) => page.getByRole('region', { name: 'Save changes' })
 const saveButton = (page: Page) => bar(page).getByRole('button', { name: 'Save', exact: true })
 
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+const gitEnv = () => ({ ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv(), stdio: 'pipe' })
 
 function commitInto(dir: string, files: Record<string, string>, message: string): void {

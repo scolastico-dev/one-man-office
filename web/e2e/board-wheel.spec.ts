@@ -4,6 +4,7 @@
 // pointer is over it, also over a column, whose own box scrolls only up and
 // down; a vertical wheel over a column scrolls that column and never the
 // board or the document.
+import { withoutShellConfig } from './support/env'
 import { execFileSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -122,7 +123,7 @@ test.describe('the wheel over the ticket page', () => {
     const dir = await worktreeOf(omo, n)
     const lines = Array.from({ length: 200 }, (_, i) => (i === 3 ? `const wide${i} = '${'x'.repeat(600)}'` : `const line${i} = ${i}`)).join('\n') + '\n'
     writeFileSync(join(dir, 'wide.ts'), lines)
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env: { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }, stdio: 'pipe' })
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env: { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }, stdio: 'pipe' })
     git('add', '--', 'wide.ts')
     git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', 'feat: wide')
 

@@ -3,6 +3,7 @@
 // in the panel, for committed and uncommitted files, at 390 px, in both
 // themes. With OMO_SCREENSHOTS=<folder> the page test writes
 // diff-expand-<theme>-<width>.png there.
+import { withoutShellConfig } from './support/env'
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -20,7 +21,7 @@ const filePane = (page: Page) => ticketPage(page).locator('[data-file-pane]')
 const tree = (page: Page) => ticketPage(page).locator('[data-diff-tree]')
 const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
 
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+const gitEnv = () => ({ ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
 
 function writeInto(dir: string, files: Record<string, string>): void {
   for (const [name, body] of Object.entries(files)) {

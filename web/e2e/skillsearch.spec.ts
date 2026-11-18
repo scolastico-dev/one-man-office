@@ -7,6 +7,7 @@ import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
 import { expect, test, type Omo } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
 // Searching skills.sh from the Skills page. omo's two search routes are
 // stood in for here (the real ones ask skills.sh and GitHub, and a test
@@ -14,7 +15,7 @@ import { expect, test, type Omo } from './support/omo'
 // search answers recorded-shape results, choosing one answers a local bare
 // repository, so saving the set fetches only from the test's home.
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+const GIT_ENV = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, env: GIT_ENV, stdio: 'pipe' })
     .toString()

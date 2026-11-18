@@ -171,7 +171,7 @@ async function occurrences(terminal: Locator, text: string): Promise<number> {
   return shown.split(text).length - 1
 }
 
-test('the first keys typed into a terminal that just opened are not lost while its history is still being drawn', async ({ page, omo }) => {
+test('the first keys typed into a terminal that just opened are not lost while its history is still being drawn', async ({ page, omo, cpuThrottleRate }) => {
   // The socket goes through the test like in the tests below, and the page is
   // slowed down: the keys then arrive while the terminal still parses its replay.
   await page.routeWebSocket(/\/api\/terminals\/[^/]+\/socket$/, (ws) => {
@@ -182,12 +182,12 @@ test('the first keys typed into a terminal that just opened are not lost while i
     await openBoard(page, omo)
     await openTerminalsTab(page)
     const cdp = await page.context().newCDPSession(page)
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 })
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Math.max(6, cpuThrottleRate) })
     await newTerminal(sidebar(page))
     const terminal = terminalIn(sidebar(page))
     await typeInTerminal(page, terminal, 'echo first=$((40 + 2))')
     await expectTerminalText(terminal, 'first=42')
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottleRate })
   } finally {
     await closeAll(omo)
   }
@@ -373,7 +373,7 @@ test.describe('with a running fake developer', () => {
 
 test.describe('a ticket that finishes while a shell is open', () => {
   test.use({
-    omoOptions: { agents: { developer: script('ready', 'sleep|8s', 'write|held.txt|held', 'commit|feat: held', 'done|held', 'hang') } },
+    omoOptions: { agents: { developer: script('ready', 'print|waiting for shell', 'await-line|shell-open|10m', 'write|held.txt|held', 'commit|feat: held', 'done|held', 'hang') } },
   })
 
   test('the worktree stays while a shell is open in it and goes when it closes', async ({ page, omo }) => {
@@ -382,7 +382,7 @@ test.describe('a ticket that finishes while a shell is open', () => {
       const n = await omo.createTicket({ title: 'Finish under a shell' })
       await omo.api('PATCH', `/api/tickets/${n}`, { review: 'skipped' })
       await omo.moveTicket(n, 'ready')
-      await waitForSession(omo, n, 'developer')
+      const session = await waitForSession(omo, n, 'developer')
       const worktree = (await omo.api<{ projects: { worktree: string }[] }>('GET', `/api/tickets/${n}`)).projects[0]!.worktree
       expect(existsSync(worktree)).toBe(true)
 
@@ -391,10 +391,21 @@ test.describe('a ticket that finishes while a shell is open', () => {
       await page.getByRole('dialog', { name: /Finish under a shell/ }).getByRole('button', { name: 'Open terminal' }).click()
       await expect(terminalIn(sidebar(page))).toBeVisible()
 
+      // The developer cannot finish until the shell really holds this worktree.
+      expect((await shells(omo)).map((s) => s.dir)).toContain(worktree)
+      const shell = (await shells(omo)).find((s) => s.dir === worktree)!
+      await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
+      await sidebar(page).locator(`[data-session="${session.id}"]`).click()
+      const developer = terminalIn(sidebar(page))
+      await expectTerminalText(developer, 'waiting for shell')
+      await typeInTerminal(page, developer, 'shell-open')
+
       // The ticket is merged and done; the folder stays for the shell.
       await expectCardIn(page, n, 'Done')
       await waitForNoLiveSession(omo, n)
       expect(existsSync(worktree), 'the worktree went while a shell was open in it').toBe(true)
+      await openTerminalsTab(page)
+      await sidebar(page).locator(`[data-terminal="${shell.id}"][data-terminal-row]`).click()
       await typeInTerminal(page, terminalIn(sidebar(page)), 'echo still=$(ls | wc -l)')
       await expectTerminalText(terminalIn(sidebar(page)), /still=\d/)
 

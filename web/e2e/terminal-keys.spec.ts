@@ -85,7 +85,19 @@ test.describe('screen reader setting', () => {
       const sw = page.getByRole('switch', { name: 'Screen reader mode for terminals' })
       await expect(sw).toHaveAttribute('aria-checked', 'false')
       await sw.click()
+      // Hold the write before the server handles it: the edited switch
+      // already reads true, even though no new value has been stored yet.
+      let save: (() => Promise<void>) | undefined
+      await page.route('**/api/settings', (route) => {
+        if (route.request().method() === 'PATCH') save = () => route.continue()
+        else return route.continue()
+      })
       await page.getByRole('button', { name: /^Save/ }).click()
+      await expect.poll(() => save !== undefined).toBe(true)
+      await expect(page.locator('[data-save-state]')).toHaveText('Saving…')
+      expect((await omo.api<{ settings: { ui: { screen_reader_mode: boolean } } }>('GET', '/api/settings')).settings.ui.screen_reader_mode).toBe(false)
+      await save!()
+      await expect(page.locator('[data-save-state]')).toHaveText('Saved')
       await expect(sw).toHaveAttribute('aria-checked', 'true')
       expect((await omo.api<{ settings: { ui: { screen_reader_mode: boolean } } }>('GET', '/api/settings')).settings.ui.screen_reader_mode).toBe(true)
       if (SHOTS) await page.getByText('Accessibility').first().scrollIntoViewIfNeeded().then(() => page.screenshot({ path: join(SHOTS, `screen-reader-setting-${scheme}.png`) }))

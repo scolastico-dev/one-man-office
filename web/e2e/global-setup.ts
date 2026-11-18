@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { BINARY, FAKE_AGENT_BINARY, FAKE_MCP_BINARY, REPO_DIR, SEED_BINARY, WEB_DIR } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
 // Runs once before the suite: checks that the binary under test is built with
 // the current app and builds the seeding tool, the fake agent and the fake
@@ -22,7 +23,7 @@ export default function globalSetup(): void {
     execFileSync('go', ['build', '-o', out, pkg], {
       cwd: REPO_DIR,
       stdio: 'inherit',
-      env: { ...process.env, CGO_ENABLED: '0' },
+      env: { ...withoutShellConfig(), CGO_ENABLED: '0' },
     })
   }
 }

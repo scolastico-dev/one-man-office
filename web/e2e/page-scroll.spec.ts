@@ -5,6 +5,7 @@
 // window) at two window sizes, and drives the Diff tab's file browser, which
 // once scrolled the whole document. With OMO_SCREENSHOTS=<folder> the diff
 // test writes page-scroll-after-<width>.png there.
+import { withoutShellConfig } from './support/env'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -15,6 +16,7 @@ import { expectNoAgentProcesses, script, waitForSession } from './support/agents
 import { openBoard } from './support/board'
 import { png, uploadImage } from './support/images'
 import { terminalIn } from './support/terminal'
+import { expectSettingsReady } from './support/settings'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -22,7 +24,7 @@ const ticketPage = (page: Page) => page.locator('[data-ticket-page]')
 const tree = (page: Page) => ticketPage(page).locator('[data-diff-tree]')
 const filePane = (page: Page) => ticketPage(page).locator('[data-file-pane]')
 
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+const gitEnv = () => ({ ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
 
 function commitInto(dir: string, files: Record<string, string>, message: string): void {
   for (const [name, body] of Object.entries(files)) {
@@ -231,7 +233,7 @@ test.describe('every full-height view', () => {
       })
       await visit(`/ticket/${story}?tab=tasks`, 'tasks', () => expect(ticketPage(page).locator('[data-task]')).toHaveCount(12))
       for (const section of SETTINGS) {
-        await visit(`/settings/${section}`, `settings ${section}`, () => expect(page.locator('[data-settings-page] [data-settings-loading]')).toHaveCount(0))
+        await visit(`/settings/${section}`, `settings ${section}`, () => expectSettingsReady(page, section))
       }
 
       // The sidebar with a shell in it (on a phone the sidebar is a sheet).

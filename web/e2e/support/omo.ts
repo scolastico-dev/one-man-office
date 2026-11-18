@@ -6,6 +6,8 @@ import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
 import { cleanEnv, holdsAgentProgram } from './env'
+import { cpuThrottleRate, installCPUThrottle } from './throttle'
+import { isPortCollision } from './startup'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -166,9 +168,9 @@ export class ServerError extends Error {
 }
 
 /** Creates a fresh isolated omo. Not started yet. */
-async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
-  if (!existsSync(BINARY)) {
-    throw new Error(`the omo binary ${BINARY} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
+export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY): Promise<{ omo: Omo; dispose(): Promise<void> }> {
+  if (!existsSync(binary)) {
+    throw new Error(`the omo binary ${binary} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
   }
   const root = realpathSync(tmpdir())
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
@@ -193,7 +195,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     if (env.OMO_HOME === undefined || !env.OMO_HOME.startsWith(home)) throw new Error('OMO_HOME is outside the temporary home')
   }
 
-  const cli = (args: string[]) => run(BINARY, args, env)
+  const cli = (args: string[]) => run(binary, args, env)
   const mustCli = async (args: string[]) => {
     const r = await cli(args)
     if (r.code !== 0) throw new Error(`omo ${args.join(' ')} failed (${r.code}): ${r.stdout}${r.stderr}`)
@@ -274,7 +276,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
         const failure = await spawnServer()
         if (failure === undefined) break
         // Another process may take the probed port before the first start; a restart keeps its port.
-        const taken = /address already in use|only one usage/i.test(failure)
+        const taken = isPortCollision(failure, port)
         if (!taken || !first || attempt >= 2) throw new Error(`omo did not start:\n${failure}`)
         port = await freePort()
         await mustCli(['config', 'set', 'port', String(port)])
@@ -302,7 +304,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   /** Starts the child and waits for the printed address; returns its output when it exited instead. */
   async function spawnServer(): Promise<string | undefined> {
     log += `\n--- start on port ${port} ---\n`
-    const c = spawn(BINARY, [], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const c = spawn(binary, [], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     child = c
     let buffer = ''
     const onData = (d: Buffer) => {
@@ -446,6 +448,8 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
 
 export interface E2EFixtures {
   omoOptions: OmoOptions
+  /** Chromium CPU slowdown; normal runs use 1. */
+  cpuThrottleRate: number
   /** A git repository (branch main, one commit) in the test's temporary folder. */
   repo: string
   /** A fresh omo on its own home and port, started and, unless asked otherwise, paused. */
@@ -454,6 +458,16 @@ export interface E2EFixtures {
 
 export const test = base.extend<E2EFixtures>({
   omoOptions: [{}, { option: true }],
+  cpuThrottleRate: [cpuThrottleRate(process.env.E2E_CPU_THROTTLE_RATE), { option: true }],
+  context: async ({ context, browserName, cpuThrottleRate: rate }, use) => {
+    if (rate !== 1 && browserName !== 'chromium') throw new Error('E2E_CPU_THROTTLE_RATE requires Chromium')
+    const dispose = await installCPUThrottle(context, rate)
+    try {
+      await use(context)
+    } finally {
+      await dispose()
+    }
+  },
   repo: async ({}, use) => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-repo-'))
     const dir = join(root, 'demo')
