@@ -294,7 +294,8 @@ describe('a kill that fails', () => {
     const watch = await endWatch()
     let held = 0
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
-    const script = `require('node:net').connect(${watch.port}, '127.0.0.1'); process.stdout.write('PROXY_BROWSER_FIXTURES []\\n'); process.stdin.resume()`
+    // The fixtures line is printed only once the connection exists, so the server certainly sees it close when the process is gone.
+    const script = `require('node:net').connect(${watch.port}, '127.0.0.1', () => process.stdout.write('PROXY_BROWSER_FIXTURES []\\n')); process.stdin.resume()`
     const run = await startFixture({ command: process.execPath, args: ['-e', script], end: { kill: denied }, onSpawn: (pid) => { held = pid } })
     try {
       expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
