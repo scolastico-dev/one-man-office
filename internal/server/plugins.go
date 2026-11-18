@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -413,7 +414,7 @@ func (s *Server) pluginInfo(name string) api.PluginInfo {
 			return s.withCommit(info)
 		}
 	}
-	return api.PluginInfo{Name: name, State: plugins.StateNotInstalled, Hooks: []api.PluginHook{}}
+	return api.PluginInfo{Name: name, State: plugins.StateNotInstalled, Hooks: []api.PluginHook{}, Buttons: []api.PluginButton{}, ConfigFields: []api.PluginConfigField{}}
 }
 
 // withCommit fills the commit of an installed plugin from its install
@@ -883,7 +884,7 @@ func (s *Server) knownPlugin(name string) bool {
 // (read as the user; the hook gets the same ticket payload as events
 // carry). One action per plugin runs at a time (409); the run is bounded
 // by 5 minutes and goes on when the client leaves. The answer is the
-// hook's text as plain text, cleaned and cut by the runtime.
+// hook's message (cleaned and cut) and validated navigation, if supplied.
 func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 	var req api.PluginRun
 	if err := decodeSettings(w, r, &req); err != nil {
@@ -897,7 +898,8 @@ func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, e)
 		return
 	}
-	var ticket map[string]any
+	var ticket, project map[string]any
+	var ticketProjects []api.TicketProject
 	if req.Ticket > 0 {
 		t, err := s.board.Get(r.Context(), board.User, int64(req.Ticket))
 		if err != nil {
@@ -905,24 +907,45 @@ func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ticket = plugins.TicketPayload(t.TicketSummary, s.Address())
+		ticketProjects = t.Projects
+	}
+	if req.Project != "" {
+		if _, ok := s.settings.Project(req.Project); !ok {
+			writeError(w, r, api.Errorf(api.CodeNotFound, "project does not exist"))
+			return
+		}
+		if req.Ticket > 0 && !slices.ContainsFunc(ticketProjects, func(p api.TicketProject) bool { return p.Project == req.Project }) {
+			e := api.Errorf(api.CodeValidation, "project must belong to the selected ticket")
+			e.Details = api.FieldDetail{Field: "project"}
+			writeError(w, r, e)
+			return
+		}
+		project = map[string]any{"id": req.Project}
 	}
 	type result struct {
-		msg string
-		err error
+		answer api.PluginRunResult
+		err    error
 	}
 	done := make(chan result, 1)
 	if !s.background(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, pluginActionBound)
 		defer cancel()
-		msg, err := s.plugins.m.Trigger(ctx, name, action, ticket)
-		done <- result{msg, err}
+		out, err := s.plugins.m.TriggerAction(ctx, name, action, ticket, project)
+		// Never let the board's current bearer credential leave in any part of a
+		// hook destination, even under an innocuous query key or encoded in a path.
+		decoded, _ := url.QueryUnescape(out.URL)
+		if err == nil && s.token != "" && (strings.Contains(out.URL, s.token) || strings.Contains(decoded, s.token)) {
+			out = api.PluginRunResult{}
+			err = errors.New("the action URL contains an omo login token")
+		}
+		done <- result{out, err}
 	}) {
 		writeError(w, r, api.Errorf(api.CodeUnavailable, "omo is stopping"))
 		return
 	}
 	select {
 	case res := <-done:
-		reply(w, r, http.StatusOK, api.PluginRunResult{Message: res.msg}, pluginActionError(name, action, res.err))
+		reply(w, r, http.StatusOK, res.answer, pluginActionError(name, action, res.err))
 	case <-r.Context().Done():
 	}
 }

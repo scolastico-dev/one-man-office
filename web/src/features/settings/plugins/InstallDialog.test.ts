@@ -11,7 +11,7 @@ afterEach(() => {
   mounted = null
 })
 
-const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({ name: 'log', version: '1.0.0', description: '', state: 'ready', message: '', commit: 'abc', last_event: '', last_run_at: null, hooks: [], ...o })
+const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({ name: 'log', version: '1.0.0', description: '', state: 'ready', message: '', commit: 'abc', last_event: '', last_run_at: null, hooks: [], buttons: [], frontend: {}, config_fields: [], content_id: '', ...o })
 
 async function open(props: Record<string, unknown> = {}): Promise<{ w: VueWrapper; h: Harness }> {
   const h = await harness()

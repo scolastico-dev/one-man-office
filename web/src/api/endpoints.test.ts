@@ -332,6 +332,8 @@ describe('endpoints', () => {
     await e.getPluginLog(client, 'x')
     await e.runPluginAction(client, 'x', 'go')
     await e.runPluginAction(client, 'x', 'go', 5)
+    await e.runPluginAction(client, 'x', 'go', 5, 'project-a')
+    await e.runPluginAction(client, 'x', 'go', undefined, 'project-b')
     expect(seen).toMatchObject([
       { method: 'GET', path: '/api/usage' },
       { method: 'POST', path: '/api/usage/refresh', body: {} },
@@ -355,6 +357,8 @@ describe('endpoints', () => {
       { method: 'GET', path: '/api/plugins/x/log' },
       { method: 'POST', path: '/api/plugins/x/actions/go', body: {} },
       { method: 'POST', path: '/api/plugins/x/actions/go', body: { ticket: 5 } },
+      { method: 'POST', path: '/api/plugins/x/actions/go', body: { ticket: 5, project: 'project-a' } },
+      { method: 'POST', path: '/api/plugins/x/actions/go', body: { project: 'project-b' } },
     ])
   })
 

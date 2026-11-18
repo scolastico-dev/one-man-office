@@ -148,6 +148,9 @@ its absolute path (press **Update** after each change).
 | `version`, `description` | Shown on the Plugins page; the description is at most 1,000 bytes. |
 | `default_config` | A JSON object: the configuration a fresh install starts with. You edit it on the plugin's page as **Configuration (JSON)**. |
 | `hooks` | At most 64. |
+| `buttons` | Optional list of up to 64 button declarations; see below. |
+| `frontend` | Optional `{script, assets?}` with confined public paths; see below. |
+| `config_fields` | Optional list of up to 64 configuration controls; see below. |
 
 Every hook has an `event` and exactly one of:
 
@@ -170,6 +173,90 @@ of plugins written for omo 0.11 (`requires`, `roles`, `manual_args`,
 `javascript`, `files`, `prompt_render`, `cron`, `startup` and the like) are
 refused with a message saying what to use instead.
 
+### Button, frontend and configuration declarations
+
+The manifest reader validates these additive declarations and exposes them in
+`PluginInfo`. The current contract provides metadata: declared-button rendering,
+frontend serving/loading and configuration controls are separate from validation.
+The existing JSON configuration editor remains available.
+
+```json
+{
+  "hooks": [
+    { "event": "manual", "name": "open", "description": "Open editor", "scope": "ticket", "lua": "open.lua" },
+    { "event": "manual", "name": "repository", "description": "Open repository", "scope": "global", "lua": "open.lua" },
+    { "event": "omo_started", "lua": "start.lua" }
+  ],
+  "buttons": [
+    { "label": "Open editor", "place": "ticket", "action": "open", "per_worktree": true },
+    { "label": "Open repository", "place": "project", "action": "repository" },
+    { "label": "Editors", "place": "sidebar", "action": "repository" }
+  ],
+  "frontend": { "script": "ui/main.js", "assets": "ui/assets" },
+  "default_config": { "editor": "code", "accept_terms": false, "idle_minutes": 30, "version": "1.0" },
+  "config_fields": [
+    { "key": "editor", "label": "Editor", "type": "select", "choices": [
+      { "value": "code", "label": "Code" },
+      { "value": "open", "label": "Open editor" }
+    ] },
+    { "key": "accept_terms", "label": "Accept licence terms", "type": "boolean" },
+    { "key": "idle_minutes", "label": "Idle minutes", "type": "number" },
+    { "key": "version", "label": "Version", "type": "string" }
+  ]
+}
+```
+
+All nested objects reject unknown keys and wrong types, including `null`.
+Labels contain 1–200 visible characters on one line. A button's `action` must
+name an existing manual hook. `ticket` requires ticket scope; `sidebar` and
+`project` require global scope. Each place/action pair is unique.
+`per_worktree` is optional (default false), and true is valid only at `ticket`:
+it describes one button per available project worktree.
+
+`frontend.script` is required when `frontend` is present. `frontend.assets` is
+an optional directory. `ParseManifest` checks their syntax; `ReadManifest`
+requires the script to be a regular file and assets to be an existing directory,
+both when installing/updating in staging and when loading installed plugins.
+Every component and every asset must be a real directory or regular file,
+without symlinks, even links within the plugin. Public paths use `/`, at most
+512 bytes, with no empty, `.` or `..` components, absolute/drive/UNC paths,
+backslashes, colons, hidden/control characters, Windows device names or trailing
+spaces/dots. Dot-prefixed components (including `.data`, `.git` and the install
+record), `settings`, `settings.yaml`, `settings.yml`, `settings.json` and
+`plugin.json` are private at every depth and cannot appear in public paths.
+The script is at most 1 MiB; the script plus assets are at most 64 MiB and
+10,000 entries (files and directories, including the script and assets root).
+Asset serving must recheck confinement on each read; loading is not protection
+against later filesystem edits by a plugin running as you.
+
+A configuration field names a top-level JSON key. Keys and select values use
+1–64 letters, digits, `.`, `_` or `-`, starting with a letter or digit. Keys
+are unique; `select` requires 1–100 choices with unique stable `value` strings
+and human `label` strings. Other types are exactly `boolean`, `string` and
+`number`; `choices` is refused on those types. Defaults come exclusively from
+`default_config`: a declared default must have the matching JSON type, a finite
+number, or a listed select value. Missing defaults are allowed and do not invent
+a value (in particular, no licence acceptance is implied). Unlisted JSON keys
+are kept, and the user's existing values win over defaults on install/update.
+These declarations validate defaults, not arbitrary existing user configuration.
+
+`GET /api/plugins` and `plugin.changed` include `buttons`, `frontend`,
+`config_fields` and `content_id` in each `PluginInfo`. Empty declarations are
+`[]` or `{}`, never null; non-select fields omit `choices`. `content_id` is a
+64-character SHA-256 of the exact manifest bytes and the public script/assets
+(paths and contents in sorted traversal order), recomputed on runtime load.
+It changes with script/asset edits even when `version` and installed `commit`
+stay the same. It is independent of staging/install location and user config;
+it is empty for unavailable or invalid manifests. Files outside the public
+frontend and manifest do not affect it. A consumer can use it to invalidate its
+frontend cache after reload.
+
+`omo_started` is accepted as a hook event; automatic lifecycle dispatch is not
+part of the manifest reader. Legacy `startup` and `load` remain errors pointing
+to `hooks` with `event: omo_started`; `javascript`, `files` and `company_load`
+point to `frontend.script`/`frontend.assets`. The other removed names remain
+refused with their replacement guidance.
+
 ### Events
 
 A command hook gets the event as JSON on standard input,
@@ -186,7 +273,7 @@ the same as the global table `event`.
 | `agent_started`, `agent_exited` | `ticket` (null for the CEO), `agent`; for exits also `reason`: `finished`, `stopped`, `crashed`, `usage` or `omo stopped` |
 | `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
 | `timer` | `at` |
-| `manual` | `action`, `ticket` (null for a global button) |
+| `manual` | `action`, `ticket` (null without a ticket), `project` (`{id}` for a selected project, otherwise null) |
 
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
 `supervisor`, `attention` and `url` (the ticket's address on the board, without
@@ -239,17 +326,58 @@ bytecode. `print` writes to the plugin's log. The globals:
 
 A run ends at the hook's time limit, and memory is watched. Every configuration
 string of six characters or more is replaced by `[redacted]` in the log, in
-error texts and in answers, and so are the header values the hook sent with
+error texts and in answer messages, and so are the header values the hook sent with
 `omo.http`.
 
 ### Buttons (manual hooks)
 
 A manual hook with `scope: ticket` adds a button to every ticket; one with
-`scope: global` adds a button on the plugin's page. Only you press them. The
-hook's answer shows in a dialog over the ticket, or under the button on the
-plugin's page: from Lua a string or `{message = "…"}`, from a command its
-standard output (plain text, a JSON string or `{"message": "…"}`), at most 1,000
-characters. One button of a plugin runs at a time.
+`scope: global` adds a button on the plugin's page. Only you press them. One
+action per plugin runs at a time, bounded by its timeout.
+
+`POST /api/plugins/{name}/actions/{action}` accepts `{ticket?, project?}`.
+`ticket` is a positive ticket number when supplied (zero/omitted means none);
+`project` is an optional registered project id. With a ticket it must belong
+to that ticket. Ticket-scope actions still require a ticket. The hook receives
+`event.data.project = {id = "…"}` or null; folder resolution is separate.
+Existing request bodies remain valid.
+
+Lua may return a string, nil, or a table containing `message`, `url`
+and/or `forward_id` string fields. Objects with navigation fields are strict:
+unknown fields or invalid navigation fail the action. A command's standard
+output may be plain text, a JSON string, or the same JSON object. Legacy
+message objects still ignore extra metadata; other command JSON without
+navigation fields still displays as plain text. The response always contains
+`message` (empty when absent); `url` and `forward_id` are optional and mutually
+exclusive. A message may accompany either navigation result:
+
+```lua
+return {message = "Editor ready", forward_id = "0123456789abcdef0123456789abcdef"}
+-- Or an ordinary external link:
+-- return {url = "https://example.org/help?topic=editor#setup"}
+```
+
+Messages are cleaned of secrets and hidden characters and cut to 1,000
+characters. Navigation URLs are validated separately and preserved exactly,
+including escaping/query/fragment bytes: never truncated, redacted or rebuilt
+into another address. They must be absolute HTTP(S), at most 8,192 bytes, with
+no userinfo, backslashes, whitespace, hidden/control characters or known
+configuration/HTTP-request secrets (including URL-encoded secrets). Conventional
+authentication query/fragment keys (`token`, `access_token`, `refresh_token`,
+`id_token`, `api_key`, `apikey`, `key`, `password`, `passwd`, `authorization`,
+`auth`, `bearer`, `grant`, `code`, `__omo_proxy_grant`, case-insensitive with
+hyphens treated as underscores), `omo-token.` and bare 64-hex login fragments,
+and internal proxy bootstrap URLs (including normalized traversal paths) are
+refused. The server also rejects its current login token anywhere in a URL,
+including encoded paths or ordinary query values. Errors do not repeat the
+unsafe address.
+
+`forward_id` must be the proxy registry's lowercase 32-hex-character identifier.
+An integration opening it must call the existing authenticated
+`POST /api/proxy/forwards/{id}/open` flow and navigate its opaque returned URL
+unchanged; a hook must return the id rather than a proxy login/grant URL. Hook
+results contain no board login token. The existing message dialogs display the
+`message`; navigation consumers use the additional result fields.
 
 ### Example
 

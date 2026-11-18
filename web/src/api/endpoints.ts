@@ -527,8 +527,8 @@ export function getPluginLog(c: ApiClient, name: string): R<PluginLogLine[]> {
   return c.get(`/api/plugins/${seg(name)}/log`)
 }
 
-export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number): R<PluginRunResult> {
-  const body: PluginRun = ticket === undefined ? {} : { ticket }
+export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number, project?: string): R<PluginRunResult> {
+  const body: PluginRun = { ...(ticket === undefined ? {} : { ticket }), ...(project === undefined ? {} : { project }) }
   return c.send('POST', `/api/plugins/${seg(name)}/actions/${seg(action)}`, body)
 }
 
