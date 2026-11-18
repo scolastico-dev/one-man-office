@@ -99,3 +99,45 @@ func isSel(e ast.Expr, pkg, name string) bool {
 	id, ok := sel.X.(*ast.Ident)
 	return ok && id.Name == pkg
 }
+
+// TestCheckoutsAreSwappedBehindTheGate guards the turn-taking of omo's
+// readers and a fetch: this package replaces a checkout only through
+// gitops.FetchSourceGated, whose gate holds checkouts. The ungated
+// FetchSource would rename the folder while the manager reads it, which
+// Windows refuses.
+func TestCheckoutsAreSwappedBehindTheGate(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gated := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "FetchSource":
+				t.Errorf("%s fetches a checkout with FetchSource; use FetchSourceGated with the checkouts lock", file)
+			case "FetchSourceGated":
+				gated++
+			}
+			return true
+		})
+	}
+	if gated == 0 {
+		t.Fatal("found no gated fetch; the guard no longer sees the code")
+	}
+}

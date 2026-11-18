@@ -80,6 +80,10 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	if _, err := s.settings.AddProject(goneDir, "gone"); err != nil {
 		t.Fatal(err)
 	}
+	// The worker that records a new project reads its branches with git
+	// running in the folder, and Windows does not remove a folder a process
+	// runs in: the removal waits for that worker.
+	s.waitSettingsEvents(context.Background())
 	if err := os.RemoveAll(goneDir); err != nil {
 		t.Fatal(err)
 	}

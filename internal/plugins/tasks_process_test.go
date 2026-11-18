@@ -67,7 +67,7 @@ func TestProcessGroupCancellationBeforeRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer group.close()
-	if err := cmd.Start(); err != nil {
+	if err := group.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	// Exercise cancellation before started deterministically, independent of

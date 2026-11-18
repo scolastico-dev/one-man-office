@@ -52,6 +52,18 @@ const maxMessage = 500
 // checkouts, to notice skill set files written by hand.
 const DefaultPoll = 5 * time.Second
 
+// checkouts keeps omo's own reads of a checkout apart from the moments omo
+// renames or removes a checkout folder. Windows does not rename or remove a
+// folder while a file in it is open, and omo reads the checkouts all the
+// time (the manager's comparison every Poll, every state asked for, every
+// prompt built) while a fetch of the same manager replaces one. Readers
+// hold it shared for the length of one read (fromSource, Find, Missing,
+// diskState); it is held exclusively only for the renames of a swap and
+// for a removal, never for a fetch. A reader must not take it twice.
+// Programs other than omo that keep a file of a checkout open are outside
+// of it.
+var checkouts sync.RWMutex
+
 // Options configure a Manager.
 type Options struct {
 	// Dir is the skills folder (globalhome.Layout.Skills); "" disables
@@ -269,7 +281,10 @@ func (m *Manager) Removed(name string) {
 	if _, ok := m.o.Store.SkillSet(name); ok {
 		return
 	}
-	if err := os.RemoveAll(filepath.Join(m.o.Dir, name)); err != nil {
+	checkouts.Lock()
+	err := os.RemoveAll(filepath.Join(m.o.Dir, name))
+	checkouts.Unlock()
+	if err != nil {
 		m.o.Log.Printf("skill set %s: remove the checkout: %v", name, err)
 	}
 }
@@ -323,7 +338,9 @@ func (m *Manager) diskState(name string) api.SkillSetState {
 	if !ok {
 		return st
 	}
+	checkouts.RLock()
 	commit, err := m.o.Git.SourceCommit(context.Background(), path)
+	checkouts.RUnlock()
 	if err != nil {
 		return st
 	}
@@ -438,7 +455,11 @@ func (m *Manager) fetchOnce(ctx context.Context, name string, j *job) {
 	}
 	m.mu.Unlock()
 	path := filepath.Join(m.o.Dir, name)
-	commit, err := m.o.Git.FetchSource(ctx, k.Repository, k.Ref, path)
+	commit, err := m.o.Git.FetchSourceGated(ctx, k.Repository, k.Ref, path, func(swap func() error) error {
+		checkouts.Lock()
+		defer checkouts.Unlock()
+		return swap()
+	})
 	if err == nil {
 		err = RecordSource(path, k.Repository, k.Ref)
 	}
@@ -506,7 +527,10 @@ func (m *Manager) cleanFolder() {
 		default:
 			continue
 		}
-		if err := os.RemoveAll(path); err != nil {
+		checkouts.Lock()
+		err := os.RemoveAll(path)
+		checkouts.Unlock()
+		if err != nil {
 			m.o.Log.Printf("skill sets: remove %s: %v", path, err)
 		}
 	}

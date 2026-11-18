@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // listRepo is a local repository that stands in for the release branch of
@@ -133,7 +134,7 @@ func TestPluginCatalogRoute(t *testing.T) {
 	}
 
 	// A broken list is a clear state, not an error of the route.
-	r.publish(map[string]string{"plugins/index.yaml": "plugins:\n  - name: x\n    tag: gold\n    description: d\n    source: /x\n"})
+	r.publish(map[string]string{"plugins/index.yaml": "plugins:\n  - name: x\n    tag: gold\n    description: d\n    source: " + testpath.Abs("/x") + "\n"})
 	broken := readCatalogRoute(t, s, b, "?refresh=true")
 	if broken.Available || !strings.Contains(broken.Message, "tag must be") || len(broken.Plugins) != 0 || broken.FetchedAt == nil {
 		t.Fatalf("broken list: %+v", broken)

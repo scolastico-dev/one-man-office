@@ -73,6 +73,7 @@ Package map (`internal/`):
 | `webterm` | web terminal core; the engine serves agent terminals and user shells through it |
 | `userterm` | the user's shells in the board: a manager that opens a shell in a project folder or a ticket's worktree (16 running at most), keeps its output for replay, and holds the ticket's worktree until the last shell in it ends. The environment of a shell has no `OMO_AGENT_ID`. A ticket shell is refused unless the folder is the worktree omo made and its `.git` is the gitfile git wrote |
 | `session` | terminal processes, transcripts, environment merging |
+| `processtree` | shared contained launch: Windows roots start suspended, join a kill-on-close job, then resume; also owns the Windows ConPTY backend. Plugins, MCP stdio/header commands, Git and environment hooks use this boundary; its structure guard audits direct starts. Unix keeps pre-exec process groups and PTY sessions |
 | `childenv` | the base environment of every program omo starts (agents, CEO, export jobs, git, plugin programs, usage helpers, user shells): omo's own without the variables that tie a program to the IDE or terminal session omo was started from (`TERM_PROGRAM`, `VSCODE_*`, `CLAUDE_CODE_SSE_PORT`, `TMUX`, ...); the agent and profile environments are laid over it. `guard_test.go` fails on `os.Environ` elsewhere and on a started program without its own `Env` |
 | `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation (`agentcli.Supported`: claude, codex, agy, gemini; Codex and Antigravity trust the worktree through launch arguments, Gemini through a variable), folder trust for Claude, agent names, file locks; guard tests fail when a supported program lacks a catalog entry, a start adapter, settings validation or a choice in the web's profile form |
 | `textsafe` | the characters omo never shows or prints as they are (controls, bidirectional and invisible characters); `web/src/components/ui/visibleText.ts` escapes the same set, both tested against `internal/textsafe/testdata/hidden.json` |
@@ -522,7 +523,7 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 
 ## Tests
 
-`make check` is the required local gate and matches CI: `gofmt -l` must report nothing, `go vet ./...` must pass, `staticcheck -checks U1000 ./...` must report nothing where staticcheck is installed (CI skips it), `go test ./... -timeout 900s` must pass.
+Inside a Go test binary `db.Open` turns SQLite's per-commit disk flush off (`synchronous=OFF`, `db.syncPragma`, `testing.Testing()`); omo itself keeps the default and flushes every commit. `make check` is the required local gate and matches CI; it runs every stage even when an earlier one failed and names the failed stages at the end, so one run reports all problems (CI steps and jobs do the same: none is skipped because another failed): `gofmt -l` must report nothing, `go vet ./...` must pass, `staticcheck -checks U1000 ./...` must report nothing where staticcheck is installed (CI skips it), `go test ./... -timeout 900s` must pass.
 
 Engine and end-to-end tests run agents as the scripted fake agent (`internal/fakeagent`): the test binary's `TestMain` calls `fakeagent.Main()` when `fakeagent.Enabled()`, and a profile with CLI `custom` runs `fakeagent.Command()` with `fakeagent.Env(script)`. `internal/e2e` builds the server from its parts (`server.New` with a runner, `ListenSocket`, the handlers served, `StartEngine`) and asserts on the board and the repositories; it is skipped on Windows. No test calls a real model.
 
@@ -532,7 +533,7 @@ Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` 
 
 ## CI and releases
 
-- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests.
+- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests; `windows-latest` jobs run `go vet ./...` and the whole Go test suite in four groups side by side (engine; server; gitops and board; everything else), because starting programs is far slower there; `archtest.TestWindowsTestGroupsCoverEveryPackageOnce` holds the groups complete.
 - `.github/workflows/browser-tests.yml`: browser end-to-end tests on pull requests and pushes to `main`.
 - `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
 - `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.

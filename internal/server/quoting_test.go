@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // TestDecodeQuotesNoValue sends bodies whose parser errors quote what they
@@ -56,11 +57,11 @@ func asAPIError(err error, e **api.Error) bool { return errors.As(err, e) }
 // that does not render is reported by the engine (see the engine's
 // TestCustomPromptErrorIsBounded).
 var brokenFiles = map[string]string{
-	"settings.yaml":         "limits:\n  tasks: 2\nhealth:\n  silent_after: " + canaryGeneral + "\nworkspace_roots:\n  - path: /a\n    ignore: [\"**" + canaryModel + "\"]\n",
+	"settings.yaml":         "limits:\n  tasks: 2\nhealth:\n  silent_after: " + canaryGeneral + "\nworkspace_roots:\n  - path: " + testpath.Abs("/a") + "\n    ignore: [\"**" + canaryModel + "\"]\n",
 	"profiles/broken.yaml":  "cli: custom\ncommand: x\nprompt_delivery:\n  delay: " + canaryProfile + "\nmodels:\n  a: {}\n",
 	"profiles/number.yaml":  "cli: custom\ncommand: x\nmodels:\n  a:\n    args: " + canaryNumber + "\n",
 	"roles/developer.yaml":  "models: [\"" + canaryModel + "\"]\n",
-	"projects/broken.yaml":  "name: [" + canaryGeneral + "]\npath: /p\n",
+	"projects/broken.yaml":  "name: [" + canaryGeneral + "]\npath: " + testpath.Abs("/p") + "\n",
 	"settings.yaml.unknown": canaryGeneral,
 }
 

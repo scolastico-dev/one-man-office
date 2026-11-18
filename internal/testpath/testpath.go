@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -50,4 +51,15 @@ func Reaches(path string) []string {
 		}
 	}
 	return found
+}
+
+// Abs turns a slash-separated absolute path of a test ("/srv/omo") into one
+// that is absolute on the platform the test runs on. A path that starts
+// with a slash has no drive on Windows and is not absolute there, so tests
+// that need "some absolute path" name it through Abs.
+func Abs(path string) string {
+	if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
+		return `C:` + filepath.FromSlash(path)
+	}
+	return filepath.FromSlash(path)
 }

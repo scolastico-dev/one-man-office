@@ -21,7 +21,9 @@ func TestLicenceIsStatedConsistently(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(raw)
+		// A checkout may hold these files with CRLF line ends (git on
+		// Windows converts them by default); the licence is the same text.
+		return strings.ReplaceAll(string(raw), "\r\n", "\n")
 	}
 	if !strings.Contains(read("LICENSE"), "GNU AFFERO GENERAL PUBLIC LICENSE\n                       Version 3, 19 November 2007") {
 		t.Error("LICENSE is not the text of the GNU AGPL version 3")

@@ -221,6 +221,16 @@ const checkoutAttributes = "* -filter -text -eol -ident -working-tree-encoding\n
 // agents control (ErrAgentFolder). Errors never repeat the address's user
 // or password.
 func (g *Git) FetchSource(ctx context.Context, url, ref, dir string) (commit string, err error) {
+	return g.FetchSourceGated(ctx, url, ref, dir, nil)
+}
+
+// FetchSourceGated is FetchSource for a caller that reads files in dir
+// itself: the renames that put the new folder at dir run inside gate, which
+// must call swap once and return its error. The caller's gate keeps its own
+// readers out for that moment, because Windows does not rename a folder
+// while a file in it is open. The fetch before and the removal of the old
+// folder after run outside gate. A nil gate runs swap directly.
+func (g *Git) FetchSourceGated(ctx context.Context, url, ref, dir string, gate func(swap func() error) error) (commit string, err error) {
 	if err := ValidSourceURL(url); err != nil {
 		return "", err
 	}
@@ -271,10 +281,22 @@ func (g *Git) FetchSource(ctx context.Context, url, ref, dir string) (commit str
 	if size, _ := folderSize(tmp, MaxSourceBytes); size > MaxSourceBytes {
 		return "", fmt.Errorf("%w (more than %d bytes)", ErrSourceTooLarge, MaxSourceBytes)
 	}
-	if err := swapIn(tmp, dir); err != nil {
+	if gate == nil {
+		gate = func(swap func() error) error { return swap() }
+	}
+	aside := ""
+	if err := gate(func() (err error) {
+		aside, err = swapIn(tmp, dir)
+		return err
+	}); err != nil {
 		return "", err
 	}
 	keep = true
+	if aside != "" {
+		if err := os.RemoveAll(aside); err != nil {
+			return "", err
+		}
+	}
 	return commit, nil
 }
 
@@ -451,31 +473,32 @@ func folderSize(dir string, max int64) (int64, error) {
 }
 
 // swapIn puts the folder tmp at dir: an existing dir is renamed aside
-// first, tmp renamed to dir, the old folder removed after. When the second
-// rename fails the old folder is put back.
-func swapIn(tmp, dir string) error {
+// first, tmp renamed to dir. When the second rename fails the old folder is
+// put back. It returns the folder that now holds the old one, for the
+// caller to remove, or "" when there was no old folder.
+func swapIn(tmp, dir string) (aside string, err error) {
 	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
-		return os.Rename(tmp, dir)
+		return "", os.Rename(tmp, dir)
 	} else if err != nil {
-		return err
+		return "", err
 	}
-	aside, err := os.MkdirTemp(filepath.Dir(dir), "."+filepath.Base(dir)+".old-")
+	aside, err = os.MkdirTemp(filepath.Dir(dir), "."+filepath.Base(dir)+".old-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	old := filepath.Join(aside, "old")
 	if err := os.Rename(dir, old); err != nil {
 		_ = os.Remove(aside)
-		return err
+		return "", err
 	}
 	if err := os.Rename(tmp, dir); err != nil {
 		if rerr := os.Rename(old, dir); rerr != nil {
-			return fmt.Errorf("%v; the previous checkout is kept at %s", err, old)
+			return "", fmt.Errorf("%v; the previous checkout is kept at %s", err, old)
 		}
 		_ = os.Remove(aside)
-		return err
+		return "", err
 	}
-	return os.RemoveAll(aside)
+	return aside, nil
 }
 
 // SourceCommit reads the commit of a checkout made by FetchSource. It reads

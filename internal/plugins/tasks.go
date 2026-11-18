@@ -234,7 +234,7 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 		cancel()
 		return api.PluginTask{}, errors.New("the task program could not start")
 	}
-	if err = cmd.Start(); err != nil {
+	if err = group.Start(cmd); err != nil {
 		cancel()
 		group.close()
 		return api.PluginTask{}, errors.New("the task program could not start")

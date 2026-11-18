@@ -388,6 +388,15 @@ omo.store_set("moved", event.data.n)
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	released := time.Now()
+	defer func() {
+		// Says what a run that timed out got to: events lost (the first one
+		// is missing when its program failed) or events still arriving.
+		if t.Failed() {
+			seen := e.stored("slow", "seen")
+			t.Logf("%v after the release: %d events seen (%.60s…), state %+v, log:\n%s", time.Since(released), strings.Count(seen, ",")+1, seen, e.info("slow"), e.logText("slow"))
+		}
+	}()
 	eventually(t, "the slow plugin", func() bool { return strings.Count(e.stored("slow", "seen"), ",") == 256 })
 	var seen []int
 	if err := json.Unmarshal([]byte(e.stored("slow", "seen")), &seen); err != nil {
@@ -592,6 +601,13 @@ func TestChangedReportsStates(t *testing.T) {
 	e.load(enabled("p", nil))
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{}})
 	eventually(t, "the error", func() bool { return e.info("p").State == StateError })
+	// Changed is called after the state was stored, so the last report can
+	// come a moment after Infos shows the state.
+	eventually(t, "the report of the error", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return len(e.changes) > 0 && e.changes[len(e.changes)-1].State == StateError
+	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var states []string

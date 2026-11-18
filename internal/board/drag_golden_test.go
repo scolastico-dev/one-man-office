@@ -368,6 +368,9 @@ func TestUserDragTargetsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v\nregenerate it with: go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1", dragGoldenPath, err)
 	}
+	// A checkout on Windows may hold the file with CRLF line ends (git's
+	// core.autocrlf); the rules are the same, so the line ends do not count.
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("the board's drag rules no longer match %s.\n"+
 			"Regenerate it with: go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1\n"+

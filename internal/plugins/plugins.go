@@ -1273,7 +1273,7 @@ func runProgram(ctx context.Context, cmd *exec.Cmd) string {
 		return "the program could not start"
 	}
 	defer group.close()
-	if err := cmd.Start(); err != nil {
+	if err := group.Start(cmd); err != nil {
 		if ctx.Err() != nil {
 			return stopText(ctx)
 		}

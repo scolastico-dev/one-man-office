@@ -10,6 +10,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/skillsets"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 func TestReadyRendersRestartNoteForFreshSession(t *testing.T) {
@@ -214,9 +215,12 @@ func TestRolePromptHasSkillSetBlocks(t *testing.T) {
 	if err := h.st.PutPromptIf("", "developer-instructions", "Always write tests first."); err != nil {
 		t.Fatal(err)
 	}
+	// An absolute folder of the platform: "/srv/skills.git" has no drive
+	// on Windows and is no absolute path there.
+	source := testpath.Abs("/srv/skills.git")
 	put := func(name string, enabled bool, text map[string]string) {
 		t.Helper()
-		if err := h.st.PutSkillSetIf("", api.SkillSet{Name: name, Repository: "/srv/skills.git", Update: api.SkillSetPinned, Enabled: enabled, Instructions: text}); err != nil {
+		if err := h.st.PutSkillSetIf("", api.SkillSet{Name: name, Repository: source, Update: api.SkillSetPinned, Enabled: enabled, Instructions: text}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -224,7 +228,7 @@ func TestRolePromptHasSkillSetBlocks(t *testing.T) {
 	put("off", false, map[string]string{"developer": "disabled", "reviewer": "disabled"})
 	put("unfetched", true, map[string]string{"developer": "no checkout"})
 	for _, name := range []string{"sp", "off"} {
-		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), "/srv/skills.git", ""); err != nil {
+		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), source, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/skillsets"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // TestEveryRoleGetsOnlyItsSkillSets: the prompt of every role (CEO and
@@ -32,9 +33,12 @@ func TestEveryRoleGetsOnlyItsSkillSets(t *testing.T) {
 	write("code/skills/tdd/SKILL.md", "---\nname: tdd\n---\n")
 	write("code/skills/debug/SKILL.md", "---\nname: debug\n---\n")
 	write("all/SKILL.md", "---\nname: everyone\n---\n")
+	// An absolute folder of the platform: "/srv/skills.git" has no drive
+	// on Windows and is no absolute path there.
+	source := testpath.Abs("/srv/skills.git")
 	put := func(k api.SkillSet) {
 		t.Helper()
-		k.Repository, k.Update, k.Enabled = "/srv/skills.git", api.SkillSetPinned, true
+		k.Repository, k.Update, k.Enabled = source, api.SkillSetPinned, true
 		if err := h.st.PutSkillSetIf("", k); err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +47,7 @@ func TestEveryRoleGetsOnlyItsSkillSets(t *testing.T) {
 	put(api.SkillSet{Name: "code", Roles: []string{"developer", "reviewer"}, Paths: []string{"skills/tdd"}})
 	put(api.SkillSet{Name: "all"})
 	for _, name := range []string{"talk", "code", "all"} {
-		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), "/srv/skills.git", ""); err != nil {
+		if err := skillsets.RecordSource(filepath.Join(h.layout.Skills, name), source, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

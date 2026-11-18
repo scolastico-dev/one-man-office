@@ -1,8 +1,11 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -13,17 +16,28 @@ import (
 // must answer like a real terminal.
 func TestSessionAnswersTerminalQueries(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "q.log")
+	// Everything the program writes, as omo receives it: it tells whether
+	// the query reached omo at all.
+	var mu sync.Mutex
+	var raw []byte
 	// Emit an OSC 11 background query, then consume one byte of the reply.
 	// Raw mode as termenv itself uses: an OSC reply carries no newline, so a
-	// canonical-mode read would never see it.
+	// canonical-mode read would never see it. The START line before all of
+	// it shows in a failure that the script ran.
 	s, err := Start(Options{
 		Cmd:     "sh",
-		Args:    []string{"-c", `stty raw; printf '\033]11;?\007'; head -c 1 >/dev/null; stty sane; echo GOT:reply`},
+		Args:    []string{"-c", `echo START; stty raw; printf '\033]11;?\007'; head -c 1 >/dev/null; stty sane; echo GOT:reply`},
 		LogPath: log, Rows: 24, Cols: 80,
+		OnOutput: func(b []byte) {
+			mu.Lock()
+			raw = append(raw, b...)
+			mu.Unlock()
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	endSession(t, s)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(s.Screen(), "GOT:") {
@@ -31,7 +45,19 @@ func TestSessionAnswersTerminalQueries(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("no reply to OSC 11 query; screen:\n%s", s.Screen())
+	mu.Lock()
+	got := string(raw)
+	mu.Unlock()
+	// A Windows pseudoconsole reads the program's output itself and passes
+	// on what it decides to: the console that Windows ships keeps this
+	// query, so omo never sees it and cannot answer. That is skipped here
+	// only when it is what happened: the script ran and no query arrived.
+	// A query that did arrive and stayed unanswered fails on every platform.
+	if runtime.GOOS == "windows" && strings.Contains(got, "START") && !strings.Contains(got, "\x1b]11;?") {
+		t.Skipf("the Windows pseudoconsole did not pass the OSC 11 query on to omo; it received %q", got)
+	}
+	written, rerr := os.ReadFile(log)
+	t.Fatalf("no reply to OSC 11 query; screen:\n%s\nreceived: %q\nlog (read error %v): %q", strings.TrimSpace(s.Screen()), got, rerr, written)
 }
 
 func TestAnswerQueriesCarriesSplitSequences(t *testing.T) {

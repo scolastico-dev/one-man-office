@@ -414,7 +414,7 @@ func TestUnknownFolderAtWorktreePathIsNotTouched(t *testing.T) {
 	h.approve(task)
 	h.step()
 	tk := h.ticket(task)
-	if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, dir) {
+	if tk.FailedStep != api.FailedStart || !h.flagged(task, dir) {
 		t.Fatalf("failed step %q attention %q", tk.FailedStep, tk.Attention)
 	}
 	if tk.Column != api.ColumnReady || tk.Busy {
@@ -503,7 +503,7 @@ func TestStartRefusesWorktreeThatIsNotItsOwn(t *testing.T) {
 			h.approve(task)
 			h.step()
 			tk = h.ticket(task)
-			if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "already exists and is not a worktree omo recorded") {
+			if tk.FailedStep != api.FailedStart || !h.flagged(task, "already exists and is not a worktree omo recorded") {
 				t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 			}
 			if tk.Projects[0].Branch != "" || len(h.runner.all()) != 0 {
@@ -755,9 +755,7 @@ func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
 	if err := os.Rename(wtOne, wtOne+"-moved"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(wtTwo, wtOne); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, wtTwo, wtOne)
 	startsIn := func(dir string) int {
 		n := 0
 		for _, s := range h.runner.specList() {
@@ -772,7 +770,7 @@ func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
 	if startsIn(wtOne) != before {
 		t.Fatalf("a session started in the linked folder %s", wtOne)
 	}
-	if tk := h.ticket(one); tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "leaves it alone") {
+	if tk := h.ticket(one); tk.FailedStep != api.FailedStart || !h.flagged(one, "leaves it alone") {
 		t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 	}
 }

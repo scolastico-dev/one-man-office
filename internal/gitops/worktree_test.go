@@ -83,7 +83,7 @@ func TestRemoveWorktreeIfCleanKeepsDirty(t *testing.T) {
 				t.Fatalf("dirty = %q, want [%s]", files, want)
 			}
 			sameSnapshot(t, "worktree", before, snapshot(t, wt))
-			if !strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+			if !registeredT(t, repo, wt) {
 				t.Fatal("registration removed")
 			}
 		})
@@ -102,7 +102,7 @@ func TestRemoveWorktreeIfCleanRemovesIgnoredFiles(t *testing.T) {
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("folder still exists")
 	}
-	if strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+	if registeredT(t, repo, wt) {
 		t.Fatal("registration left behind")
 	}
 	if exists, _ := g.BranchExists(repo, "omo/1-x"); !exists {
@@ -124,11 +124,10 @@ func TestRemoveWorktreeOfMissingFolderDropsOnlyItsRegistration(t *testing.T) {
 	if files, err := g.RemoveWorktreeIfClean(repo, gone, "omo/gone"); err != nil || len(files) != 0 {
 		t.Fatalf("dirty = %q, err = %v", files, err)
 	}
-	list := tg(t, repo, "worktree", "list", "--porcelain")
-	if strings.Contains(list, gone) {
+	if registeredT(t, repo, gone) {
 		t.Fatal("registration of the missing folder left behind")
 	}
-	if !strings.Contains(list, other) {
+	if !registeredT(t, repo, other) {
 		t.Fatal("another missing worktree was pruned too")
 	}
 	// Unknown folders and repeated calls are no-ops.
@@ -152,7 +151,7 @@ func TestForceRemoveWorktreeDiscardsChangesKeepsBranch(t *testing.T) {
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("folder still exists")
 	}
-	if strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+	if registeredT(t, repo, wt) {
 		t.Fatal("registration left behind")
 	}
 	if exists, _ := g.BranchExists(repo, "omo/1-x"); !exists {
@@ -248,11 +247,11 @@ func TestDeleteBranchRestoresBranchCheckedOutMeanwhile(t *testing.T) {
 func TestWorktreeOf(t *testing.T) {
 	repo := newTestRepo(t)
 	g := testGit(t)
-	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || wt != repo {
+	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || !samePathT(wt, repo) {
 		t.Fatalf("main: %q %v %v", wt, found, err)
 	}
 	linked := addWorktree(t, repo, "omo/1-x")
-	if wt, found, err := g.WorktreeOf(repo, "omo/1-x"); err != nil || !found || wt != linked {
+	if wt, found, err := g.WorktreeOf(repo, "omo/1-x"); err != nil || !found || !samePathT(wt, linked) {
 		t.Fatalf("linked: %q %v %v", wt, found, err)
 	}
 	tg(t, repo, "branch", "free", "main")
@@ -260,7 +259,7 @@ func TestWorktreeOf(t *testing.T) {
 		t.Fatalf("free: %v %v", found, err)
 	}
 	// Called from a linked worktree, the answer is the same.
-	if wt, found, err := g.WorktreeOf(linked, "main"); err != nil || !found || wt != repo {
+	if wt, found, err := g.WorktreeOf(linked, "main"); err != nil || !found || !samePathT(wt, repo) {
 		t.Fatalf("from linked: %q %v %v", wt, found, err)
 	}
 }
@@ -443,7 +442,7 @@ func TestForceRemoveWorktreeRefusesLockedWorktree(t *testing.T) {
 	if err := g.ForceRemoveWorktree(repo, wt); !errors.Is(err, ErrWorktreeLocked) {
 		t.Fatalf("missing folder: err = %v, want ErrWorktreeLocked", err)
 	}
-	if !strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+	if !registeredT(t, repo, wt) {
 		t.Fatal("registration of the locked worktree removed")
 	}
 }
@@ -646,5 +645,85 @@ func TestBranchRefResolvesOnlyTheBranch(t *testing.T) {
 	}
 	if ok, err := g.BranchExists(repo, "main~1"); err == nil || ok {
 		t.Fatalf("BranchExists(main~1) = %v, %v", ok, err)
+	}
+}
+
+func TestRealPathResolvesWhatExists(t *testing.T) {
+	dir := t.TempDir()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := realPath(dir); got != real {
+		t.Fatalf("existing folder: %q, want %q", got, real)
+	}
+	if got, want := realPath(filepath.Join(dir, "gone", "deep")), filepath.Join(real, "gone", "deep"); got != want {
+		t.Fatalf("missing folder: %q, want %q", got, want)
+	}
+	if !samePath(filepath.Join(dir, "gone"), filepath.Join(real, "gone")) || samePath(filepath.Join(dir, "gone"), filepath.Join(dir, "other")) {
+		t.Fatal("samePath is wrong for missing folders")
+	}
+	if foldsCase && !samePath(strings.ToUpper(dir), dir) {
+		t.Fatal("another case of the folder is another folder")
+	}
+	// Windows has no links without a privilege.
+	if runtime.GOOS != "windows" {
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(dir, link); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := realPath(filepath.Join(link, "gone")), filepath.Join(real, "gone"); got != want {
+			t.Fatalf("missing folder behind a link: %q, want %q", got, want)
+		}
+	}
+}
+
+// git names a worktree's folder resolved; omo may name it another way (a
+// link in a parent; on Windows a short name or another case). A folder that
+// is gone cannot be resolved itself, and its registration is found all the
+// same.
+func TestMissingWorktreeIsFoundUnderAnotherSpelling(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	spell := func(wt string) string {
+		// Windows has no links without a privilege; there and on macOS
+		// another case is another spelling (and on Windows t.TempDir is
+		// already a short name of what git records).
+		if foldsCase {
+			return filepath.Join(filepath.Dir(wt), strings.ToUpper(filepath.Base(wt)))
+		}
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(filepath.Dir(wt), link); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Join(link, filepath.Base(wt))
+	}
+
+	locked := addWorktree(t, repo, "omo/locked")
+	tg(t, repo, "worktree", "lock", locked)
+	lockedAs := spell(locked)
+	if err := os.RemoveAll(locked); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ForceRemoveWorktree(repo, lockedAs); !errors.Is(err, ErrWorktreeLocked) {
+		t.Fatalf("locked: err = %v, want ErrWorktreeLocked", err)
+	}
+	if !registeredT(t, repo, locked) {
+		t.Fatal("registration of the locked worktree removed")
+	}
+
+	gone := addWorktree(t, repo, "omo/gone")
+	goneAs := spell(gone)
+	if branch, found, err := g.BranchAt(repo, goneAs); err != nil || !found || branch != "omo/gone" {
+		t.Fatalf("BranchAt = %q %v %v", branch, found, err)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	if files, err := g.RemoveWorktreeIfClean(repo, goneAs, "omo/gone"); err != nil || len(files) != 0 {
+		t.Fatalf("dirty = %q, err = %v", files, err)
+	}
+	if registeredT(t, repo, gone) {
+		t.Fatal("registration of the missing folder left behind")
 	}
 }

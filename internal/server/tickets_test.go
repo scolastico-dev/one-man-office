@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,11 @@ func addProject(t *testing.T, s *Server) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Adding a project queues a settings event whose worker runs git in the
+	// project's folder. A test goes on only once that is over: its counts of
+	// events start from a settled state, and it can remove the folder (which
+	// Windows refuses while a program runs in it).
+	s.waitSettingsEvents(context.Background())
 	return p.ID
 }
 

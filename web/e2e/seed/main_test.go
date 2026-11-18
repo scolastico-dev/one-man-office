@@ -15,7 +15,19 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
+
+// quoted is s as a JSON string, quotes included: a path may hold characters
+// JSON escapes (the backslashes of a Windows path).
+func quoted(t *testing.T, s string) string {
+	t.Helper()
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
 
 func makeRepo(t *testing.T) string {
 	t.Helper()
@@ -133,7 +145,7 @@ func TestSeedBuildsEveryColumn(t *testing.T) {
 func TestSeedRefusesStoryBeyondInProgress(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	repo := makeRepo(t)
-	_, err := seedRun(t, `{"projects":[{"path":"`+repo+`","name":"demo"}],"tickets":[{"ref":"s","type":"story","title":"S","projects":["demo"],"to":"review"}]}`)
+	_, err := seedRun(t, `{"projects":[{"path":`+quoted(t, repo)+`,"name":"demo"}],"tickets":[{"ref":"s","type":"story","title":"S","projects":["demo"],"to":"review"}]}`)
 	if err == nil || !strings.Contains(err.Error(), "story") {
 		t.Fatalf("err = %v", err)
 	}
@@ -144,10 +156,7 @@ func TestSeedRefusesUnsafeHomes(t *testing.T) {
 	if err := run(context.Background(), strings.NewReader(`{}`), &bytes.Buffer{}); err == nil {
 		t.Error("ran without OMO_HOME")
 	}
-	outside := "/nonexistent-omo-seed-home"
-	if os.PathSeparator == '\\' {
-		t.Skip("path check is for unix homes")
-	}
+	outside := testpath.Abs("/nonexistent-omo-seed-home")
 	t.Setenv("OMO_HOME", outside)
 	if err := run(context.Background(), strings.NewReader(`{}`), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "temporary") {
 		t.Errorf("home outside the temp folder: err = %v", err)
@@ -160,7 +169,7 @@ func TestSeedRefusesUnsafeHomes(t *testing.T) {
 func TestSeedRefusesHomeWithTickets(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	repo := makeRepo(t)
-	sc := `{"projects":[{"path":"` + repo + `","name":"demo"}],"tickets":[{"ref":"a","type":"task","title":"A","projects":["demo"]}]}`
+	sc := `{"projects":[{"path":` + quoted(t, repo) + `,"name":"demo"}],"tickets":[{"ref":"a","type":"task","title":"A","projects":["demo"]}]}`
 	if _, err := seedRun(t, sc); err != nil {
 		t.Fatal(err)
 	}

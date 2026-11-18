@@ -270,7 +270,7 @@ func TestForeignFolderInPlaceOfTheWorkingFolderFailsTheStart(t *testing.T) {
 	h.approve(n)
 	h.step()
 	tk := h.ticket(n)
-	if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "already exists") || tk.Workdir != "" {
+	if tk.FailedStep != api.FailedStart || !h.flagged(n, "already exists") || tk.Workdir != "" {
 		t.Fatalf("failed %q, attention %q, workdir %q", tk.FailedStep, tk.Attention, tk.Workdir)
 	}
 }

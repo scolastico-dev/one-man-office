@@ -532,3 +532,18 @@ func TestMigrationNinePreservesTicketsAndAddsExportWatch(t *testing.T) {
 		t.Fatal("foreign keys disabled after migration")
 	}
 }
+
+// A test's database does not flush every commit to the disk; that is what
+// omo itself does, and what made the suite slow on a real disk. This holds
+// the switch in place: if tests stop turning the flush off, the suite gets
+// slow again without any test failing.
+func TestTestsOpenWithoutTheCommitFlush(t *testing.T) {
+	d := open(t)
+	var mode int
+	if err := d.QueryRow(`PRAGMA synchronous`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != 0 {
+		t.Fatalf("synchronous = %d in a test binary, want 0 (off)", mode)
+	}
+}

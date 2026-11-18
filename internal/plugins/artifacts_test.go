@@ -98,11 +98,18 @@ func TestArtifactsAsyncDedupCacheAndIntegrity(t *testing.T) {
 		t.Fatal("cross-plugin status")
 	}
 	old := ready.Path
+	// downloads is the first install plus one per tampered cache.
+	downloads := int32(1)
 	// Even in-memory ready cache must be rechecked on explicit reuse.
 	for _, tamper := range []string{"none", "content", "missing", "extra", "metadata", "mode"} {
 		t.Run(tamper, func(t *testing.T) {
-			if tamper == "mode" && os.PathSeparator == '\\' {
+			if tamper == "mode" && runtime.GOOS == "windows" {
+				// Windows has no Unix file modes: a chmod to 0600 leaves the
+				// file as it is, so there is nothing tampered to detect.
 				return
+			}
+			if tamper != "none" {
+				downloads++
 			}
 			switch tamper {
 			case "content":
@@ -127,11 +134,14 @@ func TestArtifactsAsyncDedupCacheAndIntegrity(t *testing.T) {
 			if s.State != "ready" {
 				t.Fatalf("cache reuse: %+v", s)
 			}
+			if got := requests.Load(); got != downloads {
+				t.Fatalf("%d downloads after this cache, want %d", got, downloads)
+			}
 			old = s.Path
 		})
 	}
-	if requests.Load() != 6 {
-		t.Fatalf("tampered caches not replaced: %d", requests.Load())
+	if requests.Load() != downloads {
+		t.Fatalf("tampered caches not replaced: %d downloads, want %d", requests.Load(), downloads)
 	}
 	// New manager can reuse completion, never resumes a queue.
 	other := New(Options{Root: e.root, ArtifactHTTP: server.Client()})
@@ -146,7 +156,7 @@ func TestArtifactsAsyncDedupCacheAndIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 	reused := waitArtifact(t, other, "p", "tool")
-	if reused.State != "ready" || reused.Path != old || requests.Load() != 6 {
+	if reused.State != "ready" || reused.Path != old || requests.Load() != downloads {
 		t.Fatalf("restart cache: %+v requests %d", reused, requests.Load())
 	}
 }

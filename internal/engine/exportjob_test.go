@@ -239,7 +239,9 @@ func TestExportFolderHoldsMaterialAndOmosOwnText(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fi.Mode().Perm() != want {
+		// Windows has no Unix file modes: Go reports 0777 or 0666 for
+		// everything there, whatever mode the file was made with.
+		if runtime.GOOS != "windows" && fi.Mode().Perm() != want {
 			t.Errorf("%s has mode %v, want %v", path, fi.Mode().Perm(), want)
 		}
 	}

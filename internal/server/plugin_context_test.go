@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 func TestPluginAuthoritativeFolderContext(t *testing.T) {
@@ -150,6 +151,10 @@ func TestPluginFolderAvailabilityAndEventPropagation(t *testing.T) {
 	if _, err := s.settings.UpdateProject(p.ID, settings.ProjectUpdate{Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
+	// Each project change is recorded by a worker that reads the project's
+	// branches with git running in the folder. Windows does not remove a
+	// folder a process runs in, so the removal waits for that worker.
+	s.waitSettingsEvents(ctx)
 	if err := os.RemoveAll(p.Path); err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +187,8 @@ func pluginRealPath(t *testing.T, p string) string {
 func TestPluginHistoricalEventFoldersMatchHistoricalProjects(t *testing.T) {
 	historical := api.TicketSummary{Number: 7, Projects: []api.TicketProject{{Project: "removed"}, {Project: "kept"}}, Attention: "look"}
 	current := map[string]any{"folders": []any{
-		map[string]any{"project": "new", "kind": "worktree", "path": "/new", "available": true, "reason": ""},
-		map[string]any{"project": "kept", "kind": "worktree", "path": "/kept", "available": true, "reason": ""},
+		map[string]any{"project": "new", "kind": "worktree", "path": testpath.Abs("/new"), "available": true, "reason": ""},
+		map[string]any{"project": "kept", "kind": "worktree", "path": testpath.Abs("/kept"), "available": true, "reason": ""},
 	}}
 	events := []api.Event{
 		boardEvent(t, 1, api.KindTicketCreated, api.TicketCreatedData{Ticket: historical}),
@@ -203,7 +208,7 @@ func TestPluginHistoricalEventFoldersMatchHistoricalProjects(t *testing.T) {
 			}
 			first := folders[0].(map[string]any)
 			second := folders[1].(map[string]any)
-			if first["project"] != "removed" || first["path"] != "" || first["available"] != false || first["reason"] == "" || second["project"] != "kept" || second["path"] != "/kept" {
+			if first["project"] != "removed" || first["path"] != "" || first["available"] != false || first["reason"] == "" || second["project"] != "kept" || second["path"] != testpath.Abs("/kept") {
 				t.Fatalf("%s snapshot misaligned %+v", ev.Kind, folders)
 			}
 		}
@@ -289,8 +294,8 @@ func TestPluginProjectlessWorkingDirectory(t *testing.T) {
 }
 
 func TestPluginHistoricalProjectlessFolders(t *testing.T) {
-	working := map[string]any{"project": "", "kind": "working_directory", "path": "/work/7", "available": true, "reason": ""}
-	project := map[string]any{"project": "repo", "kind": "worktree", "path": "/repo/7", "available": true, "reason": ""}
+	working := map[string]any{"project": "", "kind": "working_directory", "path": testpath.Abs("/work/7"), "available": true, "reason": ""}
+	project := map[string]any{"project": "repo", "kind": "worktree", "path": testpath.Abs("/repo/7"), "available": true, "reason": ""}
 	for _, c := range []struct {
 		name       string
 		historical api.TicketSummary

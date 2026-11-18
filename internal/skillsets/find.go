@@ -60,6 +60,8 @@ type Skill struct {
 // the order of the paths (a folder's skills sorted by path), each file
 // once, at most maxSkills. Paths the checkout does not have are skipped.
 func Find(root string, paths []string) []Skill {
+	checkouts.RLock()
+	defer checkouts.RUnlock()
 	if fi, err := os.Lstat(root); err != nil || !fi.IsDir() {
 		return nil
 	}
@@ -95,6 +97,8 @@ func Find(root string, paths []string) []Skill {
 // folder or a regular file (a link counts as missing), in their order;
 // nil when there is no checkout.
 func Missing(root string, paths []string) []string {
+	checkouts.RLock()
+	defer checkouts.RUnlock()
 	if fi, err := os.Lstat(root); err != nil || !fi.IsDir() {
 		return nil
 	}

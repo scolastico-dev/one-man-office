@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 // DefaultCommandTimeout bounds each backtick command of an environment
@@ -367,7 +368,7 @@ func executeEnvironmentCommand(parent context.Context, command string, timeout t
 	// A grandchild outside the group may keep the output pipe open; do not
 	// wait for it after the command itself ended or was killed.
 	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
+	out, err := processtree.Output(cmd)
 	if err := parent.Err(); err != nil {
 		return "", err
 	}
