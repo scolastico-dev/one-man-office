@@ -33,10 +33,14 @@ jobs:
       - name: Test
         run: make check
 
+      # The steps below run even when an earlier one failed, so that one run
+      # reports every problem. The job fails when any step failed.
       - name: Test the board
+        if: ${{ !cancelled() }}
         run: make web-check
 
       - name: Build all platforms
+        if: ${{ !cancelled() }}
         run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
 
   windows-test:
@@ -58,11 +62,11 @@ jobs:
         run: go vet ./...
 
       - name: Test on Windows
+        if: ${{ !cancelled() }}
         run: go test ./... -timeout 900s
 
   container-build:
     name: Test container (${{ matrix.arch }})
-    needs: test-and-build
     strategy:
       fail-fast: false
       matrix:

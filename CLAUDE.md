@@ -522,7 +522,7 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 
 ## Tests
 
-`make check` is the required local gate and matches CI: `gofmt -l` must report nothing, `go vet ./...` must pass, `staticcheck -checks U1000 ./...` must report nothing where staticcheck is installed (CI skips it), `go test ./... -timeout 900s` must pass.
+`make check` is the required local gate and matches CI; it runs every stage even when an earlier one failed and names the failed stages at the end, so one run reports all problems (CI steps and jobs do the same: none is skipped because another failed): `gofmt -l` must report nothing, `go vet ./...` must pass, `staticcheck -checks U1000 ./...` must report nothing where staticcheck is installed (CI skips it), `go test ./... -timeout 900s` must pass.
 
 Engine and end-to-end tests run agents as the scripted fake agent (`internal/fakeagent`): the test binary's `TestMain` calls `fakeagent.Main()` when `fakeagent.Enabled()`, and a profile with CLI `custom` runs `fakeagent.Command()` with `fakeagent.Env(script)`. `internal/e2e` builds the server from its parts (`server.New` with a runner, `ListenSocket`, the handlers served, `StartEngine`) and asserts on the board and the repositories; it is skipped on Windows. No test calls a real model.
 
