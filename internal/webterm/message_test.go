@@ -40,8 +40,16 @@ func dialTerminal(t *testing.T, ctx context.Context, i *Terminal) *websocket.Con
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.CloseNow() })
-	expectReplayEnd(t, ctx, c)
-	return c
+	// Whatever history there is comes first; the end-of-replay frame closes it.
+	for {
+		kind, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("end of replay: %v", err)
+		}
+		if kind == websocket.MessageText && string(data) == replayEnd {
+			return c
+		}
+	}
 }
 
 func readAck(t *testing.T, ctx context.Context, c *websocket.Conn) (id int64, errText string) {
@@ -64,11 +72,13 @@ func readAck(t *testing.T, ctx context.Context, c *websocket.Conn) (id int64, er
 func TestTerminalMessageIsOneWholeWriteWithItsKeys(t *testing.T) {
 	p := &messageTerminal{controlledTerminal: terminalFixture()}
 	i := Own("message", p, nil)
+	// The program asked for bracketed paste: omo wraps the message itself, at the
+	// moment it writes it, from what the program has asked for by then.
+	i.publish([]byte("\x1b[?2004h"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
-	text := "\x1b[200~line one\nline two\x1b[201~"
-	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 7, "text": text, "keys": "\r"})
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 7, "text": "line one\nline two", "keys": "\r"})
 	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +86,7 @@ func TestTerminalMessageIsOneWholeWriteWithItsKeys(t *testing.T) {
 		t.Fatalf("ack = %d %q", id, e)
 	}
 	got := p.got()
-	if len(got) != 1 || got[0][0] != text || got[0][1] != "\r" {
+	if want := "\x1b[200~line one\rline two\x1b[201~"; len(got) != 1 || got[0][0] != want || got[0][1] != "\r" {
 		t.Fatalf("message = %q", got)
 	}
 }
@@ -151,5 +161,63 @@ func TestTerminalMessageOnAProcessWithoutMessagesWritesTextThenKeys(t *testing.T
 	defer p.mu.Unlock()
 	if strings.Join(p.writes, "|") != "hi|\r" {
 		t.Fatalf("writes = %q", p.writes)
+	}
+}
+
+func TestTerminalMessageWithoutBracketedPasteIsPlainTextWithEnterPresses(t *testing.T) {
+	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	i := Own("message-nobracket", p, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := dialTerminal(t, ctx, i)
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "text": "one\r\ntwo\nthree", "keys": "\r"})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	readAck(t, ctx, c)
+	if got := p.got(); len(got) != 1 || got[0][0] != "one\rtwo\rthree" {
+		t.Fatalf("message = %q", got)
+	}
+}
+
+func TestTerminalMessageNeverCarriesControlCharactersOrItsOwnPasteEnd(t *testing.T) {
+	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	i := Own("message-clean", p, nil)
+	i.publish([]byte("\x1b[?2004h"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := dialTerminal(t, ctx, i)
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "text": "a\x1b[201~rm -rf\x03b\ttab\u009b", "keys": "\r"})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	readAck(t, ctx, c)
+	if got := p.got(); len(got) != 1 || got[0][0] != "\x1b[200~a[201~rm -rfb\ttab\x1b[201~" {
+		t.Fatalf("message = %q", got)
+	}
+}
+
+func TestTerminalMessageNeedsAPositiveIDAndIsOtherwiseIgnored(t *testing.T) {
+	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	i := Own("message-id", p, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := dialTerminal(t, ctx, i)
+	for _, id := range []int{0, -4} {
+		frame, _ := json.Marshal(map[string]any{"type": "message", "id": id, "text": "no", "keys": "\r"})
+		if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 5, "text": "yes", "keys": "\r"})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	// The first answer is for message 5: no input-ack came for the others.
+	if id, e := readAck(t, ctx, c); id != 5 || e != "" {
+		t.Fatalf("ack = %d %q", id, e)
+	}
+	if got := p.got(); len(got) != 1 || got[0][0] != "yes" {
+		t.Fatalf("messages = %q", got)
 	}
 }

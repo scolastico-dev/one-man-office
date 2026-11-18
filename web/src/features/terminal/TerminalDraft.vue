@@ -5,7 +5,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { guardPaste } from './terminalPaste'
-import { loadDraft, MAX_MESSAGE_CHARS, messageOf, pasteOf, saveDraft, type Attachment } from './draftStore'
+import { loadDraft, MAX_MESSAGE_CHARS, messageOf, saveDraft, type Attachment } from './draftStore'
 import { uploadImages } from './terminalUploads'
 
 const props = defineProps<{
@@ -13,10 +13,8 @@ const props = defineProps<{
   draftId: string
   /** Accessible name of the box. */
   label: string
-  /** Whether the program in the terminal asked for bracketed paste. */
-  bracketed: () => boolean
-  /** Puts one message (already a paste) into the terminal and submits it; rejects with the reason. */
-  send: (paste: string) => Promise<void>
+  /** Puts one message into the terminal as a paste and submits it; rejects with the reason. */
+  send: (message: string) => Promise<void>
 }>()
 
 const session = useSession()
@@ -49,6 +47,9 @@ watch([text, attachments], () => saveDraft(props.draftId, { text: text.value, at
 
 /** Text pasted or dropped in goes where the cursor is. */
 function insert(clean: string): void {
+  // While a message is on its way the draft is not changed: what it adds would be
+  // neither in that message nor safe from being cleared with it.
+  if (sending.value) return
   const el = field.value
   if (!el) {
     text.value += clean
@@ -63,6 +64,7 @@ function insert(clean: string): void {
 }
 
 async function takeFiles(list: File[]): Promise<void> {
+  if (sending.value) return
   uploading.value = true
   error.value = ''
   try {
@@ -85,7 +87,9 @@ function remove(i: number): void {
 
 async function submit(): Promise<void> {
   if (sending.value || uploading.value) return
-  const message = messageOf(text.value, attachments.value.map((a) => a.path))
+  const sentText = text.value
+  const sentFiles = attachments.value
+  const message = messageOf(sentText, sentFiles.map((a) => a.path))
   if (message === '') return
   if (message.length > MAX_MESSAGE_CHARS) {
     error.value = `A message has at most ${MAX_MESSAGE_CHARS} characters; this one has ${message.length}.`
@@ -94,9 +98,10 @@ async function submit(): Promise<void> {
   sending.value = true
   error.value = ''
   try {
-    await props.send(pasteOf(message, props.bracketed()))
-    text.value = ''
-    attachments.value = []
+    await props.send(message)
+    // Only what was sent goes: anything added meanwhile stays.
+    if (text.value === sentText) text.value = ''
+    attachments.value = attachments.value.filter((a) => !sentFiles.some((f) => f.path === a.path))
     announcer.polite('Message sent.')
   } catch (e) {
     // The draft stays as it is.
@@ -138,7 +143,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unmounted = true
   stopPaste?.()
-  saveDraft(props.draftId, { text: text.value, attachments: attachments.value })
 })
 
 defineExpose({ focus: () => field.value?.focus() })

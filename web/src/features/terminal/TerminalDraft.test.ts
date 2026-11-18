@@ -13,9 +13,9 @@ function sessionWith(): Session {
   return createSession({ tokens: createTokenStore(() => window.localStorage), makeClient: omo.makeClient, connect: omo.connect })
 }
 function box(props: Record<string, unknown> = {}, session: Session = sessionWith()) {
-  const send = vi.fn(async (_paste: string) => {})
+  const send = vi.fn(async (_message: string) => {})
   const w = mount(TerminalDraft, {
-    props: { draftId: 't1', label: 'Message to the agent', bracketed: () => true, send, ...props },
+    props: { draftId: 't1', label: 'Message to the agent', send, ...props },
     attachTo: document.body,
     global: { provide: { [SESSION as symbol]: session } },
   })
@@ -48,7 +48,7 @@ afterEach(() => {
 })
 
 describe('TerminalDraft', () => {
-  test('Enter sends the whole draft as one bracketed paste; Shift+Enter makes a line break and sends nothing', async () => {
+  test('Enter sends the whole draft as one message; Shift+Enter makes a line break and sends nothing', async () => {
     const { w, send } = box()
     await field(w).setValue('one')
     await field(w).trigger('keydown', { key: 'Enter', shiftKey: true })
@@ -57,7 +57,7 @@ describe('TerminalDraft', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     field(w).element.dispatchEvent(enter)
     expect(enter.defaultPrevented).toBe(true)
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('\x1b[200~one\rtwo\x1b[201~'))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('one\ntwo'))
     await vi.waitFor(() => expect((field(w).element as HTMLTextAreaElement).value).toBe(''))
   })
 
@@ -66,13 +66,6 @@ describe('TerminalDraft', () => {
     await field(w).setValue('ni')
     await field(w).trigger('keydown', { key: 'Enter', isComposing: true })
     expect(send).not.toHaveBeenCalled()
-  })
-
-  test('without bracketed paste the line breaks are plain Enter presses', async () => {
-    const { w, send } = box({ bracketed: () => false })
-    await field(w).setValue('a\nb')
-    await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('a\rb'))
   })
 
   test('an empty draft sends nothing', async () => {
@@ -107,7 +100,7 @@ describe('TerminalDraft', () => {
     expect(w.find('[data-draft-attachment]').text()).toContain('shot one.png')
     await field(w).setValue('see this')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("\x1b[200~see this\r'/home/me/omo/images/terminal/a b.png'\x1b[201~"))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("see this\n'/home/me/omo/images/terminal/a b.png'"))
     expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
   })
 
@@ -121,7 +114,7 @@ describe('TerminalDraft', () => {
     expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
     await field(w).setValue('text only')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('\x1b[200~text only\x1b[201~'))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('text only'))
   })
 
   test('files that are not images are refused with a word and not uploaded', async () => {
@@ -173,7 +166,7 @@ describe('TerminalDraft', () => {
     const el = field(w).element as HTMLTextAreaElement
     el.focus()
     await field(w).setValue('typing')
-    await w.setProps({ label: 'Message to the agent (renamed)', bracketed: () => false })
+    await w.setProps({ label: 'Message to the agent (renamed)' })
     expect(el.value).toBe('typing')
     expect(document.activeElement).toBe(el)
   })
@@ -193,5 +186,38 @@ describe('TerminalDraft', () => {
     await w.find('[data-draft-send]').trigger('click')
     await vi.waitFor(() => expect(send).toHaveBeenCalled())
     await vi.waitFor(() => expect(document.activeElement).toBe(field(w).element))
+  })
+
+  test('a paste, a dropped image or a change while a message is on its way is not lost with it: only what was sent is cleared', async () => {
+    const session = sessionWith()
+    const upload = stubUpload(session)
+    let release!: () => void
+    const send = vi.fn(() => new Promise<void>((resolve) => (release = resolve)))
+    const { w } = box({ send }, session)
+    await field(w).setValue('the message')
+    await w.find('[data-draft-send]').trigger('click')
+    await vi.waitFor(() => expect(send).toHaveBeenCalled())
+    // In flight: the box takes no paste and no drop, so nothing is added that the message lacks.
+    paste(field(w).element, [], 'late text')
+    drop(w.find('[data-terminal-draft]').element, [png()])
+    await nextTick()
+    expect(upload).not.toHaveBeenCalled()
+    expect((field(w).element as HTMLTextAreaElement).value).toBe('the message')
+    release()
+    await vi.waitFor(() => expect((field(w).element as HTMLTextAreaElement).value).toBe(''))
+  })
+
+  test('if the text was changed by other means while sending (another view), it is kept', async () => {
+    let release!: () => void
+    const send = vi.fn(() => new Promise<void>((resolve) => (release = resolve)))
+    const { w } = box({ send })
+    await field(w).setValue('sent text')
+    await w.find('[data-draft-send]').trigger('click')
+    await vi.waitFor(() => expect(send).toHaveBeenCalled())
+    ;(field(w).element as HTMLTextAreaElement).value = 'sent text and more'
+    await field(w).trigger('input')
+    release()
+    await vi.waitFor(() => expect(w.find('[data-draft-send]').text()).toBe('Send'))
+    expect((field(w).element as HTMLTextAreaElement).value).toBe('sent text and more')
   })
 })

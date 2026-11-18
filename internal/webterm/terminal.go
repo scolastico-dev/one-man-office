@@ -3,6 +3,7 @@ package webterm
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +38,41 @@ type terminalInput struct {
 }
 
 type terminalMessage struct{ text, keys string }
+
+// pasted is the message as a terminal takes a paste: without control
+// characters (so it cannot end its own paste early or act on the program),
+// line breaks as the Enter key sends them, and between the paste markers when
+// the program has asked for bracketed paste, which is read now, from what the
+// program has written so far.
+func (i *Terminal) pasted(m terminalMessage) terminalMessage {
+	i.mu.Lock()
+	bracketed := i.modes.state(2004) == terminalModeSet
+	i.mu.Unlock()
+	body := cleanMessage(m.text)
+	if bracketed {
+		body = "\x1b[200~" + body + "\x1b[201~"
+	}
+	return terminalMessage{text: body, keys: m.keys}
+}
+
+// cleanMessage drops every control character except tab, and turns each line
+// break (LF, CR LF, CR) into a CR, as a terminal emulator does for a paste.
+func cleanMessage(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r':
+			b.WriteByte('\r')
+		case r == '\t':
+			b.WriteByte('\t')
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 // Messenger is a process that takes a whole message: text, then keys (the
 // Enter that submits it), written in one go with nothing else getting between
@@ -105,7 +141,7 @@ func Own(id string, p Process, onExit func(*Terminal, error)) *Terminal {
 			case input := <-i.inputQueue:
 				var err error
 				if input.message != nil {
-					err = writeTerminalMessage(p, *input.message)
+					err = writeTerminalMessage(p, i.pasted(*input.message))
 				} else {
 					err = writeTerminalInput(p, input.data)
 				}

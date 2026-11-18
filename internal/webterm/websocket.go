@@ -118,6 +118,9 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 					return
 				}
 				if size.Type == "message" {
+					if size.ID <= 0 {
+						continue // nobody could be answered; the message is dropped
+					}
 					if err := i.queueMessage(size.Text, size.Keys, acknowledgeMessage(size.ID)); err != nil {
 						refuseMessage(size.ID, err)
 					}

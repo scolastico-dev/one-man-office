@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import { clearDraft, loadDraft, messageOf, pasteOf, saveDraft, MAX_MESSAGE_CHARS } from './draftStore'
+import { clearDraft, loadDraft, messageOf, saveDraft, MAX_MESSAGE_CHARS } from './draftStore'
 
 beforeEach(() => window.localStorage.clear())
 
@@ -62,14 +62,6 @@ describe('the message', () => {
 
   test('blank drafts make no message', () => {
     expect(messageOf('  \n ', [])).toBe('')
-  })
-
-  test('in bracketed paste mode the message is wrapped as one paste, line breaks as the emulator sends them', () => {
-    expect(pasteOf('one\ntwo\r\nthree', true)).toBe('\x1b[200~one\rtwo\rthree\x1b[201~')
-  })
-
-  test('without bracketed paste only the line breaks are converted', () => {
-    expect(pasteOf('one\ntwo', false)).toBe('one\rtwo')
   })
 
   test('the limit leaves room for the markers inside the 64 KiB the server takes', () => {

@@ -51,8 +51,9 @@ export interface TerminalConnection {
   /** Sends typed or pasted text to the process. */
   send(text: string): void
   /**
-   * Sends one message (its text is already a paste) and its Enter as a single
-   * unit that omo's own lines cannot get into. Resolves once the process took
+   * Sends one message as a paste, and its Enter, as a single unit that omo's own
+   * lines cannot get into. The server cleans the text and adds the bracketed-paste
+   * markers when the program asked for them, as of the moment it writes it. Resolves once the process took
    * it; rejects, with the connection kept as it is, when it did not. Never
    * waits for a connection: without an open one it rejects at once.
    */

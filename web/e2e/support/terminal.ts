@@ -28,6 +28,6 @@ export function expectNoTokenInUrls(observed: Observed, token: string): void {
 /** Switches an agent terminal inside `scope` from read-only to writable (it starts read-only); does nothing when it is writable. */
 export async function makeWritable(scope: Locator): Promise<void> {
   const toggle = scope.locator('[data-terminal-mode]').first()
-  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  if ((await toggle.getAttribute('data-writable')) === null) await toggle.click()
+  await expect(toggle).toHaveAttribute('data-writable', '')
 }

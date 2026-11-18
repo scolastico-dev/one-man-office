@@ -83,14 +83,3 @@ export function messageOf(text: string, paths: readonly string[]): string {
   const message = body.trim() === '' ? files : files === '' ? body : `${body}\n${files}`
   return message.trim() === '' ? '' : message
 }
-
-/**
- * The message as the emulator would send it pasted: line breaks as the
- * Enter key sends them, and between the paste markers when the program asked
- * for bracketed paste (without them its input box would take every line break
- * as a submit).
- */
-export function pasteOf(message: string, bracketed: boolean): string {
-  const body = message.replace(/\r?\n/g, '\r')
-  return bracketed ? `\x1b[200~${body}\x1b[201~` : body
-}

@@ -72,7 +72,7 @@ function toggleWritable(): void {
   if (writable.value) term?.focus()
 }
 
-/** One message from the draft box, written by omo as a whole. */
+/** One message from the draft box, written by omo as a whole (omo adds the paste markers the program asked for). */
 function sendDraft(paste: string): Promise<void> {
   if (!connection) return Promise.reject(new Error('The terminal is not connected.'))
   return connection.sendMessage(paste)
@@ -635,7 +635,6 @@ defineExpose({
           size="sm"
           class="tv__mode"
           :data-writable="writable ? '' : undefined"
-          :aria-pressed="writable ? 'true' : 'false'"
           :title="writable ? 'Typing goes into the terminal. Switch back to read-only.' : 'Read-only. Switch on to type into the terminal, for single keys, arrow keys or Escape.'"
           data-terminal-mode
           @click="toggleWritable"
@@ -684,7 +683,6 @@ defineExpose({
       v-if="showDraft"
       :draft-id="draftId"
       :label="`Message to the ${label.charAt(0).toLowerCase()}${label.slice(1)}`"
-      :bracketed="() => term?.modes.bracketedPasteMode ?? true"
       :send="sendDraft"
     />
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>

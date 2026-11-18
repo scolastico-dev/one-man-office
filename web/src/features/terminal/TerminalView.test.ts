@@ -85,7 +85,6 @@ vi.mock('@xterm/xterm', () => {
       this.resets++
       this.written = []
     }
-    modes = { bracketedPasteMode: true }
     focus = vi.fn()
     dispose() {
       this.disposed = true
@@ -752,7 +751,7 @@ describe('agent terminals', () => {
     const w = agent()
     const toggle = w.find('[data-terminal-mode]')
     expect(toggle.text()).toBe('Read only')
-    expect(toggle.attributes('aria-pressed')).toBe('false')
+    expect(toggle.attributes('data-writable')).toBeUndefined()
     expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(false)
     expect(term().keyHandler!(keyEv({ key: 'Enter' }))).toBe(false)
     expect(term().keyHandler!(keyEv({ key: 'Enter', shiftKey: true }))).toBe(false)
@@ -802,7 +801,7 @@ describe('agent terminals', () => {
     const w = agent()
     await w.find('[data-terminal-mode]').trigger('click')
     expect(w.find('[data-terminal-mode]').text()).toBe('Writable')
-    expect(w.find('[data-terminal-mode]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-terminal-mode]').attributes('data-writable')).toBeDefined()
     expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(true)
     term().dataHandler!('a')
     expect(conn().send).toHaveBeenCalledWith('a')
@@ -832,12 +831,12 @@ describe('agent terminals', () => {
     expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(true)
   })
 
-  test('the draft box sends whatever the toggle says, as one paste with the program’s bracketed paste, and empties on success', async () => {
+  test('the draft box sends whatever the toggle says, as one message, and empties on success', async () => {
     const w = agent()
     conn().o.onState('live')
     await w.find('[data-draft-field]').setValue('first line\nsecond line')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(conn().sendMessage).toHaveBeenCalledWith('\x1b[200~first line\rsecond line\x1b[201~'))
+    await vi.waitFor(() => expect(conn().sendMessage).toHaveBeenCalledWith('first line\nsecond line'))
     await vi.waitFor(() => expect((w.find('[data-draft-field]').element as HTMLTextAreaElement).value).toBe(''))
     expect(conn().send).not.toHaveBeenCalled()
   })
