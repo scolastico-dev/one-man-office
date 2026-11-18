@@ -21,6 +21,7 @@ import { useBoard } from '../../store'
 import { ticketDrafts } from './drafts'
 import { registerExportAction } from './exportAction'
 import { usePluginActions } from './pluginActions'
+import { usePluginTicketContext } from '../plugins/usePluginExtensions'
 import { registerStartAnywayAction, useStartAnywayUsage } from './startAnywayAction'
 
 registerExportAction()
@@ -106,6 +107,7 @@ export function useTicketView(numberOf: MaybeRefOrGetter<number>, o: TicketViewO
   let leaving = false
 
   const ticket = computed<TicketSummary | null>(() => store.view(number.value) ?? fetched.value)
+  usePluginTicketContext(ticket)
   const dirty = computed(() => (editing.value && descDirty.value) || titleDirty.value)
   const shownText = computed(() => {
     const s = saved.value

@@ -165,6 +165,8 @@ type Manifest struct {
 	Frontend      api.PluginFrontend      `json:"frontend,omitzero"`
 	ConfigFields  []api.PluginConfigField `json:"config_fields,omitempty"`
 	contentID     string
+	manifestHash  [32]byte
+	frontendFiles map[string]frontendFile // immutable per-file digests computed at load
 }
 
 var (

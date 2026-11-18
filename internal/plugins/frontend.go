@@ -8,6 +8,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -73,29 +74,38 @@ func frontendNode(dir, rel string, folder bool) error {
 	return nil
 }
 
-func hashFrontendFile(h hash.Hash, dir, rel string, limit int64) (int64, error) {
+func hashFrontendFile(h hash.Hash, dir, rel string, limit int64) ([]byte, error) {
 	if err := publicPath(rel); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := frontendNode(dir, rel, false); err != nil {
-		return 0, err
+		return nil, err
 	}
 	b, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), limit)
 	if err != nil {
-		return 0, errors.New("frontend file cannot be read or exceeds its byte limit")
+		return nil, errors.New("frontend file cannot be read or exceeds its byte limit")
 	}
 	// Length framing prevents file-name/content boundary collisions.
 	fmt.Fprintf(h, "%d:%s:%d:", len(rel), rel, len(b))
 	_, _ = h.Write(b)
-	return int64(len(b)), nil
+	return b, nil
+}
+
+type frontendFile struct {
+	size   int64
+	digest [32]byte
 }
 
 func (m *Manifest) readFrontend(dir string, raw []byte) error {
+	m.manifestHash = sha256.Sum256(raw)
+	m.frontendFiles = map[string]frontendFile{}
 	h := sha256.New()
 	fmt.Fprintf(h, "%d:", len(raw))
 	_, _ = h.Write(raw)
 	if m.Frontend.Script != "" {
-		total, err := hashFrontendFile(h, dir, m.Frontend.Script, MaxFrontendScriptBytes)
+		script, err := hashFrontendFile(h, dir, m.Frontend.Script, MaxFrontendScriptBytes)
+		total := int64(len(script))
+		m.frontendFiles[m.Frontend.Script] = frontendFile{size: int64(len(script)), digest: sha256.Sum256(script)}
 		if err != nil {
 			return fmt.Errorf("frontend.script: %w", err)
 		}
@@ -132,8 +142,9 @@ func (m *Manifest) readFrontend(dir string, raw []byte) error {
 				if d.Type()&os.ModeSymlink != 0 || !d.Type().IsRegular() {
 					return errors.New("frontend assets must be regular files, without symlinks")
 				}
-				n, err := hashFrontendFile(h, dir, rel, MaxFrontendBytes-total)
-				total += n
+				data, err := hashFrontendFile(h, dir, rel, MaxFrontendBytes-total)
+				total += int64(len(data))
+				m.frontendFiles[rel] = frontendFile{size: int64(len(data)), digest: sha256.Sum256(data)}
 				return err
 			})
 			if err != nil {
@@ -143,4 +154,50 @@ func (m *Manifest) readFrontend(dir string, raw []byte) error {
 	}
 	m.contentID = hex.EncodeToString(h.Sum(nil))
 	return nil
+}
+
+// FrontendFile reads only an enabled plugin's declared public files. Repeat
+// validation at read time: an installed tree can change after runtime loading.
+// Recorded per-file digests prevent new bytes under an old content identity
+// without re-reading or re-hashing unrelated assets on a public request.
+func (m *Manager) FrontendFile(name, identity, rel string) ([]byte, error) {
+	missing := errors.New("plugin asset unavailable")
+	if !ValidName(name) || publicPath(rel) != nil || identity == "" {
+		return nil, missing
+	}
+	m.mu.Lock()
+	var e *entry
+	for _, candidate := range m.entries {
+		if candidate.settings.Name == name {
+			e = candidate
+			break
+		}
+	}
+	if m.closed || e == nil || e.p == nil || !e.settings.Enabled || e.manifest.contentID != identity {
+		m.mu.Unlock()
+		return nil, missing
+	}
+	dir := e.p.dir
+	recorded, public := e.manifest.frontendFiles[rel]
+	manifestHash := e.manifest.manifestHash
+	m.mu.Unlock()
+	if !public || frontendNode(dir, rel, false) != nil {
+		return nil, missing
+	}
+	// The small manifest check invalidates changed declarations immediately.
+	// Asset reads scale with this file's recorded size, never the entire tree.
+	raw, err := homefile.Read(filepath.Join(dir, ManifestFile), MaxManifestBytes)
+	if err != nil || sha256.Sum256(raw) != manifestHash {
+		return nil, missing
+	}
+	data, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), recorded.size)
+	if err != nil || int64(len(data)) != recorded.size || sha256.Sum256(data) != recorded.digest {
+		return nil, missing
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || !slices.Contains(m.entries, e) || e.p == nil || !e.settings.Enabled {
+		return nil, missing
+	}
+	return data, nil
 }

@@ -9,7 +9,7 @@
 // install of a plugin that is not official does.
 // A plugin removed elsewhere while its box is open says so; its unsaved edits
 // are dropped and nothing that needs the plugin is offered any more.
-import { computed, onMounted, ref, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { ApiError } from '../../../api/client'
 import { deletePlugin, getPlugins, putPlugin, runPluginAction, updatePlugin } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
@@ -23,6 +23,9 @@ import { useSession } from '../../../session'
 import { askFirst } from '../useLeaveGuard'
 import PluginConfigEditor from './PluginConfigEditor.vue'
 import PluginLog from './PluginLog.vue'
+import PluginTasks from './PluginTasks.vue'
+import { navigatePluginResult } from '../../proxy/pluginNavigation'
+import { pluginCodeIdentity } from '../../plugins/frontendRuntime'
 import { shortCommit } from '../extensionWords'
 import { confirmInstall } from './confirmInstall'
 import { hookWords, installResult, manualActions, sameSettings, shownState } from './pluginForms'
@@ -51,6 +54,8 @@ const emit = defineEmits<{
 }>()
 
 const session = useSession()
+let alive = true
+onBeforeUnmount(() => { alive = false })
 const announce = useAnnouncer()
 const dialogs = usePluginDialogs()
 const fallbackId = useId()
@@ -141,12 +146,14 @@ const answer = ref('')
 const actionError = ref('')
 
 async function runAction(action: string, description: string) {
-  if (running.value !== null) return
+  if (running.value !== null || session.phase.value !== 'ready') return
+  const identity = props.info ? pluginCodeIdentity(props.info) : undefined
+  const active = () => alive && session.phase.value === 'ready' && props.settings?.enabled !== false && !!props.info && ['ready', 'running', 'error'].includes(props.info.state) && pluginCodeIdentity(props.info) === identity
   running.value = action
   answer.value = ''
   actionError.value = ''
   try {
-    const { data } = await runPluginAction(session.client, props.name, action)
+    const data = await navigatePluginResult(session.client, async () => (await runPluginAction(session.client, props.name, action)).data, active)
     const text = data?.message ?? ''
     answer.value = text === '' ? `${description}: done; the plugin gave no answer.` : text
     announce.polite(visibleText(answer.value))
@@ -311,6 +318,7 @@ async function remove() {
         <p>{{ visibleText(removeError) }}</p>
       </Callout>
 
+      <PluginTasks :name="name" />
       <PluginConfigEditor v-if="settings" :name="name" @dirty="(d) => emit('dirty', d)" @info="(i) => emit('info', i)">
         <PluginLog :name="name" :last-run-at="info?.last_run_at ?? null" />
       </PluginConfigEditor>

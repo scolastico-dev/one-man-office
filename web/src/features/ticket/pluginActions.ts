@@ -26,6 +26,8 @@ import { visibleText } from '../../components/ui/visibleText'
 import { useSession } from '../../session'
 import type { BoardStore } from '../../store'
 import { registerTicketAction, type TicketAction } from './actions'
+import { navigatePluginResult } from '../proxy/pluginNavigation'
+import { pluginCodeIdentity } from '../plugins/frontendRuntime'
 
 export interface PluginList {
   /** The last answer of `GET /api/plugins`, with newer plugin states from events; null until the first read. */
@@ -150,7 +152,7 @@ export function ticketActionsOf(d: PluginsResponse | null): PluginTicketAction[]
     if (!RUNS_HOOKS.has(p.state)) continue
     if (d.settings.find((s) => s.name === p.name)?.enabled === false) continue
     for (const hk of p.hooks) {
-      if (hk.event === 'manual' && hk.scope === 'ticket' && hk.name !== '') out.push({ plugin: p.name, action: hk.name, description: hk.description })
+      if (hk.event === 'manual' && hk.scope === 'ticket' && hk.name !== '' && !(p.buttons ?? []).some((b) => b.place === 'ticket' && b.action === hk.name)) out.push({ plugin: p.name, action: hk.name, description: hk.description })
     }
   }
   return out
@@ -176,7 +178,7 @@ function showAnswer(title: string, n: number, text: string, dialogs: DialogScope
 }
 
 /** The registered action for one plugin hook; it applies only in panels of `store`. */
-export function pluginTicketAction(a: PluginTicketAction, store: object): TicketAction {
+export function pluginTicketAction(a: PluginTicketAction, store: object, active: () => boolean = () => true): TicketAction {
   const label = actionLabel(a)
   return {
     id: `plugin:${a.plugin}:${a.action}`,
@@ -184,9 +186,10 @@ export function pluginTicketAction(a: PluginTicketAction, store: object): Ticket
     applies: (_t, ctx) => ctx.store === store,
     describe: (t) => `Runs the action of the plugin ${visibleText(a.plugin)} for #${t.number}; the plugin runs as you.`,
     run: async (t, ctx) => {
+      if (!active()) throw new Error('The plugin is no longer active.')
       let answer: string
       try {
-        answer = (await runPluginAction(ctx.client, a.plugin, a.action, t.number)).data?.message ?? ''
+        answer = (await navigatePluginResult(ctx.client, async () => (await runPluginAction(ctx.client, a.plugin, a.action, t.number)).data, active)).message ?? ''
       } catch (e) {
         // No answer: the action may have run; the plugin's log says.
         if (isLostAnswer(e)) return 'unknown'
@@ -216,11 +219,19 @@ export function usePluginActions(): void {
     watch(
       () => ticketActionsOf(list.data.value),
       (now) => {
-        const next = JSON.stringify(now)
+        const next = JSON.stringify([now, list.data.value?.plugins.map((p) => [p.name, pluginCodeIdentity(p)])])
         if (next === key) return
         key = next
         for (const f of off) f()
-        off = now.map((a) => registerTicketAction(pluginTicketAction(a, store)))
+        off = now.map((a) => {
+          const plugin = list.data.value?.plugins.find((p) => p.name === a.plugin)
+          const identity = plugin ? pluginCodeIdentity(plugin) : undefined
+          const active = () => {
+            const current = list.data.value?.plugins.find((p) => p.name === a.plugin)
+            return session.phase.value === 'ready' && !!current && pluginCodeIdentity(current) === identity && RUNS_HOOKS.has(current.state) && list.data.value?.settings.find((s) => s.name === a.plugin)?.enabled !== false
+          }
+          return registerTicketAction(pluginTicketAction(a, store, active))
+        })
       },
       { immediate: true },
     )
