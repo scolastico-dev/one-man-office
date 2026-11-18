@@ -333,10 +333,19 @@ func TestTaskTempDirUnattachedBoundsExpiryAndRuntimeEnd(t *testing.T) {
 	tempDirRemoved(t, other.Path)
 }
 
-func TestTaskTempDirCleanupDoesNotFollowSymlinks(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary")
+// requireSymlinks skips only where this account cannot make a symbolic link
+// (Windows without Developer Mode or elevation): the capability is probed, not
+// assumed from the operating system, so an account that can makes the test run.
+func requireSymlinks(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(dir, filepath.Join(dir, "probe")); err != nil {
+		t.Skipf("this account cannot create symbolic links: %v", err)
 	}
+}
+
+func TestTaskTempDirCleanupDoesNotFollowSymlinks(t *testing.T) {
+	requireSymlinks(t)
 	e := tempDirPlugin(t)
 	lease := newTestTaskTempDir(t, e, "p")
 	outside := t.TempDir()
@@ -389,9 +398,7 @@ func TestTaskTempDirExpiryBeforeTimerAndAttachedLifetime(t *testing.T) {
 }
 
 func TestTaskTempDirCleanupDoesNotFollowReplacedAllocation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary")
-	}
+	requireSymlinks(t)
 	e := tempDirPlugin(t)
 	lease := newTestTaskTempDir(t, e, "p")
 	outside := t.TempDir()

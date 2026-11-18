@@ -8,9 +8,9 @@ import { expectNoAgentProcesses, script, waitForSession } from './support/agents
 import { expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import { initRepo } from './support/git'
 
-// The runtime bridge in the archive is a POSIX fixture, not a native publisher
-// distribution. Native platform behavior remains in the Lua/launcher fixtures.
-test.skip(process.platform !== 'linux', 'local editor protocol fixture uses a POSIX runtime bridge')
+// The editor archive's runtime is a native stand-in on every platform (web/e2e/nodeshim), not a publisher
+// distribution, and omo trusts the fixture's HTTPS certificate on every platform through the test
+// command line built from web/e2e/omoca (support/omo.ts, tlsCA). No test of this file is conditional.
 test.setTimeout(90_000)
 test.use({ launchOptions: { args: ['--host-resolver-rules=MAP board.example.test 127.0.0.1', '--no-proxy-server'] } })
 const projectButton = (page: Page, name = 'demo') => page.locator(`.sidebar-plugins > section[aria-label="${name}"]`).getByRole('button', { name: 'Open in VS Code', exact: true })
@@ -323,7 +323,8 @@ test.describe('projectless working folder', () => {
     renameSync(dev.workdir, saved)
     try {
       for (const foreign of [false, true]) {
-        if (foreign) symlinkSync(repo, dev.workdir)
+        // A directory junction is the link Windows lets an unprivileged user make; the type argument is ignored elsewhere.
+        if (foreign) symlinkSync(repo, dev.workdir, 'junction')
         for (const path of [`/${n}`, `/ticket/${n}`]) {
           await page.goto(omo.url(path))
           const controls = page.locator('[data-plugin-controls="ticket"]')

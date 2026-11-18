@@ -66,9 +66,7 @@ func (g *Git) KeepCommits(repo string, n int64, commits []string) error {
 		}
 		want[c] = true
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	have, err := g.ticketCommits(repo, n)
 	if err != nil {
 		return err

@@ -6,7 +6,6 @@ import { configure, expectClean, expectTreeGone, forwards, processTree, tasks } 
 import { openBoard, markPage, expectNotReloaded, nudgeReconnect } from './support/board'
 import { git } from './support/git'
 
-test.skip(process.platform !== 'linux', 'local process fixture is exercised on Linux; native task tests cover other platforms')
 async function status(omo: Omo) {
   return (await omo.api<{ message: string }>('POST', '/api/plugins/sample/actions/status', {})).message
 }

@@ -98,6 +98,19 @@ func (g *Git) repoLock(repo string) *sync.Mutex {
 	return g.locks[key]
 }
 
+// lockRepo takes the repository's mutex and returns the function that releases
+// it. An operation that finds the mutex held reports the point "repo-lock-wait"
+// before it waits, so a test can observe that it is queued behind the holder
+// instead of guessing from a clock.
+func (g *Git) lockRepo(repo string) (unlock func()) {
+	l := g.repoLock(repo)
+	if !l.TryLock() {
+		g.at("repo-lock-wait")
+		l.Lock()
+	}
+	return l.Unlock
+}
+
 // lockKey resolves repo to its common git directory once and caches it. A
 // path that is not (yet) inside a repository falls back to the cleaned path
 // and is resolved again next time.
@@ -267,9 +280,7 @@ func (g *Git) opRun(dir string, args ...string) (string, error) {
 // created the branch (only then is it the caller's to remove, at base). An
 // empty base is the checkout's HEAD.
 func (g *Git) AddWorktreeNewBranch(repo, dir, base string, pick func(taken func(name string) (bool, error)) (string, error)) (string, error) {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	taken := func(name string) (bool, error) { return g.branchTaken(repo, name) }
 	branch, err := pick(taken)
 	if err != nil {
@@ -364,9 +375,7 @@ func (g *Git) branchTaken(repo, name string) (bool, error) {
 
 // CurrentBranch returns the branch checked out in repo.
 func (g *Git) CurrentBranch(repo string) (string, error) {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	out, err := g.queryRun(repo, "branch", "--show-current")
 	return strings.TrimSpace(out), err
 }
