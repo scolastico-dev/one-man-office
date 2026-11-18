@@ -373,6 +373,13 @@ func (s *Server) routeProxy(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) serveProxyForward(w http.ResponseWriter, r *http.Request, f api.ProxyForward, mode proxy.Mode) {
+	tracked, done, ok := s.trackForwardRequest(w, r, f.ID, f.Plugin != "")
+	if !ok {
+		s.proxyPage(w, r, 404, "This Web UI forward no longer exists.")
+		return
+	}
+	defer done()
+	w = tracked
 	origin, _ := url.Parse(s.proxyOrigin(r))
 	// Same-origin app WebSockets need the upstream Host/Origin pair after Host
 	// rewriting. Foreign origins remain untouched for the app to accept/refuse.

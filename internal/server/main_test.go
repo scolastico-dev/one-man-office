@@ -14,6 +14,14 @@ import (
 // starts it as an agent process, and as the fake MCP server when the relay
 // starts it as a stdio server.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "plugin-task-gate" {
+		for {
+			if _, err := os.Stat(os.Args[2]); err == nil {
+				os.Exit(0)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 	if len(os.Args) > 2 && os.Args[1] == "plugin-task-output" {
 		os.Exit(taskOutputHelper())
 	}

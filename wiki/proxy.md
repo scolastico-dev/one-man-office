@@ -20,7 +20,8 @@ also show that page.
 A ticket forward belongs to that exact ticket. Completing or cancelling the
 ticket automatically removes its forwards, including when a task completes
 by merging into its story. Do not rely on a task's preview for later story
-review. Global forwards have no ticket and stay until the user removes them.
+review. Generic global forwards have no ticket and stay until the user removes them.
+Plugin-owned globals instead follow their plugin/task lifecycle (below).
 A removed forward stops accepting new requests; registration is not process
 supervision and does not terminate an already upgraded connection.
 
@@ -246,3 +247,34 @@ outer proxy even though omo itself streams. With subdomains, pass the
 wildcard Host unchanged and use wildcard routing/certificates on the same
 external port. See [Running omo](running.md#behind-a-reverse-proxy) for the
 board's deployment settings.
+
+## Plugin ownership and activity
+
+Plugins register through bound Lua `forward_add`, `forward_list` and
+`forward_remove` helpers, using this same registry, validation, transport and
+Open/sign-in. A plugin forward carries optional `plugin` and `task_id` metadata.
+Only server-bound helpers assign ownership; public create JSON rejects those
+fields. The user can still view/remove these forwards normally. Helpers cannot
+list/remove another plugin's forward or attach another plugin's task.
+
+Stable background-task attachment removes the forward on every task exit,
+including natural exit and idle stop. Unattached plugin resources end on
+disable/remove, code replacement and shutdown too. Restart removes stale
+plugin-owned records before loading hooks. Generic persistent forwards are
+preserved. Registration and attachment emit normal board events, including
+`proxy.forward_updated` for the first task binding.
+
+Plugins can inspect authenticated request/WebSocket counts and schedule a
+plugin-chosen idle duration for an attached task. Accepted WebSockets remain
+active for their entire downstream lifetime, including hijacked connections;
+only the last disconnect starts the next idle interval. Reconnect invalidates
+old deadlines atomically with upgrade admission. Authentication failures,
+refused upgrades and health/status polling cannot keep an idle task alive.
+HTTP/SSE requests have separate request counts and do not serve as WebSocket
+presence. Connection counts reflect server-observed closure; editor/protocol
+heartbeats and network detection bound observation of physically dropped clients.
+No editor-specific default or automatic idle policy is built into the proxy.
+See [Plugins — Owned Web UI forwards](plugins.md#owned-web-ui-forwards) for the
+exact helpers, schema, timing semantics and free-loopback-port candidate contract.
+Always use user-only Open for the browser destination; helper addresses never
+contain a login token or substitute for sign-in.

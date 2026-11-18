@@ -263,7 +263,7 @@ refused with their replacement guidance.
 ### Events
 
 A command hook gets the event as JSON on standard input,
-`{"event": "<name>", "at": "<RFC 3339 time>", "data": {...}}`; a Lua hook gets
+`{"event": "<name>", "at": "<RFC 3339 time>", "host": {...}, "data": {...}}`; a Lua hook gets
 the same as the global table `event`.
 
 | Event | `data` |
@@ -277,12 +277,31 @@ the same as the global table `event`.
 | `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
 | `omo_started` | `at` (readiness/enable time) |
 | `timer` | `at` |
-| `manual` | `action`, `ticket` (null without a ticket), `project` (`{id}` for a selected project, otherwise null) |
+| `manual` | `action`, `ticket` (null without a ticket), `project` (selected folder context below, otherwise null) |
 
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
-`supervisor`, `attention` and `url` (the ticket's address on the board, without
-the login token). No event carries a session id, terminal id, environment
-value or file path. Text written by people or agents (titles, comments,
+`supervisor`, `attention`, `url` (without the login token) and `folders`.
+`projects` remains an array of project **identifiers**, compatible with existing
+plugins. `folders` is an ordered array, one entry per project:
+`{project: string, kind: "worktree", path: string, available: boolean, reason: string}`.
+Available entries contain the absolute, resolved recorded worktree path and
+`reason: ""`. Unavailable entries have `path: ""` and a fixed reason:
+`project_unavailable` (unknown/disabled project) or `folder_unavailable` (not
+started, removed, closed ticket, or failed worktree/gitfile checks). Empty
+projects produce `folders: []`. Delayed events retain their historical project
+IDs/order; current folders are matched by ID, with removed associations marked
+unavailable. A project's repository is never substituted for
+a missing ticket worktree. Paths use the same trusted records, confinement and
+`.git` checks as **Open terminal**; the server never follows an agent-written
+`.git` lookup. Folder availability is a snapshot; validate readiness before
+launch and handle a folder disappearing afterwards.
+
+Every event has `host: {os: string, arch: string, path_separator: string,
+task_process_trees: true}`. `os` and `arch` are Go platform names, for example
+`linux` / `amd64`, `darwin` / `arm64`, `windows` / `amd64`. This describes omo's
+host, not the browser. It does not certify native editor/libc/OS-version
+compatibility; the plugin checks its distribution's prerequisites. No event
+carries a session id, terminal id or arbitrary inherited environment values. Text written by people or agents (titles, comments,
 attention texts) is only ever in `data`, never in arguments, environment values
 or file names.
 
@@ -454,6 +473,109 @@ Dispatch; `Server.PluginsReady()` is called after launching both listeners in
 `Run`. Embedders call it after serving their own handlers. No automatic task
 restart, persistence, editor management or command-side task identity is added.
 
+### Owned Web UI forwards
+
+These Lua helpers are bound to the executing plugin. A plugin cannot select an
+owner, list another plugin's forwards, or attach another plugin's task. Command
+hooks keep their existing user-level socket access; there is no additional
+command-side plugin identity.
+
+| Helper | Result |
+|---|---|
+| `omo.forward_add(options)` | forward record, or `nil, error` |
+| `omo.forward_list()` | own forward array (including activity), or `nil, error`; empty is `{}` in Lua / `[]` in JSON |
+| `omo.forward_remove(id)` | `true`, or `nil, error` for unknown/wrong owner |
+| `omo.forward_attach(id, task_id)` | `true`, or `nil, error`; associates an existing forward with a running stable task ID |
+| `omo.forward_idle_watch(id, idle_seconds)` | `true`, or `nil, error`; schedules idle stop for the attached running task |
+| `omo.free_loopback_port()` | integer port candidate on IPv4 `127.0.0.1`, or `nil, error` |
+
+`forward_add` strictly accepts `{name: string, port: integer, ticket?: integer|null,
+host?: string, scheme?: "http"|"https", start_path?: string,
+strip_prefix?: boolean, verify_tls?: boolean, task_id?: string}`. Name and port
+are required. Omitted/null ticket is global (it does **not** inherit the hook's
+ticket); pass `event.data.ticket.number` explicitly when binding. Defaults and
+normal host/port/name/path validation are the [forward registry's](proxy.md).
+Credentials, known hook secrets and authentication query keys are refused in
+destinations. Registration never starts or probes a target.
+
+Each record contains `{id, ticket, host, port, scheme, name, start_path,
+strip_prefix, verify_tls, base_path, address, plugin, task_id?, activity}`.
+`id` is the existing opaque forward ID. `base_path` stays `/proxy/ID/`; `address`
+includes `start_path` and prefers a configured subdomain. It contains no omo
+token or grant and is an address hint, not a sign-in link. Return
+`{forward_id = f.id}` from the manual hook; the frontend must obtain the opaque
+URL from the existing **user-only Open API** and navigate that URL unchanged.
+
+Task attachment requires the **stable task ID**, not a reusable name. Forward
+and task ticket bindings must match exactly (global means no ticket for both).
+A forward's task binding is immutable; attaching the same live ID is idempotent.
+Either supply `task_id` at creation, or register first to obtain a base path,
+start the task with that base, then call `forward_attach(f.id, task.id)`. If the
+task exits during attachment, the attachment fails or its exit callback removes
+the forward. Remove a still-unattached forward if task startup fails.
+
+Natural exit and every stop reason remove all forwards attached to that run,
+including idle, Stop, ticket completion/cancellation, disable/remove, replacement
+and shutdown. Unattached owned forwards also disappear on plugin disable,
+removal, code replacement and shutdown. Configuration-only reloads preserve
+forwards and tasks. Restart removes **all** stale plugin-owned forwards before
+loading plugins; persistent generic user/agent forwards retain their normal
+behavior. Removing a forward alone does not stop its task. Ordinary already
+open proxy streams retain the transport's existing behavior; stopping the task
+terminates its process tree and thus its upstream connections.
+
+`activity` is `{active_requests: integer, active_websockets: integer,
+ever_connected: boolean, no_client_since: string, revision: integer}`.
+Counters begin only after proxy authentication and a live lookup, in both path
+and subdomain modes. `active_requests` includes pending/upgraded/streaming
+requests until the reverse-proxy handler finishes. `active_websockets` counts
+only accepted upstream WebSocket upgrades with successful downstream hijacks,
+until that full handler ends (including disconnect, cancellation or failure).
+Failed authentication and refused upgrades cannot extend the idle interval.
+HTTP/SSE/health/status requests are counted as requests but never reset that
+interval. This policy fits browser tools which maintain WebSockets; tools whose
+presence uses another protocol must implement their own policy.
+
+At registration, `ever_connected=false`, `active_websockets=0` and
+`no_client_since` is the registration timestamp. On upgrade, it becomes empty
+and `ever_connected=true`; any live socket prevents idle stop regardless of its
+age. Only the **last** socket closing starts a new no-client interval. Reconnect
+clears it and invalidates any prior deadline. `revision` increases on WS
+open/close and watch-policy changes. The timestamp is RFC 3339 nanoseconds for
+inspection; elapsed time/deadlines use Go's monotonic clock, not wall-clock
+subtraction in Lua. Counts reflect **observed** connection closure, not the
+instant a laptop loses physical connectivity; upstream protocol heartbeats or
+network failure detection determine when a dead connection is observed.
+
+`forward_idle_watch` accepts a finite duration from **0.01 to 604800 seconds**
+(seven days). It creates/replaces one watch per forward, measured from its
+current no-client interval, and requires a running attached task. Call it after
+readiness; if registration/startup already consumed the interval, it expires
+immediately. No watch or idle default exists until the plugin chooses one.
+It uses a deadline timer, not the one-minute sweep. At expiration, revision,
+zero sockets and the deadline are checked atomically with closing upgrade
+admission, then the stable task is stopped with reason `idle`. A reconnect that
+wins admission invalidates the old timer; one arriving after stop was committed
+is refused. Scheduling may run late under load, but never stops early against
+an obsolete revision. Policy replacement preserves the current interval;
+repeated calls/polls do not reset it. A watch stops its attached task even if
+that task has another forward, so plugins should choose one presence forward
+per task. Removal/exit/unload cancels the watch. Expiry rechecks persisted registration
+before stopping, including the interval before removal events are consumed.
+
+The loopback helper closes its temporary listener before returning: it is
+**not a reservation**. Launch on `127.0.0.1:PORT`, detect bind collisions and
+retry with a new candidate a bounded number of times. Never substitute a public
+listener or claim that a closed candidate is race-free.
+
+Runtime adapters: `Options.Forwards` implements `plugins.ForwardDesk`;
+`Options.Unloaded(plugin, reason)` releases unbound resources after cancellation
+and in-flight helper operations, outside manager locks. Stable task cleanup
+uses `Options.TaskExited`. Persisted registry ownership is assigned only by
+system board adapters; public create JSON accepts neither `plugin` nor `task_id`.
+The board emits ordinary add/remove events and `proxy.forward_updated` on first
+task attachment. All carry the public record with a relative address.
+
 ### Buttons (manual hooks)
 
 A manual hook with `scope: ticket` adds a button to every ticket; one with
@@ -464,7 +586,12 @@ action per plugin runs at a time, bounded by its timeout.
 `ticket` is a positive ticket number when supplied (zero/omitted means none);
 `project` is an optional registered project id. With a ticket it must belong
 to that ticket. Ticket-scope actions still require a ticket. The hook receives
-`event.data.project = {id = "…"}` or null; folder resolution is separate.
+`event.data.project = {id: string, kind: "worktree"|"repository", path: string,
+available: true, reason: ""}` or null. With a ticket this selects its checked
+worktree; without one it selects the enabled project's configured repository
+folder, resolved through its user-owned links. Unknown/disabled projects return
+404, ticket/project mismatches 422, and unavailable selected folders 409 before
+the hook runs. A request accepts identifiers, never a filesystem path.
 Existing request bodies remain valid.
 
 Lua may return a string, nil, or a table containing `message`, `url`

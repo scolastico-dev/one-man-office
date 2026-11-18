@@ -39,7 +39,7 @@ const reads = liveRead({
     readProblem.value = message(e)
     loading.value = false
   },
-  watches: (ev) => ev.kind === 'proxy.forward_added' || ev.kind === 'proxy.forward_removed',
+  watches: (ev) => ev.kind === 'proxy.forward_added' || ev.kind === 'proxy.forward_updated' || ev.kind === 'proxy.forward_removed',
 })
 watch(() => props.ticket?.number, () => {
   reads.newer()

@@ -76,10 +76,15 @@ func (s *Server) createProxyForward(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProxyForward(w http.ResponseWriter, r *http.Request) {
-	if err := s.board.DeleteProxyForward(r.Context(), actorFrom(r), r.PathValue("id")); err != nil {
+	s.pluginForwards.Lock()
+	err := s.board.DeleteProxyForward(r.Context(), actorFrom(r), r.PathValue("id"))
+	if err == nil {
+		s.forgetPluginForwardLocked(r.PathValue("id"))
+	}
+	s.pluginForwards.Unlock()
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	s.proxyAuth.forgetForward(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
 }

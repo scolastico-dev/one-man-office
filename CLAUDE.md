@@ -207,7 +207,7 @@ never null) and `content_id`: SHA-256 of exact manifest bytes and sorted public
 paths/content, recomputed on load, independent of installation directory/config.
 It changes on frontend edits even without a version/commit change.
 `PluginRun.project` optionally selects a registered project (with ticket: must
-belong to it); manual payload includes `project: {id}` or null. `TriggerAction`
+belong to it); manual payload includes selected `project: {id, kind, path, available, reason}` or null. Server `plugin_context.go` reuses terminal folder/gitfile checks and adds ordered `ticket.folders` without changing `ticket.projects` identifiers (delayed historical events match current folders by ID in snapshot order); unavailable paths are empty with a fixed reason. Selected unknown/disabled projects fail 404, mismatch 422, unavailable folder 409. Every event adds host OS/arch/path-separator/process-tree metadata, never session/environment identity. `TriggerAction`
 returns `api.PluginRunResult`; `Trigger` retains its text-only interface.
 `plugins/answers.go` handles command/Lua messages and optional `url` or
 `forward_id`; messages alone are redacted/escaped/cut, URLs validated then
@@ -263,7 +263,7 @@ Limit of the model: the socket and the files in `OMO_HOME` are not a security bo
 ## Web UI forward registry
 
 Web UI forward registry: `api/proxy.go`, `board/proxy.go` and
-`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 8).
+`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 9; plugin ownership added in version 9).
 `GET /api/proxy/forwards[?ticket=N]` returns `{forwards: []}`;
 `POST /api/proxy/forwards` takes `{ticket, host, port, scheme, name, start_path,
 strip_prefix, verify_tls}` and returns the record (201);
@@ -293,6 +293,41 @@ user gesture, calls Open with normal API auth, and navigates the returned
 opaque URL unchanged. It closes failed blank reservations and reports errors;
 it never constructs proxy hosts or places board credentials in destinations.
 See [Web UI forwards](wiki/proxy.md).
+
+Plugin forward bridge: `plugins/forwards.go`, `forwards_lua.go`, server
+`plugin_forwards.go` and `proxy_activity.go`. Bound Lua helpers are
+`forward_add{...CreateProxyForward, task_id?}`, `forward_list()`,
+`forward_remove(id)`, `forward_attach(id, stable_task_id)` and
+`forward_idle_watch(id, idle_seconds)`. Public create JSON has no ownership
+fields; system-only board adapters assign `ProxyForward.plugin`/`task_id`
+(schema 9 `proxy_forwards.plugin_owner`, `task_id`), share ordinary validation,
+and emit add/remove plus `proxy.forward_updated` on attachment. Task and forward
+ticket bindings match exactly. Attachment/exit serialize on a resource lock and
+recheck running stable identity; `Options.TaskExited` removes every attached
+forward before Stop returns. `Options.Unloaded` releases unattached resources
+after hook cancellation and in-flight helper completion, outside manager locks;
+config refresh preserves them. Startup removes all stale plugin-owned forwards
+before Load; generic persistent user forwards survive. Startup cleanup failure
+refuses server initialization.
+
+Lua forward records include `activity: {active_requests, active_websockets,
+ever_connected, no_client_since, revision}`. Only authenticated requests reach
+the tracker. Requests count through handler completion; WS count starts on
+successful downstream hijack after upstream acceptance and ends with the full
+ReverseProxy handler, including errors/cancellation/close. Both routing modes
+share it. No-client time starts at registration, clears on WS admission, resets
+only on last disconnect; HTTP/SSE/health polls never reset it. Monotonic times
+and revision and live-registry checks guard precise idle timers against reconnect/removal; stop commits
+closing admission under that same lock before waiting for the task callback.
+`forward_idle_watch` takes 0.01..604800 finite seconds, requires an attached live
+task, replaces its forward's policy without resetting the interval, and stops
+with reason `idle`. No hardcoded editor policy/default. Observed closure depends
+on protocol/network detection. Removal/exit/unload cancels timers; existing
+streams retain generic proxy behavior until upstream task shutdown. The free
+IPv4 `127.0.0.1` port helper `free_loopback_port()` returns a closed-listener
+candidate, never a reservation; plugins must bound bind-collision retries.
+Addresses contain no credentials; frontend still opens via user-only Open.
+Exact types and lifecycle/timing contracts: [Plugins](wiki/plugins.md).
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 

@@ -17,11 +17,11 @@ import (
 )
 
 const proxySelect = `SELECT f.id, f.ticket_id, f.host, f.port, f.scheme, f.name,
-	f.start_path, f.strip_prefix, f.verify_tls FROM proxy_forwards f`
+	f.start_path, f.strip_prefix, f.verify_tls, f.plugin_owner, f.task_id FROM proxy_forwards f`
 
 func scanProxyForward(row interface{ Scan(...any) error }) (api.ProxyForward, error) {
 	var f api.ProxyForward
-	if err := row.Scan(&f.ID, &f.Ticket, &f.Host, &f.Port, &f.Scheme, &f.Name, &f.StartPath, &f.StripPrefix, &f.VerifyTLS); err != nil {
+	if err := row.Scan(&f.ID, &f.Ticket, &f.Host, &f.Port, &f.Scheme, &f.Name, &f.StartPath, &f.StripPrefix, &f.VerifyTLS, &f.Plugin, &f.TaskID); err != nil {
 		return f, err
 	}
 	f.BasePath = "/proxy/" + f.ID + "/"
@@ -201,10 +201,14 @@ func validProxyDecodedPath(path string) bool {
 // CreateProxyForward persists a target without contacting or starting it.
 // Agents may register only for their own ticket; globals are user-only.
 func (b *Board) CreateProxyForward(ctx context.Context, a Actor, req api.CreateProxyForward) (api.ProxyForward, error) {
+	return b.createProxyForward(ctx, a, req, "", "")
+}
+
+func (b *Board) createProxyForward(ctx context.Context, a Actor, req api.CreateProxyForward, plugin, task string) (api.ProxyForward, error) {
 	if err := checkActor(b.env.Policy(), a); err != nil {
 		return api.ProxyForward{}, err
 	}
-	if err := checkProxyWrite(a, req.Ticket); err != nil {
+	if err := checkProxyWrite(a, req.Ticket); err != nil && !(a.Role == api.RoleSystem && plugin != "") {
 		return api.ProxyForward{}, err
 	}
 	req, err := checkProxyInput(req)
@@ -227,7 +231,7 @@ func (b *Board) CreateProxyForward(ctx context.Context, a Actor, req api.CreateP
 				return api.Errorf(api.CodeInvalidTransition, "cannot add a forward to a closed ticket")
 			}
 		}
-		if _, err := tx.Exec(`INSERT INTO proxy_forwards(id,ticket_id,host,port,scheme,name,start_path,strip_prefix,verify_tls) VALUES(?,?,?,?,?,?,?,?,?)`, id, req.Ticket, req.Host, req.Port, req.Scheme, req.Name, req.StartPath, req.StripPrefix, req.VerifyTLS); err != nil {
+		if _, err := tx.Exec(`INSERT INTO proxy_forwards(id,ticket_id,host,port,scheme,name,start_path,strip_prefix,verify_tls,plugin_owner,task_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, req.Ticket, req.Host, req.Port, req.Scheme, req.Name, req.StartPath, req.StripPrefix, req.VerifyTLS, plugin, task); err != nil {
 			return err
 		}
 		var err error
