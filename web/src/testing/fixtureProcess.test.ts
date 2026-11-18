@@ -440,46 +440,60 @@ setInterval(() => {}, 1 << 30)
   }, 120_000)
 })
 
-// ---- platform skips in tests ----
+// ---- conditional skips in tests ----
 
-describe('tests that skip for a platform', () => {
+describe('tests that are skipped', () => {
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') return []
       const path = join(dir, e.name)
       return e.isDirectory() ? walk(path) : /\.(test|spec)\.(ts|mjs)$/.test(e.name) ? [path] : []
     })
-  // Every web test file: unit tests, browser specs and the standalone drivers.
+  // Every web test file, guards included: unit tests, browser specs and the standalone drivers.
   const files = walk(resolve('.')).map((path) => ({ path: path.slice(resolve('.').length + 1).split('\\').join('/'), text: readFileSync(path, 'utf8') }))
-  const SKIP = /(?:skipIf|runIf|\.skip)\s*\(/g
-  const platformSkips = (text: string) =>
-    [...text.matchAll(SKIP)].filter((m) => /process\.platform|win32|linux|darwin|platform/.test(text.slice(m.index, m.index + 200).split('\n').slice(0, 3).join('\n')))
+  // Every way a test is left out, whatever its condition says or hides: a variable, a helper, an import, a platform name.
+  const SKIPS = /(?:\.(?:skipIf|runIf|skip|fixme|todo)|\b(?:xit|xtest|xdescribe))\s*\(/g
+  const skipsIn = (text: string) => text.match(SKIPS) ?? []
 
-  // The whole inventory: a skip for a platform needs a capability the platform truly lacks, named here.
+  // The whole inventory. A skip that is not here fails until someone states why; a platform skip needs a capability the platform truly lacks.
   const allowed: Record<string, { count: number; reason: string }> = {
     'src/testing/fixtureProcess.test.ts': {
       count: 1,
-      reason: 'a real SIGINT cannot be delivered to a process on Windows (process.kill ends it at once); the same handler sequence runs everywhere through an emitted event',
+      reason: 'platform capability: a real SIGINT cannot be delivered to a process on Windows (process.kill ends it at once); the same handler sequence runs everywhere through an emitted event',
+    },
+    'e2e/filters.spec.ts': {
+      count: 1,
+      reason: 'not a platform skip: the screenshot-only test runs only when OMO_SCREENSHOTS names a folder to write to',
     },
   }
 
-  it('are found only in the inventory, in every web test file', () => {
+  it('are found only in the inventory, in every web test file, whatever their condition', () => {
     const found: Record<string, number> = {}
     for (const { path, text } of files) {
-      const n = platformSkips(text).length
-      if (n > 0 && !path.endsWith('.guard.test.ts')) found[path] = n
+      const n = skipsIn(text).length
+      if (n > 0) found[path] = n
     }
     expect(found).toEqual(Object.fromEntries(Object.entries(allowed).map(([path, { count }]) => [path, count])))
+    for (const [path, { reason }] of Object.entries(allowed)) expect(reason.length, path).toBeGreaterThan(20)
   })
 
-  it('see the spec-wide skip and the skip in a script test, not only src/', () => {
+  it('see a skip whose condition is a variable, a helper or a platform name, in one line or several', () => {
     // Written in pieces so that this file's own text holds no skip for the scan above to count.
-    const skip = 'test.' + 'skip('
-    const skipIf = 'it.skip' + 'If('
-    expect(platformSkips(skip + "process.platform === 'win32', 'x')")).toHaveLength(1)
-    expect(platformSkips(skipIf + "\n  process.platform === 'win32',\n)('x')")).toHaveLength(1)
-    expect(platformSkips(skip + "shots === '', 'screenshots only')")).toHaveLength(0)
+    const dot = (name: string) => `it.${name}` + '('
+    const forms = [
+      "const WINDOWS = process.platform === 'win32'\n" + dot('skipIf') + "WINDOWS)('x', () => {})",
+      dot('skipIf') + "isWindows())('x', () => {})",
+      dot('skipIf') + "\n  process.platform === 'win32',\n)('x', () => {})",
+      dot('runIf') + "IS_LINUX)('x', () => {})",
+      'test.skip' + "(WINDOWS, 'x')",
+      'test.fix' + "me(WINDOWS, 'x')",
+      'describe.skip' + "('x', () => {})",
+      'x' + "it('x', () => {})",
+    ]
+    for (const form of forms) expect(skipsIn(form), form).toHaveLength(1)
+    expect(skipsIn('expect(skipped).toBe(1); const skipIfNot = 1; items.skipped(2)')).toHaveLength(0)
     expect(files.some((f) => f.path.startsWith('e2e/') && f.path.endsWith('.spec.ts'))).toBe(true)
     expect(files.some((f) => f.path.startsWith('scripts/') && f.path.endsWith('.test.mjs'))).toBe(true)
+    expect(files.some((f) => f.path.endsWith('.guard.test.ts'))).toBe(true)
   })
 })
