@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -41,9 +42,15 @@ func TestShellFixtureIgnoresPromptAndHistoryOverrides(t *testing.T) {
 	t.Setenv("HISTFILE", history)
 	s, b := shellServer(t)
 	// Exercise Bash's actual interactive prompt and history consumers even
-	// on systems where the fixture's usual /bin/sh is dash.
-	t.Setenv("SHELL", bash)
-	t.Setenv("PS1", "fixture-ready> ")
+	// on systems where the fixture's usual /bin/sh is dash. An owned wrapper
+	// suppresses system rc files too: Ubuntu's bash.bashrc overwrites PS1.
+	// Assign PS1 at exec because a Bash /bin/sh resets it in the wrapper.
+	wrapper := filepath.Join(t.TempDir(), "bash")
+	script := "#!/bin/sh\nPS1='fixture-ready> ' exec '" + strings.ReplaceAll(bash, "'", "'\\''") + "' --norc --noprofile -i\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", wrapper)
 	sh := openShell(t, b, s, api.OpenTerminalRequest{Project: addProject(t, s)})
 	out := shellConn(t, b, s, sh.ID)
 	out.until("fixture-ready> ")
