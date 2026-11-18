@@ -12,8 +12,9 @@ tab then opens through omo's authenticated Web UI proxy. Keep the board open
 while installation finishes; allow popups. A lost request is reported without
 automatic retries: inspect tasks/logs before clicking again. Only a confirmed
 pre-execution busy response is retried, within the same cancellable deadline.
-A later click
-reuses the same running instance for the canonical folder/editor/version.
+A later click reuses the running instance when its canonical folder, editor,
+pinned version and ticket/global binding match. Each canonical folder has at
+most one running editor; different folders can run independently.
 
 ## Editors and platforms
 
@@ -152,12 +153,14 @@ hooks, so it cannot delete a concurrent launch. Downloads remain cached. If a fo
 stale, a subsequent explicit click cleans up and recreates it. Bind collisions
 get at most three attempts; other early exits/timeouts require an explicit retry.
 
-Changing the editor affects the next click; existing instances retain their
-editor/version until Stop or idle. A selection change during first-use polling
+Changing the selection leaves existing editors running. Opening the same
+canonical folder with another editor, pinned version or ticket/global binding
+is refused with an instruction to **Stop** the existing editor in plugin
+settings first. After Stop, the next click can use the new selection; a different
+folder can use it immediately. A selection change during first-use polling
 ends that request with a clear retry message. Changing idle duration is applied
 when the instance is next opened/polled; it preserves the existing no-client
-interval. A canonical folder already open under a different ticket/global
-binding must be stopped before changing that binding.
+interval.
 
 ## Verification
 
@@ -210,3 +213,34 @@ pinned publisher archive; its Node extension entry still activates. Failed
 requests are recorded in probe reports, including the requested file for remote
 resources. These checks do not certify proprietary authentication features or
 arbitrary extensions.
+
+The routine browser integration checks are separate from those publisher probes:
+
+```sh
+make build
+npm --prefix web run e2e -- e2e/plugin-editor.spec.ts e2e/plugin-lifecycle.spec.ts e2e/plugin-frontend.spec.ts --workers=2
+```
+
+They use temporary homes/repositories, a local HTTPS archive and a small editor
+protocol stand-in. Only the installed test copy's artifact URL/digest and idle
+interval change; the manifest, frontend polling, Lua orchestration, launcher,
+artifact extractor, task supervisor and authenticated proxy remain in use.
+The fixture runtime bridge uses the test runner's Node through a POSIX wrapper,
+so these checks run on Linux and do not prove publisher runtime compatibility.
+They need OpenSSL and Playwright Chromium. They exercise both editor launch
+contracts in path and subdomain mode, a remote board hostname mapped locally,
+real assets and WebSocket round trips beyond idle, reconnect/last-disconnect
+cleanup, checksums/cache reuse, download cancellation and unavailable choices.
+The sample covers public frontend APIs, configuration, startup and process-tree
+cleanup on completion, cancellation, cascade, Stop, disable, removal, replacement,
+natural exit and restart. All child omo environments strip inherited `OMO_*`
+variables through the browser harness; no live home/socket is used.
+
+Retained Linux amd64 publisher probe evidence for the pinned builds includes
+OpenVSCode path mode and code-server cross-site subdomain mode with two active
+folders, shared settings, disposable host Git/runtime configuration, reuse and
+independent idle/runtime cleanup. Separate smoke reports record browser edits
+saved to both folders and explicit Stop cleanup. These are real publisher runs
+from development, distinct from the routine stand-in tests; they do not certify
+native macOS, Windows or arm64. Reproduce them with the opt-in commands above;
+reports retain the optional upstream 404s described here.

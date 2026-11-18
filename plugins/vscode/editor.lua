@@ -103,14 +103,11 @@ if ticket_action then
 elseif ticket then return message('Use the ticket action for a worktree; a project action requires repository context without a ticket.')
 elseif project and project.available and project.path~='' then folder=project.path end
 if not folder then return message('The selected project folder is unavailable. Start work to create its worktree first.') end
-local version=editor=='code-server' and '4.145.2' or '1.109.5'
+local versions={['code-server']='4.145.2',openvscode='1.109.5'}
+local version=versions[editor]
 local artifact_key=omo.sha256_hex(editor..'\0'..version..'\0'..platform)
 local request_key='request:'..omo.sha256_hex(tostring(binding or 0)..'\0'..folder)
 local req=omo.store_get(request_key)
-if req and (req.editor~=editor or req.version~=version) then
-  if not opening then return message('The editor selection changed. Click Open in VS Code again; existing editors remain until Stop or idle expiry.') end
-  req=nil
-end
 local function records()
   return assert(omo.task_list()),assert(omo.forward_list())
 end
@@ -137,6 +134,23 @@ local function ready(rec,t,forward)
   rec.ready=true;save(rec.key,rec)
   return {message='VS Code is ready. Edits go directly into this folder.',forward_id=forward.id}
 end
+local function stop_required()
+  return message('This folder already has a running editor with another ticket binding or editor/version. Stop that editor in plugin settings before reopening here.')
+end
+local function compatible(rec,t)
+  return (t.ticket or 0)==(binding or 0) and
+    (not rec.editor or rec.editor==editor) and (not rec.version or rec.version==version)
+end
+if req and (req.editor~=editor or req.version~=version) then
+  local rec=req.instance and omo.store_get(req.instance)
+  local tasks,forwards=records()
+  local t=rec and find_task(tasks,rec.task)
+  local f=rec and find_forward(forwards,rec.forward)
+  -- Keep the owning request intact: switching back can still reuse unsaved work.
+  if t and t.state=='running' and f and f.task_id==t.id then return stop_required() end
+  if not opening then return message('The editor selection changed. Click Open in VS Code again.') end
+  req=nil
+end
 -- Reuse only stable identities still owned by this runtime. No stale restart.
 if req and req.instance then
   local rec=omo.store_get(req.instance)
@@ -144,6 +158,7 @@ if req and req.instance then
   local t=rec and find_task(tasks,rec.task)
   local f=rec and find_forward(forwards,rec.forward)
   if rec and t and t.state=='running' and f and f.task_id==t.id then
+    if not compatible(rec,t) then return stop_required() end
     local result,why=ready(rec,t,f)
     if result then return result end
     if why then cleanup(rec,tasks,forwards);return message('Cannot arm editor idle cleanup: '..why) end
@@ -211,21 +226,37 @@ for line in ((output or '')..'\n'):gmatch('([^\n]*)\n') do
 end
 if err~='' or count~=1 or not canonical or canonical=='' or canonical:find('\0',1,true) then drop(request_key);return message('Editor runtime cannot resolve the folder. Check host ABI/runtime requirements and output in plugin settings: '..tostring(err)) end
 if host.os=='windows' then canonical=canonical:gsub('\\','/') end
-local key='instance:'..omo.sha256_hex(canonical..'\0'..editor..'\0'..version)
+local function instance_key(name,release)
+  return 'instance:'..omo.sha256_hex(canonical..'\0'..name..'\0'..release)
+end
+local key=instance_key(editor,version)
 local tasks,forwards=records()
-local old=omo.store_get(key)
-if old then
-  local t,f=find_task(tasks,old.task),find_forward(forwards,old.forward)
-  if t and t.state=='running' and f and f.task_id==t.id then
-    -- A global/ticket alias must never steal a ticket-bound lifecycle.
-    if (t.ticket or 0)~=(binding or 0) then drop(request_key);return message('This folder already has an editor with another ticket binding. Stop that editor in plugin settings before reopening here.') end
-    req.instance=key;save(request_key,req)
-    local result,why=ready(old,t,f)
-    if result then return result end
-    if why then return message('Cannot arm editor idle cleanup: '..why) end
-    return pending('starting the existing editor')
+-- The tuple identifies reusable state, but the canonical folder owns exclusion
+-- across editors, releases and ticket/global bindings. Recognize records from
+-- before canonical metadata was stored using the shipped tuple identities.
+local known={}
+for name,release in pairs(versions) do known[instance_key(name,release)]=true end
+local owner
+for _,stored_key in ipairs(assert(omo.store_keys())) do
+  if stored_key:sub(1,9)=='instance:' then
+    local rec=omo.store_get(stored_key)
+    if rec and (rec.canonical==canonical or known[stored_key]) then
+      local t,f=find_task(tasks,rec.task),find_forward(forwards,rec.forward)
+      if t and t.state=='running' and f and f.task_id==t.id then
+        if stored_key~=key or not compatible(rec,t) then drop(request_key);return stop_required() end
+        owner={rec=rec,task=t,forward=f}
+      else cleanup(rec,tasks,forwards) end
+    end
   end
-  cleanup(old,tasks,forwards)
+end
+if owner then
+  local old,t,f=owner.rec,owner.task,owner.forward
+  old.canonical=canonical;old.editor=editor;old.version=version;save(old.key,old)
+  req.instance=key;save(request_key,req)
+  local result,why=ready(old,t,f)
+  if result then return result end
+  if why then return message('Cannot arm editor idle cleanup: '..why) end
+  return pending('starting the existing editor')
 end
 local port,port_error=omo.free_loopback_port()
 if not port then drop(request_key);return message('No loopback port available: '..tostring(port_error)) end
@@ -251,7 +282,7 @@ if not attached then
   drop(request_key)
   return message('Editor exited before its forward could attach: '..tostring(attach_error)..'. Inspect output in plugin settings.')
 end
-local rec={key=key,task=task.id,forward=forward.id,started=omo.now(),attempt=req.attempt,ready=false}
+local rec={key=key,canonical=canonical,editor=editor,version=version,task=task.id,forward=forward.id,started=omo.now(),attempt=req.attempt,ready=false}
 -- Watch immediately as well: an abandoned first-use tab cannot leak a task.
 local watched,watch_error=omo.forward_idle_watch(forward.id,idle*60)
 if not watched then cleanup(rec,assert(omo.task_list()),assert(omo.forward_list()));drop(request_key);return message('Cannot arm editor idle cleanup: '..tostring(watch_error)) end

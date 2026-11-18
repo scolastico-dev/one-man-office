@@ -44,7 +44,7 @@ local function fixture()
   function f:opened(action,project,ticket) self:run(action or 'open-ticket',project,ticket);self:ready();self:run((action=='open-project') and 'status-project' or 'status-ticket',project,ticket);local t=self.tasks[#self.tasks];t.output={'OMO_EDITOR_READY'};return self:run((action=='open-project') and 'status-project' or 'status-ticket',project,ticket) end
   return f
 end
-local function test(name,fn) local ok,err=pcall(fn);if not ok then error(name..': '..err) end;passed=passed+1;print('ok '..name) end
+local function test(name,fn) if arg[1] and not name:find(arg[1],1,true) then return end;local ok,err=pcall(fn);if not ok then error(name..': '..err) end;passed=passed+1;print('ok '..name) end
 
 test('default pin verifies before launch and pending completes',function()
  local f=fixture();local r=f:run('open-ticket');contains(r.message,'VS Code pending:');same(#f.starts,0)
@@ -96,10 +96,9 @@ test('port collisions retry at most three times',function()
  same(#f.starts,3);same(#f.forwards,0)
 end)
 
-test('failed downloads require next explicit click and changed selection leaves existing alone',function()
+test('failed downloads require next explicit click',function()
  local f=fixture();f:run('open-ticket');f.artifacts[f.artifact_options.key]={state='failed',error='checksum mismatch'};local r=f:run('status-ticket');contains(r.message,'checksum');same(f.installs,1)
  f:run('open-ticket');same(f.artifact_options.retry,true)
- f=fixture();f:opened();f.config.editor='openvscode';f:run('open-ticket');same(#f.starts,1);same(f.stops,0);same(f.installs,2)
 end)
 
 test('startup leaves inert state for manual pruning and never starts editors',function()
@@ -236,6 +235,104 @@ test('a refused ticket binding retains the owner and next explicit click reverif
  f:run('open-project','alpha',false);f:ready();contains(f:run('status-project','alpha',false).message,'another ticket binding')
  same(#f.starts,1);same(f.tasks[1].state,'running');same(f.tasks[1].ticket,7)
  f:run('open-project','alpha',false);same(f.installs,3)
+end)
+
+
+-- Removing canonical ownership checks must fail these tests by returning another
+-- forward, spawning another editor, or stopping the existing unsaved session.
+local function assert_owner_preserved(f,owner)
+ same(#f.starts,1);same(#f.forwards,1);same(f.forwards[1].id,owner.forward_id)
+ same(f.tasks[1].state,'running');same(f.stops,0);same(f.ports,1);same(f.temp_sequence,1)
+end
+local function assert_stop_required(r)
+ same(r.forward_id,nil);contains(r.message,'Stop');contains(r.message,'plugin settings')
+end
+for _,editors in ipairs({{'code-server','openvscode'},{'openvscode','code-server'}}) do
+ test('selection switch refuses '..editors[1]..' to '..editors[2]..' until Stop',function()
+  for _,is_ready in ipairs({false,true}) do
+   local f=fixture();f.config.editor=editors[1];local owner=f:opened()
+   if not is_ready then
+    f.tasks[1].output={}
+    for _,rec in pairs(f.store) do if type(rec)=='table' and rec.key then rec.ready=false end end
+   end
+   f.config.editor=editors[2]
+   assert_stop_required(f:run('status-ticket'));assert_stop_required(f:run('open-ticket'))
+   assert_owner_preserved(f,owner);same(f.installs,1)
+   f.config.editor=editors[1];local r=f:run('open-ticket')
+   if is_ready then same(r.forward_id,owner.forward_id) else contains(r.message,'pending') end
+   f.config.editor=editors[2];f.omo.task_stop(f.tasks[1].name)
+   f:run('open-ticket');same(f.installs,2);f:ready();f:run('status-ticket')
+   same(#f.starts,2);same(f.starts[2].args[3],editors[2]);same(#f.forwards,1);same(f.temp_sequence,2);same(f.ports,2)
+  end
+ end)
+ test('canonical alias refuses '..editors[1]..' to '..editors[2]..' without duplicate resources',function()
+  local f=fixture();f.config.editor=editors[1];f.identity_output=identity('/canonical/shared');local owner=f:opened()
+  f.config.editor=editors[2];f.ticket.folders[1].path='/alias/shared'
+  f:run('open-ticket');f:ready();assert_stop_required(f:run('status-ticket'))
+  assert_owner_preserved(f,owner)
+  f.now=f.now+121;f:timer();assert_owner_preserved(f,owner)
+  f.omo.task_stop(f.tasks[1].name);local r=f:opened()
+  same(#f.starts,2);same(f.starts[2].args[3],editors[2]);same(r.forward_id,f.forwards[1].id);same(f.temp_sequence,2)
+ end)
+end
+
+test('canonical folder excludes another pinned version and preserves its live owner',function()
+ local f=fixture();f.identity_output=identity('/canonical/shared');local owner=f:opened()
+ local old_key='instance:'..f.omo.sha256_hex('/canonical/shared\0code-server\0previous-pinned-version')
+ for key,rec in pairs(copy(f.store)) do
+  if type(rec)=='table' and rec.key then
+   f.store[key]=nil;rec.key=old_key;rec.version='previous-pinned-version';f.store[old_key]=rec
+  elseif type(rec)=='table' and rec.instance then
+   rec.instance=old_key;rec.version='previous-pinned-version';f.store[key]=rec
+  end
+ end
+ assert_stop_required(f:run('status-ticket'));assert_stop_required(f:run('open-ticket'));assert_owner_preserved(f,owner)
+ f.ticket.folders[1].path='/alias/shared';f:run('open-ticket');f:ready()
+ assert_stop_required(f:run('status-ticket'));assert_owner_preserved(f,owner)
+end)
+
+test('canonical alias binding checks cover both editors and ticket global ownership',function()
+ for _,editor in ipairs({'code-server','openvscode'}) do
+  for _,bindings in ipairs({{7,8},{7,0},{0,7}}) do
+   for _,switch in ipairs({false,true}) do
+    local f=fixture();f.config.editor=editor;f.identity_output=identity('/canonical/shared')
+    local owner=bindings[1]==0 and f:opened('open-project','alpha',false) or f:opened()
+    f.ticket.number=bindings[2];f.ticket.folders[1].path='/alias/shared'
+    if switch then f.config.editor=editor=='code-server' and 'openvscode' or 'code-server' end
+    local open=bindings[2]==0 and 'open-project' or 'open-ticket'
+    local status=bindings[2]==0 and 'status-project' or 'status-ticket'
+    local ticket=bindings[2]~=0
+    f:run(open,'alpha',ticket);f:ready();assert_stop_required(f:run(status,'alpha',ticket))
+    assert_owner_preserved(f,owner);same(f.tasks[1].ticket,bindings[1]~=0 and bindings[1] or nil)
+   end
+  end
+ end
+end)
+
+test('canonical alias reuses matching editor version and binding while starting or ready',function()
+ for _,editor in ipairs({'code-server','openvscode'}) do
+  for _,bound in ipairs({false,true}) do
+   for _,is_ready in ipairs({false,true}) do
+    local f=fixture();f.config.editor=editor;f.identity_output=identity('/canonical/shared')
+    local action=bound and 'open-ticket' or 'open-project';local status=bound and 'status-ticket' or 'status-project'
+    local owner=f:opened(action,'alpha',bound)
+    if not is_ready then f.tasks[1].output={};for _,rec in pairs(f.store) do if type(rec)=='table' and rec.key then rec.ready=false end end end
+    if bound then f.ticket.folders[1].path='/alias/shared' end
+    f:run(action,bound and 'alpha' or 'alias',bound);f:ready();local r=f:run(status,bound and 'alpha' or 'alias',bound)
+    if is_ready then same(r.forward_id,owner.forward_id) else contains(r.message,'pending') end
+    assert_owner_preserved(f,owner)
+   end
+  end
+ end
+end)
+
+test('legacy tuple records also refuse another editor through a canonical alias',function()
+ for _,editor in ipairs({'code-server','openvscode'}) do
+  local f=fixture();f.config.editor=editor;f.identity_output=identity('/canonical/shared');local owner=f:opened()
+  for _,rec in pairs(f.store) do if type(rec)=='table' and rec.key then rec.canonical=nil;rec.editor=nil;rec.version=nil end end
+  f.config.editor=editor=='code-server' and 'openvscode' or 'code-server';f.ticket.folders[1].path='/alias/shared'
+  f:run('open-ticket');f:ready();assert_stop_required(f:run('status-ticket'));assert_owner_preserved(f,owner)
+ end
 end)
 
 print(passed..' tests passed')
