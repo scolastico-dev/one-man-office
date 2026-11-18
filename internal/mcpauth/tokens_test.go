@@ -176,7 +176,9 @@ func TestSecretsStoredHashed(t *testing.T) {
 	}
 	dump := dumpTable(t, d, "mcp_tokens")
 	for _, secret := range []string{pat, p.Access, p.Refresh, q.Access, q.Refresh} {
-		body := secret[strings.LastIndex(secret, "_")+1:]
+		// The base64url payload can itself contain underscores. Compare
+		// the whole payload, not a random (possibly tiny) final segment.
+		body := strings.SplitN(secret, "_", 3)[2]
 		if strings.Contains(dump, body) {
 			t.Fatalf("a secret is stored as it is")
 		}

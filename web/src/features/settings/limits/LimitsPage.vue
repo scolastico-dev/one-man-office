@@ -16,7 +16,7 @@ import { sectionDef } from '../settingsSections'
 import { SLOT_RULE } from '../../../board/slots'
 
 const def = sectionDef('limits')
-const form = useGeneralForm(['limits', 'health', 'waiting', 'stop', 'rescan_interval', 'images'])
+const form = useGeneralForm(['limits', 'health', 'waiting', 'stop', 'rescan_interval', 'export_check_interval', 'images'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
 const FIELDS = [
@@ -27,6 +27,7 @@ const FIELDS = [
   'waiting.timeouts_before_investigate',
   'stop.handoff_timeout',
   'rescan_interval',
+  'export_check_interval',
   'images.keep_days_after_done',
 ]
 const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
@@ -96,9 +97,17 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
         <DurationField
           v-model="draft.rescan_interval"
           label="Rescan interval"
-          hint="How often the workspace folders are searched and the exported pull requests are checked for a merge."
+          hint="How often the workspace folders are searched."
           :error="err('rescan_interval')"
           data-field="rescan_interval"
+        />
+        <DurationField
+          v-model="draft.export_check_interval"
+          label="Export check interval"
+          hint="How often remote target branches are checked for exported work. 0 disables automatic checks; otherwise at least 1m. Check now stays available on the ticket."
+          :examples="['0', '1m', '10m']"
+          :error="err('export_check_interval')"
+          data-field="export_check_interval"
         />
       </FormSection>
       <FormSection

@@ -41,7 +41,7 @@ urgent of:
 | no usable model | its role has no model that can start |
 
 Under the badge a card may say what omo is doing: "agent review",
-"merging…", "exporting…", "starting…"; a done card says "cancelled" or
+"merging…", "exporting…", "Exported, waiting for the merge", "starting…"; a done card says "cancelled" or
 "exported".
 
 ## Moving cards
@@ -55,8 +55,8 @@ columns:
 | Planning → Ready For Dev | Approve: omo may start it. |
 | Ready For Dev → Planning | Withdraw the approval (not once an agent started). |
 | In Progress → Planning or Ready For Dev | Stop its agents; you confirm first. Branch and worktree stay. |
-| Review → In Progress | Reject; you write what needs to change. Only for a review that waits for you, or one whose merge failed. |
-| Review → Done | Approve the review (only when it waits for you). The card stays in Review, "merging…" or "exporting…", until omo is done. |
+| Review → In Progress | Reject; you write what needs to change. Available for a review that waits for you, an export waiting for its merge, or a failed merge. |
+| Review → Done | Approve a human review; the card stays in Review while merging or exporting. After export it waits there for the remote merge. Moving an export already waiting for the merge to Done confirms completion manually. |
 | Within a column | Change the priority. **Move to top** and **Move to bottom** do the same. |
 
 Everything else is refused with the reason in the menu or under the dragged
@@ -127,7 +127,8 @@ The ticket shows:
   export…** or **Approve…** (a review that waits for you), **Reject…**,
   **Export…**, **Merge locally instead** (inside the approve dialog when the
   ticket would export), **Retry start**, **Retry agent** or **Retry merge**,
-  **Mark as merged** (an exported ticket whose pull request you merged), **Start
+  **Check now** (check the remote targets of an export waiting for the merge),
+  **Mark as merged** (confirm the exported work was merged), **Start
   anyway…** (waiting for usage), **Open terminal**, **Cancel ticket…**, and the
   buttons of plugins.
 - **Details**: Project, Story, Depends on, Blocks, Supervisor, Model, Review,
@@ -210,15 +211,16 @@ file**. Large diffs are cut and say so.
   hidden lines**, or **Show the whole file** in a file's header (not for
   binary, new, deleted or untracked files, nor for one whose diff would be over
   1 MiB).
-- omo never fetches. When the local base branch is behind its remote-tracking
+- The Diff tab never fetches. When the local base branch is behind its remote-tracking
   branch, the tab says so ("local main is 4 commits behind origin/main, …") and
   offers **Compare with origin/main** for this ticket until the page is
   reloaded.
-- **Done tickets**: when a ticket is merged or exported, omo records the two
+- **Recorded diffs**: when a ticket is merged or exported, omo records the two
   commits its diff ran between, and keeps them in the repository under
-  `refs/omo/tickets/` even after the branch is deleted or squashed. The tab then
-  shows "Changes as recorded when the ticket was done", and the Branch field
+  `refs/omo/tickets/` even after the branch is deleted or squashed. For Done
+  tickets, the tab shows "Changes as recorded when the ticket was done", and the Branch field
   says "Deleted after the merge" and "Diff recorded when done: abc1234..def5678".
+  An export waiting in Review keeps its branch and labels those commits "Exported diff".
   When those commits are no longer in the repository, or for a ticket done
   before omo recorded them, the tab says so.
 

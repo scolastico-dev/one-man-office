@@ -90,11 +90,16 @@ While omo exports, the card says "exporting…"; other changes to the ticket
 are refused with that word until it is done.
 
 A comment links each pull request and says whether the agent or omo wrote its
-text. When every project has its pull request, the ticket is Done (exported).
+text. When every project has its pull request, the ticket stays in Review,
+marked **Exported, waiting for the merge** (`awaiting_merge`). Its details show
+the recorded remote, exported branch, target branch and pull request. Its
+resolution stays open and dependencies keep waiting until the exported work
+has merged into every remote target branch.
 When one fails, the ticket stays in Review, flagged "Export of <project>
 failed: <reason>"; the exported projects keep their pull request. Then either
 approve the export again (only projects without a pull request are tried),
-choose **Merge locally instead** (merges only those), or take the failing
+choose **Merge locally instead** (merges only those; the ticket still waits for
+the projects with pull requests to merge remotely), or take the failing
 project off the ticket (**Remove from ticket**).
 
 A repository whose remote is a folder on this machine has no forge, so its
@@ -103,10 +108,31 @@ export fails; give it a real remote (`git remote add origin <address>`).
 Images are not uploaded: a pull request names each as "[image: <name>, not
 exported]".
 
-**After the pull request is merged**: an exported ticket counts as finished
-for tickets that depend on it only once its pull request is merged. omo notices
-that when the exported branch shows up in the base branch (it checks at the
-**Rescan interval**); **Mark as merged** on the ticket tells it at once.
+**Checking for a merge**: omo checks the remote target branches with Git,
+without calling a forge API. It uses the remote, target branch and reviewed
+commit recorded when the work was exported, so later configuration or local
+branch changes do not change what is checked. Fetching the recorded target
+keeps the checkout, index, local branches and remote-tracking branches intact.
+A normal merge can be found by
+commit ancestry; squash and rebase merges can be found by checking that the
+exported content is present. These content checks use Git's built-in text
+merge independently of the project's merge-driver policies. Content checks
+are conservative: later rewrites,
+reverts or conflicts can leave a merged ticket waiting. A failed or unavailable
+remote also leaves the ticket waiting.
+
+**Settings → Limits → Export check interval** controls automatic checks
+(`export_check_interval`, default `10m`; `0` turns them off, otherwise at least
+`1m`). This is independent of workspace rescanning. **Check now** on a waiting
+ticket requests a check; the user CLI `omo ai ticket check-export N` does the same. Repeated requests share the same checking round. The
+ticket updates when the check finishes. A confirmed merge moves the ticket to
+Done (exported, merged) and lets its dependents start.
+
+You can also use **Mark as merged**, or move the waiting card to Done, to
+confirm completion yourself. **Reject…** sends it back to In Progress for
+further work. Existing Done exports from older versions still support
+**Mark as merged**. When all projects have nothing to export, the ticket goes
+straight to Done (completed).
 
 ## Branch names
 

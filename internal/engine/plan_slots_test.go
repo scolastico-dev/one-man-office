@@ -76,6 +76,9 @@ func TestPlanSlotTable(t *testing.T) {
 			w.ticket(1, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageExporting))
 			w.session(api.RoleDeveloper, 1, api.SessionRunning, sessPurpose(api.PurposeExport), sessProject("p"))
 		}},
+		{"review, exported waiting for merge", true, func(w *world) {
+			w.ticket(1, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAwaitingMerge))
+		}},
 		{"review, export failed", true, func(w *world) {
 			w.ticket(1, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageExporting))
 			w.in.exportOver = map[int64]map[string]bool{1: {"p": true}}

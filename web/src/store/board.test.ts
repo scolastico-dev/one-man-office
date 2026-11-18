@@ -64,6 +64,7 @@ const general = (max: number): General => ({
   stop: { handoff_timeout: '1m' },
   workspace_roots: [],
   rescan_interval: '1h',
+  export_check_interval: '10m',
   agent_env: {},
   usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 })
@@ -698,7 +699,7 @@ describe('moves', () => {
   })
 
   test('Review → Done keeps the card in Review with stage merging; a task without a project goes to Done', async () => {
-    const api = [{ project: 'api', base_branch: 'main', branch: 'omo/1', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
+    const api = [{ project: 'api', base_branch: 'main', branch: 'omo/1', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }]
     const f = await started({
       tickets: [
         summary(1, { column: 'review', review_stage: 'human', rank: 50, projects: api }),
@@ -713,6 +714,15 @@ describe('moves', () => {
     expect(f.store.view(1)).toMatchObject({ column: 'review', review_stage: 'merging', rank: 50 })
     expect(f.store.view(2)).toMatchObject({ column: 'review', review_stage: 'exporting' })
     expect(f.store.view(3)).toMatchObject({ column: 'done' })
+    expect(f.client.last('POST', '/api/tickets/1/move').body).toEqual({ column: 'done', before: null })
+  })
+
+  test('manually completing an exported review shows Done without another export', async () => {
+    const f = await started({ tickets: [summary(1, { column: 'review', review_stage: 'awaiting_merge', effective_when_approved: 'export', projects: [
+      { project: 'api', base_branch: 'main', branch: 'feature', worktree: '', export_url: 'https://example.invalid/pull/1', export_state: 'exported', export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' },
+    ] })], event_id: 1 })
+    void f.store.requestMove(1, 'done', null)
+    expect(f.store.view(1)).toMatchObject({ column: 'done', review_stage: '' })
     expect(f.client.last('POST', '/api/tickets/1/move').body).toEqual({ column: 'done', before: null })
   })
 

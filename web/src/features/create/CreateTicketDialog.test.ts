@@ -140,7 +140,7 @@ test('a task in a story shows the default of tasks in a story, a standalone task
   try {
     const h = await harness((omo) => {
       TWO(omo)
-      omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] })]
+      omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] })]
     })
     const w = await open(h, { initialStory: 1 })
     expect(w.get('select[name="review"] option').text()).toBe('Default (Skipped)')
@@ -172,7 +172,7 @@ test('an empty supervisor reads as the server default; You sends user', async ()
 test('the supervisor default of a task in a story is the product manager, and every model is listed', async () => {
   const h = await harness((omo) => {
     TWO(omo)
-    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] })]
+    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] })]
   })
   h.respond.models = [
     { id: 'claude/sonnet', profile: 'claude', name: 'sonnet', cli: 'claude', description: '', selectable: true },
@@ -321,7 +321,7 @@ test('a task with a story offers only that story\'s projects and hides when appr
   const h = await harness((omo) => {
     TWO(omo)
     omo.tickets = [
-      ticket({ number: 1, type: 'story', title: 'S', projects: [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] }),
+      ticket({ number: 1, type: 'story', title: 'S', projects: [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] }),
       ticket({ number: 2, type: 'story', title: 'Closed', column: 'review' }),
     ]
   })
@@ -389,7 +389,7 @@ test('a task in a story gets no branch notice: it is based on its story\'s branc
   const onFeature = { ...project('ui', 'ui'), current_branch: 'feature-x', default_branch: 'main' }
   const h = await harness((omo) => {
     omo.projects = [onFeature]
-    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] })]
+    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] })]
   })
   const w = await open(h, { initialStory: 1 })
   expect((w.get('input[type="radio"][value="ui"]').element as HTMLInputElement).checked).toBe(true)

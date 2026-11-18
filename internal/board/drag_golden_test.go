@@ -147,6 +147,8 @@ func dragSetups() []dragSetup {
 		{name: "standalone task in review, merging", col: rv, stage: api.ReviewStageMerging},
 		{name: "standalone task in review, merging, omo is merging it", col: rv, stage: api.ReviewStageMerging, busy: true},
 		{name: "standalone task in review, exporting", col: rv, stage: api.ReviewStageExporting},
+		{name: "standalone task in review, awaiting exported merge", col: rv, stage: api.ReviewStageAwaitingMerge},
+		{name: "story in review, awaiting exported merge", story: true, col: rv, stage: api.ReviewStageAwaitingMerge},
 		{name: "story in review, agent review", story: true, col: rv, stage: agentStage},
 		{name: "story in review, waiting for the user", story: true, col: rv, stage: human},
 		{name: "story in review, merging", story: true, col: rv, stage: api.ReviewStageMerging},

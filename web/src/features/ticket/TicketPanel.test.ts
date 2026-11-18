@@ -18,7 +18,33 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }
+
+test('an exported ticket waits in Review with its remote, branch, target and a check action', async () => {
+  const t = ticket({
+    number: 2, column: 'review', review_stage: 'awaiting_merge',
+    export_url: 'https://example.invalid/pull/2',
+    projects: [{ ...demo, branch: 'feature/2', export_state: 'exported', export_url: 'https://example.invalid/pull/2',
+      start_commit: '1234567890abcdef', end_commit: 'abcdef1234567890',
+      export_remote: 'https://example.invalid/demo.git', export_branch: 'feature/2', export_base: 'release', export_commit: 'abc', export_target_commit: 'def' }],
+  })
+  const hn = await panelHarness(seeded(t))
+  hn.write.fn = () => ok({ checking: true })
+  const { w } = await open(hn, 2)
+  expect(w.get('[data-ticket-column]').text()).toBe('Review')
+  expect(w.get('[data-ticket-caption]').text()).toBe('Exported, waiting for the merge')
+  expect(w.get('[data-export-target]').text()).toContain('https://example.invalid/demo.git')
+  expect(w.get('[data-export-target]').text()).toContain('feature/2')
+  expect(w.get('[data-export-target]').text()).toContain('release')
+  expect(w.get('[data-commits="demo"]').text()).toContain('Exported diff:')
+  expect(w.get('[data-pull-requests] a').attributes('href')).toBe('https://example.invalid/pull/2')
+  expect(actionLabels(w)).toContain('Reject…')
+  expect(actionLabels(w)).toContain('Mark as merged')
+  await action(w, 'check-export').trigger('click')
+  await flushPromises()
+  expect(hn.sent).toContainEqual({ method: 'POST', path: '/api/tickets/2/check-export', body: {} })
+  expect(w.get('[data-export-check-status]').text()).toContain('Merge check requested')
+})
 
 async function open(hn: PanelHarness, n: number, onClose?: () => void) {
   const { wrapper, router } = await mountPanel(hn, TicketPanel, { number: n, ...(onClose ? { onClose } : {}) }, `/${n}`)

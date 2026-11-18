@@ -108,7 +108,11 @@ func TestEveryWayToDoneNeedsRecordedCommits(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := get(t, b, tk.Number)
-			if got.Column != api.ColumnDone {
+			if w.name == "export of one project" || w.name == "export job's report" {
+				if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge {
+					t.Fatalf("export = %s/%s", got.Column, got.ReviewStage)
+				}
+			} else if got.Column != api.ColumnDone {
 				t.Fatalf("column = %s", got.Column)
 			}
 			if p := got.Projects[0]; p.StartCommit != commitB || p.EndCommit != commitC {

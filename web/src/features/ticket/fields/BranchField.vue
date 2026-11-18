@@ -34,8 +34,12 @@ const removingProject = computed<TicketProject | null>(() => props.ticket.projec
         <code v-if="p.branch !== ''" class="branch__name">{{ p.branch }}</code>
         <span v-else-if="ticket.column === 'done'">{{ p.end_commit ? 'Deleted after the merge' : 'None' }}</span>
         <span v-else>Not created yet</span>
+        <span v-if="p.export_remote || p.export_branch || p.export_base" class="branch__export" data-export-target>
+          Exported to {{ visibleText(p.export_remote) }}: <code>{{ visibleText(p.export_branch) }}</code>
+          → target <code>{{ visibleText(p.export_base) }}</code>
+        </span>
         <span v-if="p.end_commit" class="branch__commits" :data-commits="p.project"
-          >Diff recorded when done: <code :title="p.start_commit">{{ shortCommit(p.start_commit ?? '') }}</code>..<code :title="p.end_commit">{{
+          >{{ ticket.column === 'done' ? 'Diff recorded when done:' : 'Exported diff:' }} <code :title="p.start_commit">{{ shortCommit(p.start_commit ?? '') }}</code>..<code :title="p.end_commit">{{
             shortCommit(p.end_commit)
           }}</code></span
         >

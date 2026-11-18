@@ -79,6 +79,7 @@ type General struct {
 	Stop                 StopSettings         `yaml:"stop" json:"stop"`
 	WorkspaceRoots       []WorkspaceRoot      `yaml:"workspace_roots" json:"workspace_roots"`
 	RescanInterval       Duration             `yaml:"rescan_interval" json:"rescan_interval"`
+	ExportCheckInterval  Duration             `yaml:"export_check_interval" json:"export_check_interval"`
 	AgentEnv             map[string]string    `yaml:"agent_env" json:"agent_env"`
 	Usage                UsageSettings        `yaml:"usage" json:"usage"`
 	UI                   UISettings           `yaml:"ui" json:"ui"`

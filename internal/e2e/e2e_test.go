@@ -160,8 +160,8 @@ func TestExportFlowEndToEnd(t *testing.T) {
 	before := w.git("rev-parse", "main")
 	n := w.task("Export me", api.ReviewSkipped, api.WhenApprovedExport)
 
-	tk := w.waitColumn(n, api.ColumnDone, "")
-	if tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/you/app/pull/"+itoa(n) {
+	tk := w.waitColumn(n, api.ColumnReview, api.ReviewStageAwaitingMerge)
+	if tk.Resolution != "" || tk.ExportURL != "https://example.invalid/you/app/pull/"+itoa(n) {
 		t.Fatalf("resolution %q url %q", tk.Resolution, tk.ExportURL)
 	}
 	exports := 0
@@ -191,6 +191,7 @@ func TestExportFlowEndToEnd(t *testing.T) {
 		t.Fatalf("no push comment:\n%s", strings.Join(w.comments(n), "\n---\n"))
 	}
 	w.checkoutClean()
+	w.mergeExport(tk)
 	w.settled(branch)
 	if left := w.exportFolders(); len(left) != 0 {
 		t.Fatalf("export folders left: %v", left)
@@ -211,7 +212,7 @@ func TestExportPushesReviewedCommitEndToEnd(t *testing.T) {
 	extra := commitFile(t, wt, "late.txt", "not reviewed\n", "late change")
 	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{Export: true}, nil)
 
-	tk = w.waitColumn(n, api.ColumnDone, "")
+	tk = w.waitColumn(n, api.ColumnReview, api.ReviewStageAwaitingMerge)
 	branch := tk.Projects[0].Branch
 	if got := w.remoteHead(branch); got != reviewed {
 		t.Fatalf("origin has %q, want the reviewed %s (not %s)", got, reviewed, extra)
@@ -222,6 +223,7 @@ func TestExportPushesReviewedCommitEndToEnd(t *testing.T) {
 	if tk.ExportURL != "https://example.invalid/you/app/pull/"+itoa(n) {
 		t.Fatalf("url %q", tk.ExportURL)
 	}
+	w.mergeExport(tk)
 	w.settled(branch)
 	w.noCrashes(n)
 }
@@ -259,10 +261,11 @@ func TestExportPushRefusedEndToEnd(t *testing.T) {
 
 	gitIn(t, w.origin, "update-ref", "-d", "refs/heads/"+branch)
 	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{Export: true}, nil)
-	tk = w.waitColumn(n, api.ColumnDone, "")
+	tk = w.waitColumn(n, api.ColumnReview, api.ReviewStageAwaitingMerge)
 	if got, want := w.remoteHead(branch), w.git("rev-parse", branch); got != want {
 		t.Fatalf("after the retry origin has %q, want %s", got, want)
 	}
+	w.mergeExport(tk)
 	w.settled(branch)
 	w.noCrashes(n)
 }
@@ -639,7 +642,7 @@ func TestBranchTemplateEndToEnd(t *testing.T) {
 	if !w.isAncestor(w.commitWith("main", "feat: fake work for #"+itoa(merged)), "main") {
 		t.Fatal("the work is not on main")
 	}
-	tk = w.waitColumn(exported, api.ColumnDone, "")
+	tk = w.waitColumn(exported, api.ColumnReview, api.ReviewStageAwaitingMerge)
 	branch := tk.Projects[0].Branch
 	if want := "task/" + itoa(exported) + "-export-me"; branch != want {
 		t.Fatalf("exported branch %q, want %q", branch, want)
@@ -648,6 +651,7 @@ func TestBranchTemplateEndToEnd(t *testing.T) {
 		t.Fatalf("origin has %q, want %s", got, want)
 	}
 	w.checkoutClean()
+	w.mergeExport(tk)
 	w.settled(branch)
 	w.noCrashes(merged, exported)
 }

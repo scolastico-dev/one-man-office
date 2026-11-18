@@ -82,8 +82,10 @@ func TestExportTextPerRepositoryEndToEnd(t *testing.T) {
 		// so every project has something to export.
 		"pm": strings.Join([]string{
 			"ready",
-			"git|-C|../../" + ui + "/$TICKET|commit|--allow-empty|-m|feat: the sign-in form",
-			"git|-C|../../" + web + "/$TICKET|commit|--allow-empty|-m|feat: the sign-in page",
+			"git|-C|../../" + ui + "/$TICKET|rm|README.md",
+			"git|-C|../../" + ui + "/$TICKET|commit|-m|feat: the sign-in form",
+			"git|-C|../../" + web + "/$TICKET|rm|README.md",
+			"git|-C|../../" + web + "/$TICKET|commit|-m|feat: the sign-in page",
 			"create-tasks|1",
 			"release-all",
 			"until-tasks-done|10m",
@@ -107,9 +109,9 @@ func TestExportTextPerRepositoryEndToEnd(t *testing.T) {
 	story := w.create(api.CreateTicket{Type: api.TypeStory, Title: "Sign in across three", Projects: []string{api1, ui, web},
 		Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport}).Number
 	w.approve(story)
-	tk := w.waitColumn(story, api.ColumnDone, "")
-	if tk.Resolution != api.ResolutionExported {
-		t.Fatalf("story is done as %q", tk.Resolution)
+	tk := w.waitColumn(story, api.ColumnReview, api.ReviewStageAwaitingMerge)
+	if tk.Resolution != "" || tk.ClosedAt != nil || tk.ExportMerged {
+		t.Fatalf("story completed before its remote merges: resolution %q, closed %v, merged %v", tk.Resolution, tk.ClosedAt, tk.ExportMerged)
 	}
 	list, err := w.user.Tickets(context.Background(), api.TicketFilter{Story: &story, Type: api.TypeTask, Column: api.ColumnDone})
 	if err != nil || len(list.Tickets) != 1 {
@@ -177,6 +179,12 @@ func TestExportTextPerRepositoryEndToEnd(t *testing.T) {
 		if head, _ := gitOut(bare, "rev-parse", "--verify", "-q", "refs/heads/"+pp.Branch); head == "" {
 			t.Errorf("%s was not pushed to its origin", p)
 		}
+		gitIn(t, bare, "update-ref", "refs/heads/main", pp.ExportCommit)
+	}
+	w.do("POST", "/api/tickets/"+itoa(story)+"/check-export", struct{}{}, nil)
+	done := w.waitColumn(story, api.ColumnDone, "")
+	if done.Resolution != api.ResolutionExported || !done.ExportMerged || done.ClosedAt == nil {
+		t.Fatalf("story did not finish after its remote merges: resolution %q, merged %v, closed %v", done.Resolution, done.ExportMerged, done.ClosedAt)
 	}
 	w.noCrashes(story, task)
 }

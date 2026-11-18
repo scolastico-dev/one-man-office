@@ -154,7 +154,8 @@ signed.
 | **Question unanswered after** | `health.question_unanswered_after` | 30m | a question this old is flagged (a question to an agent is first reminded, and flagged after twice the time) |
 | **Timeouts before investigating** | `waiting.timeouts_before_investigate` | 3 | after this many `omo ai wait` timeouts in a row the waiting agent is told to find out why nothing happens |
 | **Handoff time limit at stop** | `stop.handoff_timeout` | 2m | how long `omo stop` (and a usage stop) waits for handoff comments; 5s to 1h |
-| **Rescan interval** | `rescan_interval` | 10m | how often workspace folders are searched (and exported pull requests checked) |
+| **Rescan interval** | `rescan_interval` | 10m | how often workspace folders are searched |
+| **Export check interval** | `export_check_interval` | 10m | how often remote target branches are checked for exported work; `0` disables automatic checks, otherwise at least `1m`; **Check now** remains available on a waiting ticket |
 | **Keep images after Done (days)** | `images.keep_days_after_done` | 60 | 0 keeps images for ever |
 
 ## Review

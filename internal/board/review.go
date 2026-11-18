@@ -124,7 +124,7 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 
 // exportResult records what an export job reports for its project: the url
 // of the pull request it opened, or the error that stopped it. Once every
-// project of the ticket has a pull request the ticket is done as exported.
+// project of the ticket has a pull request the ticket waits for the merge.
 // An error is settled by the engine (Engine.CheckHandIn records it), which
 // sends the ticket back to the user with ExportFailed once the other
 // projects' exports are over, or ends it with FinishExport.
@@ -612,12 +612,12 @@ func checkHumanStage(t ticketRow) error {
 	}
 }
 
-// checkRejectable requires t to wait for the user's review, or to be
-// approved but stuck at merging with a failed merge step (for example
+// checkRejectable requires t to wait for the user's review or an exported
+// merge, or to be approved but stuck with a failed merge step (for example
 // because its branch moved after the review): the user may then send it
 // back to work instead of retrying the merge.
 func checkRejectable(t ticketRow) error {
-	if t.Col == api.ColumnReview && t.ReviewStage == api.ReviewStageMerging && t.FailedStep == api.FailedMerge {
+	if t.Col == api.ColumnReview && (t.ReviewStage == api.ReviewStageAwaitingMerge || (t.ReviewStage == api.ReviewStageMerging && t.FailedStep == api.FailedMerge)) {
 		return nil
 	}
 	return checkHumanStage(t)
@@ -701,9 +701,19 @@ func (b *Board) SetExportMerged(ctx context.Context, n int64) error {
 	})
 }
 
-// markMerged sets export_merged on the exported ticket t and tells the
-// tickets that depend on it. Marking it again changes nothing.
+// markMerged closes an awaiting export and tells tickets that depend on it.
+// For legacy Done exports it only sets export_merged. Marking again changes
+// nothing; the actor distinguishes user confirmation from engine detection.
 func (b *Board) markMerged(tx *sql.Tx, a Actor, t ticketRow) error {
+	if t.Col == api.ColumnReview && t.ReviewStage == api.ReviewStageAwaitingMerge {
+		if err := b.setColumn(tx, t.ID, api.ColumnDone, t.Rank, api.ResolutionExported); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE tickets SET export_merged = 1 WHERE id = ?`, t.ID); err != nil {
+			return err
+		}
+		return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnDone, action: ActionMerged}})
+	}
 	if t.Resolution != api.ResolutionExported {
 		return api.Errorf(api.CodeInvalidTransition, "#%d was not exported; only an exported ticket can be marked as merged", t.ID)
 	}

@@ -1,7 +1,7 @@
 import type { Column, Project, ReviewStage, TicketSummary } from '../api/types'
 import { COLUMNS } from '../api/types'
 
-export type MoveAction = 'reorder' | 'approve' | 'withdraw' | 'stop' | 'reject'
+export type MoveAction = 'reorder' | 'approve' | 'withdraw' | 'stop' | 'reject' | 'move'
 
 /** What dropping a card on one column means. */
 export interface Target {
@@ -114,7 +114,7 @@ function inProgressTarget(to: Column): Target {
  */
 export function canReject(t: TicketSummary): boolean {
   if (t.column !== 'review') return false
-  return t.review_stage === 'human' || (t.review_stage === 'merging' && t.failed_step === 'merge')
+  return t.review_stage === 'human' || t.review_stage === 'awaiting_merge' || (t.review_stage === 'merging' && t.failed_step === 'merge')
 }
 
 function reviewTarget(t: TicketSummary, to: Column): Target {
@@ -128,6 +128,7 @@ function reviewTarget(t: TicketSummary, to: Column): Target {
     case 'review':
       return reorder('review', t.review_stage)
     case 'done':
+      if (t.review_stage === 'awaiting_merge') return { column: to, allowed: true, action: 'move', resultColumn: 'done' }
       if (t.review_stage !== 'human') return refuse(to, TO_DONE)
       // A task without a project has nothing to merge or export: approving it is Done.
       if (t.type === 'task' && t.projects.length === 0) return { column: to, allowed: true, action: 'approve', resultColumn: 'done' }
@@ -141,7 +142,7 @@ function reviewTarget(t: TicketSummary, to: Column): Target {
   }
 }
 
-const REVIEW_STAGES: readonly ReviewStage[] = ['agent', 'human', 'merging', 'exporting']
+const REVIEW_STAGES: readonly ReviewStage[] = ['agent', 'human', 'merging', 'exporting', 'awaiting_merge']
 
 /**
  * Which columns accept a drop of `t` and what each drop does. The rules

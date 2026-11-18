@@ -28,7 +28,7 @@ export const sampleProjects: Project[] = [
 ]
 
 function on(id: string, branch = ''): TicketProject {
-  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '', export_url: '', export_state: '' as const, export_error: '' }
+  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }
 }
 
 function agent(role: AgentRef['role'], name: string, state: AgentRef['state'] = 'running'): AgentRef {
@@ -259,7 +259,7 @@ export const sampleTickets: TicketSummary[] = [
   t({ number: 5, title: 'Design tokens and base components', column: 'done', resolution: 'completed', story: 3, projects: [on('ui')] }),
   t({ number: 27, title: 'Move backups to object storage', column: 'done', resolution: 'cancelled', projects: [on('infra')] }),
   t({ number: 6, title: 'Event id header on state changes', column: 'done', resolution: 'completed', story: 3, projects: [on('api')] }),
-  t({ number: 29, title: 'Typed API client package', column: 'done', resolution: 'exported', projects: [on('api')], export_url: 'https://github.com/acme-corp/api/pull/112' }),
+  t({ number: 29, title: 'Typed API client package', column: 'review', review_stage: 'awaiting_merge', projects: [{ ...on('api', 'omo/typed-api-client'), export_url: 'https://github.com/acme-corp/api/pull/112', export_state: 'exported', export_remote: 'https://github.com/acme-corp/api.git', export_branch: 'omo/typed-api-client', export_base: 'main' }], export_url: 'https://github.com/acme-corp/api/pull/112' }),
   t({ number: 7, title: 'API types and login token', column: 'done', resolution: 'completed', story: 3, projects: [on('ui')] }),
   t({ number: 48, title: 'Pin npm packages exactly', column: 'done', resolution: 'completed', projects: [on('omo')] }),
   t({ number: 49, title: 'Statusmeldung im Hub aktualisieren', column: 'done', resolution: 'completed', projects: [on('infra')] }),

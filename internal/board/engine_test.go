@@ -27,6 +27,7 @@ var allStates = []boardState{
 	{api.ColumnPlanning, ""}, {api.ColumnReady, ""}, {api.ColumnInProgress, ""},
 	{api.ColumnReview, api.ReviewStageAgent}, {api.ColumnReview, api.ReviewStageHuman},
 	{api.ColumnReview, api.ReviewStageMerging}, {api.ColumnReview, api.ReviewStageExporting},
+	{api.ColumnReview, api.ReviewStageAwaitingMerge},
 	{api.ColumnDone, ""},
 }
 
@@ -45,7 +46,7 @@ func TestEngineMatrix(t *testing.T) {
 			func(b *Board, n int64) error { return b.CompleteMerge(context.Background(), n) }},
 		{"merge_conflict", boardState{api.ColumnReview, api.ReviewStageMerging}, boardState{api.ColumnInProgress, ""},
 			func(b *Board, n int64) error { return b.MergeConflict(context.Background(), n, "conflict in a.go") }},
-		{"complete_export", boardState{api.ColumnReview, api.ReviewStageExporting}, boardState{api.ColumnDone, ""},
+		{"complete_export", boardState{api.ColumnReview, api.ReviewStageExporting}, boardState{api.ColumnReview, api.ReviewStageAwaitingMerge},
 			func(b *Board, n int64) error {
 				return b.CompleteExport(context.Background(), n, "https://example.test/pr/1")
 			}},
@@ -141,7 +142,7 @@ func TestExportFailedFlagsForUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = get(t, b, tk.Number)
-	if got.Resolution != api.ResolutionExported || got.ExportURL != "https://example.test/pr/7" || got.ExportMerged {
+	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.Resolution != "" || got.ExportURL != "https://example.test/pr/7" || got.ExportMerged {
 		t.Fatalf("got %s %q %v", got.Resolution, got.ExportURL, got.ExportMerged)
 	}
 }
