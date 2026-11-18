@@ -8,7 +8,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { script } from "./support/agents";
+import { script, waitForRestartsExhausted } from "./support/agents";
 import { openBoard } from "./support/board";
 import {
   expect,
@@ -240,14 +240,15 @@ test.describe("an agent that prints a long line and exits", () => {
   test("the log of an agent session breaks it", async ({ page, omo }) => {
     const n = await omo.createTicket({ title: "Long output" });
     await omo.moveTicket(n, "ready");
+    // Every attempt of the exiting agent has finished before anything asks; the row is one session picked by its id.
+    const [saved] = await waitForRestartsExhausted(omo, n, "developer");
     await openBoard(page, omo);
     await page.goto(omo.url(`/${n}?tab=agents`));
-    const item = page
-      .locator(`dialog[data-ticket-panel] [data-session]`)
-      .first();
-    await expect(item.locator("[data-ended]")).toBeVisible({ timeout: 30_000 });
-    const show = item.getByRole("button", { name: "Show log" });
-    if (await show.count()) await show.click();
+    const item = page.locator(
+      `dialog[data-ticket-panel] li[data-session="${saved!.id}"]`,
+    );
+    await expect(item.locator("[data-ended]")).toBeVisible();
+    await item.getByRole("button", { name: "Show log" }).click();
     const log = item.locator("[data-log] pre");
     await expect(log).toContainText("unbrokenmachinetext");
     await atEveryWidth(page, (width) =>

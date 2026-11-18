@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { expect, test } from './support/omo'
+import { traceWheels, wheelTraceProblems } from './support/wheelTrace'
 
 // On the ticket page the wheel scrolls the Overview from anywhere beside it
 // that has nothing to scroll for itself: over the centred text, in the free
@@ -17,8 +18,11 @@ async function expectMoves(page: Page, x: number, y: number, where: string) {
   await settle(page)
   const before = await descTop(page)
   await page.mouse.move(x, y)
-  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
-  await expect.poll(() => descTop(page), { message: `the wheel ${where} (${x}, ${y}) scrolls the overview` }).toBeLessThan(before - 50)
+  const trace = await traceWheels(page, async () => {
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
+    await expect.poll(() => descTop(page), { message: `the wheel ${where} (${x}, ${y}) scrolls the overview` }).toBeLessThan(before - 50)
+  })
+  expect(wheelTraceProblems(trace, 5), `the wheels ${where} are scrolled by the compositor alone`).toEqual([])
   expect(await page.evaluate(() => (document.scrollingElement ?? document.documentElement).scrollTop)).toBe(0)
 }
 
