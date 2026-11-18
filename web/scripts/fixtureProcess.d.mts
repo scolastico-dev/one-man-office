@@ -17,6 +17,8 @@ export interface FixtureOptions {
   /** Where the build folder is made; default the system's temporary folder as configured. */
   tmp?: string
   env?: NodeJS.ProcessEnv
+  /** Test seam: replaces the kill steps of `endProcess` for the helper. */
+  end?: EndOptions
   /** Called with the process id as soon as the helper is started. */
   onSpawn?: (pid: number) => void
   /** Called after each piece of output with everything so far and a way to write to the helper's input. */
@@ -32,6 +34,8 @@ export interface EndOptions {
 }
 /** Ends a running process without waiting for it (the caller waits for its close); a failure to end it throws. */
 export function endProcess(child: { pid?: number; exitCode: number | null; signalCode: string | null; kill(signal?: string): boolean }, options?: EndOptions): void
+/** True for a program that launches others (go, npm, npx, a shell); `startFixture` refuses it as the helper. */
+export function isLauncher(command: string): boolean
 export function taskkillArgs(pid: number): string[]
 export function fixtureEnv(base?: NodeJS.ProcessEnv, extra?: Record<string, string>, platform?: NodeJS.Platform): NodeJS.ProcessEnv
 export function startFixture(options?: FixtureOptions): Promise<FixtureRun>

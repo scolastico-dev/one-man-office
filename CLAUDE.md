@@ -486,11 +486,20 @@ root) and starts that binary directly, so the child it holds is the process that
 owns the servers and ending it ends them on every platform; on Windows only that
 awaited build, which starts compilers itself, is ended with `taskkill /T /F`.
 Stop, every start failure (build, spawn, bad or split fixtures line, early exit)
-and an interrupt of the driver wait for the process to be closed, remove the
-folder and report a failed kill instead of treating it as "already gone".
-`web/src/processOwnership.guard.test.ts` lists every launcher under `web/` with
-its lifecycle and fails on a new one, on a launcher of a launcher (`go`, `npm`,
-`npx`, a shell) started as a long-lived child, and on a shell option. The e2e
+and an interrupt of the driver (SIGINT/SIGTERM, handled asynchronously) wait for
+the process to be closed, then remove the folder, and report a failed kill
+(also from `stop`, which still removes the folder and releases the handlers)
+instead of treating it as "already gone". The synchronous `exit` hook is only a
+best effort: Node cannot wait there, so on Windows, where a running `.exe`
+cannot be deleted, a crash of the driver can leave the folder behind (reported
+on stderr). `startFixture` refuses a launcher (`go`, `npm`, `npx`, a shell) as
+its `command`.
+`web/src/processOwnership.guard.test.ts` lists every tooling launcher under
+`web/` with its lifecycle and fails on a new one; it also checks the specs and
+unit tests (only the guard itself and the two tests of the helper and runner
+are exempt, each with a reason): they may start programs only synchronously
+(`execFileSync`, `spawnSync`). It fails on a launcher of a launcher started as a
+long-lived child and on a shell option. The e2e
 `run` (`web/e2e/support/run.ts`) rejects a program past its limit only once the
 process is closed. omo's own agent containment on Windows is product work, not
 covered here.

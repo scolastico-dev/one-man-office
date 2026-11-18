@@ -5,7 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { completeLine, endProcess, fixtureEnv, startFixture, taskkillArgs } from '../../scripts/fixtureProcess.mjs'
+import { completeLine, endProcess, fixtureEnv, isLauncher, startFixture, taskkillArgs } from '../../scripts/fixtureProcess.mjs'
 
 // An owned temporary root that is not below the shared one and has a space in it.
 const owned = resolve('owned temporary root', 'tmp')
@@ -233,6 +233,51 @@ describe('the helper process is the process that owns the servers', () => {
   })
 })
 
+describe('the helper must be the process that owns the servers', () => {
+  it.each(['go', 'npm', 'npx', 'sh', '/bin/bash', 'C:\\Program Files\\Go\\bin\\go.exe', 'CMD.EXE', 'pwsh'])('refuses the launcher %s as the helper', async (command) => {
+    const tmp = own()
+    expect(isLauncher(command)).toBe(true)
+    await expect(startFixture({ command, args: ['test', './internal/server'], tmp })).rejects.toThrow(/launcher/)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
+  it('accepts a program that is not a launcher, including a path with a launcher\'s name inside it', () => {
+    for (const command of [process.execPath, '/home/x/go/bin/server.test', 'C:\\gopher\\fixture.exe']) expect(isLauncher(command), command).toBe(false)
+  })
+})
+
+describe('a kill that fails', () => {
+  it('is reported by stop, and the build folder and the interrupt handlers are released all the same', async () => {
+    const tmp = own()
+    const listeners = process.listenerCount('SIGINT')
+    // The helper reports through a connection that closes when its process is gone, so the test can end it afterwards without sleeping.
+    const server = createServer()
+    const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    try {
+      const run = await startFixture({
+        cwd: goHelper(),
+        build: { pkg: '.' },
+        args: [...HELPER_ARGS, '--', `127.0.0.1:${(server.address() as { port: number }).port}`],
+        tmp,
+        end: { killGroup: denied },
+        onSpawn: (pid) => { held = pid },
+      })
+      expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+      await expect(run.stop()).rejects.toThrow(/not permitted/)
+      expect(readdirSync(tmp)).toEqual([])
+      expect(process.listenerCount('SIGINT')).toBe(listeners)
+    } finally {
+      // The refused kill left the helper running: end it for real.
+      if (held > 0) process.kill(-held, 'SIGKILL')
+      await helperGone
+      server.close()
+    }
+  }, 120_000)
+})
+
 describe('ending a process', () => {
   const running = (extra: object = {}) => ({ pid: 4242, exitCode: null, signalCode: null, kill: () => true, ...extra })
 
@@ -269,7 +314,9 @@ describe('ending a process', () => {
 describe('a driver that is interrupted', () => {
   // The Go helper connects to this test (its address after `--`); the kernel closes that connection when the helper's
   // process is gone, so the close is the proof that it ended: no sleeping, and no lookup of a process nobody reaped.
-  it.skipIf(process.platform === 'win32')('ends the helper and removes the build folder before it ends itself with the signal', async () => {
+  // The driver's kill is held back (`end.killGroup`) until the test lets it through, as if the platform ended the
+  // process late: the folder of a running program must stay until the close has been awaited, and then go.
+  it.skipIf(process.platform === 'win32')('waits for the helper to be closed, removes the build folder, then ends itself with the signal', async () => {
     // Windows does not deliver a catchable interrupt signal to a process (process.kill ends it at once), so the handler cannot run there.
     const tmp = own()
     const module = goHelper('io.Copy(io.Discard, os.Stdin)')
@@ -277,7 +324,12 @@ describe('a driver that is interrupted', () => {
     writeFileSync(
       driver,
       `import { startFixture } from ${JSON.stringify(new URL('../../scripts/fixtureProcess.mjs', import.meta.url).href)}
-await startFixture({ cwd: process.argv[3], build: { pkg: '.' }, args: ['-test.run=^TestHelper$', '-test.count=1', '--', '127.0.0.1:' + process.argv[2]], tmp: process.argv[4] })
+const held = []
+await startFixture({
+  cwd: process.argv[3], build: { pkg: '.' }, tmp: process.argv[4],
+  args: ['-test.run=^TestHelper$', '-test.count=1', '--', '127.0.0.1:' + process.argv[2]],
+  end: { killGroup: (pid) => { process.stdout.write('KILL-HELD\\n'); process.stdin.once('data', () => process.kill(-pid, 'SIGKILL')) } },
+})
 process.stdout.write('READY\\n')
 setInterval(() => {}, 1 << 30)
 `,
@@ -286,15 +338,23 @@ setInterval(() => {}, 1 << 30)
     const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
     await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
     const port = (server.address() as { port: number }).port
-    const child = spawn(process.execPath, [driver, String(port), module, tmp], { stdio: ['ignore', 'pipe', 'inherit'] })
+    const child = spawn(process.execPath, [driver, String(port), module, tmp], { stdio: ['pipe', 'pipe', 'inherit'] })
     const closed = new Promise<string | null>((ok) => child.once('close', (_code, signal) => ok(signal)))
+    const printed = (word: string) => new Promise<void>((ok, bad) => {
+      let seen = ''
+      child.stdout.on('data', (d: Buffer) => { seen += d; if (seen.includes(word)) ok() })
+      child.once('close', () => bad(new Error(`the driver ended before it printed ${word}`)))
+    })
     try {
-      await new Promise<void>((ok, bad) => {
-        child.stdout.on('data', (d: Buffer) => { if (String(d).includes('READY')) ok() })
-        child.once('close', () => bad(new Error('the driver ended before it was ready')))
-      })
+      const ready = printed('READY')
+      const held = printed('KILL-HELD')
+      await ready
       expect(readdirSync(tmp)).toHaveLength(1)
       child.kill('SIGINT')
+      await held
+      // The kill was asked for and has not taken effect: the process is running, so its folder is still there.
+      expect(readdirSync(tmp)).toHaveLength(1)
+      child.stdin.write('go')
       expect(await closed).toBe('SIGINT')
       await helperGone
       expect(readdirSync(tmp)).toEqual([])

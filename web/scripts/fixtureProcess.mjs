@@ -96,37 +96,62 @@ function launch(command, args, { cwd, env, tree = false }) {
 }
 
 // A driver that is interrupted (or crashes) must not leave its helper or build
-// folder behind. Each running fixture registers a synchronous cleanup here; the
-// signal handlers exist only while one is registered.
-const cleanups = new Set()
+// folder behind. Each running fixture registers a cleanup here: `teardown` ends the
+// process, waits for its close and removes the folder; `quick` is the synchronous
+// best effort. The signal handlers exist only while one is registered.
+const running = new Set()
 const SIGNALS = ['SIGINT', 'SIGTERM']
-function runCleanups() {
-  for (const cleanup of [...cleanups]) {
+let interrupted = false
+function reportCleanup(error) {
+  process.stderr.write(`fixture cleanup failed: ${error?.stack ?? error}\n`)
+}
+// The last resort at process exit, where Node cannot wait: the kill is sent and the folder is removed at once. On
+// Windows a still-running .exe cannot be deleted, so this path can leave the folder behind (reported on stderr);
+// the signal path below is the one that waits for the close.
+function exitCleanup() {
+  for (const entry of [...running]) {
     try {
-      cleanup()
+      entry.quick()
     } catch (error) {
-      process.stderr.write(`fixture cleanup failed: ${error.stack ?? error}\n`)
+      reportCleanup(error)
     }
   }
 }
-function onSignal(signal) {
-  runCleanups()
-  unwatch()
+async function onSignal(signal) {
+  if (interrupted) {
+    // A second signal while the first is being handled: stop waiting.
+    exitCleanup()
+  } else {
+    interrupted = true
+    const results = await Promise.allSettled([...running].map((entry) => entry.teardown()))
+    for (const result of results) if (result.status === 'rejected') reportCleanup(result.reason)
+  }
+  unwatchAll()
+  interrupted = false
   process.kill(process.pid, signal) // the default action now ends this process with the signal it was sent
 }
-function watch(cleanup) {
-  if (cleanups.size === 0) {
+function watch(entry) {
+  if (running.size === 0) {
     for (const signal of SIGNALS) process.on(signal, onSignal)
-    process.on('exit', runCleanups)
+    process.on('exit', exitCleanup)
   }
-  cleanups.add(cleanup)
+  running.add(entry)
 }
-function unwatch(cleanup) {
-  if (cleanup) cleanups.delete(cleanup)
-  if (cleanups.size === 0 || !cleanup) {
-    for (const signal of SIGNALS) process.off(signal, onSignal)
-    process.off('exit', runCleanups)
-  }
+function unwatchAll() {
+  for (const signal of SIGNALS) process.off(signal, onSignal)
+  process.off('exit', exitCleanup)
+}
+function unwatch(entry) {
+  running.delete(entry)
+  if (running.size === 0) unwatchAll()
+}
+
+// A program that starts other programs: never the helper itself (the child held must be the process that owns the servers).
+const LAUNCHERS = new Set(['go', 'npm', 'npx', 'pnpm', 'yarn', 'sh', 'bash', 'zsh', 'dash', 'cmd', 'powershell', 'pwsh'])
+/** True for a program that launches others (`go`, `npm`, `npx`, a shell), by its file name without folder or Windows suffix. */
+export function isLauncher(command) {
+  const name = String(command).split(/[\\/]/).pop().toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '')
+  return LAUNCHERS.has(name)
 }
 
 const HELPER_PACKAGE = './internal/server'
@@ -154,29 +179,36 @@ export async function startFixture({
   cwd,
   env = fixtureEnv(),
   tmp = tmpdir(),
+  end = {},
   onSpawn,
   onOutput,
 } = {}) {
+  if (command !== undefined && isLauncher(command)) {
+    throw new Error(`the helper must be the program that owns the servers, not the launcher ${command}: build a binary and run it directly`)
+  }
   const root = cwd instanceof URL ? fileURLToPath(cwd) : cwd
   let dir
   let current // the process that is running now: the build, then the helper
-  const cleanup = () => {
-    if (current) endProcess(current.child, { tree: current.tree })
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  }
-  watch(cleanup)
-  // Ends what runs and waits for its close, then removes the folder. Always runs both steps.
+  // Ends what runs and waits for its close, then removes the folder. Always runs both steps, whatever the first does.
   const teardown = async () => {
     try {
       if (current) {
-        endProcess(current.child, { tree: current.tree })
+        endProcess(current.child, { tree: current.tree, ...end })
         await current.ended
       }
     } finally {
-      unwatch(cleanup)
+      unwatch(entry)
       if (dir) rmSync(dir, { recursive: true, force: true })
     }
   }
+  const entry = {
+    teardown,
+    quick() {
+      if (current) endProcess(current.child, { tree: current.tree, ...end })
+      if (dir) rmSync(dir, { recursive: true, force: true })
+    },
+  }
+  watch(entry)
   const fail = async (error) => {
     try {
       await teardown()
@@ -247,16 +279,17 @@ export async function startFixture({
     output: () => output,
     stop(stopUrl) {
       stopped ??= (async () => {
-        // The address belongs to the helper's own wrapper, never the omo API.
-        const asked = stopUrl ? await fetch(stopUrl).then(() => true, () => false) : false
-        if (!asked) endProcess(child)
+        let code
         try {
-          return await exitedHelper
-        } finally {
-          current = undefined
-          unwatch(cleanup)
-          if (dir) rmSync(dir, { recursive: true, force: true })
+          // The address belongs to the helper's own wrapper, never the omo API.
+          const asked = stopUrl ? await fetch(stopUrl).then(() => true, () => false) : false
+          if (!asked) endProcess(child, end)
+          code = await exitedHelper
+        } catch (error) {
+          return fail(error) // the folder is removed and the handlers are released all the same
         }
+        await teardown()
+        return code
       })()
       return stopped
     },

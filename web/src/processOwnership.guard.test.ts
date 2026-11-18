@@ -37,16 +37,49 @@ function sources(dir: string): string[] {
 
 const SPAWNED_LAUNCHER = /\bspawn\(\s*['"`](go|npm|npx|pnpm|yarn|sh|bash|zsh|cmd|cmd\.exe|powershell|pwsh)['"`]/
 const SHELL_OPTION = /shell:\s*(true|['"`])/
+// The calls that leave a child running after they return (or go through a shell).
+const LONG_LIVED = /(?<![.\w])(spawn|fork|exec|execSync|execFile)\(/
+const IMPORTS_LONG_LIVED = /import\s*\{[^}]*\b(spawn|fork|exec|execSync|execFile)\b[^}]*\}\s*from\s*'(node:)?child_process'/
+const LONG_LIVED_HINT = 'starts a program that can outlive the call; use the synchronous forms, or the helper that owns its child'
 const SHELL_EXEC = /(?<![.\w])(exec|execSync)\(/
 
+// Files exempt from the checks, each for a stated reason. Nothing else is: specs and unit tests are checked too.
+const EXEMPT: Record<string, string> = {
+  'src/processOwnership.guard.test.ts': 'this guard: it names launchers as sample text',
+  'src/testing/fixtureProcess.test.ts': 'exercises the helper with real stand-in children (node, the built Go test binary), each ended and awaited in the test itself; the helper refuses launchers as its command',
+  'src/testing/runProgram.test.ts': 'exercises the program runner with a real stand-in child that is killed and awaited by the runner',
+}
+
 const all = sources(WEB).map((p) => ({ path: relative(WEB, p).split('\\').join('/'), text: readFileSync(p, 'utf8') }))
-// This file and the tests that exercise launchers name them as text.
-const code = all.filter((f) => !/\.(test|spec)\.(ts|mjs)$/.test(f.path) )
-const launchers = code.filter((f) => /from 'node:child_process'|require\('node:child_process'\)|from 'child_process'/.test(f.text))
+const imports = (f: { text: string }) => /from 'node:child_process'|require\('node:child_process'\)|from 'child_process'/.test(f.text)
+const importing = all.filter(imports).filter((f) => !(f.path in EXEMPT))
+const isTest = (path: string) => /\.(test|spec)\.(ts|mjs)$/.test(path)
+// Production tooling (the helpers and drivers): each is inventoried. Specs and unit tests: one rule, below.
+const launchers = importing.filter((f) => !isTest(f.path))
+const testFiles = importing.filter((f) => isTest(f.path))
+// Everything that starts a program, tests included: the shape checks run on all of it.
+const checked = importing
 
 describe('programs started by the web tooling', () => {
-  it('lists every file that imports child_process, with its lifecycle', () => {
+  it('lists every tooling file that imports child_process, with its lifecycle', () => {
     expect(launchers.map((f) => f.path).sort()).toEqual(Object.keys(INVENTORY).sort())
+  })
+
+  it('has every exemption in place, with a reason', () => {
+    for (const [path, why] of Object.entries(EXEMPT)) {
+      expect(all.map((f) => f.path), path).toContain(path)
+      expect(why.length, path).toBeGreaterThan(20)
+    }
+  })
+
+  // A spec or unit test that runs a program waits for it: execFileSync/spawnSync/execFile-style synchronous calls only.
+  // A long-lived child of a test is the helper's job (fixtureProcess.mjs) or run.ts's.
+  it('lets a spec or unit test start programs only synchronously', () => {
+    expect(testFiles.length).toBeGreaterThan(0)
+    for (const f of testFiles) {
+      expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(LONG_LIVED)
+      expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(IMPORTS_LONG_LIVED)
+    }
   })
 
   it('gives every entry a reason', () => {
@@ -55,12 +88,12 @@ describe('programs started by the web tooling', () => {
 
   // A long-lived child is started with spawn; only the helper and the runner of the test binaries may do that.
   it('starts a long-lived child (spawn) only in the files that own their child to its close', () => {
-    const spawners = launchers.filter((f) => /\bspawn\(/.test(f.text)).map((f) => f.path).sort()
+    const spawners = checked.filter((f) => /\bspawn\(/.test(f.text)).map((f) => f.path).sort()
     expect(spawners).toEqual(['e2e/support/omo.ts', 'e2e/support/run.ts', 'scripts/fixtureProcess.mjs'])
   })
 
   it('never starts a launcher (go, npm, npx, a shell) as a long-lived child, nor uses a shell option', () => {
-    for (const f of launchers) {
+    for (const f of checked) {
       expect(f.text, `${f.path}: spawn of a launcher`).not.toMatch(SPAWNED_LAUNCHER)
       expect(f.text, `${f.path}: shell option`).not.toMatch(SHELL_OPTION)
       expect(f.text, `${f.path}: exec through a shell`).not.toMatch(SHELL_EXEC)
@@ -83,5 +116,11 @@ describe('programs started by the web tooling', () => {
     expect("spawn(cmd, [], { shell: true })").toMatch(SHELL_OPTION)
     expect("execSync('go test')").toMatch(SHELL_EXEC)
     expect('const m = /x/.exec(text)').not.toMatch(SHELL_EXEC)
+    expect("spawn('go', ['run', '.'])").toMatch(LONG_LIVED)
+    expect("execFile('npx', [])").toMatch(LONG_LIVED)
+    expect("execFileSync('git', ['status'])").not.toMatch(LONG_LIVED)
+    expect("spawnSync(process.execPath, [])").not.toMatch(LONG_LIVED)
+    expect("import { spawn, execFileSync } from 'node:child_process'").toMatch(IMPORTS_LONG_LIVED)
+    expect("import { execFileSync } from 'node:child_process'").not.toMatch(IMPORTS_LONG_LIVED)
   })
 })
