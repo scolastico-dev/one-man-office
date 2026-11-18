@@ -127,6 +127,7 @@ const AUDITED_CLEAN: Record<string, string> = {
   '/src/features/settings/plugins/PluginConfigEditor.vue .plugin-config__code :deep(textarea)': 'a text area',
   '/src/features/settings/usage/ScriptEditor.vue .script-editor__code :deep(textarea)': 'a text area',
   '/src/features/ticket/DescriptionEditor.vue .editor__source': 'a text area',
+  '/src/features/terminal/TerminalDraft.vue .td__field': 'a text area',
   // These three carry the class omo-logtext, which composites them (checked below).
   '/src/features/settings/mcp/McpServerLog.vue .mcp-log__text': 'omo-logtext',
   '/src/features/settings/plugins/PluginLog.vue .plugin-log__text': 'omo-logtext',

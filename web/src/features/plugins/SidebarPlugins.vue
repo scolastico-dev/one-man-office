@@ -22,7 +22,7 @@ const projects = computed(() => [...store.state.projects.values()].filter((p) =>
   </div>
 </template>
 <style scoped>
-.sidebar-plugins:has(> :not(:empty)) { padding: calc(var(--omo-space) * 2); border-top: var(--omo-border) solid var(--omo-line); max-height: 40dvh; overflow: auto; }
+.sidebar-plugins:has(> :not(:empty)) { padding: calc(var(--omo-space) * 2); border-top: var(--omo-border) solid var(--omo-line); max-height: 40dvh; overflow: auto; will-change: scroll-position; }
 .sidebar-plugins section { margin-top: calc(var(--omo-space) * 2); }
 .sidebar-plugins h3 { margin: 0 0 var(--omo-space); font-size: var(--omo-text-sm); overflow-wrap: anywhere; }
 </style>

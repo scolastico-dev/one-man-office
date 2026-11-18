@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { devNull } from 'node:os'
-import { withoutShellConfig } from './env'
+import { withoutShellConfig } from './env.ts' // with its extension: scripts/git-isolation.test.mjs loads this file straight under Node
 
 /**
  * Runs Git in a test-owned folder without inherited Git configuration, omo

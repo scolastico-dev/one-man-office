@@ -17,6 +17,6 @@ onBeforeUnmount(() => disposePluginExtensions(session.store))
   </aside>
 </template>
 <style scoped>
-.plugin-errors { position: fixed; z-index: 50; right: calc(var(--omo-space) * 3); top: calc(var(--omo-space) * 14); max-width: min(90vw, 48ch); max-height: 50dvh; overflow: auto; padding: calc(var(--omo-space) * 3); background: var(--omo-surface); border: var(--omo-border) solid var(--omo-danger); }
+.plugin-errors { position: fixed; z-index: 50; right: calc(var(--omo-space) * 3); top: calc(var(--omo-space) * 14); max-width: min(90vw, 48ch); max-height: 50dvh; overflow: auto; will-change: scroll-position; padding: calc(var(--omo-space) * 3); background: var(--omo-surface); border: var(--omo-border) solid var(--omo-danger); }
 .plugin-errors p { overflow-wrap: anywhere; font-size: var(--omo-text-sm); }
 </style>

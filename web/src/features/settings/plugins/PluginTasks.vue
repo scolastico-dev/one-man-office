@@ -88,5 +88,5 @@ onBeforeUnmount(() => { alive = false; seq++; offEvent(); offSnapshot() })
 .plugin-tasks__bar { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--omo-space) * 2); min-width: 0; }
 .plugin-tasks h4, .plugin-tasks p { margin: 0; font-size: var(--omo-text-sm); line-height: var(--omo-text-sm-lh); overflow-wrap: anywhere; }
 .plugin-tasks__task { display: grid; gap: calc(var(--omo-space) * 2); min-width: 0; padding: calc(var(--omo-space) * 2); border: var(--omo-border) solid var(--omo-line); font-size: var(--omo-text-sm); overflow-wrap: anywhere; }
-.plugin-tasks pre { max-height: calc(var(--omo-space) * 60); max-width: 100%; overflow: auto; margin: 0; }
+.plugin-tasks pre { max-height: calc(var(--omo-space) * 60); max-width: 100%; overflow: auto; margin: 0; will-change: transform; }
 </style>
