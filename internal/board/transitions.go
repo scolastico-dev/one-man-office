@@ -431,7 +431,7 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 	}
 	if _, err := tx.Exec(`UPDATE tickets SET col = ?, rank = ?, resolution = ?, closed_at = ?,
 		review_stage = CASE WHEN ? = 'review' THEN review_stage ELSE '' END,
-		attention = '', failed_step = '', start_blocked = '', busy = 0,
+		attention = '', attention_owner = '', failed_step = '', start_blocked = '', busy = 0,
 		updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
 		return err
 	}
@@ -514,7 +514,8 @@ func (b *Board) setStage(tx *sql.Tx, n int64, stage api.ReviewStage, attention s
 		}
 	}
 	_, err := tx.Exec(`UPDATE tickets SET review_stage = ?,
-		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END, updated_at = ? WHERE id = ?`,
+		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END,
+		attention_owner = CASE WHEN failed_step = '' THEN '' ELSE attention_owner END, updated_at = ? WHERE id = ?`,
 		stage, attention, b.stamp(), n)
 	return err
 }

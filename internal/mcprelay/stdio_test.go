@@ -455,6 +455,12 @@ func TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced(t *testing.T) {
 	f.pool.mu.Lock()
 	inst := f.pool.instances[instanceKey{"fake", "s"}]
 	f.pool.mu.Unlock()
+	// A started server is usable first and announced as running right after:
+	// the call above can return before that announcement. It belongs to the
+	// start, not to the notices below, so the count begins after it.
+	eventually(t, "the start to be announced", func() bool {
+		return strings.Contains(f.events.all(), api.KindMCPChanged+` {"name":"fake","state":"running"`)
+	})
 	changed, toolsChanged := f.events.count(api.KindMCPChanged), f.events.count(api.KindMCPToolsChanged)
 	gen := f.pool.Generation()
 	for range 50 {

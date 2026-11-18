@@ -5,7 +5,7 @@ import { expect, type Omo } from './support/omo'
 import { test, configure, tasks, forwards, expectClean, processTree, expectTreeGone, IDLE_SECONDS } from './support/editor'
 import { openBoard, expectBoardLive } from './support/board'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
-import { expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import { initRepo } from './support/git'
 
 // The runtime bridge in the archive is a POSIX fixture, not a native publisher
@@ -295,6 +295,7 @@ test.describe('projectless working folder', () => {
         await view.locator(`[data-session="${dev.id}"] [data-agent-row]`).click()
         const terminal = terminalIn(view)
         await expectTerminalText(terminal, 'editor-gate')
+        await makeWritable(view)
         await typeInTerminal(page, terminal, 'finish-editor')
         await expect.poll(async () => (await omo.api<{ review_stage: string }>('GET', `/api/tickets/${n}`)).review_stage).toBe('human')
         await omo.api('POST', `/api/tickets/${n}/approve`, {})

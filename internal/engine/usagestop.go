@@ -170,7 +170,7 @@ func (e *Engine) stopForUsage(ctx context.Context, en *entry) bool {
 	if !mine {
 		return false // it ended by itself, or something else ends it
 	}
-	e.end(ctx, en.sess.ID, usageStopReason)
+	e.end(ctx, en.sess.ID, usageStopReason, api.SessionEndUsage)
 	return true
 }
 

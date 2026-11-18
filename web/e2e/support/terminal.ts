@@ -6,8 +6,17 @@ export function terminalIn(locator: Locator): Locator {
   return locator.locator('.xterm').first()
 }
 
-/** Focuses the terminal's input, types `text` and presses Enter. */
+/**
+ * Focuses the terminal's input, types `text` and presses Enter.
+ *
+ * An agent terminal starts read-only and then takes no key: the test has to
+ * switch it with makeWritable first. Typing into a read-only terminal fails
+ * here at once, instead of as a timeout on whatever the keys should have
+ * caused.
+ */
 export async function typeInTerminal(page: Page, terminal: Locator, text: string): Promise<void> {
+  const screen = terminal.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " tv__screen ")][1]')
+  expect(await screen.getAttribute('data-readonly'), 'the terminal is read-only: call makeWritable before typing into it').toBeNull()
   await terminal.locator('.xterm-helper-textarea').focus()
   await page.keyboard.type(text)
   await page.keyboard.press('Enter')

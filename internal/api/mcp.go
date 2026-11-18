@@ -273,9 +273,12 @@ type MCPClientState struct {
 // MCPClientEntry is a server entry of an agent program's file, read as
 // omo's server settings.
 type MCPClientEntry struct {
-	Name   string    `json:"name"`
-	Server MCPServer `json:"server"`
-	Notes  []string  `json:"notes"`
+	// ProjectScoped is inspection metadata used when checking a local removal.
+	// It is independent of the explanatory Reason and never goes on the wire.
+	ProjectScoped bool      `json:"-"`
+	Name          string    `json:"name"`
+	Server        MCPServer `json:"server"`
+	Notes         []string  `json:"notes"`
 	// Reason says why omo cannot take the entry over; "" when it can.
 	Reason string `json:"reason"`
 }

@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -179,7 +178,7 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 			continue
 		}
 		delete(e.exportCheckFailures, key)
-		if strings.HasPrefix(current.Attention, mergeCheckAttention) {
+		if current.AttentionOwner == board.AttentionMergeCheck {
 			if err := e.b.SetExportCheckAttention(ctx, t.ID, t.ReviewRound, ""); err != nil {
 				e.log.Printf("engine: clear merge check flag of #%d: %v", t.ID, err)
 			}

@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Queryer is satisfied by *sql.DB and *sql.Tx.
@@ -43,7 +43,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 var ErrNewerSchema = errors.New("the database was made by a newer omo")
 
 // SchemaVersion is the schema version a freshly opened database ends up at.
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 // Open opens (creating if needed) the omo database in WAL mode and applies
 // pending migrations, each in its own transaction. A single connection
@@ -107,7 +107,9 @@ func connect(ctx context.Context, d *sql.DB) (*sql.Conn, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		conn, err := d.Conn(ctx)
-		if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") || time.Now().After(deadline) {
+		var coded interface{ Code() int }
+		busy := errors.As(err, &coded) && coded.Code()&0xff == sqlite3.SQLITE_BUSY
+		if err == nil || !busy || time.Now().After(deadline) {
 			return conn, err
 		}
 		time.Sleep(10 * time.Millisecond)

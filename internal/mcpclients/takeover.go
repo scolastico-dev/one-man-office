@@ -319,5 +319,5 @@ func (c *Clients) removeEntry(ctx context.Context, t Target, entry string, secre
 
 // isProjectStay says whether an entry is one of Claude's project entries.
 func isProjectStay(e api.MCPClientEntry) bool {
-	return strings.HasPrefix(e.Reason, "it belongs to the project")
+	return e.ProjectScoped
 }
