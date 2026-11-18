@@ -288,10 +288,15 @@ func rewriteLocation(s string, target *url.URL, prefix string, mode Mode, v Requ
 	if mode == PathMode && u.Host == "" && (strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) {
 		return ""
 	}
-	if u.Opaque != "" || u.User != nil {
+	if u.Opaque != "" {
 		return s
 	}
 	same := u.Host != "" && sameTarget(u, target)
+	if same {
+		// Upstream credentials must neither bypass target rewriting nor be
+		// carried onto the public forward origin.
+		u.User = nil
+	}
 	if u.Host != "" && !same {
 		return s
 	}
@@ -308,14 +313,18 @@ func rewriteLocation(s string, target *url.URL, prefix string, mode Mode, v Requ
 		}
 		return u.String()
 	}
-	// Resolve path-relative references at the path the upstream actually saw.
-	// Normalize browser dot segments before adding the routing prefix, so a
-	// redirect cannot navigate out of this forward after browser normalization.
-	u = target.ResolveReference(u)
-	raw := redirectPath(u.EscapedPath())
-	if raw == "" {
-		raw = "/"
+	// Join escaped paths before normalizing all browser dot segments together.
+	// url.ResolveReference would consume literal .. before encoded dots, which
+	// can remove the wrong segment. Query and fragment bytes remain untouched.
+	raw := u.EscapedPath()
+	if !same && !strings.HasPrefix(raw, "/") {
+		base := target.EscapedPath()
+		raw = base[:strings.LastIndex(base, "/")+1] + raw
 	}
+	if !strings.HasPrefix(raw, "/") {
+		raw = "/" + raw
+	}
+	raw = redirectPath(raw)
 	if !hasPrefix(raw, prefix) {
 		raw = prefix + raw
 	}

@@ -186,6 +186,70 @@ func TestResponseRewrites(t *testing.T) {
 	}
 }
 
+func TestCredentialBearingRedirects(t *testing.T) {
+	for _, route := range []struct {
+		name  string
+		mode  Mode
+		strip bool
+	}{
+		{"path keep", PathMode, false},
+		{"path strip", PathMode, true},
+		{"subdomain keep", SubdomainMode, false},
+		{"subdomain strip", SubdomainMode, true},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, location, pathWant, subdomainWant string
+			}{
+				{"absolute", "http://user:pass@{target}/login?q=%2f&x=1+2#section%2Fone", "/proxy/abc/login?q=%2f&x=1+2#section%2Fone", "https://abc.office.test:8443/login?q=%2f&x=1+2#section%2Fone"},
+				{"protocol relative", "//user:pass@{target}/login?q=%2f&x=1+2#section%2Fone", "/proxy/abc/login?q=%2f&x=1+2#section%2Fone", "https://abc.office.test:8443/login?q=%2f&x=1+2#section%2Fone"},
+				{"username only", "http://user@{target}/login", "/proxy/abc/login", "https://abc.office.test:8443/login"},
+				{"escaped credentials", "//us%40er:pa%3Ass%2Fword@{target}/a%2fb", "/proxy/abc/a%2fb", "https://abc.office.test:8443/a%2fb"},
+				{"empty userinfo", "http://@{target}/login", "/proxy/abc/login", "https://abc.office.test:8443/login"},
+				{"empty password", "//user:@{target}/login", "/proxy/abc/login", "https://abc.office.test:8443/login"},
+				{"empty path", "http://user:pass@{target}", "/proxy/abc/", "https://abc.office.test:8443"},
+				{"query without path", "//user:pass@{target}?q=%2f#part", "/proxy/abc/?q=%2f#part", "https://abc.office.test:8443?q=%2f#part"},
+				{"dot segments", "http://user:pass@{target}/a/%2e%2e/login", "/proxy/abc/login", "https://abc.office.test:8443/a/%2e%2e/login"},
+				{"already prefixed", "//user:pass@{target}/proxy/abc/login", "/proxy/abc/login", "https://abc.office.test:8443/proxy/abc/login"},
+				{"query and fragment backslashes", `http://user:pass@{target}/login?q=keep\value#keep\fragment`, `/proxy/abc/login?q=keep\value#keep%5Cfragment`, `https://abc.office.test:8443/login?q=keep\value#keep%5Cfragment`},
+				{"external absolute", "https://us%40er:pa%3Ass@other.test/login?q=%2f#part", "https://us%40er:pa%3Ass@other.test/login?q=%2f#part", "https://us%40er:pa%3Ass@other.test/login?q=%2f#part"},
+				{"external protocol relative", "//user:pass@other.test/login?q=%2f#part", "//user:pass@other.test/login?q=%2f#part", "//user:pass@other.test/login?q=%2f#part"},
+				{"non HTTP scheme", "ftp://user:pass@{target}/login", "ftp://user:pass@{target}/login", "ftp://user:pass@{target}/login"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Location", strings.ReplaceAll(tc.location, "{target}", r.Host))
+						w.WriteHeader(http.StatusTemporaryRedirect)
+						fmt.Fprint(w, "application redirect")
+					}))
+					defer upstream.Close()
+					tr := NewTransport()
+					defer tr.CloseIdleConnections()
+					f := forwardFor(t, upstream.URL)
+					f.StripPrefix = route.strip
+					path, want := "/proxy/abc/start", tc.pathWant
+					if route.mode == SubdomainMode {
+						path, want = "/start", tc.subdomainWant
+					}
+					want = strings.ReplaceAll(want, "{target}", strings.TrimPrefix(upstream.URL, "http://"))
+					r := WithRequestContext(httptest.NewRequest("GET", path, nil), RequestContext{
+						PublicScheme: "https", PublicHost: "abc.office.test:8443",
+						OnError: func(error) { t.Error("redirect unexpectedly reported as upstream failure") },
+					})
+					w := httptest.NewRecorder()
+					tr.Handler(f, route.mode).ServeHTTP(w, r)
+					if w.Code != http.StatusTemporaryRedirect || w.Body.String() != "application redirect" {
+						t.Fatalf("upstream response changed: status=%d body=%q", w.Code, w.Body.String())
+					}
+					if got := w.Header().Get("Location"); got != want {
+						t.Errorf("Location=%q want %q", got, want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTLSAndUnavailable(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "secure") }))
 	defer upstream.Close()
@@ -401,6 +465,64 @@ func TestRedirectResolutionStaysInsideForward(t *testing.T) {
 			tr.Handler(f, PathMode).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 			if got := w.Header().Get("Location"); got != tc.want {
 				t.Fatalf("Location=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMixedDotRedirects(t *testing.T) {
+	for _, route := range []struct {
+		name  string
+		mode  Mode
+		strip bool
+	}{
+		{"path keep", PathMode, false},
+		{"path strip", PathMode, true},
+		{"subdomain keep", SubdomainMode, false},
+		{"subdomain strip", SubdomainMode, true},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, location, keepWant, stripWant, subdomainWant string
+			}{
+				{"root parent", "/a/%2e%2e/../login", "/proxy/abc/login", "/proxy/abc/login", "/a/%2e%2e/../login"},
+				{"root current", "/a/%2E/../login", "/proxy/abc/login", "/proxy/abc/login", "/a/%2E/../login"},
+				{"root mixed parent", "/a/.%2e/../login", "/proxy/abc/login", "/proxy/abc/login", "/a/.%2e/../login"},
+				{"root reverse mixed parent", "/a/%2e./../login", "/proxy/abc/login", "/proxy/abc/login", "/a/%2e./../login"},
+				{"root trailing parent", "/a/%2e%2e/..", "/proxy/abc/", "/proxy/abc/", "/a/%2e%2e/.."},
+				{"relative parent", "a/%2e%2e/../login", "/proxy/abc/login", "/proxy/abc/login", "a/%2e%2e/../login"},
+				{"relative escape base", "../%2e%2e/login", "/proxy/abc/proxy/login", "/proxy/abc/login", "../%2e%2e/login"},
+				{"relative trailing parent", "a/%2e%2e/..", "/proxy/abc/", "/proxy/abc/", "a/%2e%2e/.."},
+				{"root escapes", "/a%2fb/%2e%2e/../c%2Fd//?x=%2f&x=1+2#part%2f", "/proxy/abc/c%2Fd//?x=%2f&x=1+2#part%2f", "/proxy/abc/c%2Fd//?x=%2f&x=1+2#part%2f", "/a%2fb/%2e%2e/../c%2Fd//?x=%2f&x=1+2#part%2f"},
+				{"relative escapes", "a%2fb/%2e%2e/../c%2Fd//?x=%2f#part%2F", "/proxy/abc/c%2Fd//?x=%2f#part%2F", "/proxy/abc/c%2Fd//?x=%2f#part%2F", "a%2fb/%2e%2e/../c%2Fd//?x=%2f#part%2F"},
+				{"absolute with userinfo", "http://user:pass@{target}/a/%2e%2e/../login?x=%2f#part", "/proxy/abc/login?x=%2f#part", "/proxy/abc/login?x=%2f#part", "https://abc.office.test/a/%2e%2e/../login?x=%2f#part"},
+				{"protocol relative with userinfo", "//user:pass@{target}/a/%2e%2e/../login?x=%2f#part", "/proxy/abc/login?x=%2f#part", "/proxy/abc/login?x=%2f#part", "https://abc.office.test/a/%2e%2e/../login?x=%2f#part"},
+				{"external", "https://user:pass@other.test/a/%2e%2e/../login?x=%2f#part", "https://user:pass@other.test/a/%2e%2e/../login?x=%2f#part", "https://user:pass@other.test/a/%2e%2e/../login?x=%2f#part", "https://user:pass@other.test/a/%2e%2e/../login?x=%2f#part"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Location", strings.ReplaceAll(tc.location, "{target}", r.Host))
+						w.WriteHeader(http.StatusFound)
+					}))
+					defer upstream.Close()
+					tr := NewTransport()
+					defer tr.CloseIdleConnections()
+					f := forwardFor(t, upstream.URL)
+					f.StripPrefix = route.strip
+					path, want := "/proxy/abc/dir/start", tc.keepWant
+					if route.strip {
+						want = tc.stripWant
+					}
+					if route.mode == SubdomainMode {
+						path, want = "/dir/start", tc.subdomainWant
+					}
+					r := WithRequestContext(httptest.NewRequest("GET", path, nil), RequestContext{PublicScheme: "https", PublicHost: "abc.office.test"})
+					w := httptest.NewRecorder()
+					tr.Handler(f, route.mode).ServeHTTP(w, r)
+					if got := w.Header().Get("Location"); w.Code != http.StatusFound || got != want {
+						t.Fatalf("status=%d Location=%q want %q", w.Code, got, want)
+					}
+				})
 			}
 		})
 	}

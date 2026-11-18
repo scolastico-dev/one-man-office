@@ -309,9 +309,16 @@ from upstream Set-Cookie. `X-Omo-*`, `Omo-*`, client forwarding headers,
 credentials remain. Responses stream through `httputil.ReverseProxy`, including
 upgrades, without board security/cache headers. Target redirects and cookie
 paths/scopes are rewritten; connection failures get an escaped HTML page.
+Absolute and protocol-relative target redirects are classified by host and port
+regardless of URL userinfo; target userinfo is discarded before rewriting to the
+path forward or accepted public subdomain origin. External redirect userinfo is
+preserved with the external destination.
 Path-mode redirects with a path are resolved at the upstream request URL before
-being mapped into the forward; redirect dot segments (including encoded dots)
-are normalized before prefixing. Literal backslashes in redirect paths use the
+being mapped into the forward. Escaped relative paths are joined to the upstream
+directory before literal and encoded dot segments are normalized together, so a
+literal parent segment cannot consume an encoded dot segment prematurely.
+Non-dot path escapes (including encoded slashes), duplicate slashes and
+query/fragment escapes are preserved. Literal backslashes in redirect paths use the
 browser's separator interpretation; malformed path-mode Location values are
 dropped, as are authority-less HTTP(S) references such as `http:/x` and
 `http:../../x` that browsers can resolve onto the board origin. The rest of the
