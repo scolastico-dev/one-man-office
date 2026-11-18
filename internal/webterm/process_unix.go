@@ -17,10 +17,15 @@ import (
 )
 
 type ptyProcess struct {
-	cmd       *exec.Cmd
-	terminal  *os.File
-	closeOnce sync.Once
-	closeErr  error
+	cmd      *exec.Cmd
+	terminal *os.File
+	// terminalMu keeps ioctl's descriptor access inside the file's lifetime.
+	// creack/pty.Setsize calls File.Fd, which cannot race with File.Close.
+	// closed also forbids descriptor access while in-flight I/O finishes closing it.
+	terminalMu sync.Mutex
+	closed     bool
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func startProcess(command string, args []string, dir string, env []string) (Process, error) {
@@ -40,10 +45,20 @@ func startProcess(command string, args []string, dir string, env []string) (Proc
 func (p *ptyProcess) Read(b []byte) (int, error)  { return p.terminal.Read(b) }
 func (p *ptyProcess) Write(b []byte) (int, error) { return p.terminal.Write(b) }
 func (p *ptyProcess) Resize(rows, cols uint16) error {
+	p.terminalMu.Lock()
+	defer p.terminalMu.Unlock()
+	if p.closed {
+		return os.ErrClosed
+	}
 	return pty.Setsize(p.terminal, &pty.Winsize{Rows: rows, Cols: cols})
 }
 func (p *ptyProcess) Close() error {
-	p.closeOnce.Do(func() { p.closeErr = p.terminal.Close() })
+	p.terminalMu.Lock()
+	defer p.terminalMu.Unlock()
+	p.closeOnce.Do(func() {
+		p.closed = true
+		p.closeErr = p.terminal.Close()
+	})
 	return p.closeErr
 }
 func (p *ptyProcess) Wait() error { return p.cmd.Wait() }
