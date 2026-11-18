@@ -150,6 +150,52 @@ func TestFetchSourceSwaps(t *testing.T) {
 	noSiblings(t, dir)
 }
 
+// The renames that put a new checkout in place run inside the caller's
+// gate, once, and nothing else of the fetch does: a caller that reads the
+// checkout keeps its readers out for exactly that moment.
+func TestFetchSourceGated(t *testing.T) {
+	g := testGit(t)
+	src, _ := sourceRepo(t, map[string]string{"a.txt": "one\n"})
+	dir := filepath.Join(t.TempDir(), "skills", "set")
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := g.FetchSource(ctx, src, "", dir); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(src, "a.txt"), "two\n")
+	tg(t, src, "commit", "-q", "-am", "two")
+	second := rev(t, src, "HEAD")
+
+	// A gate that refuses leaves the old checkout and nothing next to it.
+	refused := errors.New("the gate refused")
+	if _, err := g.FetchSourceGated(ctx, src, "main", dir, func(func() error) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("err = %v, want the gate's", err)
+	}
+	if got := read(t, filepath.Join(dir, "a.txt")); got != "one\n" {
+		t.Fatalf("a refused swap changed the checkout: %q", got)
+	}
+	noSiblings(t, dir)
+
+	calls := 0
+	got, err := g.FetchSourceGated(ctx, src, "main", dir, func(swap func() error) error {
+		calls++
+		if got := read(t, filepath.Join(dir, "a.txt")); got != "one\n" {
+			t.Errorf("before the swap the checkout holds %q, want the old one", got)
+		}
+		err := swap()
+		if got := read(t, filepath.Join(dir, "a.txt")); got != "two\n" {
+			t.Errorf("after the swap the checkout holds %q, want the new one", got)
+		}
+		return err
+	})
+	if err != nil || got != second || calls != 1 {
+		t.Fatalf("gated fetch: commit %s, %v, %d gate calls; want %s, one call", got, err, calls, second)
+	}
+	noSiblings(t, dir)
+}
+
 func TestFetchSourceTag(t *testing.T) {
 	g := testGit(t)
 	src, first := sourceRepo(t, map[string]string{"a.txt": "one\n"})

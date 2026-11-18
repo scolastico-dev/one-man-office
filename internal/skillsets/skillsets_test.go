@@ -2,6 +2,7 @@ package skillsets
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -467,6 +468,47 @@ func TestSkillSetSourceChange(t *testing.T) {
 	// following the branch, not keeping another source's checkout.
 	waitCommit(t, m, "auto", second)
 	waitCommit(t, m, "pin", second)
+}
+
+// A fetch replaces a checkout while omo reads it (the manager's own
+// comparison, states, prompts): every replacement succeeds. Windows refuses
+// to rename a folder while a file in it is open, so omo's readers and the
+// swap must take turns.
+func TestSkillSetReplacedWhileRead(t *testing.T) {
+	u := newUpstream(t, map[string]string{"one/SKILL.md": "---\nname: one\n---\n"})
+	e := newEnv(t)
+	e.put("s", u.bare, "main", api.SkillSetPinned, map[string]string{"developer": "Use them."})
+	m := e.manager()
+	if st := m.Update(context.Background(), "s"); st.State != StateOK {
+		t.Fatalf("first fetch: %+v", st)
+	}
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				m.Reconcile()
+				m.States()
+				Text("developer", e.store.SkillSets(), m.Checkout)
+			}
+		})
+	}
+	for i := range 5 {
+		want := u.commit(map[string]string{"one/SKILL.md": fmt.Sprintf("---\nname: one\ndescription: %d\n---\n", i)})
+		if st := m.Update(context.Background(), "s"); st.State != StateOK || st.Commit != want {
+			close(stop)
+			readers.Wait()
+			t.Fatalf("fetch %d while the checkout is read: %+v, want commit %s", i, st, want)
+		}
+	}
+	close(stop)
+	readers.Wait()
+	onlySets(t, e.dir, "s")
 }
 
 // Until a changed source is fetched, agents get nothing of the old
