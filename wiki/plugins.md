@@ -77,7 +77,22 @@ it). The plugin's log keeps its last 500 lines, newest last.
 |---|---|
 | [pushover](../plugins/pushover/README.md) | A Pushover notification on your phone when a ticket needs your attention or an agent asks you a question. Button: "Send a test notification". |
 | [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
+| [vscode](../plugins/vscode/README.md) | Opens ticket worktrees and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
+
+The VS Code plugin edits folders directly alongside agents, with no locking.
+Its default is code-server, its idle setting defaults to 30 minutes after the
+last connected browser disconnects, and its task output/Stop control lives on
+its settings page. First-use progress completes in the tab reserved by that
+same click; the editor has no separate sign-in. The Microsoft option would
+launch a verified official **server-web** payload directly, rather than
+literally invoking `code serve-web`, but is currently blocked: Microsoft's
+[terms](https://code.visualstudio.com/license/server) and
+[FAQ](https://code.visualstudio.com/docs/remote/faq#_can-i-use-vs-code-server-to-build-a-service)
+have not established permission for this integration. A saved acceptance value
+cannot unlock it; no licence is accepted or Microsoft payload downloaded/run.
+The [plugin README](../plugins/vscode/README.md) lists exact pins/checksums,
+platform/runtime limitations, direct-edit behavior and opt-in real probes.
 
 Each plugin's README lists its configuration keys. Pushover and Discord send at
 most 20 messages an hour by default (`max_per_hour`).
@@ -166,7 +181,13 @@ Optional fields:
   naming the configuration key that holds it.
 - Manual hooks: `name` (the button's id), `description` (its text, at most 200
   characters) and `scope`: `global` (a button on the plugin's page; the
-  default) or `ticket` (a button on every ticket).
+  default) or `ticket` (a button on every ticket). Optional `hidden: true`
+  suppresses automatically generated legacy ticket/settings action controls;
+  it defaults to false. Explicit declared buttons may still reference a hidden
+  hook, and the owning frontend may invoke it with `runHook`. This is presentation
+  metadata, not an authorization boundary. `hidden` must be a boolean, is only
+  valid on manual hooks, and rejects null/other types and nonmanual use (including
+  `hidden: false`). Existing plugins keep their implicit controls.
 
 The manifest is read strictly: unknown fields are refused. Fields and events
 of plugins written for omo 0.11 (`requires`, `roles`, `manual_args`,

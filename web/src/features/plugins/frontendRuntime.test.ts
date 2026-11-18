@@ -4,6 +4,9 @@ import { shallowRef, ref } from 'vue'
 import type { ApiClient } from '../../api/client'
 import type { PluginInfo, PluginsResponse } from '../../api/types'
 import { createFrontendRuntime, type PluginFacade, type PluginContext } from './frontendRuntime'
+import { ticketActionsOf } from '../ticket/pluginActions'
+import { manualActions } from '../settings/plugins/pluginForms'
+import { controlsOf } from './controls'
 
 const info = (name: string, content_id = 'a'.repeat(64)): PluginInfo => ({ name, content_id, version: '1', description: '', state: 'ready', message: '', commit: '', last_event: '', last_run_at: null, hooks: [{ event: 'manual', name: 'run', description: '', scope: 'global', interval: '' }], buttons: [], frontend: { script: 'ui/entry.js', assets: 'public' }, config_fields: [] })
 const response = (...plugins: PluginInfo[]): PluginsResponse => ({ plugins, settings: plugins.map((p) => ({ name: p.name, enabled: true, config: {}, source: '/repo', subpath: '', ref: '' })), errors: [] })
@@ -267,4 +270,43 @@ test('a scripted action button uses its own hook scope when a ticket is shown', 
   await flushPromises()
   await runtime.buttons.value[0]!.invoke({ page: 'ticket', ticket: { number: 7, title: 'T', workdir: '', projects: [] }, project: 'repo' })
   expect(send).toHaveBeenCalledExactlyOnceWith('POST', '/api/plugins/one/actions/run', { project: 'repo' })
+})
+
+// Visibility is presentation metadata: a facade must still invoke its own hidden hook.
+test('a plugin facade and explicit declarations can invoke hidden manual hooks', async () => {
+  const plugin = info('one')
+  plugin.hooks = [{ ...plugin.hooks[0]!, hidden: true }]
+  plugin.buttons = [{ label: 'Declared', place: 'sidebar', action: 'run' }]
+  const { script, send, list } = setup(plugin)
+  const facade = script('one').omo
+  facade.initialize(() => {})
+  await flushPromises()
+  await expect(facade.runHook('run')).resolves.toEqual({ message: 'ran' })
+  expect(send).toHaveBeenCalledExactlyOnceWith('POST', '/api/plugins/one/actions/run', {})
+  expect(controlsOf(list.value, [], 'sidebar').map((b) => [b.label, b.action])).toEqual([['Declared', 'run']])
+  expect(manualActions(plugin, 'global')).toEqual([])
+})
+
+// Failing the frontend must not resurrect either generic ticket or settings buttons.
+test.each(['load', 'initialize'])('hidden hooks do not create duplicate controls after frontend %s failure', async (failure) => {
+  const plugin = info('one')
+  plugin.hooks = [
+    { ...plugin.hooks[0]!, hidden: true },
+    { ...plugin.hooks[0]!, name: 'ticket', scope: 'ticket', hidden: true },
+    { ...plugin.hooks[0]!, name: 'unlisted-ticket', scope: 'ticket', hidden: true },
+  ]
+  plugin.buttons = [{ label: 'Declared', place: 'ticket', action: 'ticket' }]
+  const { script, runtime, list } = setup(plugin)
+  const entry = script('one')
+  if (failure === 'load') entry.dispatchEvent(new Event('error'))
+  else entry.omo.initialize((omo) => {
+    omo.addButton({ id: 'partial', place: 'ticket', label: 'Partial', action: 'ticket' })
+    throw new Error('Initialization failed')
+  })
+  await flushPromises()
+  expect(runtime.errors.value.map((e) => e.plugin)).toEqual(['one'])
+  expect(runtime.buttons.value).toEqual([])
+  expect(ticketActionsOf(list.value)).toEqual([])
+  expect(manualActions(list.value!.plugins[0]!, 'global')).toEqual([])
+  expect(controlsOf(list.value, runtime.buttons.value, 'ticket').map((b) => b.label)).toEqual(['Declared'])
 })

@@ -192,6 +192,16 @@ URL. Neither the board bearer token nor a retained grant appears in the final
 address. Opening a direct forward URL without a proxy session shows a page
 linking back to the board; sign in there and choose Open.
 
+Open also works when the board is outside the proxy's site (or a configured
+`public_url` selects another origin). A top-level GET/HEAD navigation to exactly
+`/_omo/proxy/bootstrap`, with fetch mode `navigate`, destination `document` and
+no Origin header, may load that inert document across sites. Delivery does not
+consume a grant, set cookies or create a session. Host checks still apply;
+bootstrap scripts, grant exchange, other internal paths and board APIs retain
+their origin/authentication/JSON checks. Forged Origins, cross-site script/fetch
+requests and frames receive no exception. Removed forwards cannot obtain/redeem
+Open grants or route application requests.
+
 The separate proxy session cookie is HttpOnly, SameSite=Lax, lasts 12 hours
 without sliding expiry and is invalidated by a server restart. In path mode
 it is host-only; with subdomains it covers the configured base and its

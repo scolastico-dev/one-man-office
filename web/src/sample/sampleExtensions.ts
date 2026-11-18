@@ -261,6 +261,7 @@ export interface SamplePluginHook {
   name: string
   description: string
   scope: '' | 'ticket' | 'global'
+  hidden?: boolean
   interval: string
 }
 

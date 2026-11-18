@@ -1221,6 +1221,8 @@ export interface PluginHook {
   description: string
   /** Manual hooks: `ticket` or `global`. */
   scope: string
+  /** Manual hooks: suppress automatic controls; explicit controls and invocation remain available. */
+  hidden?: boolean
   /** Timer hooks only. */
   interval: string
 }

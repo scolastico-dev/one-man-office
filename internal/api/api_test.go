@@ -354,6 +354,7 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 		{SkillSearchResolved{Paths: []string{}}, []string{"repository", "ref", "paths", "found", "commit"}},
 		{PluginSettings{Config: map[string]any{}}, []string{"name", "source", "subpath", "ref", "enabled", "config"}},
 		{PluginHook{}, []string{"event", "name", "description", "scope", "interval"}},
+		{PluginHook{Hidden: true}, []string{"event", "name", "description", "scope", "hidden", "interval"}},
 		{PluginButton{}, []string{"label", "place", "action"}},
 		{PluginButton{PerWorktree: true}, []string{"label", "place", "action", "per_worktree"}},
 		{PluginFrontend{}, nil},
