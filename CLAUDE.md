@@ -252,6 +252,39 @@ repeating delivered startup. Removal clears history. Nothing is persisted or
 resurrected, and startup has its own queue slot. Full helper/API and lifecycle
 contract: [Plugins](wiki/plugins.md).
 
+Plugin artifacts: `plugins/artifacts.go`, `artifact_archive.go`,
+`artifacts_lua.go`; manager adapters `StartArtifact(ctx, plugin, ArtifactStart)`
+and `ArtifactStatus(plugin, key)` share the task lifecycle boundaries. Lua
+`omo.artifact_start{key,url,sha256?,format,strip_components?,retry?}` returns
+promptly; `omo.artifact_status(key)` polls owner-scoped snapshots with
+id/key/state/phase/bytes/total_bytes/verification/path?/error?. A path appears
+only after verified atomic publication or asynchronous full-tree cache checking.
+States: running/ready/failed/cancelled; running phases:
+checking/downloading/verifying/extracting. Same-key active identity deduplicates;
+changed identity conflicts until terminal. Failed/cancelled identity needs an
+explicit retry=true. Empty checksum is explicitly unverified; supplied SHA-256
+is checked before extraction. `omo.runtime_info()` exposes Go `{os,arch}` without
+an external runtime. No second server or unrestricted filesystem API.
+HTTPS only, five redirects (cross-host allowed), 30-minute overall deadline;
+512 MiB compressed, 2 GiB expanded, 512 MiB/file, 50000 archive/tree entries,
+four active/64 retained keys per plugin. `boundedzip.NewReader` preflights actual
+central-directory records (32 MiB, including bounded single-disk ZIP64) before
+standard-library allocations; settings imports and self-update share it, and an
+AST guard forbids bypassing it. Redirecting artifact/list/client-metadata/release
+fetchers discard Referer to keep source query credentials private.
+Strict portable path/type/link checks,
+os.Root writes, homefile reads; private 0600/0700 modes, deferred contained file
+links (Unix symlinks; Windows materialization with documented Node semantics).
+Caches live below plugins/.data/<plugin>/.artifacts-v1/<key> with immutable
+random generations, matching completion/reference metadata and full-tree hashes
+including contents/types/permissions/link targets. Source URLs are never stored
+or returned. Start always rechecks disk before reuse; status is a snapshot,
+not a fresh integrity check. Old generations remain for user maintenance.
+Only completed cache data persists; lifecycle stop cancels/reaps jobs and removes
+private staging, with config refresh preserving jobs. Tests use local TLS
+fixtures and launch a fixture executable through task_start. Full exact schema,
+limits and Windows fallback: [Plugins](wiki/plugins.md#artifact-installs).
+
 Plugin list. `plugins/index.yaml` (top level of the repository) lists plugins with `name`, `tag` (`official`, `recommended`, `community`), a one-line `description` and their place: an official plugin only `path` (its folder in the list's own repository, installed from the repository and branch the list was read from), any other `source`, optional `ref` and `path`. The release workflow copies the `plugins` folder to the `release` branch; omo reads the list from there (`pluginmanager.DefaultCatalog`: `buildinfo.Repository` + `.git`, branch `release`), or from `OMO_PLUGIN_CATALOG=<source>[#<ref>]`, which `server.Run` reads (`Options.PluginCatalog`; tests set it directly, the zero value is no list). The server fetches it through `gitops.FetchSource` into `<home>/plugins/.catalog` (removed after the read) when `GET /api/plugins/catalog` asks, keeps it 10 minutes (a failure 1 minute) and answers `available: false` with the reason when it cannot be read. `ParseCatalog` is strict: 64 KiB, one YAML document, known keys only, at most 200 plugins, names by the plugin-name rule and unique in any case, addresses through `gitops.ValidSourceURL`, folders through the install's subpath rule, descriptions one line of at most 200 characters without hidden characters; one bad entry refuses the list. Tags are decided by the server (`checkPluginSource`): the tag of the listed plugin with exactly that source, folder and ref, else (also while the list cannot be read) community; `POST /api/plugins`, a `PUT` that changes source, folder or ref, and an update whose settings differ from the install record (`.omo-install.json`) need `acknowledge` covering the tag (`api.PluginInstall`, `api.PluginUpdate`; community covers recommended), else 422 with `details` `api.PluginConfirmation{field: "acknowledge", tag}`. The web (`features/settings/plugins/PluginCatalog.vue`, `pluginTrust.ts`, `confirmInstall.ts`, `TrustDialog.vue`) asks first through the page's `mountDialog` scope (`PLUGIN_DIALOGS`), and asks again with the server's tag when it is stronger. `TestShippedCatalog` checks the repository's list and its official plugins; browser tests read a stand-in list from `pluginListPath(home)` (`makePluginList`), never the network. Additional lists: `settings.yaml` `plugin_lists` (http/https addresses of list files, checked by `validatePluginLists`: at most 16, a host, no user info or fragment, no repeats); `pluginmanager.FetchList` fetches one with `net/http` (15 s, 64 KiB, 5 redirects to http/https only, User-Agent `omo-plugin-list`; errors never repeat the address or the answer) and `ParseList` reads it in the same format with a source required per entry, bad entries left out with a note; `GET /api/plugins/catalog` fetches them beside omo's own list (`readLists`, same 10 min / 1 min caching, `?refresh=true` for all) and answers omo's plugins then the lists' (`pluginmanager.Combine`: a name or source/folder/ref omo's list or an earlier list has is dropped with a note) with `CatalogPlugin.list`/`origin` and `PluginCatalog.lists` (`api.PluginListState` per list: `available`, `message`, `notes`). `pluginmanager.TrustTag` is the one place that decides a listed plugin's tag (community for every entry of an additional list) and `Catalog.TagOf` uses it, so the install routes never take a tag from an additional list; the web mirrors it in `trustTagOf` (`pluginTrust.ts`, `pluginTrust.guard.test.ts` fails on another read of a listed plugin's tag); `TestAdditionalListNeverGrantsTrust` guards the server. The page: `PluginCatalog.vue` (rows in `CatalogRow.vue`, each additional list under its address with its error, Retry and notes) and `PluginLists.vue` (the `plugin_lists` editor with its own Save bar); `e2e/plugin-lists.spec.ts` serves its lists from a local http server.
 
 Skill sets and plugins. A skill set's block (the role's text and the list of skills its `paths` select) is appended to the role's instructions as a template value, never parsed, only for the roles in its `roles` (empty: every role); export jobs use the role key `export`. Every agent program gets the same prompt; omo installs nothing into the programs' own skill folders. `TestSkillSetsReachAgentsOnlyThroughText` fails when skill sets are read for agents outside `skillsets.Text`. The plugin manager and the skill set manager fetch only through `gitops.FetchSource` and `gitops.ValidSourceURL` (https, ssh, scp-like or an absolute path; no `file://`, `git://`, `http://` or `x::` transports); read files of a checkout only with `homefile.Read`. Plugin events come from the event log (`db.EventsSince` from a start point taken at server start), so a plugin never blocks the board and never sees events from before a restart. Plugin programs reach the socket without a session, so they act as the user.

@@ -48,6 +48,9 @@ func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any
 	}
 	box.Set("http", (&luabox.HTTP{Client: m.o.HTTP}).Func(box))
 	box.Set("exec", m.luaExec(box, p, ev.Name))
+	box.Set("artifact_start", m.luaArtifactStart(box, p))
+	box.Set("artifact_status", m.luaArtifactStatus(p))
+	box.Set("runtime_info", luaRuntimeInfo)
 	box.Set("task_start", m.luaTaskStart(box, p))
 	box.Set("task_list", m.luaTaskList(p))
 	box.Set("task_stop", m.luaTaskStop(p))

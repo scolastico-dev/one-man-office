@@ -145,3 +145,23 @@ func tarGzip(t *testing.T, name string, content []byte) []byte {
 	}
 	return out.Bytes()
 }
+
+func TestReleaseRedirectDropsSourceReferer(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "source.example" {
+			res := response(http.StatusFound, nil)
+			res.Header.Set("Location", "https://cdn.example/archive")
+			return res, nil
+		}
+		if r.Referer() != "" {
+			t.Error("source query disclosed through Referer")
+		}
+		return response(http.StatusOK, []byte("fixture")), nil
+	})}
+	c := Client{HTTP: client}.defaults()
+	res, err := c.get(t.Context(), "https://source.example/archive?token=source-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+}
