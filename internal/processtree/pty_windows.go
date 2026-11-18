@@ -2,10 +2,13 @@ package processtree
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -96,7 +99,7 @@ func StartPTY(command string, args []string, dir string, env []string, cols, row
 	p.process = pi.Process
 	p.pid = int(pi.ProcessId)
 	g.mu.Lock()
-	err = g.assignAndResume(&pi)
+	err = g.assignAndResume(pi.Process, pi.Thread)
 	g.mu.Unlock()
 	if err != nil {
 		_ = windows.TerminateProcess(pi.Process, 1)
@@ -126,12 +129,79 @@ func environmentBlock(env []string) ([]uint16, error) {
 }
 
 func (p *PTY) Pid() int                    { return p.pid }
-func (p *PTY) Read(b []byte) (int, error)  { return p.output.Read(b) }
 func (p *PTY) Write(b []byte) (int, error) { return p.input.Write(b) }
+
+// Read reads console output. It reports io.EOF once the pseudoconsole was
+// closed (Hangup or Close) and its remaining output was read. The console
+// host may write nothing at all in one write; os.File reports such a read as
+// the end of the file, so the pipe is read directly and the empty read is
+// read over. Close still interrupts and waits for a Read in flight.
+func (p *PTY) Read(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	conn, err := p.output.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		var n uint32
+		var readErr error
+		if err := conn.Read(func(handle uintptr) bool {
+			readErr = windows.ReadFile(windows.Handle(handle), b, &n, nil)
+			return true
+		}); err != nil {
+			return 0, err
+		}
+		switch {
+		case errors.Is(readErr, windows.ERROR_BROKEN_PIPE):
+			return int(n), io.EOF
+		case errors.Is(readErr, windows.ERROR_OPERATION_ABORTED):
+			return int(n), os.ErrClosed
+		case readErr != nil:
+			return int(n), readErr
+		case n > 0:
+			return int(n), nil
+		}
+	}
+}
+
+// WaitTree returns once no process of the tree is left: the root and
+// everything it started have ended, or Close ended them.
+func (p *PTY) WaitTree(ctx context.Context) error {
+	for {
+		active, err := p.group.active()
+		if err != nil || active == 0 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// Hangup closes the pseudoconsole and keeps everything else. Windows keeps a
+// pseudoconsole's output open after its last program ended, so a reader
+// would wait for ever; after Hangup the console host writes what is left and
+// Read reports io.EOF. Somebody must keep reading meanwhile: older Windows
+// versions return from closing only when the output was taken. Programs
+// still attached to the console are ended by Windows.
+func (p *PTY) Hangup() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.console == 0 {
+		return
+	}
+	windows.ClosePseudoConsole(p.console)
+	p.console = 0
+}
+
 func (p *PTY) Resize(cols, rows int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed {
+	if p.closed || p.console == 0 {
 		return os.ErrClosed
 	}
 	return windows.ResizePseudoConsole(p.console, windows.Coord{X: int16(cols), Y: int16(rows)})

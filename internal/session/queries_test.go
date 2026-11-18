@@ -24,6 +24,7 @@ func TestSessionAnswersTerminalQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	endSession(t, s)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(s.Screen(), "GOT:") {

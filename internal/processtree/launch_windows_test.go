@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,12 +162,15 @@ func TestSuspendedLaunchDoesNotExecuteBeforeAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer g.Close()
-	handles, err := startSuspended(cmd)
+	process, err := startSuspended(cmd)
 	if err != nil {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(handles.Process)
-	defer windows.CloseHandle(handles.Thread)
+	defer windows.CloseHandle(process)
 	defer cmd.Wait()
 	defer cmd.Process.Kill()
 	// The process must be unable to reach user code during an arbitrarily
@@ -175,12 +179,86 @@ func TestSuspendedLaunchDoesNotExecuteBeforeAssignment(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("program ran before containment: %v", err)
 	}
-	if err := g.assignAndResume(handles); err != nil {
+	if err := g.assignAndResume(process, 0); err != nil {
 		t.Fatal(err)
 	}
 	child := childHandle(t, path)
 	g.Close()
 	assertEnded(t, child)
+}
+
+// A program is resumed as a whole, without looking for its thread. Resuming
+// must run it exactly once it is in the job, however many programs start at
+// the same time: every root reports its child, and every child ends with
+// its job.
+func TestConcurrentStartsAllRunContained(t *testing.T) {
+	const count = 16
+	dir := t.TempDir()
+	type started struct {
+		g    *Group
+		cmd  *exec.Cmd
+		path string
+		err  error
+	}
+	results := make(chan started, count)
+	for i := 0; i < count; i++ {
+		go func() {
+			path := filepath.Join(dir, strconv.Itoa(i)+".pid")
+			cmd := helperCommand("root", path)
+			g, err := New(cmd)
+			if err == nil {
+				err = g.Start(cmd)
+			}
+			results <- started{g, cmd, path, err}
+		}()
+	}
+	var all []started
+	for i := 0; i < count; i++ {
+		s := <-results
+		if s.err != nil {
+			t.Error(s.err)
+			if s.g != nil {
+				s.g.Close()
+			}
+			continue
+		}
+		all = append(all, s)
+		t.Cleanup(func() { s.g.Close(); _ = s.cmd.Wait() })
+	}
+	for _, s := range all {
+		child := childHandle(t, s.path)
+		s.g.Close()
+		assertEnded(t, child)
+	}
+}
+
+// resumeProcess must report a refusal: Start relies on its error to kill a
+// program that stayed suspended. A handle without the right to resume is
+// refused, and the program does not run.
+func TestResumeReportsFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "child.pid")
+	cmd := helperCommand("root", path)
+	process, err := startSuspended(cmd)
+	if cmd.Process != nil {
+		defer cmd.Wait()
+		defer cmd.Process.Kill()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(process)
+	limited, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(limited)
+	if err := resumeProcess(limited); err == nil {
+		t.Fatal("resuming without the right to resume reported success")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("program ran although resuming failed: %v", err)
+	}
 }
 
 func TestFailedAssignmentNeverExecutes(t *testing.T) {
@@ -227,6 +305,58 @@ func TestImmediatePTYDescendantEndsWithRoot(t *testing.T) {
 	assertEnded(t, child)
 	if _, err := p.Wait(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Windows keeps the output of a pseudoconsole open after its programs
+// ended. Once the tree is gone, Hangup must end the output, with everything
+// the program wrote before it: a reader that waits for the end of the output
+// (an agent session) would otherwise wait for ever.
+func TestPTYOutputEndsAfterHangup(t *testing.T) {
+	p, err := StartPTY("cmd.exe", []string{"/d", "/c", "echo %OMO_TREE_TEST_VALUE%"}, "", append(testEnvironment(), "OMO_TREE_TEST_VALUE=last words"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	type result struct {
+		output string
+		err    error
+	}
+	read := make(chan result, 1)
+	go func() {
+		var b strings.Builder
+		buf := make([]byte, 4096)
+		for {
+			n, err := p.Read(buf)
+			b.Write(buf[:n])
+			if err != nil {
+				read <- result{b.String(), err}
+				return
+			}
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if code, err := p.Wait(ctx); err != nil || code != 0 {
+		t.Fatalf("wait: code %d, %v", code, err)
+	}
+	if err := p.WaitTree(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p.Hangup()
+	select {
+	case got := <-read:
+		if got.err != io.EOF {
+			t.Errorf("output ended with %v, want io.EOF", got.err)
+		}
+		if !strings.Contains(got.output, "last words") {
+			t.Errorf("output before the end = %q", got.output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the output did not end after Hangup")
+	}
+	if err := p.Resize(100, 30); err == nil {
+		t.Error("a closed pseudoconsole was resized")
 	}
 }
 

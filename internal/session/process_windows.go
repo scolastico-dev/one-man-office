@@ -30,7 +30,8 @@ func startProcess(o Options) (terminalProcess, error) {
 	return cp, nil
 }
 
-// watch records the main process's exit. The job object keeps whatever it
+// watch records the main process's exit and ends the terminal's output once
+// the whole tree is gone. The job object keeps whatever the main process
 // left behind killable until Close.
 func (p *conptyProcess) watch() {
 	code, err := p.pty.Wait(context.Background())
@@ -39,6 +40,15 @@ func (p *conptyProcess) watch() {
 	}
 	p.exitErr = err
 	close(p.exited)
+	// Windows keeps the terminal's output open after its last program
+	// ended, where a Unix terminal reports its end. Close the console once
+	// nothing of the tree is left (a child left behind keeps it open, as on
+	// Unix, until it ends or is killed): the session then reads what is
+	// left and sees the end.
+	// Should the tree not be readable, the console is closed all the same:
+	// a session that never ends is worse than a child ended early.
+	_ = p.pty.WaitTree(context.Background())
+	p.pty.Hangup()
 }
 
 func (p *conptyProcess) Exited() <-chan struct{} { return p.exited }
