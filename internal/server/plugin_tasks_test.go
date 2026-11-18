@@ -331,3 +331,47 @@ func TestPluginTaskCleanupBypassesFullHookQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginTaskOutputEventCadence(t *testing.T) {
+	s := newTestServer(t)
+	installTaskPlugin(t, s, "one")
+	base := time.Now().Add(time.Minute)
+	after := lastEventID(t, s)
+	// A noisy writer invalidates continuously for a minute. The scheduler
+	// permits only one output refresh per ten-second window for this plugin.
+	for second := 0; second < 60; second++ {
+		for range 100 {
+			s.pluginTaskOutputChanged("one")
+		}
+		s.flushPluginTaskEvents(base.Add(time.Duration(second) * time.Second))
+	}
+	events, err := db.EventsSince(s.db, after, 1000, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, event := range events {
+		if event.Kind == api.KindPluginTasksChanged {
+			count++
+		}
+	}
+	if count != 6 {
+		t.Fatalf("continuous output recorded %d events in a minute, want 6", count)
+	}
+	// Lifecycle changes do not wait behind the output throttle.
+	s.pluginTasksChanged("one")
+	s.flushPluginTaskEvents(base.Add(59 * time.Second))
+	events, err = db.EventsSince(s.db, after, 1000, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count = 0
+	for _, event := range events {
+		if event.Kind == api.KindPluginTasksChanged {
+			count++
+		}
+	}
+	if count != 7 {
+		t.Fatalf("lifecycle invalidation was delayed: %d", count)
+	}
+}

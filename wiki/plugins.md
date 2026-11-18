@@ -397,12 +397,17 @@ truncation, including secrets split across writes; raw lines over 64 KiB are
 discarded whole with a marker. An unfinished line appears only on process
 exit, to avoid exposing a secret prefix before its rest arrives. Configuration
 strings, task environment values, inherited credential values and HTTP secrets
-known to the calling Lua hook use omo's existing redactor (values shorter than
+known to the calling Lua hook use a private copy of omo's existing redactor (values shorter than
 six bytes are ignored; multiline secrets also register their CR/LF-separated
-fragments). Hidden characters are escaped visibly. Unbounded
+fragments). Only credential-like inherited keys (token/password/secret/API or
+private/access key/credential names, common auth/PAT/password suffixes and
+DSN/database URLs) register inherited values; HOME, PATH, locale and user names
+stay useful in diagnostics. Task-specific secrets do not mutate the hook's
+redactor. Hidden characters are escaped visibly. Unbounded
 output cannot grow stored logs or lines without limit.
 
-Stop waits for the process and its ordinary descendants to end. The same
+Stop immediately kills the process tree (SIGKILL on Unix, TerminateJobObject
+on Windows), then waits for cleanup; there is no graceful shutdown period. The same
 cleanup also runs after natural parent exit, plugin disable/removal, code or
 installed-tree replacement, and server shutdown. Unix uses a process group;
 Windows assigns the suspended process to a kill-on-close job before resuming
@@ -423,9 +428,13 @@ The user-only API is:
 Agent sessions receive 403. Unknown plugins/names or a wrong owner give
 `not_found`; stopping a retained exited name succeeds. After name reuse, a
 name-based stop targets the latest run. JSON/content-type/size rules are the
-normal API rules. `plugin.tasks_changed` carries `{name}` at most once per
-plugin per second for starts, accumulating output and exits. Clients refetch
-GET after this invalidation, reconnect or event-stream resync. TypeScript
+normal API rules. `plugin.tasks_changed` carries `{name}`. Starts and exits are batched within
+one second. Output-driven invalidations are persisted at most once per plugin
+per ten seconds, only after a complete line changes the visible tail; partial
+lines and identical tails cause no invalidation. This caps continuous output
+at six refresh events per minute per plugin. Lifecycle changes bypass the
+output throttle. Clients refetch GET after an invalidation, reconnect or
+event-stream resync. TypeScript
 clients have `getPluginTasks` and `stopPluginTask`.
 
 Runtime adapters use `Manager.StartTask(ctx, plugin, TaskStart)`,
@@ -436,8 +445,9 @@ Runtime adapters use `Manager.StartTask(ctx, plugin, TaskStart)`,
 successful start's terminal record outside manager locks, before Stop returns.
 It must not wait for its own task or call manager shutdown. Configure callbacks
 before use; adapters should serialize resource attachment with their exit
-callback and verify the task is still running. `Options.TasksChanged
-func(string)` is a concurrent, nonblocking invalidation callback;
+callback and verify the task is still running. `Options.TasksChanged func(string)` is a concurrent, nonblocking start/exit
+invalidation callback; `Options.TaskOutputChanged func(string)` separately
+reports visible output changes for throttled refresh.
 `Options.TaskTicketLive func(context.Context, int) bool` is the board adapter.
 Server integration lives in `plugin_tasks.go`: ticket cleanup runs before hook
 Dispatch; `Server.PluginsReady()` is called after launching both listeners in

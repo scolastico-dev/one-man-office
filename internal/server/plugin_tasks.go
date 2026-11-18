@@ -70,7 +70,7 @@ func (s *Server) stopTasksForEvent(ev api.Event) {
 func (s *Server) PluginsReady() { s.plugins.m.Ready() }
 
 // pluginTasksChanged collects invalidations; output never enters the event
-// log. A one-second batch bounds event volume even for noisy processes.
+// log. Lifecycle changes flush within a second; output is throttled separately.
 func (s *Server) pluginTasksChanged(name string) {
 	f := &s.plugins
 	f.pendingMu.Lock()
@@ -80,6 +80,57 @@ func (s *Server) pluginTasksChanged(name string) {
 	f.taskPending[name] = true
 	f.pendingMu.Unlock()
 }
+
+// pluginTaskOutputChanged is called only when the visible line tail changes.
+func (s *Server) pluginTaskOutputChanged(name string) {
+	f := &s.plugins
+	f.pendingMu.Lock()
+	if f.taskOutputPending == nil {
+		f.taskOutputPending = map[string]bool{}
+	}
+	f.taskOutputPending[name] = true
+	f.pendingMu.Unlock()
+}
+
+const pluginTaskOutputInterval = 10 * time.Second
+
+func (s *Server) flushPluginTaskEvents(at time.Time) {
+	f := &s.plugins
+	f.pendingMu.Lock()
+	names := f.taskPending
+	if names == nil {
+		names = map[string]bool{}
+	}
+	f.taskPending = nil
+	if f.taskOutputAt == nil {
+		f.taskOutputAt = map[string]time.Time{}
+	}
+	for name := range f.taskOutputPending {
+		if names[name] || at.Sub(f.taskOutputAt[name]) >= pluginTaskOutputInterval {
+			names[name] = true
+		}
+	}
+	for name := range names {
+		delete(f.taskOutputPending, name)
+		f.taskOutputAt[name] = at
+	}
+	// Keep timestamps only for a live throttle window, including removed
+	// plugin names. Quiet or removed namespaces cannot accumulate forever.
+	for name, last := range f.taskOutputAt {
+		if !f.taskOutputPending[name] && at.Sub(last) >= pluginTaskOutputInterval {
+			delete(f.taskOutputAt, name)
+		}
+	}
+	f.pendingMu.Unlock()
+	for name := range names {
+		if err := s.appendSystemEvent(api.KindPluginTasksChanged, api.PluginTasksChangedData{Name: name}); err != nil {
+			s.pluginTasksChanged(name)
+		} else {
+			s.events.Wake()
+		}
+	}
+}
+
 func (s *Server) writePluginTaskEvents(ctx context.Context) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
@@ -87,19 +138,8 @@ func (s *Server) writePluginTaskEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
-		}
-		f := &s.plugins
-		f.pendingMu.Lock()
-		names := f.taskPending
-		f.taskPending = nil
-		f.pendingMu.Unlock()
-		for name := range names {
-			if err := s.appendSystemEvent(api.KindPluginTasksChanged, api.PluginTasksChangedData{Name: name}); err != nil {
-				s.pluginTasksChanged(name)
-			} else {
-				s.events.Wake()
-			}
+		case at := <-tick.C:
+			s.flushPluginTaskEvents(at)
 		}
 	}
 }

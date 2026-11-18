@@ -103,3 +103,16 @@ func TestRedactorCleansMultilineSecretFragments(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactorCloneHasIndependentSecrets(t *testing.T) {
+	original := NewRedactor()
+	original.Add("prior-secret")
+	cloned := original.Clone()
+	cloned.Add("extra-secret")
+	if got := cloned.Clean("prior-secret extra-secret"); got != "[redacted] [redacted]" {
+		t.Fatal(got)
+	}
+	if got := original.Clean("extra-secret"); got != "extra-secret" {
+		t.Fatal("clone mutated original:", got)
+	}
+}

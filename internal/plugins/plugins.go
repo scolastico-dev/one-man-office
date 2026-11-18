@@ -491,9 +491,12 @@ type Options struct {
 	// outside locks, before Stop returns. It must not wait for its own task
 	// or call Close. Configure callbacks before using the manager.
 	TaskExited func(string, api.PluginTask)
-	// TasksChanged invalidates a plugin's task snapshot on start/output/exit.
+	// TasksChanged invalidates a plugin's task snapshot on start/exit.
 	// It may be concurrent and must not block.
 	TasksChanged func(string)
+	// TaskOutputChanged invalidates a changed visible output tail. Adapters
+	// should throttle these separately from lifecycle changes.
+	TaskOutputChanged func(string)
 }
 
 // Manager runs the loaded plugins. Its methods are safe for concurrent use.

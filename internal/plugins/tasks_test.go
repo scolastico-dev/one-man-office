@@ -556,3 +556,73 @@ func TestTaskNameReuseDoesNotDependOnWallClock(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskOutputInvalidatesOnlyVisibleChanges(t *testing.T) {
+	changes := 0
+	out := &taskOutput{red: luabox.NewRedactor(), changed: func() { changes++ }}
+	out.Write([]byte("par"))
+	out.Write([]byte("tial"))
+	if changes != 0 {
+		t.Fatal("partial output invalidated unchanged tail")
+	}
+	out.Write([]byte("\n"))
+	if changes != 1 {
+		t.Fatal("complete line did not invalidate tail")
+	}
+	for range 100 {
+		out.Write([]byte("same\n"))
+	}
+	before := changes
+	out.Write([]byte("same\n"))
+	if changes != before {
+		t.Fatal("unchanged repeated tail invalidated snapshot")
+	}
+}
+
+func TestTaskOutputPreservesPathsAndRedactsOnlyCredentialEnvironment(t *testing.T) {
+	t.Setenv("HOME", "/tmp/plugin-visible-home")
+	t.Setenv("PATH", "/plugin-bin:/usr/bin")
+	t.Setenv("PLUGIN_API_TOKEN", "inherited-private-value")
+	e := taskPlugin(t)
+	e.load(enabled("p", map[string]any{"secret": "config-private-value"}), enabled("q", nil))
+	text := "failed /tmp/plugin-visible-home/work PATH=/plugin-bin:/usr/bin config-private-value task-private-value inherited-private-value"
+	req := taskRequest(t, "diagnostic", "fail", text)
+	req.Env = map[string]string{"SECRET": "task-private-value"}
+	task, err := e.m.StartTask(t.Context(), "p", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "diagnostic output", func() bool {
+		tasks, _ := e.m.Tasks("p")
+		return len(tasks) == 1 && tasks[0].ID == task.ID && tasks[0].State == "exited"
+	})
+	tasks, _ := e.m.Tasks("p")
+	raw, _ := json.Marshal(tasks)
+	for _, path := range []string{"/tmp/plugin-visible-home/work", "/plugin-bin:/usr/bin"} {
+		if !strings.Contains(string(raw), path) {
+			t.Errorf("useful path over-redacted: %s", raw)
+		}
+	}
+	for _, secret := range []string{"config-private-value", "task-private-value", "inherited-private-value"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("secret leaked: %s", raw)
+		}
+	}
+}
+
+func TestTaskDoesNotMutateCallingHookRedactor(t *testing.T) {
+	e := taskPlugin(t)
+	red := luabox.NewRedactor()
+	red.Add("prior-http-secret")
+	req := taskRequest(t, "independent", "sleep")
+	req.Env = map[string]string{"SECRET": "task-private-value"}
+	if _, err := e.m.startTask(t.Context(), "p", nil, req, red); err != nil {
+		t.Fatal(err)
+	}
+	if got := red.Clean("task-private-value"); got != "task-private-value" {
+		t.Fatalf("task contaminated calling hook redactor: %q", got)
+	}
+	if got := red.Clean("prior-http-secret"); got != "[redacted]" {
+		t.Fatal("existing hook secret lost")
+	}
+}

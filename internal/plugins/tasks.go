@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -91,6 +92,18 @@ func validateTask(req TaskStart) error {
 	return nil
 }
 
+// credentialEnvironmentKey excludes ordinary paths/locales/usernames from
+// inherited-secret collection while covering common credential conventions.
+func credentialEnvironmentKey(key string) bool {
+	key = strings.ToUpper(key)
+	for _, part := range []string{"TOKEN", "PASSWORD", "PASSWD", "SECRET", "API_KEY", "APIKEY", "PRIVATE_KEY", "CREDENTIAL", "ACCESS_KEY", "AUTHORIZATION"} {
+		if strings.Contains(key, part) {
+			return true
+		}
+	}
+	return key == "PASS" || strings.HasSuffix(key, "_PASS") || strings.HasSuffix(key, "_PWD") || strings.HasSuffix(key, "_PAT") || strings.HasSuffix(key, "_AUTH") || strings.HasSuffix(key, "_DSN") || key == "DATABASE_URL" || key == "REDIS_URL"
+}
+
 // StartTask starts an enabled plugin's task independently of ctx's lifetime.
 // ctx bounds creation only. Lua uses its bound plugin pointer instead.
 func (m *Manager) StartTask(ctx context.Context, name string, req TaskStart) (api.PluginTask, error) {
@@ -123,6 +136,8 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 	}
 	if red == nil {
 		red = p.redactor()
+	} else {
+		red = red.Clone()
 	}
 	// Include full serialized configuration as well as each configured string.
 	red.Add(p.configJSON)
@@ -172,7 +187,7 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 	// Inherited credentials and helper-collected HTTP secrets are never output.
 	for _, kv := range env {
 		key, value, _ := strings.Cut(kv, "=")
-		if key != "OMO_SOCKET" && key != "OMO_PLUGIN_NAME" && key != "OMO_PLUGIN_EVENT" && key != "OMO_PLUGIN_DATA" {
+		if credentialEnvironmentKey(key) {
 			red.Add(value)
 		}
 	}
@@ -190,8 +205,8 @@ func (m *Manager) startTask(ctx context.Context, name string, bound *plugin, req
 	cmd.Env = env
 	cmd.WaitDelay = time.Second
 	out := &taskOutput{red: red, changed: func() {
-		if m.o.TasksChanged != nil {
-			m.o.TasksChanged(name)
+		if m.o.TaskOutputChanged != nil {
+			m.o.TaskOutputChanged(name)
 		}
 	}}
 	cmd.Stdout = out
@@ -410,9 +425,11 @@ type taskOutput struct {
 
 func (o *taskOutput) Write(p []byte) (int, error) {
 	o.mu.Lock()
+	before := append([]string(nil), o.tail...)
 	defer func() {
+		changed := !slices.Equal(before, o.tail)
 		o.mu.Unlock()
-		if o.changed != nil {
+		if changed && o.changed != nil {
 			o.changed()
 		}
 	}()

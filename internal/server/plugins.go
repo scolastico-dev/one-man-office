@@ -79,11 +79,13 @@ type pluginFeature struct {
 	// pending holds the newest info of every plugin whose state changed
 	// and that is not recorded yet, in the order they changed first;
 	// changed wakes the writer.
-	pendingMu   sync.Mutex
-	pending     map[string]api.PluginInfo
-	taskPending map[string]bool
-	order       []string
-	changed     chan struct{}
+	pendingMu         sync.Mutex
+	pending           map[string]api.PluginInfo
+	taskPending       map[string]bool
+	taskOutputPending map[string]bool
+	taskOutputAt      map[string]time.Time
+	order             []string
+	changed           chan struct{}
 
 	// The plugin list omo provides, as last fetched: the list or the
 	// failure and when. catMu is held during a fetch, so one fetch runs at a
@@ -147,14 +149,15 @@ func (s *Server) startPlugins(ctx context.Context) {
 	f.busy = map[string]bool{}
 	f.pending = map[string]api.PluginInfo{}
 	f.m = plugins.New(plugins.Options{
-		Root:           s.opts.Layout.Plugins,
-		DB:             s.db,
-		Socket:         s.socketEndpoint,
-		Log:            s.log,
-		Changed:        s.pluginChanged,
-		Agents:         pluginAgents{s},
-		TaskTicketLive: s.pluginTaskTicketLive,
-		TasksChanged:   s.pluginTasksChanged,
+		Root:              s.opts.Layout.Plugins,
+		DB:                s.db,
+		Socket:            s.socketEndpoint,
+		Log:               s.log,
+		Changed:           s.pluginChanged,
+		Agents:            pluginAgents{s},
+		TaskTicketLive:    s.pluginTaskTicketLive,
+		TasksChanged:      s.pluginTasksChanged,
+		TaskOutputChanged: s.pluginTaskOutputChanged,
 	})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)

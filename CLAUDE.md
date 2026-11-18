@@ -227,17 +227,22 @@ server adapters. Task IDs identify runs independently of reusable names.
 `Options.TaskExited(plugin, api.PluginTask)` is invoked once outside locks after
 reaping and before Stop returns (must not wait for its own task or call Close);
 `TaskTicketLive(ctx, ticket)` validates open tickets before/after registration;
-`TasksChanged(plugin)` is a nonblocking invalidation callback. Records carry
+`TasksChanged(plugin)` is a nonblocking start/exit invalidation callback;
+`TaskOutputChanged(plugin)` separately reports changed visible tails. Records carry
 id/name/ticket/start/end/state/reason/error and bounded redacted combined output;
 32 running/callback-pending and 64 retained completed terminal records per plugin, 100 lines of 1024 runes,
 raw lines over 64 KiB discarded whole. Partial lines wait until exit. Task
 creation uses cleaned command environments, refuses all OMO_* overrides, and
 has no implicit shell or command-side task endpoint. Existing redaction rules
-apply to config/env/HTTP secrets and visibly escape hidden characters.
+apply to config/override/HTTP secrets and credential-like inherited environment
+values, using a cloned redactor so HOME/PATH/usernames and the calling hook stay
+useful. Hidden characters are visibly escaped.
 User-only `GET /api/plugins/{name}/tasks` returns `{tasks:[]}`;
 `POST .../tasks/{task}/stop` takes `{}`, returns 204, uses a local name and gives
 not_found for unknown/wrong owners. `plugin.tasks_changed` (`{name}`) invalidates
-snapshots at most once/plugin/second; refetch on reconnect/resync too. The reliable
+snapshots within one second for lifecycle changes; changed complete output
+tails invalidate at most once/plugin/ten seconds (six events/minute), with no
+partial/identical-tail events. Refetch on reconnect/resync too. The reliable
 event-log follower stops Done/cancel/cascade tasks before droppable hook Dispatch.
 Disable/remove/shutdown and natural parent exits clean whole ordinary process
 trees; Unix process groups and Windows suspended launch into kill-on-close jobs.

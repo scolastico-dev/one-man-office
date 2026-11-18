@@ -44,6 +44,25 @@ func NewRedactor() *Redactor {
 	return &Redactor{secrets: map[string]struct{}{}, marked: map[string]struct{}{}}
 }
 
+// Clone takes an independent snapshot of the secrets and marked sources.
+// Adding task-specific values to the copy cannot affect its calling hook.
+func (r *Redactor) Clone() *Redactor {
+	copy := NewRedactor()
+	if r == nil {
+		return copy
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for value := range r.secrets {
+		copy.secrets[value] = struct{}{}
+	}
+	for value := range r.marked {
+		copy.marked[value] = struct{}{}
+	}
+	copy.replacer = r.replacer
+	return copy
+}
+
 // Add registers a secret. Texts shorter than 6 bytes are ignored. For
 // multiline secrets, register each CR/LF-separated line too: output sinks may
 // split lines before cleaning, but must not disclose the credential that way.
