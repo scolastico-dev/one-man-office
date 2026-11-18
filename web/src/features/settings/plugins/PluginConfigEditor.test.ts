@@ -140,3 +140,14 @@ test('typed edits use the existing revision-conflict flow and JSON fallback pres
   expect(w.get('select').attributes('disabled')).toBeDefined()
   expect((field(w).element as HTMLTextAreaElement).value).toBe('{ broken')
 })
+
+test('non-finite numeric edits block save rather than serializing to null and a correction clears the error', async () => {
+  const { w, h } = await open([settings({ config: { idle: 30 } })], [fields])
+  await w.get('[data-plugin-field="idle"]').setValue('1e400')
+  await save(w)
+  expect(h.sent).toEqual([])
+  expect(w.text()).toContain('finite number')
+  await w.get('[data-plugin-field="idle"]').setValue('15')
+  await save(w)
+  expect((h.sent[0]?.body as PluginSettings).config).toEqual({ idle: 15 })
+})

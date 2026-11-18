@@ -103,6 +103,7 @@ func TestPluginAssetsRefuseInvalidRemovedAndOversizedFiles(t *testing.T) {
 			b := newBrowser(t, s)
 			dir, base := frontendRecorder(t, s, b)
 			entry := filepath.Join(dir, "entry.js")
+			requested := "entry.js"
 			var err error
 			switch kind {
 			case "invalid":
@@ -118,6 +119,7 @@ func TestPluginAssetsRefuseInvalidRemovedAndOversizedFiles(t *testing.T) {
 			case "large-script":
 				err = os.WriteFile(entry, []byte(strings.Repeat("x", (1<<20)+1)), 0600)
 			case "large-asset":
+				requested = "public/huge"
 				var f *os.File
 				f, err = os.Create(filepath.Join(dir, "public/huge"))
 				if err == nil {
@@ -144,7 +146,7 @@ func TestPluginAssetsRefuseInvalidRemovedAndOversizedFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantStatus(t, b.do("GET", base+"entry.js", nil, nil).StatusCode, http.StatusNotFound)
+			wantStatus(t, b.do("GET", base+requested, nil, nil).StatusCode, http.StatusNotFound)
 		})
 	}
 }
@@ -159,4 +161,33 @@ func TestPluginAssetsBasicModeIsPublicButSettingsRemainPrivate(t *testing.T) {
 	wantStatus(t, b.do("GET", base+"entry.js", nil, nil).StatusCode, http.StatusOK)
 	wantStatus(t, b.do("HEAD", base+"entry.js", nil, nil).StatusCode, http.StatusOK)
 	wantStatus(t, b.do("GET", "/api/plugins", nil, nil).StatusCode, http.StatusUnauthorized)
+}
+
+func TestPluginAssetReadsOnlyRequestedFile(t *testing.T) {
+	isolateGit(t)
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	dir, base := frontendRecorder(t, s, b)
+	// An unrelated known asset becomes oversized. Serving the entry must not
+	// re-read that asset or rewalk/hash the entire tree for each request.
+	f, err := os.OpenFile(filepath.Join(dir, "public/images/logo.svg"), os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.Truncate(64 << 20)
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := b.do("GET", base+"entry.js", nil, nil)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if got := respText(t, resp); got != "document.currentScript.omo;" {
+		t.Fatalf("entry %q", got)
+	}
+	wantStatus(t, b.do("GET", base+"public/images/logo.svg", nil, nil).StatusCode, http.StatusNotFound)
+	// A same-size edit is refused too, without requiring metadata changes.
+	if err := os.WriteFile(filepath.Join(dir, "entry.js"), []byte(strings.Repeat("x", len("document.currentScript.omo;"))), 0600); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, b.do("GET", base+"entry.js", nil, nil).StatusCode, http.StatusNotFound)
 }

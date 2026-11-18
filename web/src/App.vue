@@ -92,7 +92,7 @@ onBeforeUnmount(() => {
       :aria-hidden="boardShown ? undefined : 'true'"
       data-board-kept
     >
-      <PluginHost />
+      <PluginHost v-if="!consentPage" />
       <TerminalWindow v-if="terminalWindow" />
       <OAuthConsent v-else-if="consentPage" />
       <LiveBoard v-else />

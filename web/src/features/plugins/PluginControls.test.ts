@@ -1,4 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { defineComponent, h as h0, reactive } from 'vue'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { PluginInfo, PluginRunResult, PluginsResponse, TicketSummary } from '../../api/types'
 import { ticket } from '../board/testing'
@@ -19,9 +20,11 @@ async function setup(props: { place: 'ticket' | 'project' | 'sidebar'; ticket?: 
   const base = h.session.client.get.bind(h.session.client)
   h.session.client.get = ((path: string, q?: never) => path === '/api/plugins' ? Promise.resolve(ok(response)) : base(path, q)) as typeof base
   h.respond.write = () => ok({ message: 'Done' })
-  const w: VueWrapper = await mountWith(h, PluginControls, props)
+  const state = reactive(props)
+  const Host = defineComponent({ setup: () => () => h0(PluginControls, state) })
+  const w: VueWrapper = await mountWith(h, Host, {})
   cleanups.push(() => { w.unmount(); disposePluginExtensions(h.session.store) })
-  return { w, h }
+  return { w, h, props: state }
 }
 
 test('rendered worktree choices issue distinct ticket/project payloads; sidebar project controls send project alone', async () => {
@@ -62,4 +65,24 @@ test('a pending button reserves one detached tab, blocks double activation and o
   expect(h.sent.map((s) => s.path)).toEqual(['/api/plugins/editor/actions/global', '/api/proxy/forwards/0123456789abcdef0123456789abcdef/open'])
   expect(tab.location.replace).toHaveBeenCalledWith('https://apps.example/_omo/proxy/bootstrap#grant')
   expect(w.text()).toContain('Ready')
+})
+
+test('answers and errors survive replacement objects for the same ticket and clear when the ticket changes', async () => {
+  const { w, h, props } = await setup({ place: 'ticket', ticket: ticket({ number: 7, projects: [], workdir: '/work/7' }) })
+  await w.get('button').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-plugin-control-answer]').text()).toBe('Done')
+  props.ticket = { ...props.ticket! }
+  await flushPromises()
+  expect(w.get('[data-plugin-control-answer]').text()).toBe('Done')
+  h.respond.write = () => { throw new Error('Hook refused') }
+  await w.get('button').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-plugin-control-error]').text()).toBe('Hook refused')
+  props.ticket = { ...props.ticket! }
+  await flushPromises()
+  expect(w.get('[data-plugin-control-error]').text()).toBe('Hook refused')
+  props.ticket = { ...props.ticket!, number: 8 }
+  await flushPromises()
+  expect(w.find('[data-plugin-control-error]').exists()).toBe(false)
 })

@@ -98,6 +98,11 @@ const label = computed(() => `Save changes to the configuration of ${shownName.v
 // stays as typed and blocks the save.
 const text = ref('')
 const parseError = ref<string | null>(null)
+const primitiveErrors = ref<Record<string, string>>({})
+function clearPrimitiveErrors() {
+  for (const key of Object.keys(primitiveErrors.value)) r.setParse(`config.${key}`, null)
+  primitiveErrors.value = {}
+}
 function setParse(message: string | null) {
   parseError.value = message
   r.setParse('config', message)
@@ -114,6 +119,7 @@ watch(
   { immediate: true, deep: true },
 )
 watch(r.resets, () => {
+  clearPrimitiveErrors()
   if (r.draft.value) text.value = configText(r.draft.value.config)
   setParse(null)
 })
@@ -126,11 +132,16 @@ function onInput(value: string) {
     return
   }
   setParse(null)
+  clearPrimitiveErrors()
   if (r.draft.value) r.draft.value.config = got.value
 }
 
 function editField(field: PluginConfigField, value: string | boolean) {
   if (!draft.value || parseError.value) return
+  const error = field.type === 'number' && value !== '' && !Number.isFinite(Number(value)) ? 'Enter a finite number.' : null
+  r.setParse(`config.${field.key}`, error)
+  if (error) { primitiveErrors.value = { ...primitiveErrors.value, [field.key]: error }; return }
+  delete primitiveErrors.value[field.key]
   const config = { ...draft.value.config }
   if ((field.type === 'select' || field.type === 'number') && value === '') delete config[field.key]
   else config[field.key] = field.type === 'number' ? Number(value) : value
@@ -165,7 +176,7 @@ async function save() {
         <div v-for="f in fields" :key="f.key" class="plugin-config__primitive">
           <SelectField v-if="f.type === 'select'" :label="visibleText(f.label)" :model-value="stringValue(f)" :options="[{ value: '', label: 'Not set' }, ...(f.choices ?? []).map((c) => ({ value: c.value, label: visibleText(c.label) }))]" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
           <Toggle v-else-if="f.type === 'boolean'" :label="visibleText(f.label)" :model-value="draft.config[f.key] === true" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
-          <TextField v-else :label="visibleText(f.label)" :type="f.type === 'number' ? 'number' : 'text'" :model-value="stringValue(f)" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
+          <TextField v-else :error="primitiveErrors[f.key]" :label="visibleText(f.label)" :type="f.type === 'number' ? 'number' : 'text'" :model-value="stringValue(f)" :disabled="!!parseError" :data-plugin-field="f.key" @update:model-value="editField(f, $event)" />
         </div>
         <div class="plugin-config__code">
           <TextArea

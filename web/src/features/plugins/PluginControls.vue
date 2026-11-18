@@ -19,7 +19,7 @@ const panels = computed(() => runtime.panels.value.filter((p) => p.place === pro
 const running = ref<string | null>(null)
 const answer = ref('')
 const error = ref('')
-watch(() => [props.ticket?.number, props.project], () => { answer.value = ''; error.value = '' })
+watch([() => props.ticket?.number, () => props.project], () => { answer.value = ''; error.value = '' })
 async function run(button: PluginControl) {
   if (running.value || suspended.value || button.why) return
   running.value = button.id; answer.value = ''; error.value = ''

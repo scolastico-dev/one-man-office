@@ -63,7 +63,10 @@ export const CONFIG_PARSE_MESSAGE = 'Enter a JSON object, such as {"key": "value
 export function parseConfig(text: string): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   let v: unknown
   try {
-    v = JSON.parse(text)
+    v = JSON.parse(text, (_key: string, value: unknown) => {
+      if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Non-finite number')
+      return value
+    })
   } catch {
     return { ok: false, message: CONFIG_PARSE_MESSAGE }
   }

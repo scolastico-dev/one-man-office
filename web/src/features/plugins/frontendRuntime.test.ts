@@ -223,11 +223,48 @@ test('assetUrl encodes literal percent characters once instead of treating them 
 test('an installed commit update renews frontend lifetime even when its public bytes are identical', async () => {
   const { script, list, runtime } = setup({ ...info('one'), commit: 'old' })
   const entry = script('one')
-  entry.omo.initialize((omo) => { omo.addButton({ id: 'a', place: 'sidebar', label: 'Old', action: 'run' }) })
+  const facade = entry.omo
+  facade.initialize((omo) => { omo.addButton({ id: 'a', place: 'sidebar', label: 'Old', action: 'run' }) })
   await flushPromises()
   list.value = response({ ...info('one'), commit: 'new' })
   await flushPromises()
   expect(script('one')).not.toBe(entry)
-  expect(entry.omo.signal.aborted).toBe(true)
+  expect(facade.signal.aborted).toBe(true)
   expect(runtime.buttons.value).toEqual([])
+})
+
+test('another entry cannot retrieve a plugin facade from its script element after load or failure', async () => {
+  const { script } = setup(info('one'), info('two'))
+  const first = script('one')
+  const facade = first.omo
+  facade.initialize(() => {})
+  first.dispatchEvent(new Event('load'))
+  expect((document.querySelector('script[data-omo-plugin="one"]') as HTMLScriptElement & { omo?: PluginFacade }).omo).toBeUndefined()
+  const second = script('two')
+  second.dispatchEvent(new Event('error'))
+  expect(second.omo).toBeUndefined()
+  await flushPromises()
+  expect(facade.signal.aborted).toBe(false)
+})
+
+test('route subscriptions ignore identical context replacements and unchanged unlocks', async () => {
+  const { script, context, suspended } = setup(info('one'))
+  const routes = vi.fn()
+  script('one').omo.initialize((omo) => { omo.onRouteChange(routes) })
+  await flushPromises()
+  context.value = { page: 'board' }
+  await flushPromises()
+  suspended.value = true
+  await flushPromises()
+  suspended.value = false
+  await flushPromises()
+  expect(routes).toHaveBeenCalledTimes(1)
+})
+
+test('a scripted action button uses its own hook scope when a ticket is shown', async () => {
+  const { script, runtime, send } = setup(info('one'))
+  script('one').omo.initialize((omo) => { omo.addButton({ id: 'a', label: 'Global', place: 'ticket', action: 'run' }) })
+  await flushPromises()
+  await runtime.buttons.value[0]!.invoke({ page: 'ticket', ticket: { number: 7, title: 'T', workdir: '', projects: [] }, project: 'repo' })
+  expect(send).toHaveBeenCalledExactlyOnceWith('POST', '/api/plugins/one/actions/run', { project: 'repo' })
 })

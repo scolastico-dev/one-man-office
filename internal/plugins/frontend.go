@@ -91,23 +91,27 @@ func hashFrontendFile(h hash.Hash, dir, rel string, limit int64) ([]byte, error)
 	return b, nil
 }
 
-func (m *Manifest) readFrontendFile(dir string, raw []byte, target string) ([]byte, error) {
-	var content []byte
+type frontendFile struct {
+	size   int64
+	digest [32]byte
+}
+
+func (m *Manifest) readFrontend(dir string, raw []byte) error {
+	m.manifestHash = sha256.Sum256(raw)
+	m.frontendFiles = map[string]frontendFile{}
 	h := sha256.New()
 	fmt.Fprintf(h, "%d:", len(raw))
 	_, _ = h.Write(raw)
 	if m.Frontend.Script != "" {
 		script, err := hashFrontendFile(h, dir, m.Frontend.Script, MaxFrontendScriptBytes)
 		total := int64(len(script))
-		if target == m.Frontend.Script {
-			content = script
-		}
+		m.frontendFiles[m.Frontend.Script] = frontendFile{size: int64(len(script)), digest: sha256.Sum256(script)}
 		if err != nil {
-			return nil, fmt.Errorf("frontend.script: %w", err)
+			return fmt.Errorf("frontend.script: %w", err)
 		}
 		if m.Frontend.Assets != "" {
 			if err := frontendNode(dir, m.Frontend.Assets, true); err != nil {
-				return nil, fmt.Errorf("frontend.assets: %w", err)
+				return fmt.Errorf("frontend.assets: %w", err)
 			}
 			entries := 1
 			err := filepath.WalkDir(filepath.Join(dir, filepath.FromSlash(m.Frontend.Assets)), func(p string, d os.DirEntry, err error) error {
@@ -140,23 +144,22 @@ func (m *Manifest) readFrontendFile(dir string, raw []byte, target string) ([]by
 				}
 				data, err := hashFrontendFile(h, dir, rel, MaxFrontendBytes-total)
 				total += int64(len(data))
-				if rel == target {
-					content = data
-				}
+				m.frontendFiles[rel] = frontendFile{size: int64(len(data)), digest: sha256.Sum256(data)}
 				return err
 			})
 			if err != nil {
-				return nil, fmt.Errorf("frontend.assets: %w", err)
+				return fmt.Errorf("frontend.assets: %w", err)
 			}
 		}
 	}
 	m.contentID = hex.EncodeToString(h.Sum(nil))
-	return content, nil
+	return nil
 }
 
 // FrontendFile reads only an enabled plugin's declared public files. Repeat
 // validation at read time: an installed tree can change after runtime loading.
-// The content identity also prevents serving new bytes under an old address.
+// Recorded per-file digests prevent new bytes under an old content identity
+// without re-reading or re-hashing unrelated assets on a public request.
 func (m *Manager) FrontendFile(name, identity, rel string) ([]byte, error) {
 	missing := errors.New("plugin asset unavailable")
 	if !ValidName(name) || publicPath(rel) != nil || identity == "" {
@@ -175,15 +178,20 @@ func (m *Manager) FrontendFile(name, identity, rel string) ([]byte, error) {
 		return nil, missing
 	}
 	dir := e.p.dir
+	recorded, public := e.manifest.frontendFiles[rel]
+	manifestHash := e.manifest.manifestHash
 	m.mu.Unlock()
-	manifest, data, err := readManifest(dir, rel)
-	if err != nil || manifest.contentID != identity || manifest.Frontend.Script == "" {
+	if !public || frontendNode(dir, rel, false) != nil {
 		return nil, missing
 	}
-	if rel != manifest.Frontend.Script && (manifest.Frontend.Assets == "" || !strings.HasPrefix(rel, manifest.Frontend.Assets+"/")) {
+	// The small manifest check invalidates changed declarations immediately.
+	// Asset reads scale with this file's recorded size, never the entire tree.
+	raw, err := homefile.Read(filepath.Join(dir, ManifestFile), MaxManifestBytes)
+	if err != nil || sha256.Sum256(raw) != manifestHash {
 		return nil, missing
 	}
-	if data == nil {
+	data, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), recorded.size)
+	if err != nil || int64(len(data)) != recorded.size || sha256.Sum256(data) != recorded.digest {
 		return nil, missing
 	}
 	m.mu.Lock()

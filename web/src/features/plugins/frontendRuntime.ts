@@ -48,7 +48,7 @@ interface Lifetime {
   identity: string
   script: HTMLScriptElement
   controller: AbortController
-  subscriptions: Set<(context: PluginContext) => void | Promise<void>>
+  subscriptions: Map<(context: PluginContext) => void | Promise<void>, string>
   cleanup?: () => void
   timer?: ReturnType<typeof setTimeout>
   removeErrorListener?: () => void
@@ -81,6 +81,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
   function clear(name: string, life: Lifetime) {
     life.controller.abort()
     clearTimeout(life.timer)
+    Reflect.deleteProperty(life.script, 'omo')
     life.script.remove()
     life.removeErrorListener?.()
     life.subscriptions.clear()
@@ -96,7 +97,10 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     errors.value = [...errors.value.filter((e) => e.plugin !== name), { plugin: name, message: visibleText(message).slice(0, 1000) }]
   }
   function notifyRoute(name: string, life: Lifetime, callback: (context: PluginContext) => void | Promise<void>) {
-    if (life.controller.signal.aborted || deps.suspended.value || disposed) return
+    if (life.controller.signal.aborted || deps.suspended.value || disposed || !life.subscriptions.has(callback)) return
+    const key = JSON.stringify(deps.context.value)
+    if (life.subscriptions.get(callback) === key) return
+    life.subscriptions.set(callback, key)
     const failed = () => fail(name, life, 'A plugin route listener failed. Retry the extension.')
     try { Promise.resolve(callback(copyContext(deps.context.value))).catch(failed) } catch { failed() }
   }
@@ -105,7 +109,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     const script = document.createElement('script')
     script.src = `/plugin-assets/${encodeURIComponent(name)}/${encodeURIComponent(info.content_id)}/${info.frontend.script!.split('/').map(encodeURIComponent).join('/')}`
     script.dataset.omoPlugin = name
-    const life: Lifetime = { identity: pluginCodeIdentity(info), script, controller: new AbortController(), subscriptions: new Set(), initialized: false, failed: false }
+    const life: Lifetime = { identity: pluginCodeIdentity(info), script, controller: new AbortController(), subscriptions: new Map(), initialized: false, failed: false }
     lives.set(name, life)
     const active = () => !disposed && lives.get(name) === life && !life.controller.signal.aborted
     const check = () => { if (!active()) throw new Error('The plugin is no longer active.') }
@@ -139,7 +143,9 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
         if (buttons.value.filter((b) => b.plugin === name && b.id !== button.id).length >= 64) throw new Error('Too many plugin buttons.')
         const registered: OwnedButton = { ...button, plugin: name, active, async invoke(context) {
           actionable()
-          return (button.run ? await button.run(copyContext(context)) : await runHook(button.action!, { ticket: context.ticket?.number, project: context.project })) ?? { message: '' }
+          if (button.run) return (await button.run(copyContext(context))) ?? { message: '' }
+          const hook = info.hooks.find((h) => h.event === 'manual' && h.name === button.action)
+          return runHook(button.action!, { ...(hook?.scope === 'ticket' ? { ticket: context.ticket?.number } : {}), project: context.project })
         } }
         buttons.value = [...buttons.value.filter((b) => b.plugin !== name || b.id !== button.id), registered]
         return () => { buttons.value = buttons.value.filter((b) => b !== registered) }
@@ -155,7 +161,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
       },
       removePanel(id: string) { check(); panels.value = panels.value.filter((p) => p.plugin !== name || p.id !== id) },
       context() { check(); return copyContext(deps.context.value) },
-      onRouteChange(callback: (context: PluginContext) => void | Promise<void>) { check(); life.subscriptions.add(callback); notify(callback); return () => life.subscriptions.delete(callback) },
+      onRouteChange(callback: (context: PluginContext) => void | Promise<void>) { check(); life.subscriptions.set(callback, ''); notify(callback); return () => life.subscriptions.delete(callback) },
       runHook,
       assetUrl(path: string) {
         check()
@@ -165,8 +171,8 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
       async openForward(id: string) { actionable(); await navigatePluginResult(deps.client, async () => ({ message: '', forward_id: id }), () => active() && !deps.suspended.value) },
       async open(action: () => Promise<PluginRunResult>) { actionable(); return navigatePluginResult(deps.client, action, () => active() && !deps.suspended.value) },
     })
-    Object.defineProperty(script, 'omo', { value: omo })
-    script.onload = () => { clearTimeout(life.timer); if (!life.initialized) fail(name, life, 'The plugin entry did not call omo.initialize. Retry the extension.') }
+    Object.defineProperty(script, 'omo', { value: omo, configurable: true })
+    script.onload = () => { Reflect.deleteProperty(script, 'omo'); clearTimeout(life.timer); if (!life.initialized) fail(name, life, 'The plugin entry did not call omo.initialize. Retry the extension.') }
     script.onerror = () => fail(name, life, 'The plugin frontend could not load. Retry the extension.')
     const scriptError = (event: ErrorEvent) => {
       if (event.filename === script.src) fail(name, life, 'The plugin frontend script failed. Retry the extension.')
@@ -192,7 +198,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     watch([deps.list, deps.suspended], reconcile, { immediate: true, flush: 'sync' })
     watch([deps.context, deps.suspended], () => {
       if (deps.suspended.value) return
-      for (const [name, life] of lives) for (const callback of [...life.subscriptions]) {
+      for (const [name, life] of lives) for (const callback of [...life.subscriptions.keys()]) {
         if (life.controller.signal.aborted) break
         notifyRoute(name, life, callback)
       }

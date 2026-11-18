@@ -220,15 +220,17 @@ only enabled installed public script/assets under
 `/plugin-assets/<name>/<content_id>/<declared-path>` (GET/HEAD, public bundled
 files, no settings/data). Raw-path handling precedes ServeMux cleaning; every
 read repeats portable path/ancestor/regular-file/homefile bounds and verifies
-content identity using the exact captured bytes. No-store preserves disable
+the requested file against its load-time size/SHA-256 plus the small manifest
+digest; public reads never rewalk/hash unrelated files. No-store preserves disable
 and update checks; CSP stays script-src self. `web/src/features/plugins/`
 loads classic entries once per enabled code lifetime on every authenticated
-board document. Entries capture `document.currentScript.omo` and call
-`omo.initialize(setup)`. The bound facade provides lifetime-guarded
+board document except OAuth consent. Entries capture `document.currentScript.omo` and call
+`omo.initialize(setup)`; the script property is deleted after load/error. The bound facade provides lifetime-guarded
 button/panel registration, detached route context/subscriptions, own manual
 hooks, asset URLs and authenticated forward navigation; signal and cleanup
 end stale asynchronous initialization. Errors isolate the plugin and offer
-Retry; lock suspends actions/listeners and unlock refreshes route context.
+Retry; lock suspends actions/listeners and changed route context is delivered
+once after unlock. Identical context updates are ignored.
 Shared PluginControls renders ticket/sidebar/project buttons and text/image
 panels; per-worktree controls send ticket+project for recorded worktrees or
 explicitly explain missing folders, with no repository fallback. Legacy ticket

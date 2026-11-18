@@ -225,8 +225,11 @@ record), `settings`, `settings.yaml`, `settings.yml`, `settings.json` and
 `plugin.json` are private at every depth and cannot appear in public paths.
 The script is at most 1 MiB; the script plus assets are at most 64 MiB and
 10,000 entries (files and directories, including the script and assets root).
-Asset serving repeats these checks and hashes the exact bytes served on each
-request; loading alone is not protection against later filesystem edits. Only
+Loading records a bounded public-file allowlist with sizes and SHA-256 digests.
+Serving rechecks path/link/regular-file bounds, the small manifest and only the
+requested file’s recorded size and digest. It never rewalks unrelated assets
+per request; changed bytes are refused until a runtime reload publishes their
+new identity. Only
 the declared entry and files under the asset directory are public, at
 `/plugin-assets/<installed-name>/<content_id>/<declared-path>`. GET and HEAD
 need no sign-in; only these bundled files are public. Configuration, the plugin
@@ -247,7 +250,8 @@ are kept, and the user's existing values win over defaults on install/update.
 These declarations validate defaults, not arbitrary existing user configuration.
 The settings page shows selects, boolean switches, text and number inputs.
 Absent booleans display unchecked; choosing an editor never accepts its terms.
-Each edit retains unknown JSON keys and uses the same Save, Discard, unsaved
+Non-finite numeric input, including overflow in JSON text, blocks saving
+instead of becoming null. Each edit retains unknown JSON keys and uses the same Save, Discard, unsaved
 leave guard and revision-conflict controls as JSON edits. Invalid JSON keeps
 its text and disables primitive controls until corrected. Choice labels and
 the plugin description can explain unavailable platforms; a plugin may also
@@ -475,8 +479,10 @@ restart, persistence, editor management or command-side task identity is added.
 ### Frontend entry and the browser omo facade
 
 Every authenticated board document loads enabled entries, including settings,
-ticket pages and terminal windows. A classic script must capture its own facade
-synchronously and call `initialize` once. There is no shared `window.omo`:
+ticket pages and terminal windows; OAuth consent pages exclude entries. A classic script must capture its own facade
+synchronously and call `initialize` once. The script element’s facade property
+is deleted when loading finishes or fails; other entries cannot retrieve it
+afterward. There is no shared `window.omo`:
 
 ```js
 (() => {
@@ -514,7 +520,7 @@ The stable facade methods are:
 | `addPanel(spec)` | Adds or replaces `{id,place,title,text,image?}`; returns its registration's disposer. Place is `ticket` or `sidebar`. Text is plain text with hidden characters escaped. Optional image must use this plugin's versioned asset URL. |
 | `removePanel(id)` | Removes only this plugin's panel. |
 | `context()` | Returns a detached copy of the current route context. |
-| `onRouteChange(callback)` | Immediately supplies current context, then each route/context change; returns unsubscribe. Suspended under the lock screen, then delivers current context on unlock. A failing listener removes that plugin's frontend without affecting others. |
+| `onRouteChange(callback)` | Immediately supplies current context, then each route/context change; returns unsubscribe. Identical context replacements are ignored. Suspended under the lock screen, then delivers changed context on unlock. A failing listener removes that plugin's frontend without affecting others. |
 | `runHook(action, context?)` | Runs only this plugin's own named manual hook; resolves `{message,url?,forward_id?}`. Explicit context is `{ticket?,project?}`. Without it, ticket hooks use the current ticket/project; global hooks use the selected project only. No automatic retries, including on a lost response. |
 | `assetUrl(path)` | Builds a same-origin versioned URL relative to `frontend.assets`. Refuses traversal/private/Windows paths; throws if no assets are declared. |
 | `openForward(id)` | From a user gesture, reserves a detached tab and opens a forward through the authenticated proxy Open API. Resolves void; rejects and closes the unused tab on failure or expired plugin lifetime. |
@@ -549,8 +555,10 @@ removal, invalidation, a changed installed commit or content identity removes co
 aborts signal and runs cleanup; obsolete asynchronous initialization cannot
 register again. While locked, controls and hook/open calls are suspended.
 Load/initialization/listener failures affect only that plugin and show Retry.
-A document initializes each installed commit/content identity once per enabled lifetime (except an
-explicit retry); updating assets or entry bytes gives a new address/lifetime.
+An active board context initializes each installed commit/content identity once
+per enabled lifetime (except an explicit retry). Entering OAuth consent ends
+that frontend context; returning to the board initializes it again. Updating
+assets or entry bytes gives a new address/lifetime.
 
 ### Buttons (manual hooks)
 

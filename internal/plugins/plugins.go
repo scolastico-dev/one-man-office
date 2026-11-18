@@ -165,6 +165,8 @@ type Manifest struct {
 	Frontend      api.PluginFrontend      `json:"frontend,omitzero"`
 	ConfigFields  []api.PluginConfigField `json:"config_fields,omitempty"`
 	contentID     string
+	manifestHash  [32]byte
+	frontendFiles map[string]frontendFile // immutable per-file digests computed at load
 }
 
 var (
@@ -260,30 +262,24 @@ func quoted(s string) string { return strconv.QuoteToASCII(cutRunes(s, 40)) }
 // that names them. A missing manifest gives an error that wraps
 // ErrNotInstalled.
 func ReadManifest(dir string) (Manifest, error) {
-	m, _, err := readManifest(dir, "")
-	return m, err
-}
-
-func readManifest(dir, publicFile string) (Manifest, []byte, error) {
 	raw, err := homefile.Read(filepath.Join(dir, ManifestFile), MaxManifestBytes)
 	if errors.Is(err, os.ErrNotExist) {
-		return Manifest{}, nil, ErrNotInstalled
+		return Manifest{}, ErrNotInstalled
 	}
 	if err != nil {
 		if text, ok := homefile.Refusal(err, MaxManifestBytes); ok {
-			return Manifest{}, nil, errors.New("plugin.json: " + text)
+			return Manifest{}, errors.New("plugin.json: " + text)
 		}
-		return Manifest{}, nil, errors.New("plugin.json cannot be read")
+		return Manifest{}, errors.New("plugin.json cannot be read")
 	}
 	man, err := ParseManifest(raw)
 	if err != nil {
-		return Manifest{}, nil, err
+		return Manifest{}, err
 	}
-	data, err := man.readFrontendFile(dir, raw, publicFile)
-	if err != nil {
-		return Manifest{}, nil, err
+	if err := man.readFrontend(dir, raw); err != nil {
+		return Manifest{}, err
 	}
-	return man, data, nil
+	return man, nil
 }
 
 // ParseManifest checks a manifest's text and path syntax. ReadManifest also
