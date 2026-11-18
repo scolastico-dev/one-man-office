@@ -475,6 +475,8 @@ type Options struct {
 	Socket func() string
 	// HTTP is the client of omo.http; nil uses a fresh client per run.
 	HTTP *http.Client
+	// ArtifactHTTP supplies a trusted artifact transport; Lua HTTP limits stay separate.
+	ArtifactHTTP *http.Client
 	// Log receives the manager's own problems (a failed database write);
 	// nil discards them. Plugin output never goes there.
 	Log *log.Logger
@@ -514,12 +516,16 @@ type Manager struct {
 	entries    []*entry // by name, every plugin of the last Load
 	known      map[string]db.PluginRuntime
 
-	tasksWG      sync.WaitGroup
-	tasksMu      sync.Mutex
-	tasks        map[string]*task
-	taskSequence uint64
-	exitSequence uint64
-	manual       sync.WaitGroup // running manual actions
+	artifactsWG    sync.WaitGroup
+	artifactsMu    sync.Mutex
+	artifacts      map[string]map[string]*artifactJob
+	artifactLimits *artifactLimits // tests override finite production bounds
+	tasksWG        sync.WaitGroup
+	tasksMu        sync.Mutex
+	tasks          map[string]*task
+	taskSequence   uint64
+	exitSequence   uint64
+	manual         sync.WaitGroup // running manual actions
 
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
@@ -653,6 +659,8 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 	m.stopTasks(func(*task) bool { return true }, TaskShutdown)
 	m.tasksWG.Wait()
+	m.stopArtifacts("", false)
+	m.artifactsWG.Wait()
 	m.cancel()
 	for _, p := range running {
 		p.cancel()
@@ -786,6 +794,7 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 			reason = TaskPluginReplaced
 		}
 		if reason != "" {
+			m.stopArtifacts(e.settings.Name, false)
 			m.stopTasks(func(t *task) bool { return t.plugin == e.settings.Name }, reason)
 		}
 		e.p.wg.Wait()
@@ -801,6 +810,7 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 			continue
 		}
 		m.stopTasks(func(t *task) bool { return t.plugin == name }, TaskPluginRemoved)
+		m.stopArtifacts(name, true)
 		m.tasksMu.Lock()
 		for id, t := range m.tasks {
 			if t.plugin == name {

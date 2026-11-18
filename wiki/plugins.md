@@ -321,6 +321,9 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `config` | the plugin's configuration |
 | `omo.exec(program, args...)` | runs a program without a shell in the plugin's folder, with the environment of a command hook; returns its output (standard output and error, at most 1 MiB) and `""` or an error text |
 | `omo.http{method, url, headers, json \| form \| body, timeout}` | an HTTP request: https to any host, http only to localhost; at most 8 per run, bodies at most 1 MiB, 10 s by default and at most 30 s, redirects only to the same host. Returns `{status, body, headers}`, or `nil` and an error text |
+| `omo.artifact_start{ key, url, sha256, format, strip_components, retry }` | starts or reuses an asynchronous plugin-owned artifact install; returns a status or `nil, error`; see Artifact installs |
+| `omo.artifact_status(key)` | polls this plugin's in-memory artifact status, or `nil, error` |
+| `omo.runtime_info()` | `{os, arch}` using Go platform names, e.g. `linux`, `darwin`, `windows` and `amd64`, `arm64`; no external command |
 | `omo.task_start{ name, command, args, cwd, env, ticket }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
 | `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
 | `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
@@ -335,6 +338,123 @@ A run ends at the hook's time limit, and memory is watched. Every configuration
 string of six characters or more is replaced by `[redacted]` in the log, in
 error texts and in answer messages, and so are the header values the hook sent with
 `omo.http`.
+
+### Artifact installs
+
+Lua plugins can install standalone tools without a host Node, Python, shell,
+curl, tar or zip program. The plugin chooses every tool URL, version, platform,
+checksum, executable path, argument and licence policy. `omo.http` retains its
+existing request/redirect/body limits; artifact downloads use a separate Go
+helper that outlives the short hook.
+
+```lua
+local job, err = omo.artifact_start{
+  key = "worker", url = config.pinned_url, sha256 = config.pinned_sha256,
+  format = "tar.gz", strip_components = 1
+}
+if not job then return {message = err} end
+-- Return now, then poll omo.artifact_status("worker") from later hooks.
+-- Only a ready job has path; use job.path .. "/bin/worker" with task_start.
+return {message = "Installing: " .. job.phase}
+```
+
+`artifact_start` accepts this strict options table:
+
+| Field | Meaning |
+|---|---|
+| `key` | required plugin-local name: 1–64 ASCII letters/digits/dots/underscores/hyphens, starting alphanumeric |
+| `url` | required HTTPS URL, at most 8192 bytes; no user information or fragment |
+| `sha256` | optional expected 64-hex SHA-256 (case insensitive); omitted/empty explicitly means no publisher checksum |
+| `format` | required `tar.gz` or `zip`, on every OS |
+| `strip_components` | optional integer 0–32, default 0; removes leading archive path components after path validation |
+| `retry` | optional boolean, default false; explicitly retries a failed/cancelled job with the same identity |
+
+Unknown fields and wrong types fail with `nil, error`. No destination, headers,
+other plugin name or general filesystem operation is accepted. Keys containing
+known configuration or URL query secrets are refused. Every call is bound to
+the executing plugin; another plugin cannot inspect its jobs.
+
+Both helpers return a snapshot with these fields:
+
+| Field | Meaning |
+|---|---|
+| `id`, `key` | opaque job identity and plugin-local key |
+| `state` | `running`, `ready`, `failed` or `cancelled` |
+| `phase` | while running: `checking`, `downloading`, `verifying` or `extracting`; otherwise the terminal state |
+| `bytes` | compressed bytes received so far, zero before downloading and for cache-only checks |
+| `total_bytes` | advertised compressed length, or zero when unknown |
+| `verification` | `sha256` when an expected digest was supplied; `unverified` otherwise (describes the requested check while running; only ready means it completed) |
+| `path` | present only when ready: absolute extracted tool folder |
+| `error` | present on failure/cancellation: bounded fixed diagnostic without URL, response body, headers or filesystem paths |
+
+Simultaneous calls with the same plugin/key and URL/digest/extraction options
+reuse the active job and its id. Different options under an active key return
+an identity-conflict error. Once terminal, changed options start a fresh job;
+the former valid installation stays intact. Failed/cancelled jobs keep their
+id/error until an explicit `retry=true` or changed identity. There is no retry
+loop. At most four jobs and 64 retained keys belong to one plugin. Removal
+forgets its in-memory records; disable and server stop retain terminal status
+until the manager ends. No artifact polling endpoint or persisted job queue is
+added: a frontend polls through a normal hook.
+
+Calling `artifact_start` on a ready key also returns promptly in
+`running/checking`, without a path, while the full cache is checked. Poll
+`artifact_status` until it is ready. Polling reports the most recent result;
+it does not itself rehash the tree. Request a new `artifact_start` and await
+ready before reusing an installed executable. New servers have no job status;
+an explicit start can discover and validate a completed disk cache.
+
+Every install has a 30-minute overall deadline, including cache checks, download
+and extraction. Downloads allow five redirects, including cross-host HTTPS
+CDNs, and refuse an HTTP downgrade or credentials in redirects. No cookies or
+Authorization headers are forwarded. The default transport bounds response
+headers to 64 KiB and waiting for headers to 30 seconds. Compressed bytes are
+at most **512 MiB**, extracted file bytes **2 GiB**, one regular file **512 MiB**,
+and archive/tree entries **50,000**, including implicit directories (archive
+headers are counted too). Paths are at most 4096 bytes, components 255 bytes.
+ZIP central-directory metadata is preflighted before entry allocations: at most
+32 MiB, with actual counts checked independently of the advertised count;
+bounded single-disk ZIP64 directories are supported.
+These bounds admit the researched standalone editor pins. Expanded metadata and
+trailing tar data are also bounded. A supplied digest is checked over downloaded
+bytes **before extraction**; mismatch fails closed. Without a publisher checksum,
+ready remains explicitly `unverified`, even though local integrity is recorded.
+
+Downloads/extraction use private staging under
+`plugins/.data/<plugin>/.artifacts-v1/<key>/`. Completed generations contain
+`tree/` and `complete.json`; an identity-hashed reference selects a completed
+generation. Metadata stores identity and full-tree hashes, never source URLs.
+The tree and completion publish together by rename on the same filesystem,
+then the reference updates atomically. Cache checks require matching completion
+and reference metadata and rehash **every** file's bytes, paths, file types,
+permissions and link targets. Extra, missing or altered files/executables and
+incomplete metadata force a fresh download before ready. Metadata is local
+integrity bookkeeping, not a signature or a security boundary against someone
+who can rewrite both data and metadata as the user.
+
+Extraction rejects absolute/drive/UNC paths, `..`, percent-encoded path ambiguity,
+Windows device/ADS names, case aliases, link traversal during writes, devices,
+FIFOs, dangling/cyclic links and targets outside the extracted root. Files use
+private 0600 or executable 0700 modes; directories use 0700, with no archive
+ownership/setuid/setgid/sticky bits imported. Contained **file** symlinks and
+hardlinks are resolved only after regular files exist. Unix preserves relative
+symlinks (including Node realpath semantics); Windows copies their target bytes
+and executable mode without requiring symlink privileges. That fallback can
+change Node's realpath/relative-import behavior, so plugins must launch a
+verified real entry point rather than assume a copied `.bin` shim has identical
+semantics. Directory links are refused. Tests cover the twelve contained
+`node_modules/.bin` file links observed in the code-server archive; other
+platform archive layouts still need native validation by the plugin.
+
+Failure/cancellation removes only its private staging and never replaces an
+existing valid generation or deletes unrelated plugin data. Completed/obsolete
+generations remain on disk for explicit user maintenance; disk use can therefore
+grow with explicit version/identity changes. Installs are cancelled and reaped
+on disable, removal, code/install replacement and shutdown; ordinary
+configuration refresh preserves them. Ending a hook does not cancel its job.
+Nothing resumes automatically after restart. Artifact completion authorizes no
+licence acceptance or process start: the plugin handles those before invoking
+`task_start` with the ready path.
 
 ### Background tasks
 
