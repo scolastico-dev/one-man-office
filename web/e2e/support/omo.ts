@@ -8,6 +8,7 @@ import { initRepo } from './git'
 import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentPrograms } from './env'
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
 import { findAddress, isPortCollision } from './startup'
+import { run, type CliResult } from './run'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -78,11 +79,7 @@ export interface OmoOptions {
   firstStart?: boolean
 }
 
-export interface CliResult {
-  code: number
-  stdout: string
-  stderr: string
-}
+export type { CliResult }
 
 export interface Omo {
   /** Temporary directory used as OMO_HOME (and HOME, XDG_*). Removed after the test. */
@@ -136,38 +133,6 @@ async function freePort(): Promise<number> {
     })
     if (port !== DEFAULT_PORT) return port
   }
-}
-
-function run(bin: string, args: string[], env: NodeJS.ProcessEnv, stdin?: string, timeoutMs = 60_000): Promise<CliResult> {
-  return new Promise((res, rej) => {
-    const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      rej(new Error(`${args.join(' ')} did not finish within ${timeoutMs} ms\n${stdout}${stderr}`))
-    }, timeoutMs)
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
-    child.once('error', (e) => {
-      clearTimeout(timer)
-      rej(e)
-    })
-    child.once('close', (code) => {
-      clearTimeout(timer)
-      res({ code: code ?? -1, stdout, stderr })
-    })
-    // A command that finishes without reading its input closes the pipe
-    // while the write is still on its way (more often on a busy machine);
-    // that is not a failure of the command.
-    child.stdin.on('error', (e: NodeJS.ErrnoException) => {
-      if (e.code !== 'EPIPE') {
-        clearTimeout(timer)
-        rej(e)
-      }
-    })
-    child.stdin.end(stdin ?? '')
-  })
 }
 
 export class ServerError extends Error {

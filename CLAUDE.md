@@ -479,7 +479,21 @@ runner owns, activation (`PROXY_BROWSER_FIXTURE=1`) given by the driver alone,
 and every start failure (no program, early exit, unreadable fixtures line) or
 test failure ends the helper's process group before it is reported.
 `web/src/testing/fixtureProcess.test.ts` (in `make web-check`) pins this and
-fails on a driver that starts a child process itself.
+fails on a driver that starts a child process itself. The helper is not run
+through `go test`: `startFixture` builds the server package's test binary once
+(`go test -c`, awaited, into a folder of its own under the configured temporary
+root) and starts that binary directly, so the child it holds is the process that
+owns the servers and ending it ends them on every platform; on Windows only that
+awaited build, which starts compilers itself, is ended with `taskkill /T /F`.
+Stop, every start failure (build, spawn, bad or split fixtures line, early exit)
+and an interrupt of the driver wait for the process to be closed, remove the
+folder and report a failed kill instead of treating it as "already gone".
+`web/src/processOwnership.guard.test.ts` lists every launcher under `web/` with
+its lifecycle and fails on a new one, on a launcher of a launcher (`go`, `npm`,
+`npx`, a shell) started as a long-lived child, and on a shell option. The e2e
+`run` (`web/e2e/support/run.ts`) rejects a program past its limit only once the
+process is closed. omo's own agent containment on Windows is product work, not
+covered here.
 
 ## Web UI workflow verification
 
