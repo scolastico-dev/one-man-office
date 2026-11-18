@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -54,7 +55,7 @@ func Open(path string) (*sql.DB, error) {
 	if err := refuseNewer(path); err != nil {
 		return nil, err
 	}
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)" + syncPragma()
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -68,6 +69,21 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// syncPragma is "" for omo itself: SQLite then flushes every commit to the
+// disk, so a commit survives a power failure. Inside a Go test binary the
+// flush is turned off: a test's database lives in a temporary folder and
+// never has to survive the machine, and the flush is what makes the suite
+// slow on a real disk (about three times here, far more on a Windows CI
+// runner, where it ran packages into their time limit). Nothing else about
+// the database differs in tests. A started omo binary is never a test
+// binary, so the smoke and browser tests run with the flush.
+func syncPragma() string {
+	if testing.Testing() {
+		return "&_pragma=synchronous(OFF)"
+	}
+	return ""
 }
 
 func refuseNewer(path string) error {
