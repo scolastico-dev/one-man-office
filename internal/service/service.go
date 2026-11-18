@@ -68,10 +68,6 @@ func shortLock(ctx context.Context, path string) (*filelock.Lock, error) {
 
 type hurryKey struct{}
 
-// stopSignalled runs in the stop handler after the stop was signalled; a test
-// holds it to decide the moment the server function returns.
-var stopSignalled = func() {}
-
 // Hurry returns a channel that is closed when a stop request arrives after
 // one that already started the stop, which means "do not wait any longer".
 // The context is the one Run passes to its ServeFunc; otherwise the channel
@@ -141,28 +137,16 @@ func Run(ctx context.Context, out io.Writer, launchID string, serve ServeFunc) (
 		case r.Method == "GET" && r.URL.Path == "/status":
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && r.URL.Path == "/stop":
-			// The caller is answered before anything stops: once the stop
-			// begins, Run may return and close the control server at any time.
 			w.WriteHeader(http.StatusAccepted)
-			_ = http.NewResponseController(w).Flush()
 			if stopping.Swap(true) {
 				hurryOnce.Do(func() { close(hurry) })
 			}
 			cancel()
-			stopSignalled()
 		default:
 			http.NotFound(w, r)
 		}
 	})
-	// A handler that is still running (a stop request signalling) finishes
-	// and its connection is closed gracefully; the answer is never cut off.
-	defer func() {
-		shutdown, done := context.WithTimeout(context.Background(), 3*time.Second)
-		defer done()
-		if control.Shutdown(shutdown) != nil {
-			_ = control.Close()
-		}
-	}()
+	defer control.Close()
 	go func() { _ = control.Serve(listener) }()
 	return serve(ctx, out, func(accessURL string) error {
 		state.URL = accessURL
