@@ -4,8 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-
-	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 // GoBuild compiles a fixture without session identity, external C tools or
@@ -15,7 +13,7 @@ func GoBuild(t testing.TB, dir, output string) {
 	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", output, ".")
 	cmd.Dir = dir
 	cmd.Env = append(WithoutOmo(os.Environ()), "CGO_ENABLED=0")
-	if out, err := processtree.CombinedOutput(cmd); err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, out)
 	}
 }

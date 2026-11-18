@@ -464,9 +464,12 @@ func (w *world) settled(keep ...string) {
 		entries, err := os.ReadDir(filepath.Join(w.layout.Worktrees, w.project))
 		return (err != nil && errors.Is(err, os.ErrNotExist)) || (err == nil && len(entries) == 0)
 	})
-	if list := w.git("worktree", "list", "--porcelain"); strings.Count(list, "worktree ") != 1 {
-		w.t.Errorf("worktrees left registered:\n%s", list)
-	}
+	// git deletes a worktree's folder first and its registration after, inside
+	// one `git worktree remove`: the folder being gone does not yet mean the
+	// registration is. Wait for the registration itself.
+	w.waitFor("the worktrees to be unregistered", func() bool {
+		return strings.Count(w.git("worktree", "list", "--porcelain"), "worktree ") == 1
+	})
 	// Branches are deleted after their worktree is removed.
 	// Every branch but main is one omo made, whatever the branch template.
 	var branches []string

@@ -227,7 +227,10 @@ func TestExportGoesOnPerProject(t *testing.T) {
 			h.wantExportStates(s, api.ExportExported, api.ExportFailedState, api.ExportLeftOut)
 			reason := h.exportFailureReason(s, b)
 			if longRemote {
-				if !strings.Contains(reason, "missing.git") || !strings.Contains(reason, "asking the remote failed") {
+				// The export fetches the target branch before it pushes, so a
+				// remote that does not exist is refused by that fetch, naming
+				// the whole address (longer than the bounded summary).
+				if !strings.HasPrefix(reason, "fetching ") || !strings.Contains(reason, "missing.git failed: ") || len([]rune(reason)) <= 200 {
 					t.Fatalf("missing full remote refusal: %q", reason)
 				}
 			} else if reason != "not a remote omo pushes to: the repository names no address for the remote origin" {

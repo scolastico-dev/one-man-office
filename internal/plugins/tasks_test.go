@@ -40,13 +40,14 @@ func taskPlugin(t *testing.T) *env {
 // unscoped lookups, and duplicate reservations that launch more than one process.
 func TestTasksAsyncIsolationAndConcurrentNames(t *testing.T) {
 	e := taskPlugin(t)
-	start := time.Now()
 	a, err := e.m.StartTask(t.Context(), "p", taskRequest(t, "editor", "sleep"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if time.Since(start) > time.Second {
-		t.Fatal("StartTask waited for the child")
+	// The child sleeps until it is stopped: a StartTask that had waited for it
+	// could only have returned with the task ended, and no clock is involved.
+	if a.State != "running" || a.EndedAt != "" {
+		t.Fatalf("StartTask answered with the task %q, ended %q: it waited for the child", a.State, a.EndedAt)
 	}
 	b, err := e.m.StartTask(t.Context(), "q", taskRequest(t, "editor", "sleep"))
 	if err != nil {
@@ -352,13 +353,9 @@ func TestStartupDoesNotBlockOnFullHookQueue(t *testing.T) {
 	for range QueueSize + 10 {
 		e.m.Dispatch(Event{Name: EventTicketCreated})
 	}
-	done := make(chan struct{})
-	go func() { e.m.Ready(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("readiness blocked behind hook queue")
-	}
+	// Ready blocked behind the queue would never return: the test binary's own
+	// time limit reports it, with no short clock deciding the verdict.
+	e.m.Ready()
 }
 
 func TestConcurrentCloseWaitsForTaskReapingAndCallbacks(t *testing.T) {
