@@ -63,6 +63,8 @@ export interface OmoOptions {
    * for those it finds. Needs `path` (the test's own fake programs).
    */
   firstStart?: boolean
+  /** Additional trusted CA for a local HTTPS artifact fixture, passed only to this test's server/CLI. */
+  tlsCA?: string
 }
 
 export interface CliResult {
@@ -175,6 +177,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
   mkdirSync(join(home, 'omo'), { recursive: true })
   const env = cleanEnv(home, opts.path)
+  if (opts.tlsCA !== undefined) env.SSL_CERT_FILE = opts.tlsCA
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
@@ -312,7 +315,9 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     c.once('error', (e) => (buffer += `spawn failed: ${e.message}\n`))
     c.stdout?.on('data', onData)
     c.stderr?.on('data', onData)
-    const re = new RegExp(`^omo: http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?\\s*$`, 'm')
+    // With public_url configured, the isolated loopback address is an "also"
+    // line. Match that exact host/port instead of assuming it is the primary URL.
+    const re = new RegExp(`^(?:omo|also): http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?\\s*$`, 'm')
     const deadline = Date.now() + READY_TIMEOUT_MS
     while (Date.now() < deadline) {
       const m = re.exec(buffer)

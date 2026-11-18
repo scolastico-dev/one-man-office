@@ -187,7 +187,11 @@ Usage, skill sets and plugins have routes in the same `registerRoutes` tables (`
 
 Usage. `settings.Store` holds the scripts and `General.Usage` (soft 90, hard 98, refresh 5 m, per-window overrides); a profile write is refused when its `usage_script` does not exist. The tracker (`internal/usage`) is started by the server through `s.background`; `usage.changed` events carry the state and wake the engine. The engine reads one small interface (`engine.UsageView`): `pick` skips models that are `soft` or `hard`, a ticket's own model over the soft limit waits (`start_blocked = usage`, cleared by `StartAnyway`), and `usagestop.go` gives a working agent on a `hard` model the handoff prompt (`prompts.Data.StopReason`) and ends it with the reason "usage limit reached", which is no crash. Usage runs never run a command of the agent environment: `omo.env` takes literal entries only; only `codex_refresh` expands the full agent environment. After a failed run the windows of the last successful run keep counting for `MaxStaleAfterFailure` (30 minutes from the end of the first failed run, `UsageReading.stale_since`), then the account's models are `unknown`; the browser's `features/usage/usageVerdict.ts` mirrors `Evaluate` for the meters and shows such readings as old. A run that ends in `omo.rate_limited(retry_after)` (`RateLimitError`; the shipped scripts call it on HTTP 429) waits Retry-After (1 minute to 1 hour), else 2, 4, 8 … minutes up to the refresh interval. A model with an empty `usage_windows` list counts every window except `extra_usage`, which counts only when listed. The Usage page's helper list (`usageForms.ts` `HELPERS`) is checked against the helpers Go registers (`usageHelpers.guard.test.ts`). A window may carry a `label` (`usage.Window.Label`, `api.UsageWindow.label`, "" for none): `cleanLabel` (`internal/usage/label.go`) makes it one line (characters `textsafe.IsHidden` names become spaces) of at most `MaxLabel` 60 characters, a label holding a secret of the run is refused like a name, and `cleanWindows`/`keptWindows` clean it again. `TestWindowFieldsReachTheWire` keeps `usage.Window` and `api.UsageWindow` in step. Names stay the keys of `usage_windows` and the per-window limits; the web reads labels through `features/usage/windowLabel.ts` (`windowTitle` for the sidebar meter, with the name as tooltip; `windowWithName` "label (name)" in the Usage page's test result, `labelsOf`/`nameWithLabel` in its limits table, `reportedWords` in the model editor's hint). The shipped `claude` script reads the answer's `limits` list (`session`, `weekly_all`, `weekly_scoped` with `scope.model.display_name` → `<model>_weekly`, a surface-only scope → `surface_<surface>_weekly`, unknown kinds skipped with a log line) and falls back to `five_hour`/`seven_day`/`seven_day_<model>` without it; `extra_usage` is the paid credit budget, labelled with its amounts. Recorded answers: `testdata/claude-usage.json` (older shape) and `testdata/claude-usage-limits.json` (with `limits`); `TestClaudeLimitsCountForTheCatalogModels` checks that only `claude/fable` counts `fable_weekly`. `api.ModelUsage.window_label` is the label of the window `Evaluate` chose ("" for none; the Go list in `api_test.go` and the TypeScript type keep the fields in step); `usageStopText` (`internal/engine/usagestop.go`) writes the label, else the name, and the web's `modelWindowWords` (`windowLabel.ts`: "Weekly, Fable at 99 %", empty without a label) is used by the sidebar's kept-off lines (name in `data-usage-window-name`) and `usageWait.ts`. The shipped `codex` script classifies each window of a rate limit by `limit_window_seconds` (`kind`: 1 to 12 h `session`, 604800 s ±10 % `weekly`, else `window_<hours>h`; no length: primary `session`, secondary `weekly`), reports the windows of additional limits as `<limit>_<name>` (`limit_name(name, suffix)` cuts the name so the key stays within 40 characters), reads `reset_at` as Unix seconds or an RFC 3339 string (anything else is logged, not an error) and fails only when no window is usable; fixtures `testdata/codex-usage-other-windows.json` and `codex-usage-reset-times.json`. The shipped `agy` script reads `command.data.groups[].buckets[]` of `agy -p /usage --output-format json` (through `omo.agy_usage`, no model turn): one window per bucket named by its `id` (`gemini-weekly`, `3p-weekly`), labelled "<group>, <period>", used = (1 − `remaining_fraction`) × 100, `reset_time` as given; the group's member list (display names only) goes to the log, so the catalog's agy models name their group's window in `usage_windows`; a 429 or `RESOURCE_EXHAUSTED` answer ends in `omo.rate_limited`; fixture `testdata/agy-usage.json` (a recorded answer); `TestAgyWindowsCountForTheirGroups`. Per-window limits (`General.Usage.Windows`) are keyed by a window name (every script) or `<script>/<window>` (`validateUsage` in `internal/settings/general.go`; field errors keep the key as written); `usage.Thresholds(script, window, th)` takes each value from the scoped key, then the bare name, then the general value, and `Evaluate` passes the reading's script; `usageVerdict.ts` `windowThresholds(window, usage, script)` mirrors it. The limits table picks the key from a select (`windowChoices`, `overrideKeyWords`, `OTHER_WINDOW` in `usageForms.ts`) fed by the live readings and the models' `usage_windows`.
 
-Plugin declaration contract: `plugins/declarations.go` validates strict nested
+Plugin manifest contract: `plugins/plugins.go` accepts one JSON object up to
+64 KiB, at most 64 hooks, optional semantic version up to 64 bytes, and strict
+known fields/events with explicit replacement guidance for removed names.
+Timer configuration accepts duration text or numeric seconds, at least 1m;
+commands have at most 64 parts of 4096 bytes each. `plugins/declarations.go` validates strict nested
 `buttons: [{label, place: ticket|sidebar|project, action, per_worktree?}]`,
 `frontend: {script, assets?}` and `config_fields: [{key, label,
 type: select|boolean|string|number, choices?: [{value, label}]}]`; defaults stay
@@ -233,7 +237,9 @@ button/panel registration, detached route context/subscriptions, own manual
 hooks, asset URLs and authenticated forward navigation; signal and cleanup
 end stale asynchronous initialization. Errors isolate the plugin and offer
 Retry; lock suspends actions/listeners and changed route context is delivered
-once after unlock. Identical context updates are ignored.
+once after unlock. Identical context updates are ignored. Frontend labels use
+200 UTF-16 code units (manifest labels count runes); entry load times out after
+15s. Registration disposers cannot remove a later replacement of the same id.
 Shared PluginControls renders ticket/sidebar/project buttons and text/image
 panels; per-worktree controls send ticket+project for recorded worktrees or
 explicitly explain missing folders, with no repository fallback. Legacy ticket
@@ -261,7 +267,10 @@ readiness and three bounded bind attempts. The frontend polls using its facade,
 returns only the final forward ID to the gesture-reserved tab and does not retry
 lost action responses; only the precise pre-execution busy 409 is retried within
 the original cancellable deadline. A new execution rechecks artifact integrity; existing
-instances keep their editor after setting changes. Attached monotonic forward
+instances keep their editor after setting changes. One running editor is allowed
+per canonical folder: only matching editor/version and ticket/global binding
+reuse it; a changed selection/binding refuses with an instruction to Stop the
+existing editor first. Different folders remain independent. Attached monotonic forward
 idle watches default to 30 minutes. Timer maintenance snapshots resources before
 checking a 120-second manual-hook grace, never deletes instance/request records,
 and only reaps its original resource snapshot. Manual opens prune stale records;
@@ -288,6 +297,19 @@ cleanup. Never run the
 Microsoft mode or accept its terms in a probe. Linux amd64 publisher probes are
 proven; macOS/Windows/arm64 are fixture/metadata-only. Full details and runtime
 prerequisites: [plugin README](plugins/vscode/README.md).
+
+Focused plugin integration: after `make build`, run
+`npm --prefix web run e2e -- e2e/plugin-editor.spec.ts e2e/plugin-lifecycle.spec.ts e2e/plugin-frontend.spec.ts --workers=2`.
+The coherent sample uses only public declarations/facade/Lua helpers and real
+child processes to test routes, startup/config/enable lifetimes, task output/Stop,
+update/removal/reconnect and joint task/forward cleanup. Editor checks keep the
+shipped orchestration/launcher with a local TLS archive and protocol stand-in;
+only installed-fixture URL/digest/idle policy changes. Both editor contracts run
+through actual plugin clicks on path and cross-site subdomain proxies, including
+remote board-host selection, assets/WS, verified first-use progress/cache,
+last-disconnect/reconnect and descendant cleanup. They run on Linux with OpenSSL
+and Chromium; they are not evidence of a publisher build on another platform.
+The plugin README keeps the separate real-editor smoke recipe and limitations.
 
 Plugin tasks: `plugins/tasks.go`, `tasks_lua.go`, `startup.go` and
 `server/plugin_tasks.go`. Lua `omo.task_start{ name, command, args?, cwd?, env?,

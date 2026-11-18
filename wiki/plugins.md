@@ -81,7 +81,11 @@ it). The plugin's log keeps its last 500 lines, newest last.
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
 
 The VS Code plugin edits folders directly alongside agents, with no locking.
-Its default is code-server, its idle setting defaults to 30 minutes after the
+It permits one running editor per canonical folder. Repeated clicks reuse it
+only when editor, pinned version and ticket/global binding all match. To change
+any of those for an open folder, use **Stop** in the plugin's settings first;
+the refusal keeps the existing editor running. Different folders can run
+independently. Its default is code-server, its idle setting defaults to 30 minutes after the
 last connected browser disconnects, and its task output/Stop control lives on
 its settings page. First-use progress completes in the tab reserved by that
 same click; the editor has no separate sign-in. The Microsoft option would
@@ -159,29 +163,36 @@ its absolute path (press **Update** after each change).
 
 | Field | Rule |
 |---|---|
-| `name` | Letters, digits, `.`, `_` or `-`, starting with a letter or digit, at most 64 characters. |
-| `version`, `description` | Shown on the Plugins page; the description is at most 1,000 bytes. |
+| `name` | Optional manifest name; letters, digits, `.`, `_` or `-`, starting with a letter or digit, at most 64 characters. The installed name identifies the runtime and its storage. |
+| `version` | Optional; when nonempty, a semantic version `major.minor.patch[-prerelease][+build]`, at most 64 bytes. Numeric core/prerelease identifiers have no leading zeros. |
+| `description` | Shown on the Plugins page; at most 1,000 bytes. |
 | `default_config` | A JSON object: the configuration a fresh install starts with. You edit it on the plugin's page as **Configuration (JSON)**. |
 | `hooks` | At most 64. |
 | `buttons` | Optional list of up to 64 button declarations; see below. |
 | `frontend` | Optional `{script, assets?}` with confined public paths; see below. |
 | `config_fields` | Optional list of up to 64 configuration controls; see below. |
 
-Every hook has an `event` and exactly one of:
+`plugin.json` is one JSON object of at most 64 KiB, without trailing data.
+`hooks` may be empty or omitted. Every hook has an `event` and exactly one of:
 
 - `lua`: a Lua file inside the plugin's folder (at most 64 KiB, no
   precompiled Lua), run in omo's sandbox (see [Lua hooks](#lua-hooks)).
 - `command`: a program and its arguments as a list (at most 64 parts), started
-  without a shell in the plugin's folder.
+  without a shell in the plugin's folder. Every part is at most 4096 bytes
+  and contains no NUL; the program name cannot be blank.
 
 Optional fields:
 
 - `timeout`: the time limit of one run, `1s` to `5m`, default `30s`.
-- Timer hooks: `interval` (a duration of at least `1m`), or `interval_config`
-  naming the configuration key that holds it.
+- Timer hooks require exactly one of `interval` (a duration of at least `1m`)
+  or `interval_config` (a configuration key of at most 100 bytes). Its value
+  must be a duration string or a number of seconds, also at least one minute;
+  a missing/invalid value prevents the runtime from loading. These two fields
+  cannot carry nonempty values on other events.
 - Manual hooks: `name` (the button's id), `description` (its text, at most 200
   characters) and `scope`: `global` (a button on the plugin's page; the
-  default) or `ticket` (a button on every ticket). Optional `hidden: true`
+  default) or `ticket` (a button on every ticket). Names are unique and follow
+  the plugin-name rule; descriptions must not be blank. Optional `hidden: true`
   suppresses automatically generated legacy ticket/settings action controls;
   it defaults to false. Explicit declared buttons may still reference a hidden
   hook, and the owning frontend may invoke it with `runHook`. This is presentation
@@ -189,10 +200,26 @@ Optional fields:
   valid on manual hooks, and rejects null/other types and nonmanual use (including
   `hidden: false`). Existing plugins keep their implicit controls.
 
-The manifest is read strictly: unknown fields are refused. Fields and events
-of plugins written for omo 0.11 (`requires`, `roles`, `manual_args`,
-`javascript`, `files`, `prompt_render`, `cron`, `startup` and the like) are
-refused with a message saying what to use instead.
+The manifest is read strictly: unknown fields are refused. Removed names remain
+errors with replacement guidance; they are not compatibility aliases:
+
+| Rejected field | Guidance |
+|---|---|
+| `startup`, `load` | Use a hook with event `omo_started`. |
+| `unload`, `shutdown` | There is no shutdown hook event. |
+| `requires` | Install plugins independently; there are no plugin dependencies. |
+| `roles`, `manual_args` | Only the user runs manual actions; requests select ticket/project identifiers rather than arbitrary arguments. |
+| `javascript`, `files` | Use `frontend.script` / `frontend.assets`. |
+
+| Rejected event | Guidance |
+|---|---|
+| `prompt_render` | Plugins cannot change prompts. |
+| `company_load` | Use `frontend.script` / `frontend.assets`. |
+| `agent_log_line` | Hooks do not receive agent output. |
+| `job_create`, `agent_start` | Use `agent_started`. |
+| `cron`, `chron` | Use `timer`. |
+| `load`, `startup`, `company_startup` | Use `omo_started`. |
+| `unload`, `shutdown`, `company_shutdown` | There is no shutdown hook event. |
 
 ### Button, frontend and configuration declarations
 
@@ -226,7 +253,7 @@ configuration editor remains available alongside primitive fields.
 }
 ```
 
-All nested objects reject unknown keys and wrong types, including `null`.
+All nested declaration objects reject unknown keys and wrong types, including `null`.
 Labels contain 1–200 visible characters on one line. A button's `action` must
 name an existing manual hook. `ticket` requires ticket scope; `sidebar` and
 `project` require global scope. Each place/action pair is unique.
@@ -240,8 +267,8 @@ both when installing/updating in staging and when loading installed plugins.
 Every component and every asset must be a real directory or regular file,
 without symlinks, even links within the plugin. Public paths use `/`, at most
 512 bytes, with no empty, `.` or `..` components, absolute/drive/UNC paths,
-backslashes, colons, hidden/control characters, Windows device names or trailing
-spaces/dots. Dot-prefixed components (including `.data`, `.git` and the install
+backslashes, colons, `<`, `>`, `"`, `|`, `?`, `*`, hidden/control characters,
+Windows device names or trailing spaces/dots. Dot-prefixed components (including `.data`, `.git` and the install
 record), `settings`, `settings.yaml`, `settings.yml`, `settings.json` and
 `plugin.json` are private at every depth and cannot appear in public paths.
 The script is at most 1 MiB; the script plus assets are at most 64 MiB and
@@ -308,13 +335,13 @@ the same as the global table `event`.
 |---|---|
 | `ticket_created` | `ticket` |
 | `ticket_moved` | `ticket`, `from`, `to`, `action` |
-| `comment_written` | `ticket`, `comment` (author, body up to 4 KiB, question, to, mentions) |
+| `comment_written` | `ticket`, `comment` (details below) |
 | `question_asked` | the same, for questions only |
 | `ticket_needs_attention` | `ticket`, `reason` |
 | `agent_started`, `agent_exited` | `ticket` (null for the CEO), `agent`; for exits also `reason`: `finished`, `stopped`, `crashed`, `usage` or `omo stopped` |
 | `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
-| `omo_started` | `at` (readiness/enable time) |
-| `timer` | `at` |
+| `omo_started` | `at` (readiness/enable time, RFC 3339 with optional nanoseconds) |
+| `timer` | `at` (RFC 3339 with optional nanoseconds) |
 | `manual` | `action`, `ticket` (null without a ticket), `project` (selected folder context below, otherwise null) |
 
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
@@ -333,6 +360,17 @@ a missing ticket worktree. Paths use the same trusted records, confinement and
 `.git` checks as **Open terminal**; the server never follows an agent-written
 `.git` lookup. Folder availability is a snapshot; validate readiness before
 launch and handle a folder disappearing afterwards.
+
+A `comment` is `{id, author: {role, name}, body, question, to, mentions}`.
+`question` is boolean; `to` is the asked role (empty for ordinary comments),
+and `mentions` is an array of role names. An `agent` is
+`{name, role, model, purpose}`. Comment bodies, ticket titles and attention
+texts are cut to 4 KiB at a UTF-8 boundary; agent/model/author names and project
+identifiers are cut to 200 bytes. `story` is a ticket number or null. Comment
+and agent events may have a null ticket if it can no longer be read.
+`ticket_moved` runs only when the column changes. Attention runs when a
+nonempty attention text changes; clearing it or reaching Done resets that
+comparison. A question produces `comment_written` followed by `question_asked`.
 
 Every event has `host: {os: string, arch: string, path_separator: string,
 task_process_trees: true}`. `os` and `arch` are Go platform names, for example
@@ -366,7 +404,11 @@ A command gets omo's environment (without omo's own `OMO_*` variables) plus:
 | `OMO_PLUGIN_DATA` | a data folder of the plugin's own |
 
 `omo ai` called from a plugin acts as you: omo cannot tell it from your own
-commands. Output beyond 1 MiB is cut.
+commands. omo also removes inherited IDE/terminal integration variables through
+its normal child-environment policy. Command stdout keeps at most 1 MiB;
+overflow fails the run. Stderr keeps its final 64 KiB, contributing at most
+50 nonempty log lines of 500 characters per run. Manual stdout supplies the
+answer; stderr supplies diagnostics.
 
 ### Lua hooks
 
@@ -389,17 +431,57 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `omo.task_start{ name, command, args, cwd, env, ticket, temp_dir }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
 | `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
 | `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
-| `omo.sleep(seconds)` | waits at most 10 s, within the run's time limit |
+| `omo.sleep(seconds)` | accepts exactly one number, greater than 0 and at most 10 (fractions allowed); returns `true`, or raises the run's stop reason on cancellation/deadline |
 | `omo.store_get(key)`, `omo.store_set(key, value)`, `omo.store_delete(key)`, `omo.store_keys()` | the plugin's own storage in omo's database: keys of 1 to 200 bytes, values up to 64 KiB as JSON, at most 1,000 keys |
-| `omo.data_dir()` | the plugin's data folder |
-| `omo.agents()` | the agents running now, the CEO included: a list of tables with `terminal` (the id of its web terminal), `name`, `role`, `model`, `purpose`, `project` and `ticket` (`nil` for the CEO) |
-| `omo.send_to_agent(terminal, text)` | hands that agent a message the way omo's own notifications do: one line with `omo: ` in front (line breaks become spaces, at most 1,000 characters), submitted once nobody types in that terminal. Returns `true`, or `nil` and why |
-| `omo.json_decode`, `omo.json_encode`, `omo.sha256_hex`, `omo.nfc`, `omo.time_parse`, `omo.now`, `omo.log` | helpers |
+| `omo.data_dir()` | the plugin's absolute data folder, or `nil, error` |
+| `omo.agents()` | array of the agents running now, the CEO included: a list of tables with `terminal` (the id of its web terminal), `name`, `role`, `model`, `purpose`, `project` and `ticket` (`nil` for the CEO); or `nil, error` |
+| `omo.send_to_agent(terminal, text)` | hands that agent a message the way omo's own notifications do: one line with `omo: ` in front (line breaks become spaces, at most 1,000 characters), submitted once nobody types in that terminal. Input is at most 4096 bytes and must not be blank. Returns `true`, or `nil` and why |
+| `omo.json_decode(text)` | decoded value, or `nil, error`; valid JSON null also returns nil without an error |
+| `omo.json_encode(value)` | JSON text, or `nil, error`; rejects cycles, unsupported values and non-finite numbers |
+| `omo.sha256_hex(text)` | lowercase hexadecimal SHA-256 of the string bytes |
+| `omo.nfc(text)` | text in Unicode normalization form C |
+| `omo.time_parse(rfc3339)` | Unix seconds including fractions, or `nil, "invalid time"` |
+| `omo.now()` | current whole Unix seconds |
+| `omo.log(value)` | stringifies one value into the run's log; no return value |
 
-A run ends at the hook's time limit, and memory is watched. Every configuration
-string of six characters or more is replaced by `[redacted]` in the log, in
-error texts and in answer messages, and so are the header values the hook sent with
-`omo.http`.
+`exec` accepts at most 64 parts including its program (63 arguments), each at
+most 4096 bytes without NUL. Unlike most fallible helpers, its failure result
+is `output, error` rather than `nil, error`. Invalid required Lua argument
+shapes can raise Lua errors; do not assume every invalid call returns nil.
+Storage keys must be valid UTF-8. `store_get` returns the stored value, or nil
+for a missing key; `store_set` and `store_delete` return true on success
+(deleting a missing key succeeds); `store_keys` returns keys in sorted order.
+All four return `nil, error` on storage failure. Empty arrays become `{}` in
+Lua and encode as `[]`; JSON null becomes Lua nil and removes table entries.
+Conversions reject cycles, unsupported values, depth over 64 and more than
+1,048,576 values. JSON text and amplified library strings are at most 1 MiB.
+
+`http` defaults to GET; an explicit method has 1–16 ASCII letters and is
+uppercased. Headers and form values are string-to-string tables. Header names
+have at most 128 letters/digits/underscores/hyphens; values cannot contain
+CR, LF or NUL. `json`, `form` and `body` are mutually exclusive, and `body` is
+a string. JSON/form requests supply their normal Content-Type when absent.
+Timeout accepts positive seconds or a Go duration string, clamped to 30 seconds
+and the hook deadline. HTTP is allowed for `localhost` and literal loopback
+IPs (127.0.0.0/8 or ::1); HTTPS is allowed anywhere. At most five redirects
+retain the same host and effective port and obey those scheme rules; no cookie
+jar is retained. Response `headers` maps canonical header names to string
+arrays; the default transport bounds response headers to 64 KiB. Unknown
+options and invalid values return `nil, error`. Failures use
+fixed phrases such as `http address not allowed`, `http redirect not allowed`,
+`too many http requests` and `http request timed out`; non-2xx responses still
+return a response, so check `status` explicitly.
+
+A run ends at the hook's time limit. The memory watchdog samples process heap
+growth every 20 ms against 256 MiB; this is approximate and can overshoot or
+include other concurrent work. A run has at most 100 coroutines, 200 call
+frames per coroutine and 50 log lines of 500 runes each; the plugin's retained
+log is separately bounded to 500 lines. Every configuration string of six
+bytes or more is replaced by `[redacted]` in the log, in error texts and in
+answer messages, and so are HTTP request header values (including the token
+portion of a `Scheme token` value) and URL passwords, subject to the same
+six-byte minimum. Hidden characters are escaped. Redaction matches whole,
+unchanged secret strings; it cannot recognize arbitrary encoded fragments.
 
 ### Artifact installs
 
@@ -448,6 +530,13 @@ Both helpers return a snapshot with these fields:
 | `verification` | `sha256` when an expected digest was supplied; `unverified` otherwise (describes the requested check while running; only ready means it completed) |
 | `path` | present only when ready: absolute extracted tool folder |
 | `error` | present on failure/cancellation: bounded fixed diagnostic without URL, response body, headers or filesystem paths |
+
+An unknown status key returns `nil, "no such artifact belongs to this plugin"`.
+A conflicting active identity returns `nil, "an artifact with this key is active
+with different options"`; capacity returns `nil, "artifact limit reached: 4
+active jobs or 64 retained keys per plugin"`. An installation failure is a
+returned status with `state="failed"` and `error`, rather than a helper-call
+error; inspect the state after both start and status.
 
 Simultaneous calls with the same plugin/key and URL/digest/extraction options
 reuse the active job and its id. Different options under an active key return
@@ -601,13 +690,18 @@ Reasons are `exited`, `stopped`, `ticket_done`, `plugin_disabled`,
 `plugin_removed`, `plugin_replaced`, `shutdown`, `idle` and `forward_removed`;
 the first stop reason wins. The last two are the forward-watch policies below.
 No commands, arguments, environments or PIDs appear in records. A failed start
-returns a fixed error and retains no task or child. A quick nonzero exit keeps
-its status and diagnostic output in the terminal record.
+returns a fixed error and retains no task or child. Common `nil, error`
+results are `a task with this name is already running`, `task ticket must
+exist and be open`, `the plugin already has 32 running or finishing tasks`
+and `the task program could not start`. Stopping an unknown name returns
+`no such task belongs to this plugin`; stopping a retained exited run succeeds.
+A quick nonzero exit keeps its status and diagnostic output in the terminal
+record.
 
 At most 32 tasks run or await their exit callback per plugin. Pending callbacks
 keep their identity and remain under that cap; they cannot be evicted as old
-history. The newest 64 completed terminal records remain until
-they age out or the plugin is removed. Each combined stdout/stderr tail holds
+history. The newest 64 completed terminal records remain until displaced by
+newer completions or the plugin is removed. Each combined stdout/stderr tail holds
 100 lines of at most 1024 characters. Complete lines are redacted before
 truncation, including secrets split across writes; raw lines over 64 KiB are
 discarded whole with a marker. An unfinished line appears only on process
@@ -725,10 +819,13 @@ The stable facade methods are:
 | `openForward(id)` | From a user gesture, reserves a detached tab and opens a forward through the authenticated proxy Open API. Resolves void; rejects and closes the unused tab on failure or expired plugin lifetime. |
 | `open(callback)` | From a user gesture outside a registered button callback, reserves a tab before calling the async callback, then processes its final structured result. Returns that result. |
 
-IDs are 1–64 letters/digits/underscore/dot/hyphen. At most 64 buttons and 64
-panels per plugin; titles/labels are 1–200 visible characters and panel text is
-at most 16,000 UTF-16 code units. A disposer removes its own registration even
-if the same id was replaced later. Each plugin's facade is frozen and bound to
+IDs are 1–64 ASCII letters/digits/underscore/dot/hyphen (unlike manifest names,
+they may start with punctuation). At most 64 buttons and 64 panels per plugin;
+frontend titles/labels are nonblank, visible, one-line strings of at most 200
+UTF-16 code units, and panel text is at most 16,000 UTF-16 code units. Manifest
+labels instead count Unicode characters. A disposer removes only its own
+registration; it leaves a later replacement under the same id intact. Each
+plugin's facade is frozen and bound to
 its installed name; it cannot select another plugin through `runHook`.
 
 Route context is `{page, ticket?, project?}`. Page is `board`, `ticket`,
@@ -753,7 +850,12 @@ Route changes preserve registrations and the entry's initialization. Disable,
 removal, invalidation, a changed installed commit or content identity removes controls/listeners,
 aborts signal and runs cleanup; obsolete asynchronous initialization cannot
 register again. While locked, controls and hook/open calls are suspended.
-Load/initialization/listener failures affect only that plugin and show Retry.
+Entry loading times out after 15 seconds. Load/initialization/listener failures
+affect only that plugin and show Retry. Invalid registrations/asset paths and
+registration-limit violations throw; hook and navigation failures reject their
+Promises. Calls after lifetime end throw `The plugin is no longer active.`;
+hook/open calls while locked reject with `The board is locked.`. Registration
+and context access remain available during the lock, but controls stay hidden.
 An active board context initializes each installed commit/content identity once
 per enabled lifetime (except an explicit retry). Entering OAuth consent ends
 that frontend context; returning to the board initializes it again. Updating
@@ -774,6 +876,12 @@ command-side plugin identity.
 | `omo.forward_attach(id, task_id)` | `true`, or `nil, error`; associates an existing forward with a running stable task ID |
 | `omo.forward_idle_watch(id, idle_seconds)` | `true`, or `nil, error`; schedules idle stop for the attached running task |
 | `omo.free_loopback_port()` | integer port candidate on IPv4 `127.0.0.1`, or `nil, error` |
+
+Unavailable adapters return `nil, "forwards are unavailable"`; a cancelled
+hook returns `nil, "the plugin hook has stopped"`. Removal, attachment and
+idle-policy refusals use fixed errors: `plugin forward does not exist or
+cannot be removed`, `cannot attach forward to this running task`, and
+`idle watch requires an owned running task and 0.01 to 604800 seconds`.
 
 `forward_add` strictly accepts `{name: string, port: integer, ticket?: integer|null,
 host?: string, scheme?: "http"|"https", start_path?: string,
@@ -900,7 +1008,14 @@ worktree; without one it selects the enabled project's configured repository
 folder, resolved through its user-owned links. Unknown/disabled projects return
 404, ticket/project mismatches 422, and unavailable selected folders 409 before
 the hook runs. A request accepts identifiers, never a filesystem path.
-Existing request bodies remain valid.
+Existing request bodies remain valid. All plugin management/action/task APIs
+are user-only; agent sessions receive 403. For actions, unknown/disabled plugins
+or missing actions return 404 `not_found`; a missing required ticket or failing/invalid
+hook result returns 422 `validation`; concurrent manual execution returns 409
+`conflict` (`an action of plugin NAME is already running`); stopped plugins
+return 503 `unavailable`. A disconnected HTTP caller does not cancel a manual
+action already handed to the server. Inspect state before retrying after a
+lost response.
 
 Lua may return a string, nil, or a table containing `message`, `url`
 and/or `forward_id` string fields. Objects with navigation fields are strict:
