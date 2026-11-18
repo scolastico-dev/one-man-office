@@ -15,6 +15,7 @@ import { DialogOutlet, useDialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
+import PluginControls from '../plugins/PluginControls.vue'
 import { useBoard } from '../../store'
 import RejectDialog from '../board/dialogs/RejectDialog.vue'
 import { attentionOwner, captionFor } from '../../board/badges'
@@ -256,6 +257,7 @@ async function requestExportCheck() {
         <p v-if="x.why" class="actions__why" :data-action-why="x.a.id">{{ x.why }}</p>
       </li>
     </ul>
+    <PluginControls place="ticket" :ticket="ticket" />
     <p v-if="error" class="actions__error" data-action-error>{{ error }}</p>
     <ApproveDialog
       v-if="dialog === 'approve' || dialog === 'export'"

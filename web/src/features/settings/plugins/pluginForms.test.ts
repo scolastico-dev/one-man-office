@@ -60,3 +60,19 @@ test('the plugin a settings file belongs to', () => {
   expect(fileOfPlugin('/h/omo/skillsets/x.yaml')).toBeNull()
   expect(fileOfPlugin('/h/omo/plugins/x/plugin.json')).toBeNull()
 })
+
+test.each(['{"idle":1e400}', '{"nested":{"n":-1e400}}', '{"list":[1e400]}'])('configuration refuses non-finite JSON numbers without converting them to null: %s', (text) => {
+  expect(parseConfig(text)).toEqual({ ok: false, message: CONFIG_PARSE_MESSAGE })
+})
+
+// Without the hidden filter the settings page exposes script-owned global hooks.
+test('automatic manual actions exclude hidden hooks and keep absent or false visibility', () => {
+  const info = { hooks: [
+    hook('manual', { name: 'default' }),
+    hook('manual', { name: 'visible', hidden: false }),
+    hook('manual', { name: 'secret', hidden: true }),
+    hook('manual', { name: 'ticket', scope: 'ticket', hidden: true }),
+  ] }
+  expect(manualActions(info, 'global').map((h) => h.name)).toEqual(['default', 'visible'])
+  expect(manualActions(info, 'ticket')).toEqual([])
+})

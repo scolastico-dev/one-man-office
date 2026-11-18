@@ -3,7 +3,6 @@ package selfupdate
 
 import (
 	"archive/tar"
-	"archive/zip"
 	"bufio"
 	"bytes"
 	"compress/gzip"
@@ -20,6 +19,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/boundedzip"
 )
 
 const releasesURL = "https://api.github.com/repos/scolastico-dev/one-man-office/releases"
@@ -113,7 +114,19 @@ func (c Client) get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omo-self-update")
-	resp, err := c.HTTP.Do(req)
+	client := *c.HTTP
+	redirect := client.CheckRedirect
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		next.Header.Del("Referer")
+		if redirect != nil {
+			return redirect(next, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +253,7 @@ func checksumFor(raw []byte, name string) (string, error) {
 
 func extractBinary(archiveName string, raw []byte, binaryName string) ([]byte, error) {
 	if strings.HasSuffix(archiveName, ".zip") {
-		zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+		zr, err := boundedzip.NewReader(context.Background(), bytes.NewReader(raw), int64(len(raw)), boundedzip.Limits{ArchiveBytes: 256 << 20, Entries: 2000})
 		if err != nil {
 			return nil, err
 		}

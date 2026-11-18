@@ -24,6 +24,10 @@ import (
 const envHeadersCommand = "MCPRELAY_TEST_HEADERS"
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "process-group-sleeper" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	if fakemcp.Enabled() {
 		os.Exit(fakemcp.Main())
 	}

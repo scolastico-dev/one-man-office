@@ -138,7 +138,14 @@ func (s *Server) proxyPage(w http.ResponseWriter, r *http.Request, status int, m
 
 func (s *Server) serveProxyInternal(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
-	if s.opts.Config.OriginCheck && !s.sameProxyInternalOrigin(r) {
+	// Open may navigate a reserved tab from a board outside the proxy site.
+	// This document only loads the same-origin bootstrap script: it consumes no
+	// grant and sets no cookies. Keep script/exchange and all other requests on
+	// the normal Origin gate, including navigations that supply an Origin.
+	bootstrapNavigation := r.URL.EscapedPath() == proxyInternalPrefix+"bootstrap" &&
+		(r.Method == "GET" || r.Method == "HEAD") && len(r.Header.Values("Origin")) == 0 &&
+		r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
+	if s.opts.Config.OriginCheck && !bootstrapNavigation && !s.sameProxyInternalOrigin(r) {
 		reject(w, r, api.Errorf(api.CodeForbidden, "host or origin rejected"))
 		return
 	}
@@ -373,6 +380,13 @@ func (s *Server) routeProxy(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) serveProxyForward(w http.ResponseWriter, r *http.Request, f api.ProxyForward, mode proxy.Mode) {
+	tracked, done, ok := s.trackForwardRequest(w, r, f.ID, f.Plugin != "")
+	if !ok {
+		s.proxyPage(w, r, 404, "This Web UI forward no longer exists.")
+		return
+	}
+	defer done()
+	w = tracked
 	origin, _ := url.Parse(s.proxyOrigin(r))
 	// Same-origin app WebSockets need the upstream Host/Origin pair after Host
 	// rewriting. Foreign origins remain untouched for the app to accept/refuse.

@@ -76,10 +76,10 @@ func (s *Server) createProxyForward(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProxyForward(w http.ResponseWriter, r *http.Request) {
-	if err := s.board.DeleteProxyForward(r.Context(), actorFrom(r), r.PathValue("id")); err != nil {
+	err := s.removeForwardRecord(r.PathValue("id"), func() error { return s.board.DeleteProxyForward(r.Context(), actorFrom(r), r.PathValue("id")) })
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	s.proxyAuth.forgetForward(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
 }

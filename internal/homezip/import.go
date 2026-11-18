@@ -96,7 +96,7 @@ func (h Home) check(ctx context.Context, dir string, extract bool) (*archive, er
 	if err != nil {
 		return nil, err
 	}
-	a, err := readArchive(f, info.Size(), h.Version, h.limit)
+	a, err := readArchive(ctx, f, info.Size(), h.Version, h.limit)
 	if err != nil {
 		return nil, err
 	}

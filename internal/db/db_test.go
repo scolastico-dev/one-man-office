@@ -32,8 +32,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 9 || SchemaVersion != 9 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 9", v, SchemaVersion)
+	if v := userVersion(t, d); v != 10 || SchemaVersion != 10 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 10", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",

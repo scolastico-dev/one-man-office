@@ -134,8 +134,41 @@ type PluginHook struct {
 	Description string `json:"description"`
 	// Scope of a manual hook: ticket or global.
 	Scope string `json:"scope"`
+	// Hidden suppresses automatically generated controls for a manual hook.
+	// Explicit controls and direct invocation remain available.
+	Hidden bool `json:"hidden,omitempty"`
 	// Interval is set for timer hooks only.
 	Interval string `json:"interval"`
+}
+
+// PluginButton declares a manual action at a board location.
+type PluginButton struct {
+	Label       string `json:"label"`
+	Place       string `json:"place"`
+	Action      string `json:"action"`
+	PerWorktree bool   `json:"per_worktree,omitempty"`
+}
+
+// PluginFrontend names public files relative to the installed plugin.
+// The zero value serializes to {}, for a plugin without frontend code.
+type PluginFrontend struct {
+	Script string `json:"script,omitempty"`
+	Assets string `json:"assets,omitempty"`
+}
+
+// PluginConfigChoice is a stable select value and its display label.
+type PluginConfigChoice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// PluginConfigField describes a top-level config key; defaults come from
+// default_config. Unlisted configuration keys remain editable as JSON.
+type PluginConfigField struct {
+	Key     string               `json:"key"`
+	Label   string               `json:"label"`
+	Type    string               `json:"type"`
+	Choices []PluginConfigChoice `json:"choices,omitempty"`
 }
 
 // PluginInfo is what omo knows about an installed plugin, and the data of
@@ -149,10 +182,15 @@ type PluginInfo struct {
 	// Message says why the plugin is invalid or what its last error was.
 	Message string `json:"message"`
 	// Commit is the installed commit; "" when it is not known.
-	Commit    string       `json:"commit"`
-	LastEvent string       `json:"last_event"`
-	LastRunAt *time.Time   `json:"last_run_at"`
-	Hooks     []PluginHook `json:"hooks"`
+	Commit       string              `json:"commit"`
+	LastEvent    string              `json:"last_event"`
+	LastRunAt    *time.Time          `json:"last_run_at"`
+	Hooks        []PluginHook        `json:"hooks"`
+	Buttons      []PluginButton      `json:"buttons"`
+	Frontend     PluginFrontend      `json:"frontend"`
+	ConfigFields []PluginConfigField `json:"config_fields"`
+	// ContentID hashes the manifest and public frontend files on load.
+	ContentID string `json:"content_id"`
 }
 
 // Tags of the plugins omo's list names: how far omo's maintainers vouch
@@ -259,12 +297,18 @@ type PluginLogLine struct {
 }
 
 // PluginRun is the body of POST /api/plugins/{name}/actions/{action}. Ticket
-// is required for an action of ticket scope.
+// is required for an action of ticket scope. Project optionally selects one
+// registered project; with Ticket it must be one of that ticket's projects.
 type PluginRun struct {
-	Ticket int `json:"ticket,omitempty"`
+	Ticket  int    `json:"ticket,omitempty"`
+	Project string `json:"project,omitempty"`
 }
 
-// PluginRunResult is the answer of a manual plugin action.
+// PluginRunResult is the answer of a manual plugin action. Message can accompany
+// either URL or ForwardID; URL and ForwardID are mutually exclusive. ForwardID
+// consumers must use the authenticated proxy Open flow before navigation.
 type PluginRunResult struct {
-	Message string `json:"message"`
+	Message   string `json:"message"`
+	URL       string `json:"url,omitempty"`
+	ForwardID string `json:"forward_id,omitempty"`
 }

@@ -83,7 +83,7 @@ Package map (`internal/`):
 | `plugins` | the plugin runtime: one global scope, one queue and goroutine per plugin, command and Lua hooks on `luabox`, manual actions, log, per-plugin store (`internal/db`); `omo.agents`/`omo.send_to_agent` reach the running agents through `Options.Agents` (the server's `pluginAgents`, by terminal id, delivering with `Engine.Notify`, the engine's own notification path) |
 | `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure; `Check` refuses a bad name, source, subpath or ref before anything is fetched); `catalog.go` reads omo's plugin list (`FetchCatalog`, `ParseCatalog`, `TagOf`, `Acknowledged`, `CatalogFromEnv`) |
 | `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
-| `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
+| `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`, `vscode`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
 | `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
 | `mcpserver` | omo's MCP endpoint (`/mcp`): the `omo ai` commands as board tools for agent sessions and the tools of the relayed servers, for the identity bound to each request |
 | `mcprelay` | the relayed upstream MCP servers: stdio processes (per agent session or shared), HTTP and SSE connections, sign-in (headers, a header command, OAuth), tools under omo's names (`<server>__<tool>`), calls with timeouts, cancellation and progress, a result over 4 MiB refused; logs in `logs/mcp/` through `homefile.Append`; `fakemcp` is the scripted server of the tests |
@@ -113,7 +113,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 
 - `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
 - `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
-- Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` is proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
+- Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` and `/plugin-assets` are proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
 - Which columns accept a drag is computed in the browser (`web/src/board/moveRules.ts`) and checked against `internal/board/testdata/user_drag_targets.json`, which the Go test `TestUserDragTargetsGolden` generates from the real board. A change to the transition rules regenerates it in the same commit: `go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1`.
 - The seeding tool (`web/e2e/seed`, built by the e2e global setup) writes states the API cannot reach (tickets in progress or review) into a fresh temporary home before omo starts. They are board records only: seeded branches do not exist in the repository, and omo ends seeded agent sessions when it starts.
 - Terminals use xterm.js (`web/src/features/terminal/`). `LazyTerminal.ts` loads it as its own chunk, so the entry chunk holds no xterm code; every consumer imports `LazyTerminal`. A websocket offers the subprotocols `omo` and `omo-token.<token>`; the token is never in an address. Pasted and dropped text is cleaned first (`terminalPaste.ts`: control characters and escape sequences are removed, so `ESC[201~` cannot end bracketed paste early). Dropped files, and pasted files without text, are images for the program: `TerminalView` uploads them (`uploadTerminalImage`) and pastes the paths (`terminalImages.ts`: `isImageFile`, `shellQuote`, `pastedPaths`); other files get a note. The clipboard (`terminalClipboard.ts`): OSC 52 is only ever a set (`parseOsc52`: base64, UTF-8, 1 MiB; a `?` query is never answered), taken within 5 s of the user's key or pointer press in that view and never while history replays; `writeClipboard` tries `execCommand('copy')` (any address, needs a gesture) then `navigator.clipboard` (secure contexts); a refused copy waits as "Copy selection" in the screen's corner and goes on the next key or pointer press. `clipboardKey` maps Ctrl+C with a selection (copy, then clear), Ctrl+Shift+C, Ctrl+Insert (copy) and Ctrl+V, Ctrl+Shift+V, Shift+Insert (the browser's paste); not on a Mac. Only `TerminalView.vue` makes an emulator (`TerminalView.test.ts` fails otherwise), so every view behaves the same. A terminal link whose text is not its address asks for confirmation before it opens.
@@ -183,9 +183,220 @@ Usage, skill sets and plugins have routes in the same `registerRoutes` tables (`
 | `POST /api/tickets/{n}/start-anyway` | starts a ticket that waits for usage on its own model |
 | `GET /api/skillsets`, `PUT\|DELETE /api/skillsets/{name}`, `POST .../update` | skill set files (`skillsets/<name>.yaml`) and the checkouts |
 | `GET\|POST /api/plugins`, `PUT\|DELETE /api/plugins/{name}`, `POST .../update`, `GET .../log`, `POST .../actions/{action}` | plugin settings (`plugins/<name>.yaml`), install, update, remove, log and manual actions |
+| `GET /api/plugins/{name}/tasks`, `POST .../tasks/{task}/stop` | list and stop supervised background processes (user only) |
 | `GET /api/plugins/catalog` | omo's plugin list and the additional lists of `plugin_lists` (`api.PluginCatalog`; `?refresh=true` reads them now) |
 
 Usage. `settings.Store` holds the scripts and `General.Usage` (soft 90, hard 98, refresh 5 m, per-window overrides); a profile write is refused when its `usage_script` does not exist. The tracker (`internal/usage`) is started by the server through `s.background`; `usage.changed` events carry the state and wake the engine. The engine reads one small interface (`engine.UsageView`): `pick` skips models that are `soft` or `hard`, a ticket's own model over the soft limit waits (`start_blocked = usage`, cleared by `StartAnyway`), and `usagestop.go` gives a working agent on a `hard` model the handoff prompt (`prompts.Data.StopReason`) and ends it with the reason "usage limit reached", which is no crash. Usage runs never run a command of the agent environment: `omo.env` takes literal entries only; only `codex_refresh` expands the full agent environment. After a failed run the windows of the last successful run keep counting for `MaxStaleAfterFailure` (30 minutes from the end of the first failed run, `UsageReading.stale_since`), then the account's models are `unknown`; the browser's `features/usage/usageVerdict.ts` mirrors `Evaluate` for the meters and shows such readings as old. A run that ends in `omo.rate_limited(retry_after)` (`RateLimitError`; the shipped scripts call it on HTTP 429) waits Retry-After (1 minute to 1 hour), else 2, 4, 8 … minutes up to the refresh interval. A model with an empty `usage_windows` list counts every window except `extra_usage`, which counts only when listed. The Usage page's helper list (`usageForms.ts` `HELPERS`) is checked against the helpers Go registers (`usageHelpers.guard.test.ts`). A window may carry a `label` (`usage.Window.Label`, `api.UsageWindow.label`, "" for none): `cleanLabel` (`internal/usage/label.go`) makes it one line (characters `textsafe.IsHidden` names become spaces) of at most `MaxLabel` 60 characters, a label holding a secret of the run is refused like a name, and `cleanWindows`/`keptWindows` clean it again. `TestWindowFieldsReachTheWire` keeps `usage.Window` and `api.UsageWindow` in step. Names stay the keys of `usage_windows` and the per-window limits; the web reads labels through `features/usage/windowLabel.ts` (`windowTitle` for the sidebar meter, with the name as tooltip; `windowWithName` "label (name)" in the Usage page's test result, `labelsOf`/`nameWithLabel` in its limits table, `reportedWords` in the model editor's hint). The shipped `claude` script reads the answer's `limits` list (`session`, `weekly_all`, `weekly_scoped` with `scope.model.display_name` → `<model>_weekly`, a surface-only scope → `surface_<surface>_weekly`, unknown kinds skipped with a log line) and falls back to `five_hour`/`seven_day`/`seven_day_<model>` without it; `extra_usage` is the paid credit budget, labelled with its amounts. Recorded answers: `testdata/claude-usage.json` (older shape) and `testdata/claude-usage-limits.json` (with `limits`); `TestClaudeLimitsCountForTheCatalogModels` checks that only `claude/fable` counts `fable_weekly`. `api.ModelUsage.window_label` is the label of the window `Evaluate` chose ("" for none; the Go list in `api_test.go` and the TypeScript type keep the fields in step); `usageStopText` (`internal/engine/usagestop.go`) writes the label, else the name, and the web's `modelWindowWords` (`windowLabel.ts`: "Weekly, Fable at 99 %", empty without a label) is used by the sidebar's kept-off lines (name in `data-usage-window-name`) and `usageWait.ts`. The shipped `codex` script classifies each window of a rate limit by `limit_window_seconds` (`kind`: 1 to 12 h `session`, 604800 s ±10 % `weekly`, else `window_<hours>h`; no length: primary `session`, secondary `weekly`), reports the windows of additional limits as `<limit>_<name>` (`limit_name(name, suffix)` cuts the name so the key stays within 40 characters), reads `reset_at` as Unix seconds or an RFC 3339 string (anything else is logged, not an error) and fails only when no window is usable; fixtures `testdata/codex-usage-other-windows.json` and `codex-usage-reset-times.json`. The shipped `agy` script reads `command.data.groups[].buckets[]` of `agy -p /usage --output-format json` (through `omo.agy_usage`, no model turn): one window per bucket named by its `id` (`gemini-weekly`, `3p-weekly`), labelled "<group>, <period>", used = (1 − `remaining_fraction`) × 100, `reset_time` as given; the group's member list (display names only) goes to the log, so the catalog's agy models name their group's window in `usage_windows`; a 429 or `RESOURCE_EXHAUSTED` answer ends in `omo.rate_limited`; fixture `testdata/agy-usage.json` (a recorded answer); `TestAgyWindowsCountForTheirGroups`. Per-window limits (`General.Usage.Windows`) are keyed by a window name (every script) or `<script>/<window>` (`validateUsage` in `internal/settings/general.go`; field errors keep the key as written); `usage.Thresholds(script, window, th)` takes each value from the scoped key, then the bare name, then the general value, and `Evaluate` passes the reading's script; `usageVerdict.ts` `windowThresholds(window, usage, script)` mirrors it. The limits table picks the key from a select (`windowChoices`, `overrideKeyWords`, `OTHER_WINDOW` in `usageForms.ts`) fed by the live readings and the models' `usage_windows`.
+
+Plugin manifest contract: `plugins/plugins.go` accepts one JSON object up to
+64 KiB, at most 64 hooks, optional semantic version up to 64 bytes, and strict
+known fields/events with explicit replacement guidance for removed names.
+Timer configuration accepts duration text or numeric seconds, at least 1m;
+commands have at most 64 parts of 4096 bytes each. `plugins/declarations.go` validates strict nested
+`buttons: [{label, place: ticket|sidebar|project, action, per_worktree?}]`,
+`frontend: {script, assets?}` and `config_fields: [{key, label,
+type: select|boolean|string|number, choices?: [{value, label}]}]`; defaults stay
+in `default_config`, unlisted JSON keys survive. At most 64 buttons/fields,
+100 choices, labels 200 visible characters, keys/choice values 64 characters.
+Button actions must exist and match scope; place/action pairs and config keys
+are unique. Select defaults must be listed, other declared defaults must match
+type (numbers finite). `omo_started` (`EventOmoStarted`) runs once per enabled lifecycle after the
+API/socket are serving, and on install/enable; configuration saves and unrelated
+reloads preserve it. `Server.PluginsReady` is the embedder readiness call. Old names remain refused with new guidance.
+Queued hooks are serialized per plugin; manual hooks exclude only other manual
+hooks and can overlap queued timer/startup hooks. Shared plugin state and cleanup
+must account for that concurrency; the manual busy 409 is a pre-execution refusal.
+`plugins/frontend.go` validates portable confined public paths (including
+Windows device/drive paths), missing files and symlinks in `ReadManifest`, so
+install staging and runtime use identical checks. Private/dot-prefixed files
+are forbidden throughout public trees; script 1 MiB, total 64 MiB/10000 entries.
+`PluginInfo` exposes `buttons`, `frontend`, `config_fields` (empty arrays/object,
+never null) and `content_id`: SHA-256 of exact manifest bytes and sorted public
+paths/content, recomputed on load, independent of installation directory/config.
+It changes on frontend edits even without a version/commit change.
+`PluginRun.project` optionally selects a registered project (with ticket: must
+belong to it); manual payload includes selected `project: {id, kind, path, available, reason}` or null. Server `plugin_context.go` reuses terminal folder/gitfile checks and adds ordered `ticket.folders` without changing `ticket.projects` identifiers. A projectless task gets one `{project:"", kind:"working_directory", path, available, reason}` entry through `shellSpec`/`workdirShell`; the recorded exact task directory must exist without a link, with no Git checks. Projectless stories have no folders. Delayed historical events match current folders by ID and kind in snapshot order; unavailable paths are empty with a fixed reason. Generic context permits retained working directories after Done, like terminals; ticket-bound resources still require a live ticket. Selected unknown/disabled projects fail 404, mismatch 422, unavailable folder 409. Every event adds host OS/arch/path-separator/process-tree metadata, never session/environment identity. `TriggerAction`
+returns `api.PluginRunResult`; `Trigger` retains its text-only interface.
+`plugins/answers.go` handles command/Lua messages and optional `url` or
+`forward_id`; messages alone are redacted/escaped/cut, URLs validated then
+preserved exactly (HTTP(S), no credentials/auth tokens/known secrets, 8192 bytes),
+forward ids lowercase 32-hex. Lua manual results retain the run's HTTP-aware
+redactor until answer processing. Consumers must open forward results through
+the authenticated proxy Open flow, never put board credentials in hook URLs.
+Frontend serving: `server/plugin_assets.go` and `Manager.FrontendFile` expose
+only enabled installed public script/assets under
+`/plugin-assets/<name>/<content_id>/<declared-path>` (GET/HEAD, public bundled
+files, no settings/data). Raw-path handling precedes ServeMux cleaning; every
+read repeats portable path/ancestor/regular-file/homefile bounds and verifies
+the requested file against its load-time size/SHA-256 plus the small manifest
+digest; public reads never rewalk/hash unrelated files. No-store preserves disable
+and update checks; CSP stays script-src self. `web/src/features/plugins/`
+loads classic entries once per enabled code lifetime on every authenticated
+board document except OAuth consent. Entries capture `document.currentScript.omo` and call
+`omo.initialize(setup)`; the script property is deleted after load/error. The bound facade provides lifetime-guarded
+button/panel registration, detached route context/subscriptions, own manual
+hooks, asset URLs and authenticated forward navigation; signal and cleanup
+end stale asynchronous initialization. Errors isolate the plugin and offer
+Retry; lock suspends actions/listeners and changed route context is delivered
+once after unlock. Identical context updates are ignored. Frontend labels use
+200 UTF-16 code units (manifest labels count runes); entry load times out after
+15s. Registration disposers cannot remove a later replacement of the same id.
+Shared PluginControls renders ticket/sidebar/project buttons and text/image
+panels; per-worktree controls send ticket+project for recorded worktrees or
+send ticket alone for projectless tasks with a recorded working directory, or
+explicitly explain missing records, with no repository fallback. Live server
+checks report stale/replaced folders unavailable even if a recorded-path button
+was enabled. Legacy ticket
+hooks remain unless a declaration replaces them; settings retain global hooks.
+All action-result sinks use pluginNavigation/openForward to reserve a detached
+tab synchronously, wait through plugin-controlled polling, and acquire proxy
+Open only for a final forward result. They never retry a lost action and close
+unused blank tabs; disabling/updating prevents late navigation. Config editor
+primitive controls share the JSON draft, unknown keys, If-Match and conflict
+handling; missing booleans are unchecked. PluginTasks uses task API/events,
+reconnect/snapshot refresh, shared useNow, bounded visible output and Stop.
+Focused checks: Go TestPluginAssets, Vue features/plugins/proxy/pluginNavigation,
+settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
+(actual entry/image/own-hook execution under unchanged CSP). Full schema: [Plugins](wiki/plugins.md).
+
+Official browser editor: all editor policy is in `plugins/vscode/` (Lua,
+frontend and a JS launcher executed by the verified artifact's bundled Node;
+no editor-specific core package). Pins: code-server 4.145.2, OpenVSCode 1.109.5;
+OpenVSCode root/subdomain launches omit `--server-base-path`: explicit `/`
+becomes an empty publisher client base and breaks WebSocket URLs. Path-mode
+launches preserve the exact non-root prefix, including its trailing slash.
+platform URLs/SHA-256 live in editor.lua. Microsoft remains a visible unavailable
+choice pending affirmative licence permission; no checkbox/old saved consent can
+enable it and no Microsoft artifact is fetched. Hidden manual open/status hooks
+use authoritative selected ticket/project folders (including projectless task
+working directories), refuse finished tickets before installation, and use async artifact start/status,
+canonical folder/editor/version instance keys, stable task/forward identities,
+readiness and three bounded bind attempts. The frontend polls using its facade,
+returns only the final forward ID to the gesture-reserved tab and does not retry
+lost action responses; only the precise pre-execution busy 409 is retried within
+the original cancellable deadline. A new execution rechecks artifact integrity; existing
+instances keep their editor after setting changes. One running editor is allowed
+per canonical folder: only matching editor/version and ticket/global binding
+reuse it; a changed selection/binding refuses with an instruction to Stop the
+existing editor first. Different folders remain independent. Attached monotonic forward
+idle watches default to 30 minutes. Timer maintenance snapshots resources before
+checking a 120-second manual-hook grace, never deletes instance/request records,
+and only reaps its original resource snapshot. Manual opens prune stale records;
+startup leaves them inert and never restarts editors. Unique per-run task names
+and idempotent removals prevent stale cleanup from affecting replacement runs.
+Host HOME/USERPROFILE and configuration/data/cache roots remain available to
+normal tools. Shared per-editor profiles/extensions survive folder/version
+changes; explicit flags/portable paths and a pinned code-server path-provider
+preload confine editor-managed persistent state. Session directories retain
+server/log/cache data until manually removed after Stop. Short private task
+temporary-directory leases own IPC/tmp; the editor alone receives a private
+XDG_RUNTIME_DIR, and initial terminal settings restore its host value for tools.
+Hidden hook metadata (`hidden?: boolean`, manual only,
+strict false/true, no null/nonmanual presence) suppresses implicit ticket/settings
+controls, including the sample, while explicit declarations and own facade calls
+remain valid. It is presentation, not authorization.
+Verification: `lua5.1 plugins/vscode/tests/hooks.lua` and
+`node --test plugins/vscode/tests/*.test.cjs` are no-download fixtures; opt-in
+`node plugins/vscode/tests/probe.cjs code-server|openvscode [--subdomain] [--cross-site]` runs
+actual publisher artifacts through isolated temporary omo/proxy/Chromium, including
+first-use tab, reuse, concurrent folders, shared profile retention, temporary-host
+Git through integrated terminals, connected-beyond-idle/reconnect and independent
+cleanup. Never run the
+Microsoft mode or accept its terms in a probe. Linux amd64 publisher probes are
+proven; macOS/Windows/arm64 are fixture/metadata-only. Full details and runtime
+prerequisites: [plugin README](plugins/vscode/README.md).
+Publisher probes pin canonical workspaces and attached stable task/forward IDs,
+use monotonic waits, and retain sanitized `lifecycle.jsonl`, idle exit reasons,
+disconnect-to-exit durations and Linux PID/start-time descendant cleanup plus
+browser/server shutdown evidence. Reload/immediate-close remains part of the
+full idle assertion; explicit-Stop smoke is reported separately.
+
+Focused plugin integration: after `make build`, run
+`npm --prefix web run e2e -- e2e/plugin-editor.spec.ts e2e/plugin-lifecycle.spec.ts e2e/plugin-frontend.spec.ts --workers=2`.
+The coherent sample uses only public declarations/facade/Lua helpers and real
+child processes to test routes, startup/config/enable lifetimes, task output/Stop,
+update/removal/reconnect and joint task/forward cleanup. Editor checks keep the
+shipped orchestration/launcher with a local TLS archive and protocol stand-in;
+only installed-fixture URL/digest/idle policy changes. Both editor contracts run
+through actual plugin clicks on path and cross-site subdomain proxies, including
+remote board-host selection, assets/WS, verified first-use progress/cache,
+last-disconnect/reconnect and descendant cleanup. They run on Linux with OpenSSL
+and Chromium; they are not evidence of a publisher build on another platform.
+The plugin README keeps the separate real-editor smoke recipe and limitations.
+
+Plugin tasks: `plugins/tasks.go`, `tasks_lua.go`, `startup.go` and
+`server/plugin_tasks.go`. Lua `omo.task_start{ name, command, args?, cwd?, env?,
+ticket?, temp_dir? }` returns a task or nil/error; `omo.task_list()` lists own records;
+`omo.task_stop(name)` stops the latest run, idempotently while retained.
+`omo.task_temp_dir()` returns `{id,path}` for a helper-owned short OS temporary
+directory (Unix 0700 `/tmp/omo-*`, independent of inherited TMPDIR). `temp_dir`
+consumes the same-runtime single-use opaque lease ID before validation/spawn;
+failed starts release it, successful starts bind cleanup to the stable task ID
+after tree reaping on every exit/Stop/lifecycle path. Unattached allocations are
+bounded 16/runtime and expire after 60s or runtime cancellation. Running tasks and
+their directories survive configuration-only refresh. No arbitrary deletion API.
+`Manager.StartTask`, `Tasks`, `StopTask`, `StopTaskID` and `StopTicketTasks` are
+server adapters. Task IDs identify runs independently of reusable names.
+`Options.TaskExited(plugin, api.PluginTask)` is invoked once outside locks after
+reaping and before Stop returns (must not wait for its own task or call Close);
+`TaskTicketLive(ctx, ticket)` validates open tickets before/after registration;
+`TasksChanged(plugin)` is a nonblocking start/exit invalidation callback;
+`TaskOutputChanged(plugin)` separately reports changed visible tails. Records carry
+id/name/ticket/start/end/state/reason/error and bounded redacted combined output;
+32 running/callback-pending and 64 retained completed terminal records per plugin, 100 lines of 1024 runes,
+raw lines over 64 KiB discarded whole. Partial lines wait until exit. Task
+creation uses cleaned command environments, refuses all OMO_* overrides, and
+has no implicit shell or command-side task endpoint. Existing redaction rules
+apply to config/override/HTTP secrets and credential-like inherited environment
+values, using a cloned redactor so HOME/PATH/usernames and the calling hook stay
+useful. Hidden characters are visibly escaped.
+User-only `GET /api/plugins/{name}/tasks` returns `{tasks:[]}`;
+`POST .../tasks/{task}/stop` takes `{}`, returns 204, uses a local name and gives
+not_found for unknown/wrong owners. `plugin.tasks_changed` (`{name}`) invalidates
+snapshots within one second for lifecycle changes; changed complete output
+tails invalidate at most once/plugin/ten seconds (six events/minute), with no
+partial/identical-tail events. Refetch on reconnect/resync too. The reliable
+event-log follower stops Done/cancel/cascade tasks before droppable hook Dispatch.
+Disable/remove/shutdown and natural parent exits clean whole ordinary process
+trees; Unix process groups and Windows suspended launch into kill-on-close jobs.
+Load preserves unchanged runtimes; config changes retain tasks/startup state;
+code/install-identity replacement stops tasks with plugin_replaced without
+repeating delivered startup. Removal clears history. Nothing is persisted or
+resurrected, and startup has its own queue slot. Full helper/API and lifecycle
+contract: [Plugins](wiki/plugins.md).
+
+Plugin artifacts: `plugins/artifacts.go`, `artifact_archive.go`,
+`artifacts_lua.go`; manager adapters `StartArtifact(ctx, plugin, ArtifactStart)`
+and `ArtifactStatus(plugin, key)` share the task lifecycle boundaries. Lua
+`omo.artifact_start{key,url,sha256?,format,strip_components?,retry?}` returns
+promptly; `omo.artifact_status(key)` polls owner-scoped snapshots with
+id/key/state/phase/bytes/total_bytes/verification/path?/error?. A path appears
+only after verified atomic publication or asynchronous full-tree cache checking.
+States: running/ready/failed/cancelled; running phases:
+checking/downloading/verifying/extracting. Same-key active identity deduplicates;
+changed identity conflicts until terminal. Failed/cancelled identity needs an
+explicit retry=true. Empty checksum is explicitly unverified; supplied SHA-256
+is checked before extraction. `omo.runtime_info()` exposes Go `{os,arch}` without
+an external runtime. No second server or unrestricted filesystem API.
+HTTPS only, five redirects (cross-host allowed), 30-minute overall deadline;
+512 MiB compressed, 2 GiB expanded, 512 MiB/file, 50000 archive/tree entries,
+four active/64 retained keys per plugin. `boundedzip.NewReader` preflights actual
+central-directory records (32 MiB, including bounded single-disk ZIP64) before
+standard-library allocations; settings imports and self-update share it, and an
+AST guard forbids bypassing it. Redirecting artifact/list/client-metadata/release
+fetchers discard Referer to keep source query credentials private.
+Strict portable path/type/link checks,
+os.Root writes, homefile reads; private 0600/0700 modes, deferred contained file
+links (Unix symlinks; Windows materialization with documented Node semantics).
+Caches live below plugins/.data/<plugin>/.artifacts-v1/<key> with immutable
+random generations, matching completion/reference metadata and full-tree hashes
+including contents/types/permissions/link targets. Source URLs are never stored
+or returned. Start always rechecks disk before reuse; status is a snapshot,
+not a fresh integrity check. Old generations remain for user maintenance.
+Only completed cache data persists; lifecycle stop cancels/reaps jobs and removes
+private staging, with config refresh preserving jobs. Tests use local TLS
+fixtures and launch a fixture executable through task_start. Full exact schema,
+limits and Windows fallback: [Plugins](wiki/plugins.md#artifact-installs).
 
 Plugin list. `plugins/index.yaml` (top level of the repository) lists plugins with `name`, `tag` (`official`, `recommended`, `community`), a one-line `description` and their place: an official plugin only `path` (its folder in the list's own repository, installed from the repository and branch the list was read from), any other `source`, optional `ref` and `path`. The release workflow copies the `plugins` folder to the `release` branch; omo reads the list from there (`pluginmanager.DefaultCatalog`: `buildinfo.Repository` + `.git`, branch `release`), or from `OMO_PLUGIN_CATALOG=<source>[#<ref>]`, which `server.Run` reads (`Options.PluginCatalog`; tests set it directly, the zero value is no list). The server fetches it through `gitops.FetchSource` into `<home>/plugins/.catalog` (removed after the read) when `GET /api/plugins/catalog` asks, keeps it 10 minutes (a failure 1 minute) and answers `available: false` with the reason when it cannot be read. `ParseCatalog` is strict: 64 KiB, one YAML document, known keys only, at most 200 plugins, names by the plugin-name rule and unique in any case, addresses through `gitops.ValidSourceURL`, folders through the install's subpath rule, descriptions one line of at most 200 characters without hidden characters; one bad entry refuses the list. Tags are decided by the server (`checkPluginSource`): the tag of the listed plugin with exactly that source, folder and ref, else (also while the list cannot be read) community; `POST /api/plugins`, a `PUT` that changes source, folder or ref, and an update whose settings differ from the install record (`.omo-install.json`) need `acknowledge` covering the tag (`api.PluginInstall`, `api.PluginUpdate`; community covers recommended), else 422 with `details` `api.PluginConfirmation{field: "acknowledge", tag}`. The web (`features/settings/plugins/PluginCatalog.vue`, `pluginTrust.ts`, `confirmInstall.ts`, `TrustDialog.vue`) asks first through the page's `mountDialog` scope (`PLUGIN_DIALOGS`), and asks again with the server's tag when it is stronger. `TestShippedCatalog` checks the repository's list and its official plugins; browser tests read a stand-in list from `pluginListPath(home)` (`makePluginList`), never the network. Additional lists: `settings.yaml` `plugin_lists` (http/https addresses of list files, checked by `validatePluginLists`: at most 16, a host, no user info or fragment, no repeats); `pluginmanager.FetchList` fetches one with `net/http` (15 s, 64 KiB, 5 redirects to http/https only, User-Agent `omo-plugin-list`; errors never repeat the address or the answer) and `ParseList` reads it in the same format with a source required per entry, bad entries left out with a note; `GET /api/plugins/catalog` fetches them beside omo's own list (`readLists`, same 10 min / 1 min caching, `?refresh=true` for all) and answers omo's plugins then the lists' (`pluginmanager.Combine`: a name or source/folder/ref omo's list or an earlier list has is dropped with a note) with `CatalogPlugin.list`/`origin` and `PluginCatalog.lists` (`api.PluginListState` per list: `available`, `message`, `notes`). `pluginmanager.TrustTag` is the one place that decides a listed plugin's tag (community for every entry of an additional list) and `Catalog.TagOf` uses it, so the install routes never take a tag from an additional list; the web mirrors it in `trustTagOf` (`pluginTrust.ts`, `pluginTrust.guard.test.ts` fails on another read of a listed plugin's tag); `TestAdditionalListNeverGrantsTrust` guards the server. The page: `PluginCatalog.vue` (rows in `CatalogRow.vue`, each additional list under its address with its error, Retry and notes) and `PluginLists.vue` (the `plugin_lists` editor with its own Save bar); `e2e/plugin-lists.spec.ts` serves its lists from a local http server.
 
@@ -200,7 +411,7 @@ Limit of the model: the socket and the files in `OMO_HOME` are not a security bo
 ## Web UI forward registry
 
 Web UI forward registry: `api/proxy.go`, `board/proxy.go` and
-`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 8).
+`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 9; plugin ownership added in version 10).
 `GET /api/proxy/forwards[?ticket=N]` returns `{forwards: []}`;
 `POST /api/proxy/forwards` takes `{ticket, host, port, scheme, name, start_path,
 strip_prefix, verify_tls}` and returns the record (201);
@@ -230,6 +441,52 @@ user gesture, calls Open with normal API auth, and navigates the returned
 opaque URL unchanged. It closes failed blank reservations and reports errors;
 it never constructs proxy hosts or places board credentials in destinations.
 See [Web UI forwards](wiki/proxy.md).
+
+Plugin forward bridge: `plugins/forwards.go`, `forwards_lua.go`, server
+`plugin_forwards.go` and `proxy_activity.go`. Bound Lua helpers are
+`forward_add{...CreateProxyForward, task_id?}`, `forward_list()`,
+`forward_remove(id)`, `forward_attach(id, stable_task_id)` and
+`forward_idle_watch(id, idle_seconds)`. Public create JSON has no ownership
+fields; system-only board adapters assign `ProxyForward.plugin`/`task_id`
+(schema 10 `proxy_forwards.plugin_owner`, `task_id`), share ordinary validation,
+and emit add/remove plus `proxy.forward_updated` on attachment. Task and forward
+ticket bindings match exactly. Attachment/exit serialize on a resource lock and
+recheck running stable identity; `Options.TaskExited` removes every attached
+forward before Stop returns. `Options.Unloaded` releases unattached resources
+after hook cancellation and in-flight helper completion, outside manager locks;
+config refresh preserves them. Startup removes all stale plugin-owned forwards
+before Load; generic persistent user forwards survive. Startup cleanup failure
+refuses server initialization.
+
+Lua forward records include `activity: {active_requests, active_websockets,
+ever_connected, no_client_since, revision}`. Only authenticated requests reach
+the tracker. Requests count through handler completion; WS count starts on
+successful downstream hijack after upstream acceptance and ends with the full
+ReverseProxy handler, including errors/cancellation/close. Both routing modes
+share it. The generic transport ends WebSocket tunnels on the first TCP EOF
+or copy error, closing both ends rather than waiting for a half-closed peer's
+write side; other upgrade protocols retain ordinary half-close behavior.
+No-client time starts at registration, clears on WS admission, resets
+only on last disconnect; HTTP/SSE/health polls never reset it. Monotonic times
+and revision and live-registry checks guard precise idle timers against reconnect/removal; stop commits
+closing admission under that same lock before waiting for the task callback.
+`forward_idle_watch` takes 0.01..604800 finite seconds, requires an attached live
+task, replaces its forward's policy without resetting the interval, and stops
+with reason `idle`. No hardcoded editor policy/default. Observed closure depends
+on protocol/network detection. Removing a watched forward stops its stable task
+with `forward_removed` (even with active WS or pending expiry); unwatched/generic
+removal preserves the process. `removeForwardRecord` commits deletion and captures
+the watched identity under the registry lock, then awaits `StopTaskID` outside it.
+Reliable removal-event delivery covers direct board deletion and transactional
+Done/cancel/cascade (`ticket_done`); expiry's missing-record check covers the
+pre-event window. Task/lifecycle callbacks use plain forget, avoiding self-join,
+and stable IDs keep repeated cleanup from stopping a reused name. Exit/unload
+cancels timers; existing streams retain generic proxy behavior until their
+upstream task shutdown; independent streams cannot resurrect removed state. The free
+IPv4 `127.0.0.1` port helper `free_loopback_port()` returns a closed-listener
+candidate, never a reservation; plugins must bound bind-collision retries.
+Addresses contain no credentials; frontend still opens via user-only Open.
+Exact types and lifecycle/timing contracts: [Plugins](wiki/plugins.md).
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
@@ -382,6 +639,13 @@ browser's host. Its external, embedded `proxy_bootstrap.js` clears the fragment 
 `history.replaceState` before POSTing `{grant}` to `/_omo/proxy/exchange`, then
 uses `location.replace` on the returned server-owned start URL. These internal
 endpoints are reserved before fallbacks and use board Origin/security headers.
+The exact bootstrap GET/HEAD document accepts top-level `navigate`/`document`
+requests without Origin across sites, so a real Open click from a board outside
+the proxy domain works. It is an inert shell: no grant/session/cookie mutation.
+Host admission and script/exchange/other-path/board Origin and JSON checks remain;
+this is not a cross-site fetch/frame/API exception. Regression coverage includes
+all path/subdomain/public_url combinations and actual Chromium clicked reserved
+tabs, fragment clearing, one-use exchange and WebSockets.
 The board bearer token is never used as a proxy cookie or put in these URLs.
 The grant binds its forward, start URL and exchange origin (case/default ports
 canonicalized), is 256 bits of crypto randomness, lasts **60 seconds**, and is

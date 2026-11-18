@@ -170,6 +170,7 @@ func SafeClient() *http.Client {
 }
 
 func checkRedirect(req *http.Request, via []*http.Request) error {
+	req.Header.Del("Referer")
 	if req.URL.Scheme != "https" || len(via) > maxRedirectsIn {
 		return errRedirect
 	}
