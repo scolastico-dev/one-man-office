@@ -6,6 +6,7 @@
 // once scrolled the whole document. With OMO_SCREENSHOTS=<folder> the diff
 // test writes page-scroll-after-<width>.png there.
 import { withoutShellConfig } from './support/env'
+import { traceWheels, wheelTraceProblems } from './support/wheelTrace'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -70,8 +71,13 @@ async function wheelOver(page: Page, target: Locator): Promise<void> {
   const box = await target.boundingBox()
   if (!box) throw new Error('nothing to scroll over')
   await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 200))
-  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 2000)
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  // Nothing is awaited for a wheel that moves nothing, so the trace shows that every wheel reached a scroll
+  // gesture the compositor handled: a dropped wheel would leave the check that the document stays still empty.
+  const trace = await traceWheels(page, async () => {
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 2000)
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  })
+  expect(wheelTraceProblems(trace, 10), 'the wheels over the element are handled by the compositor alone').toEqual([])
 }
 
 /** 3 MiB of text in lines of 1 KiB: more than one file may send in the whole diff. */

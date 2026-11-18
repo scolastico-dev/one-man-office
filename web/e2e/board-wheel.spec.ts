@@ -13,6 +13,7 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { column, openBoard } from './support/board'
+import { traceWheels, wheelTraceProblems } from './support/wheelTrace'
 
 const board = (page: Page) => page.locator('[data-board]')
 const body = (c: Locator) => c.locator('.column__body')
@@ -38,8 +39,12 @@ async function expectSidewaysAt(page: Page, x: number, y: number, where: string,
   await board(page).evaluate((b) => (b.scrollLeft = 0))
   await settled(page)
   await pointAt(page, x, y)
-  await wheel()
-  await expect.poll(async () => (await scrollState(page)).left, { message: `the board scrolls sideways with the pointer ${where}` }).toBeGreaterThan(0)
+  // The wheel is the browser's own: the board must get it from the compositor without a main-thread hit test (see wheelTrace).
+  const trace = await traceWheels(page, async () => {
+    await wheel()
+    await expect.poll(async () => (await scrollState(page)).left, { message: `the board scrolls sideways with the pointer ${where}` }).toBeGreaterThan(0)
+  })
+  expect(wheelTraceProblems(trace, 1), `the wheel ${where} is scrolled by the compositor alone`).toEqual([])
   const s = await scrollState(page)
   expect({ docTop: s.docTop, docLeft: s.docLeft }, where).toEqual({ docTop: 0, docLeft: 0 })
 }
@@ -81,11 +86,17 @@ test.describe('the wheel over the board', () => {
     const planning = body(column(page, 'Planning'))
     const box = (await planning.boundingBox())!
     await pointAt(page, box.x + box.width / 2, box.y + box.height / 2)
-    await page.mouse.wheel(0, 300)
-    await expect.poll(() => planning.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+    const first = await traceWheels(page, async () => {
+      await page.mouse.wheel(0, 300)
+      await expect.poll(() => planning.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+    })
+    expect(wheelTraceProblems(first, 1), 'the first wheel over the column is scrolled by the compositor alone').toEqual([])
     // Past the column's end: nothing else moves.
-    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 3000)
-    await expect.poll(() => planning.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(2)
+    const past = await traceWheels(page, async () => {
+      for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 3000)
+      await expect.poll(() => planning.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(2)
+    })
+    expect(wheelTraceProblems(past, 10), 'the wheels past the column end are handled by the compositor alone').toEqual([])
     await settled(page)
     const s = await scrollState(page)
     expect({ left: s.left, top: s.top, docTop: s.docTop, docLeft: s.docLeft }).toEqual({ left: 0, top: 0, docTop: 0, docLeft: 0 })
@@ -135,8 +146,11 @@ test.describe('the wheel over the ticket page', () => {
     expect(await code.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeGreaterThan(100)
     const box = (await code.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 120))
-    await page.mouse.wheel(300, 0)
-    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+    const trace = await traceWheels(page, async () => {
+      await page.mouse.wheel(300, 0)
+      await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+    })
+    expect(wheelTraceProblems(trace, 1), "the wheel over the diff's long lines is scrolled by the compositor alone").toEqual([])
     const doc = await page.evaluate(() => ({ top: document.documentElement.scrollTop, left: document.documentElement.scrollLeft }))
     expect(doc).toEqual({ top: 0, left: 0 })
 

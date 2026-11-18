@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
+import { traceWheels, wheelTraceProblems } from './support/wheelTrace'
 import { expect, FAKE_AGENT_BINARY, test, type Omo } from './support/omo'
 
 // The mouse wheel scrolls the settings page from anywhere in the settings
@@ -38,8 +39,11 @@ async function expectWheelScrollsPage(page: Page, x: number, y: number, where: s
   await toTop(page)
   const before = await titleTop(page)
   await page.mouse.move(x, y)
-  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
-  await expect.poll(() => titleTop(page), { message: `the wheel at ${where} (${x}, ${y}) scrolls the page` }).toBeLessThan(before - 50)
+  const trace = await traceWheels(page, async () => {
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
+    await expect.poll(() => titleTop(page), { message: `the wheel at ${where} (${x}, ${y}) scrolls the page` }).toBeLessThan(before - 50)
+  })
+  expect(wheelTraceProblems(trace, 5), `the wheels at ${where} are scrolled by the compositor alone`).toEqual([])
   expect(await page.evaluate(() => (document.scrollingElement ?? document.documentElement).scrollTop), 'the document never scrolls').toBe(0)
 }
 
@@ -84,10 +88,16 @@ test('a list taller than the window scrolls first, then hands the wheel to the p
   expect(room, 'the list is taller than the window').toBeGreaterThan(50)
   const box = (await nav.boundingBox())!
   await page.mouse.move(box.x + 100, box.y + box.height / 2)
-  await page.mouse.wheel(0, 100)
-  await expect.poll(() => nav.evaluate((e) => e.scrollTop)).toBeGreaterThan(0)
+  const first = await traceWheels(page, async () => {
+    await page.mouse.wheel(0, 100)
+    await expect.poll(() => nav.evaluate((e) => e.scrollTop)).toBeGreaterThan(0)
+  })
+  expect(wheelTraceProblems(first, 1), 'the first wheel over the list is scrolled by the compositor alone').toEqual([])
   const pageTop = await titleTop(page)
-  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400)
-  await expect.poll(() => nav.evaluate((e, r) => Math.round(e.scrollTop) >= Math.floor(r) - 1, room)).toBe(true)
-  await expect.poll(() => titleTop(page), { message: 'after the list is at its end the wheel scrolls the page' }).toBeLessThan(pageTop - 20)
+  const rest = await traceWheels(page, async () => {
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400)
+    await expect.poll(() => nav.evaluate((e, r) => Math.round(e.scrollTop) >= Math.floor(r) - 1, room)).toBe(true)
+    await expect.poll(() => titleTop(page), { message: 'after the list is at its end the wheel scrolls the page' }).toBeLessThan(pageTop - 20)
+  })
+  expect(wheelTraceProblems(rest, 10), 'the wheels that follow are scrolled by the compositor alone').toEqual([])
 })
