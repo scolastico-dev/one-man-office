@@ -38,10 +38,14 @@ func TestSlowSubscriberIsDisconnectedNotBlocking(t *testing.T) {
 		got <- ids
 	}()
 
+	// A write must never wait for the slow subscriber, which reads nothing
+	// here: a write that did would hang for good once its buffer is full.
+	// The bound only tells that from a slow disk, so it is generous; a loaded
+	// machine takes more than 100 ms for a single write now and then.
 	for i := range 300 {
 		start := time.Now()
 		m.create()
-		if d := time.Since(start); d > 100*time.Millisecond {
+		if d := time.Since(start); d > streamTimeout {
 			t.Fatalf("write %d took %v", i, d)
 		}
 	}

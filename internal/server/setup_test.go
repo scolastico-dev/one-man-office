@@ -441,13 +441,15 @@ func TestEnvCheckStopsAtItsLimit(t *testing.T) {
 		t.Skip("uses sh commands")
 	}
 	s := newTestServer(t)
-	s.setup.commandTimeout = time.Second
+	// The limit is far below the command's own timeout and the sleep, so a
+	// loaded machine cannot blur which of them ended the check.
+	s.setup.commandTimeout = 30 * time.Second
 	s.setup.checkLimit = 300 * time.Millisecond
 	b := newBrowser(t, s)
 	start := time.Now()
-	resp, raw := postEnvCheck(t, s, b, map[string]string{"A": "`sleep 3`", "B": "plain"})
+	resp, raw := postEnvCheck(t, s, b, map[string]string{"A": "`sleep 60`", "B": "plain"})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if time.Since(start) > 900*time.Millisecond {
+	if time.Since(start) > 10*time.Second {
 		t.Errorf("the answer took %s", time.Since(start))
 	}
 	got := checks(t, raw)

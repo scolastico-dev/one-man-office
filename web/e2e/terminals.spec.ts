@@ -171,6 +171,28 @@ async function occurrences(terminal: Locator, text: string): Promise<number> {
   return shown.split(text).length - 1
 }
 
+test('the first keys typed into a terminal that just opened are not lost while its history is still being drawn', async ({ page, omo }) => {
+  // The socket goes through the test like in the tests below, and the page is
+  // slowed down: the keys then arrive while the terminal still parses its replay.
+  await page.routeWebSocket(/\/api\/terminals\/[^/]+\/socket$/, (ws) => {
+    const server = ws.connectToServer()
+    ws.onClose(() => server.close())
+  })
+  try {
+    await openBoard(page, omo)
+    await openTerminalsTab(page)
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 })
+    await newTerminal(sidebar(page))
+    const terminal = terminalIn(sidebar(page))
+    await typeInTerminal(page, terminal, 'echo first=$((40 + 2))')
+    await expectTerminalText(terminal, 'first=42')
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+  } finally {
+    await closeAll(omo)
+  }
+})
+
 test('a terminal whose connection drops connects again and shows its history once', async ({ page, omo }) => {
   // Every terminal socket goes through here; the ones open so far can be dropped.
   const open: WebSocketRoute[] = []
