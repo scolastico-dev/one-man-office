@@ -1,0 +1,78 @@
+name: Constrained stress
+
+on:
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+    inputs:
+      go_runs:
+        description: Consecutive full Go attempts (acceptance requires 20)
+        type: string
+        default: '3'
+        required: true
+      browser_runs:
+        description: Consecutive full browser attempts (acceptance requires 10)
+        type: string
+        default: '2'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: Constrained ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [go, browser]
+    env:
+      STRESS_SUITE: ${{ matrix.suite }}
+      GO_RUNS: ${{ inputs.go_runs || '3' }}
+      BROWSER_RUNS: ${{ inputs.browser_runs || '2' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install browser test dependencies
+        if: matrix.suite == 'browser'
+        run: |
+          npm --prefix web ci
+          npx --prefix web playwright install --with-deps chromium
+
+      - name: Check the harness
+        run: make stress-check
+
+      - name: Run every full-suite attempt without retries
+        run: scripts/stress/ci.sh
+
+      - name: Publish failure frequencies in the job summary
+        if: always()
+        run: |
+          if [ -d bin/stress-ci ]; then
+            find bin/stress-ci -name summary.md -exec cat {} \; >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Preserve every attempt and failure artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stress-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bin/stress-ci
+          if-no-files-found: error
+          retention-days: 14

@@ -2,13 +2,15 @@ name: Pull Request
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   test-and-build:
-    name: Test and build pull request
+    name: Test and build
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -33,11 +35,14 @@ jobs:
       - name: Test
         run: make check
 
+      - name: Check the stress harness
+        run: make stress-check
+
       - name: Test the board
         run: make web-check
 
       - name: Build all platforms
-        run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
+        run: make cross VERSION="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}-${{ github.sha }}"
 
   container-build:
     name: Test container (${{ matrix.arch }})
@@ -58,7 +63,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build container image
-        run: docker build --platform "${{ matrix.platform }}" --build-arg VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}" --tag omo:pr .
+        run: docker build --platform "${{ matrix.platform }}" --build-arg VERSION="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}-${{ github.sha }}" --tag omo:pr .
 
       - name: Test container entrypoint
         run: ./docker/entrypoint_test.sh omo:pr

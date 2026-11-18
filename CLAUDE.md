@@ -19,6 +19,8 @@ make test          # tests only
 make cross         # all supported OS/architecture binaries
 make web-check     # type-check and unit-test the board app
 make e2e           # build omo and run the browser tests
+make stress-check  # Linux stress harness accounting/isolation/cleanup checks
+make stress        # Linux: full 20 Go race + 10 throttled browser attempts (Python 3)
 make notices       # bin/THIRD_PARTY_NOTICES: licences of the Go modules and the bundled npm packages
 ```
 
@@ -269,10 +271,25 @@ Test helper processes that run the test binary again (such as the helpers in `in
 
 Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. Before starting the omo binary, invoking its CLI or calling `server.Run`, a test environment drops **every** inherited `OMO_` variable (case-insensitively) before adding its own; an inherited socket override bypasses an isolated home. `childenvtest.SetOmo` and `CheckOmo` guard the smoke, CLI and helper environments; the browser harness uses the same samples. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
+Stress testing: `scripts/stress/run.py` (Linux/Python 3) pins descendants to two
+allowed CPUs, oversubscribes workers, removes inherited `OMO_` values before
+children start, and isolates HOME/XDG/git state. `make stress` defaults to full
+20 Go race/shuffle and 10 throttled browser attempts. It builds browser sources,
+records commit/tree/content provenance and every result in unique `bin/stress/`
+folders, preserves failure artifacts, and fails on any failed/incomplete attempt.
+`make stress-check` checks accounting, isolation and descendant cleanup. The Go
+AST guard in `internal/testguard` rejects short real elapsed upper ceilings;
+`web/src/timing.guard.test.ts` rejects fixed Playwright waits without matching
+comments/examples. See [contributor guidance](wiki/contributing.md#tests-that-stay-deterministic-under-load)
+and [calibration evidence](wiki/stress-calibration.md). Subsets are diagnostic,
+never acceptance counts. Chromium throttling gates new pages and popup external
+resources; initial inline popup scripts cannot be guaranteed throttled.
+
 ## CI and releases
 
-- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests.
+- `.github/workflows/pull-request.yml`: `make check`, stress harness checks, `make web-check`, `make cross`, container build and entrypoint test on pull requests and pushes to `main`.
 - `.github/workflows/browser-tests.yml`: browser end-to-end tests on pull requests and pushes to `main`.
+- `.github/workflows/stress.yml`: nightly or manual full-suite constrained stress, three Go race/shuffle and two Chromium rate-4 attempts by default, configurable counts; `scripts/stress/ci.sh` calls the same runner as `make stress`. Fresh per-attempt raw/JSON/artifact folders, job failure frequencies, no retries or publishing. Full acceptance is 20/10 consecutive successes.
 - `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
 - `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.
 - `.github/workflows/publish-container.yml`: container image publishing.
