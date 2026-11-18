@@ -107,9 +107,9 @@ func (b *Board) SetExportCheckAttention(ctx context.Context, n int64, round int,
 		if t.ReviewRound != round {
 			return api.Errorf(api.CodeConflict, "the export review round of #%d changed", n)
 		}
-		if strings.TrimSpace(reason) == "" && !strings.HasPrefix(t.Attention, ExportCheckAttentionPrefix) {
+		if strings.TrimSpace(reason) == "" && t.AttentionOwner != AttentionMergeCheck {
 			return nil
 		}
-		return b.setAttention(tx, t, reason)
+		return b.setAttentionOwned(tx, t, AttentionMergeCheck, reason)
 	})
 }

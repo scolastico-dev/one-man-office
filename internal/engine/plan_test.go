@@ -651,7 +651,9 @@ func TestPlanNoModelForContinuationSetsAttention(t *testing.T) {
 
 	// Applied: nothing more is proposed.
 	w.snap.Tickets[0].Attention = att[0].reason
+	w.snap.Tickets[0].AttentionOwner = att[0].attentionOwner
 	w.snap.Tickets[1].Attention = att[1].reason
+	w.snap.Tickets[1].AttentionOwner = att[1].attentionOwner
 	acts, _, _ = w.plan(t)
 	if len(acts) != 0 {
 		t.Fatalf("actions after applying = %v", acts)
@@ -664,6 +666,45 @@ func TestPlanNoModelForContinuationSetsAttention(t *testing.T) {
 	att = ofKind(acts, actAttention)
 	if len(starts(acts)) != 3 || len(att) != 2 || att[0].reason != "" || att[1].reason != "" {
 		t.Fatalf("actions = %v", acts)
+	}
+}
+
+func TestPlanKeepsUnownedAttentionWithMatchingWords(t *testing.T) {
+	w := newWorld(1)
+	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1, func(t *board.EngineTicket) {
+		t.Attention = noModelText(api.RoleDeveloper)
+	})
+	acts, _, _ := w.plan(t)
+	if att := ofKind(acts, actAttention); len(att) != 0 {
+		t.Fatalf("planner cleared an unrelated flag with matching words: %v", att)
+	}
+}
+
+func TestPlanEndCategoriesComeFromState(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		col        api.Column
+		resolution api.Resolution
+		alive      bool
+		kind       api.SessionEndKind
+	}{
+		{"completed", api.ColumnDone, api.ResolutionCompleted, true, api.SessionEndFinished},
+		{"exported", api.ColumnDone, api.ResolutionExported, true, api.SessionEndFinished},
+		{"cancelled", api.ColumnDone, api.ResolutionCancelled, true, api.SessionEndStopped},
+		{"moved", api.ColumnReady, "", true, api.SessionEndStopped},
+		{"lost process", api.ColumnInProgress, "", false, api.SessionEndCrashed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(1)
+			w.ticket(1, api.TypeTask, tc.col, 1, func(t *board.EngineTicket) { t.Resolution = tc.resolution })
+			id := w.session(api.RoleDeveloper, 1, api.SessionRunning)
+			w.in.processes[id] = tc.alive
+			acts, _, _ := w.plan(t)
+			ends := ofKind(acts, actEnd)
+			if len(ends) != 1 || ends[0].endKind != tc.kind {
+				t.Fatalf("ends = %+v, want kind %q", ends, tc.kind)
+			}
+		})
 	}
 }
 
@@ -818,6 +859,7 @@ func TestPlanUsageBlocksReviewersAndRecovery(t *testing.T) {
 	// Another ticket's attention is kept; a planner text of its own is
 	// cleared while it waits for usage.
 	w.snap.Tickets[0].Attention = noModelText(api.RoleDeveloper)
+	w.snap.Tickets[0].AttentionOwner = board.AttentionPlanner
 	w.snap.Tickets[1].Attention = "question 4 is unanswered"
 	acts, _, _ = w.plan(t)
 	att := ofKind(acts, actAttention)

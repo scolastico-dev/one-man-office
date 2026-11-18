@@ -194,6 +194,16 @@ After an update, compare edited usage scripts with the new defaults (see
 [Usage scripts](agents.md#usage-scripts)): omo never overwrites a script you
 changed.
 
+When upgrading from a version that stored attention flags without their
+source, an old shortened or unrecognized warning can remain after its cause
+is fixed. For an
+old export warning, choose **Export** again to retry and refresh it. A normal
+column change also clears old warnings: for example, move an In Progress
+ticket back to Ready For Dev; a ticket in Review returns to In Progress
+through **Reject**, with a comment. Use that review action only when the work
+needs another round. New warnings keep their source separately and clear
+when their cause is resolved. A CEO you stopped stays stopped after upgrading.
+
 ## Docker
 
 The repository has a `Dockerfile` and a `compose.yml`. The image runs omo as

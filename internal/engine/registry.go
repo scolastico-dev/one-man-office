@@ -29,7 +29,8 @@ type entry struct {
 	//
 	// ending is the reason the engine is ending the agent; "" while nobody
 	// asked it to end, so an exit is unexpected.
-	ending string
+	ending  string
+	endKind api.SessionEndKind
 	// crash, when set, is what made the engine kill an agent that counts
 	// as failed (it did not acknowledge its start in time).
 	crash string

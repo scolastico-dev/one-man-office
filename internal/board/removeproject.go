@@ -193,6 +193,10 @@ func (b *Board) RemoveProject(ctx context.Context, a Actor, n int64, project, no
 		if !t.Busy {
 			return api.Errorf(api.CodeConflict, "#%d is not claimed for a project removal", n)
 		}
+		var removedState api.ExportState
+		if err := tx.QueryRow(`SELECT export_state FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`, n, project).Scan(&removedState); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		res, err := tx.Exec(`DELETE FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`, n, project)
 		if err != nil {
 			return err
@@ -206,15 +210,15 @@ func (b *Board) RemoveProject(ctx context.Context, a Actor, n int64, project, no
 			return err
 		}
 		fields := []string{"projects", "busy"}
-		attention, err := remainingExportFailures(tx, t, project)
+		attention, err := remainingExportFailures(tx, t, removedState)
 		if err != nil {
 			return err
 		}
 		if attention != t.Attention {
 			fields = append(fields, "attention")
 		}
-		if _, err := tx.Exec(`UPDATE tickets SET busy = 0, attention = ?, updated_at = ? WHERE id = ?`,
-			attention, b.stamp(), n); err != nil {
+		if _, err := tx.Exec(`UPDATE tickets SET busy = 0, attention = ?, attention_owner = ?, updated_at = ? WHERE id = ?`,
+			attention, remainingAttentionOwner(t.AttentionOwner, attention), b.stamp(), n); err != nil {
 			return err
 		}
 		if err := b.emitUpdated(tx, a, n, fields...); err != nil {
@@ -247,9 +251,9 @@ func (b *Board) RemoveProject(ctx context.Context, a Actor, n int64, project, no
 // after a failed export (stage human, no failed step) the flag lists the
 // failed projects, and the removed one leaves that list; any other flag
 // stays as it is.
-func remainingExportFailures(tx *sql.Tx, t ticketRow, project string) (string, error) {
+func remainingExportFailures(tx *sql.Tx, t ticketRow, removedState api.ExportState) (string, error) {
 	if t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageHuman || t.FailedStep != api.FailedNone ||
-		!strings.Contains(t.Attention, "Export of "+project+" failed") {
+		removedState != api.ExportFailedState || t.AttentionOwner != AttentionExport {
 		return t.Attention, nil
 	}
 	// The removed project's row is gone already: the rows left are the
@@ -289,3 +293,11 @@ func actorWords(a Actor) string {
 
 // codeWords is s as a code span.
 func codeWords(s string) string { return "`" + s + "`" }
+
+// remainingAttentionOwner clears ownership along with the last flag.
+func remainingAttentionOwner(owner AttentionOwner, attention string) AttentionOwner {
+	if attention == "" {
+		return ""
+	}
+	return owner
+}

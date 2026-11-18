@@ -21,6 +21,7 @@ export function agent(over: Partial<AgentSession> = {}): AgentSession {
     state: 'running',
     workdir: '/work',
     end_reason: '',
+    end_kind: '',
     purpose: 'work',
     review_round: 0,
     started_at: '2026-11-15T10:00:00Z',

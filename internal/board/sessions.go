@@ -40,6 +40,7 @@ type sessionRow struct {
 	State       api.SessionState
 	Workdir     string
 	EndReason   string
+	EndKind     api.SessionEndKind
 	Purpose     api.Purpose
 	ReviewRound int
 	StartedAt   string
@@ -47,12 +48,12 @@ type sessionRow struct {
 }
 
 const sessionSelect = `SELECT id, role, COALESCE(ticket_id, 0), project_id, name, model, state, workdir,
-	end_reason, purpose, review_round, started_at, ended_at FROM agent_sessions`
+	end_reason, end_kind, purpose, review_round, started_at, ended_at FROM agent_sessions`
 
 func scanSession(row interface{ Scan(...any) error }) (sessionRow, error) {
 	var s sessionRow
 	err := row.Scan(&s.ID, &s.Role, &s.Ticket, &s.Project, &s.Name, &s.Model, &s.State, &s.Workdir,
-		&s.EndReason, &s.Purpose, &s.ReviewRound, &s.StartedAt, &s.EndedAt)
+		&s.EndReason, &s.EndKind, &s.Purpose, &s.ReviewRound, &s.StartedAt, &s.EndedAt)
 	return s, err
 }
 
@@ -66,6 +67,7 @@ func (s sessionRow) api() (api.AgentSession, error) {
 		State:       s.State,
 		Workdir:     s.Workdir,
 		EndReason:   s.EndReason,
+		EndKind:     s.EndKind,
 		Purpose:     s.Purpose,
 		ReviewRound: s.ReviewRound,
 	}
@@ -262,7 +264,14 @@ func (b *Board) SetSessionState(ctx context.Context, id string, st api.SessionSt
 
 // EndSession marks a session ended with a reason and emits agent.ended.
 // Ending an already ended session changes nothing.
-func (b *Board) EndSession(ctx context.Context, id, reason string) error {
+func (b *Board) EndSession(ctx context.Context, id, reason string, kinds ...api.SessionEndKind) error {
+	kind := api.SessionEndStopped
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
+	if !slices.Contains([]api.SessionEndKind{api.SessionEndStopped, api.SessionEndFinished, api.SessionEndCrashed, api.SessionEndUsage, api.SessionEndShutdown, api.SessionEndUser}, kind) {
+		return api.Errorf(api.CodeValidation, "unknown session end kind %q", kind)
+	}
 	return b.write(ctx, func(tx *sql.Tx) error {
 		s, err := loadSession(tx, id)
 		if err != nil {
@@ -271,8 +280,8 @@ func (b *Board) EndSession(ctx context.Context, id, reason string) error {
 		if !s.live() {
 			return nil
 		}
-		if _, err := tx.Exec(`UPDATE agent_sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE id = ?`,
-			reason, b.stamp(), id); err != nil {
+		if _, err := tx.Exec(`UPDATE agent_sessions SET state = 'ended', end_reason = ?, end_kind = ?, ended_at = ? WHERE id = ?`,
+			reason, kind, b.stamp(), id); err != nil {
 			return err
 		}
 		_, err = b.sessionChanged(tx, id, api.KindAgentEnded)

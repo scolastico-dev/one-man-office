@@ -69,26 +69,21 @@ func TestPayloadsHoldNoSessionIDOrPath(t *testing.T) {
 }
 
 func TestExitReason(t *testing.T) {
-	for in, want := range map[string]string{
-		"omo stopped":                        ExitOmo,
-		"omo restarted":                      ExitOmo,
-		"exited unexpectedly: exit status 1": ExitCrashed,
-		"could not start: no such program":   ExitCrashed,
-		"did not run omo ai ready in time":   ExitCrashed,
-		"stopped by the user":                ExitStopped,
-		"new session requested by the user":  ExitStopped,
-		"merged":                             ExitFinished,
-		"#4 was merged":                      ExitFinished,
-		"#4 is done":                         ExitFinished,
-		"#4 was exported":                    ExitFinished,
-		"a new review round of #4 began":     ExitFinished,
-		"#4 was cancelled":                   ExitStopped,
-		"#4 was moved to Planning":           ExitStopped,
-		"":                                   ExitFinished,
-		"usage limit reached":                ExitUsage,
+	for in, want := range map[api.SessionEndKind]string{
+		api.SessionEndShutdown: ExitOmo, api.SessionEndUsage: ExitUsage,
+		api.SessionEndCrashed: ExitCrashed, api.SessionEndFinished: ExitFinished,
+		api.SessionEndStopped: ExitStopped, api.SessionEndUser: ExitStopped, "": ExitStopped,
 	} {
 		if got := ExitReason(in); got != want {
 			t.Errorf("ExitReason(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestExitReasonDoesNotInferStateFromWords(t *testing.T) {
+	for _, message := range []string{"crash avoided; stopped by request", "usage report requested; stopped by request"} {
+		if got := ExitReason(api.SessionEndKind(message)); got != ExitStopped {
+			t.Fatalf("message %q misclassified as %q", message, got)
 		}
 	}
 }

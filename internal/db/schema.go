@@ -305,4 +305,31 @@ ALTER TABLE ticket_projects ADD COLUMN export_target_commit TEXT NOT NULL DEFAUL
 ALTER TABLE proxy_forwards ADD COLUMN task_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX proxy_forwards_plugin ON proxy_forwards(plugin_owner,task_id);
 `,
+	// Version 11: attention ownership is state, independent of display text.
+	`ALTER TABLE agent_sessions ADD COLUMN end_kind TEXT NOT NULL DEFAULT '';
+UPDATE agent_sessions SET end_kind = 'user' WHERE end_reason = 'stopped by the user';
+ALTER TABLE tickets ADD COLUMN attention_owner TEXT NOT NULL DEFAULT '';
+UPDATE tickets SET attention_owner = 'planner'
+WHERE failed_step = '' AND (
+  (attention = 'no usable model for the pm role; set models in roles/pm.yaml' AND type = 'story' AND col = 'in_progress')
+  OR (attention = 'no usable model for the developer role; set models in roles/developer.yaml'
+    AND ((type = 'task' AND col = 'in_progress') OR (col = 'review' AND review_stage = 'exporting')))
+  OR (attention = 'no usable model for the reviewer role; set models in roles/reviewer.yaml' AND col = 'review' AND review_stage = 'agent')
+  OR ((col IN ('ready','in_progress') OR (col = 'review' AND review_stage IN ('agent','exporting'))) AND EXISTS (
+    SELECT 1 FROM ticket_projects p WHERE p.ticket_id = tickets.id
+      AND tickets.attention = 'project ' || p.project_id || ' is missing or disabled; omo starts no agent on this ticket until it is available again'
+  ))
+);
+UPDATE tickets SET attention_owner = 'export'
+WHERE col = 'review' AND review_stage = 'human' AND failed_step = ''
+  AND attention <> '' AND attention = (
+    SELECT group_concat(message, '; ') FROM (
+      SELECT 'Export of ' || project_id || ' failed: ' || export_error AS message
+      FROM ticket_projects WHERE ticket_id = tickets.id AND export_state = 'failed' ORDER BY position
+    )
+  );
+UPDATE tickets SET attention_owner = 'merge_check'
+WHERE col = 'review' AND review_stage = 'awaiting_merge' AND failed_step = ''
+  AND attention LIKE 'Merge check failed: %';
+`,
 }

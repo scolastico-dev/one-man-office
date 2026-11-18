@@ -59,14 +59,16 @@ func (k actionKind) String() string {
 // the ticket's projects. For actEnd: session and reason. For actAttention:
 // reason. For actUsageStop: session.
 type action struct {
-	kind    actionKind
-	ticket  int64
-	role    api.Role
-	project string
-	purpose api.Purpose
-	gated   bool
-	session string
-	reason  string
+	kind           actionKind
+	ticket         int64
+	role           api.Role
+	project        string
+	purpose        api.Purpose
+	gated          bool
+	session        string
+	reason         string
+	attentionOwner board.AttentionOwner
+	endKind        api.SessionEndKind
 }
 
 func (a action) String() string {
@@ -516,11 +518,12 @@ func (p *planner) ends() {
 			continue
 		}
 		ok, reason := p.allowed(s)
+		endKind := p.sessionEndKind(s)
 		if ok {
 			if newest[p.slotOf(s)] != i {
-				ok, reason = false, "a newer session took over"
+				ok, reason, endKind = false, "a newer session took over", api.SessionEndStopped
 			} else if !p.in.processes[s.ID] {
-				ok, reason = false, "agent process is gone"
+				ok, reason, endKind = false, "agent process is gone", api.SessionEndCrashed
 			}
 		}
 		if ok {
@@ -528,8 +531,31 @@ func (p *planner) ends() {
 			continue
 		}
 		p.acts = append(p.acts, action{kind: actEnd, ticket: s.Ticket, role: s.Role, project: s.Project,
-			purpose: purposeOf(s), session: s.ID, reason: reason})
+			purpose: purposeOf(s), session: s.ID, reason: reason, endKind: endKind})
 	}
+}
+
+// sessionEndKind classifies a planned end from board state, before rendering
+// the explanation. No word in the explanation changes this outcome.
+func (p *planner) sessionEndKind(s board.EngineSession) api.SessionEndKind {
+	t := p.byID[s.Ticket]
+	if s.Role != api.RoleCEO && (t == nil || t.Column == api.ColumnDone) {
+		if t != nil && t.Resolution == api.ResolutionCancelled {
+			return api.SessionEndStopped
+		}
+		return api.SessionEndFinished
+	}
+	if t != nil && s.Role == api.RoleReviewer && reviewsKey(*t, reviewProject(s, *t)) && p.newerReviewer(s, *t) {
+		return api.SessionEndFinished
+	}
+	if t != nil && t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting && purposeOf(s) == api.PurposeExport {
+		for _, pr := range t.Projects {
+			if pr.ID == s.Project && (pr.ExportURL != "" || p.in.exportOver[t.ID][pr.ID]) {
+				return api.SessionEndFinished
+			}
+		}
+	}
+	return api.SessionEndStopped
 }
 
 // slotOf returns the slot of a session.
@@ -743,7 +769,7 @@ func (p *planner) endEarlierReviewers(t board.EngineTicket, project string) {
 		}
 		p.acts = slices.DeleteFunc(p.acts, func(a action) bool { return a.kind == actUsageStop && a.session == s.ID })
 		p.lateEnds = append(p.lateEnds, action{kind: actEnd, ticket: s.Ticket, role: s.Role, project: s.Project,
-			purpose: purposeOf(s), session: s.ID, reason: newRoundText(t.ID)})
+			purpose: purposeOf(s), session: s.ID, reason: newRoundText(t.ID), endKind: api.SessionEndFinished})
 	}
 	p.kept = kept
 }
@@ -847,36 +873,18 @@ func (p *planner) newWork(blocked map[int64]api.StartBlocked) {
 	}
 }
 
-// ownText reports whether text is an attention text the planner sets on t.
-func ownText(t board.EngineTicket, text string) bool {
-	if text == "" {
-		return false
-	}
-	for _, r := range []api.Role{api.RolePM, api.RoleDeveloper, api.RoleReviewer} {
-		if text == noModelText(r) {
-			return true
-		}
-	}
-	for _, pr := range t.Projects {
-		if text == projectText(pr.ID) {
-			return true
-		}
-	}
-	return false
-}
-
 // attention sets the planner's own attention texts where they are wanted,
 // never over a text somebody else set, and clears them where they no
 // longer apply.
 func (p *planner) attention() {
 	for _, t := range p.tickets {
 		want, decided := p.want[t.ID]
-		if !decided || t.Attention == want {
+		if !decided || (t.Attention == want && (want == "" || t.AttentionOwner == board.AttentionPlanner)) {
 			continue
 		}
-		own := ownText(t, t.Attention)
+		own := t.AttentionOwner == board.AttentionPlanner
 		if (want != "" && (t.Attention == "" || own)) || (want == "" && own) {
-			p.attn = append(p.attn, action{kind: actAttention, ticket: t.ID, reason: want})
+			p.attn = append(p.attn, action{kind: actAttention, ticket: t.ID, reason: want, attentionOwner: board.AttentionPlanner})
 		}
 	}
 }

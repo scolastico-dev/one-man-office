@@ -761,7 +761,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	e.mu.Lock()
 	if e.stopping {
 		e.mu.Unlock()
-		e.endSession(ctx, sess.ID, "omo stopped", name)
+		e.endSession(ctx, sess.ID, "omo stopped", name, api.SessionEndShutdown)
 		return sess, nil
 	}
 	e.entries[sess.ID] = en
@@ -813,7 +813,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	e.mu.Lock()
 	en.agent = ag
 	if en.ending == "" && e.stopping {
-		en.ending = "omo stopped"
+		en.ending, en.endKind = "omo stopped", api.SessionEndShutdown
 	}
 	ending := en.ending
 	e.watchers.Add(1)
@@ -850,7 +850,7 @@ func (e *Engine) startWarnings(ctx context.Context, ticket int64, name string, w
 // counts the failure. An environment command that timed out fails the start
 // for a person instead: every new attempt would hang the same way.
 func (e *Engine) startFailed(ctx context.Context, en *entry, err error) {
-	e.endSession(ctx, en.sess.ID, "could not start: "+err.Error(), en.sess.Name)
+	e.endSession(ctx, en.sess.ID, "could not start: "+err.Error(), en.sess.Name, api.SessionEndCrashed)
 	if en.sess.Ticket == 0 {
 		return
 	}
@@ -867,8 +867,8 @@ func (e *Engine) startFailed(ctx context.Context, en *entry, err error) {
 }
 
 // endSession ends a session on the board, logging a failure.
-func (e *Engine) endSession(ctx context.Context, id, reason, name string) {
-	if err := e.b.EndSession(ctx, id, reason); err != nil {
+func (e *Engine) endSession(ctx context.Context, id, reason, name string, kind api.SessionEndKind) {
+	if err := e.b.EndSession(ctx, id, reason, kind); err != nil {
 		e.log.Printf("engine: end the session of %s: %s", name, scrub(err, id))
 	}
 }
