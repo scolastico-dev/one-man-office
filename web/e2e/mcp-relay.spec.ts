@@ -7,10 +7,11 @@
 // authorization server, which the Go tests of the relay fake. With
 // OMO_SCREENSHOTS=<folder> the first test also writes
 // mcp-relay-running.png and mcp-relay-tokens.png there.
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
+import { recordedProcesses } from './support/process'
 import { openBoard } from './support/board'
 import { expect, FAKE_MCP_BINARY, test, type Omo } from './support/omo'
 import { expectTerminalText, terminalIn } from './support/terminal'
@@ -40,7 +41,11 @@ async function save(page: Page, name: string) {
 }
 
 /** The environment of a fake server of this test. */
-const fakeEnv = (omo: Omo, extra: Record<string, string> = {}) => ({ FAKEMCP_SERVER: '1', [MARK]: omo.home, ...extra })
+const pidDir = (omo: Omo) => join(omo.home, 'fakemcp-pids')
+const fakeEnv = (omo: Omo, extra: Record<string, string> = {}) => {
+  mkdirSync(pidDir(omo), { recursive: true })
+  return { FAKEMCP_SERVER: '1', [MARK]: omo.home, FAKEMCP_PID_DIR: pidDir(omo), ...extra }
+}
 
 /** Stores a fake stdio server through the API. */
 async function addFake(omo: Omo, name: string, o: { roles?: string[]; global?: boolean; env?: Record<string, string> } = {}) {
@@ -57,23 +62,9 @@ async function addFake(omo: Omo, name: string, o: { roles?: string[]; global?: b
   })
 }
 
-/** Ids of the fake MCP server processes of this test that still run. Linux only (reads /proc). */
+/** Ids of the fake MCP server processes of this test that still run: each recorded its own id (internal/mcprelay/fakemcp EnvPIDDir). */
 function fakeProcesses(omo: Omo): number[] {
-  if (process.platform !== 'linux') return []
-  const want = `${MARK}=${omo.home}\0`
-  const out: number[] = []
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name)) continue
-    try {
-      if (!readFileSync(`/proc/${name}/environ`, 'latin1').includes(want)) continue
-      const stat = readFileSync(`/proc/${name}/stat`, 'latin1')
-      if (stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) === 'Z') continue
-      out.push(Number(name))
-    } catch {
-      // gone, or not ours to read
-    }
-  }
-  return out
+  return recordedProcesses(pidDir(omo))
 }
 
 interface RpcAnswer {

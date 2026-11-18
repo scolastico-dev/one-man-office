@@ -9,6 +9,7 @@ import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentProgr
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
 import { findAddress, isPortCollision } from './startup'
 import { run, type CliResult } from './run'
+import { isBelow } from './within'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -172,7 +173,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = opts.tl
   const root = realpathSync(tmpdir())
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
   try {
-    if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+    if (!isBelow(root, home)) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
     return await createOmoIn(home, opts, repo, binary)
   } catch (e) {
     rmSync(home, { recursive: true, force: true })
@@ -182,6 +183,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = opts.tl
 
 async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   mkdirSync(join(home, 'omo'), { recursive: true })
+  mkdirSync(join(home, 'agent-pids'), { recursive: true }) // fake agents record their process ids here
   const programs = opts.programs === undefined ? '' : join(home, 'programs')
   if (opts.programs !== undefined) {
     mkdirSync(programs)
@@ -209,7 +211,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
       throw new Error('the test server can reach a real agent program through its PATH')
     }
     if (port === DEFAULT_PORT) throw new Error(`the test server must not use port ${DEFAULT_PORT}`)
-    if (env.OMO_HOME === undefined || !env.OMO_HOME.startsWith(home)) throw new Error('OMO_HOME is outside the temporary home')
+    if (env.OMO_HOME === undefined || !isBelow(home, env.OMO_HOME)) throw new Error('OMO_HOME is outside the temporary home')
   }
 
   const cli = (args: string[]) => run(binary, args, env)
@@ -385,6 +387,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
     const env: Record<string, string> = {
       OMO_FAKEAGENT: '1',
       [AGENT_MARK]: home,
+      OMO_FAKE_PID_DIR: join(home, 'agent-pids'),
       GIT_AUTHOR_NAME: 'Agent',
       GIT_AUTHOR_EMAIL: 'agent@example.invalid',
       GIT_COMMITTER_NAME: 'omo',

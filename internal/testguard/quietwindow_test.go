@@ -13,13 +13,22 @@ import (
 	"testing"
 )
 
-// quietWindows finds a select that gives a short clock as one of its cases:
-// `case <-time.After(20 * time.Millisecond):` (or a timer). Used to show that
-// something has NOT happened, it passes whenever the scheduler is late, so a
-// broken join or callback order passes on a slow machine. A long deadline
-// (one second or more) is a watchdog for a hang and is allowed; what a test
-// has to wait for is observed as an event (a channel the code closes, a hook
-// it calls, synctest.Wait), not as the end of an interval.
+// quietWindows finds the ways a test turns a short clock into a negative
+// observation, "nothing happened within N ms":
+//
+//   - a short one-shot timer (`time.After(20 * time.Millisecond)`,
+//     `time.NewTimer`) in any form: in a select case, or held in a variable and
+//     read later (`timer := time.NewTimer(...)`; `case <-timer.C`). A ticker
+//     drives a polling loop and is not flagged;
+//   - a short `time.Sleep` that does not end the body of a loop, i.e. sleeps and
+//     then goes on to check something. A sleep as the last statement of a `for`
+//     body is polling for a positive condition and stays allowed.
+//
+// Such an observation passes whenever the scheduler is late, so a broken join,
+// callback order or launch passes on a slow machine. A long deadline (one
+// second or more) is a watchdog for a hang and is allowed; what a test has to
+// wait for is observed as an event (a channel the code closes, a hook it calls,
+// a state the system reports, synctest.Wait), not as the end of an interval.
 func quietWindows(raw []byte) ([]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "", raw, 0)
@@ -38,34 +47,54 @@ func quietWindows(raw []byte) ([]string, error) {
 	if timeName == "" {
 		return nil, nil
 	}
-	var out []string
-	ast.Inspect(file, func(n ast.Node) bool {
-		sel, ok := n.(*ast.SelectStmt)
-		if !ok {
-			return true
+	timeCall := func(n ast.Node, names ...string) (*ast.CallExpr, string, bool) {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return nil, "", false
 		}
-		for _, clause := range sel.Body.List {
-			comm, ok := clause.(*ast.CommClause)
-			if !ok || comm.Comm == nil {
-				continue
+		fn, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return nil, "", false
+		}
+		if pkg, ok := fn.X.(*ast.Ident); !ok || pkg.Name != timeName {
+			return nil, "", false
+		}
+		for _, name := range names {
+			if fn.Sel.Name == name {
+				return call, name, true
 			}
-			ast.Inspect(comm.Comm, func(m ast.Node) bool {
-				call, ok := m.(*ast.CallExpr)
-				if !ok || len(call.Args) != 1 {
-					return true
-				}
-				fn, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				if pkg, ok := fn.X.(*ast.Ident); !ok || pkg.Name != timeName || (fn.Sel.Name != "After" && fn.Sel.Name != "NewTimer") {
-					return true
-				}
-				if d, ok := shortDuration(call.Args[0], timeName); ok {
-					out = append(out, fmt.Sprintf("%d: a select with a %s clock (%s)", fset.Position(call.Pos()).Line, d, fn.Sel.Name))
-				}
-				return true
-			})
+		}
+		return nil, "", false
+	}
+	var out []string
+	flag := func(call *ast.CallExpr, name string) {
+		if d, ok := shortDuration(call.Args[0], timeName); ok {
+			out = append(out, fmt.Sprintf("%d: time.%s with a %s clock", fset.Position(call.Pos()).Line, name, d))
+		}
+	}
+	// A sleep ending a loop body is polling; every other short sleep is a quiet interval.
+	pollingSleeps := map[ast.Node]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		var body *ast.BlockStmt
+		switch loop := n.(type) {
+		case *ast.ForStmt:
+			body = loop.Body
+		case *ast.RangeStmt:
+			body = loop.Body
+		}
+		if body != nil && len(body.List) > 0 {
+			if stmt, ok := body.List[len(body.List)-1].(*ast.ExprStmt); ok {
+				pollingSleeps[stmt.X] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(file, func(n ast.Node) bool {
+		if call, name, ok := timeCall(n, "After", "NewTimer"); ok {
+			flag(call, name)
+		}
+		if call, name, ok := timeCall(n, "Sleep"); ok && !pollingSleeps[call] {
+			flag(call, name)
 		}
 		return true
 	})
@@ -116,16 +145,28 @@ func shortDuration(e ast.Expr, timeName string) (string, bool) {
 	return "", false
 }
 
+func quietIn(t *testing.T, body string) []string {
+	t.Helper()
+	got, err := quietWindows([]byte("package p\nimport \"time\"\nvar timeout = time.Second\nfunc f(done chan int, check func() bool) {\n" + body + "\n}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestQuietWindowGuardRecognizesShortClocks(t *testing.T) {
 	for _, body := range []string{
 		"select {\ncase <-done:\ncase <-time.After(20 * time.Millisecond):\n}",
 		"select {\ncase <-done:\ncase <-time.After(time.Millisecond):\n}",
 		"select {\ncase <-done:\ncase <-time.NewTimer(500 * time.Microsecond).C:\n}",
 		"select {\ncase <-time.After(999 * time.Millisecond):\ncase <-done:\n}",
+		"timer := time.NewTimer(20 * time.Millisecond)\nselect {\ncase <-done:\ncase <-timer.C:\n}",
+		"time.Sleep(200 * time.Millisecond)\nif check() {\n}",
+		"for i := 0; i < 3; i++ {\ntime.Sleep(10 * time.Millisecond)\n_ = check()\n}",
+		"_ = time.After(20 * time.Millisecond)",
 	} {
-		got, err := quietWindows([]byte("package p\nimport \"time\"\nfunc f(done chan int) {\n" + body + "\n}\n"))
-		if err != nil || len(got) != 1 {
-			t.Errorf("%q: %v %v", body, got, err)
+		if got := quietIn(t, body); len(got) != 1 {
+			t.Errorf("%q: %v", body, got)
 		}
 	}
 	aliased, _ := quietWindows([]byte("package p\nimport tm \"time\"\nfunc f(d chan int) {\nselect {\ncase <-d:\ncase <-tm.After(5 * tm.Millisecond):\n}\n}\n"))
@@ -134,18 +175,20 @@ func TestQuietWindowGuardRecognizesShortClocks(t *testing.T) {
 	}
 }
 
-func TestQuietWindowGuardAllowsWatchdogsAndOtherUses(t *testing.T) {
+func TestQuietWindowGuardAllowsWatchdogsAndPositivePolling(t *testing.T) {
 	for _, body := range []string{
 		"select {\ncase <-done:\ncase <-time.After(5 * time.Second):\n}",
 		"select {\ncase <-done:\ncase <-time.After(1000 * time.Millisecond):\n}",
 		"select {\ncase <-done:\ncase <-time.After(timeout):\n}",
 		"select {\ncase <-done:\ndefault:\n}",
-		"time.Sleep(10 * time.Millisecond)",
-		"_ = time.After(20 * time.Millisecond)",
+		"for !check() {\ntime.Sleep(10 * time.Millisecond)\n}",
+		"for {\nif check() {\nreturn\n}\ntime.Sleep(time.Millisecond)\n}",
+		"for range 3 {\ntime.Sleep(time.Millisecond)\n}",
+		"tick := time.NewTicker(10 * time.Millisecond)\n_ = tick",
+		"time.Sleep(2 * time.Second)",
 	} {
-		got, err := quietWindows([]byte("package p\nimport \"time\"\nvar timeout = time.Second\nfunc f(done chan int) {\n" + body + "\n}\n"))
-		if err != nil || len(got) != 0 {
-			t.Errorf("%q: %v %v", body, got, err)
+		if got := quietIn(t, body); len(got) != 0 {
+			t.Errorf("%q: %v", body, got)
 		}
 	}
 }

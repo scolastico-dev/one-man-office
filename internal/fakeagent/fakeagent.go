@@ -80,6 +80,10 @@ func Main() int {
 	if os.Getenv(EnvBridge) == "1" {
 		return bridgeMain()
 	}
+	if err := recordPID(); err != nil {
+		fmt.Fprintf(os.Stdout, "fake: %v\n", err)
+		return ExitFailed
+	}
 	var in io.Reader = os.Stdin
 	if swallow, deaf, paste, ok := composerSettings(); ok {
 		if err := rawInput(os.Stdin); err != nil {

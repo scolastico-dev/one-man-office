@@ -38,7 +38,7 @@ test.describe('a developer that works and stays', () => {
     await expect.poll(() => git(repo, 'log', '--format=%s', branch)).toContain('feat: hello')
 
     // The process check sees the running agent, so an empty result later means something.
-    if (process.platform === 'linux') expect(agentProcesses(omo).length).toBeGreaterThan(0)
+    expect(agentProcesses(omo).length).toBeGreaterThan(0)
 
     // Stopping the server ends the agent and leaves no process behind.
     await expectNoAgentProcesses(omo)

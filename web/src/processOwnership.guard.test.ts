@@ -19,7 +19,8 @@ const INVENTORY: Record<string, string> = {
   'e2e/support/omo.ts':
     'RETAINED. The omo server binary under test, started directly; stop() sends SIGTERM and escalates to SIGKILL, and awaits the exit. The agents omo itself starts belong to the product (graceful stop and recovery in internal/engine); containment of them at launch on Windows is product work outside this class.',
   'e2e/global-setup.ts': 'RETAINED. execFileSync `go build` of test tools: synchronous, returns only after the go command and its compilers ended; nothing is left running.',
-  'e2e/support/editor.ts': 'RETAINED. execFileSync of the built testcert tool (a throw-away certificate) and, on macOS and the BSDs only, `ps` for a process state: both synchronous, return only after the program ended; nothing is left running.',
+  'e2e/support/editor.ts': 'RETAINED. execFileSync of the built testcert tool (a throw-away certificate): synchronous, returns only after the program ended; nothing is left running.',
+  'e2e/support/process.ts': 'RETAINED. execFileSync `ps -o stat= -p <pid>` on macOS and the BSDs to read one process state: synchronous and short, no long-lived child.',
   'e2e/support/git.ts': 'RETAINED. execFileSync git: synchronous and short, no long-lived child.',
   'e2e/support/workspace.ts': 'RETAINED. execFileSync git: synchronous and short, no long-lived child.',
   'e2e/support/plugin.ts': 'RETAINED. execFileSync git: synchronous and short, no long-lived child.',

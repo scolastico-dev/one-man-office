@@ -16,8 +16,6 @@ import (
 	"time"
 )
 
-func setFallback(pool *x509.CertPool) { x509.SetFallbackRoots(pool) }
-
 // newServer starts a TLS server whose certificate is generated here, so two
 // servers never share an authority (httptest's built-in certificate is one
 // fixed pair for every server).

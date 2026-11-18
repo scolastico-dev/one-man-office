@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
+import { recordedProcesses } from './support/process'
 import { expectCardIn, nudgeReconnect, observe, openBoard } from './support/board'
 import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page, WebSocketRoute } from '@playwright/test'
@@ -25,26 +26,11 @@ async function closeAll(omo: Omo): Promise<void> {
 }
 
 /**
- * Ids of the user shells of this test that are still alive: they carry the
- * test's home and omo's socket but no agent id. Linux only; elsewhere none.
+ * Ids of the user shells of this test that are still alive. Each shell's startup file (below) appends the shell's own
+ * process id to a file of the test's home, and the operating system is asked about every one.
  */
 function shellProcesses(omo: Omo): number[] {
-  if (process.platform !== 'linux') return []
-  const home = `HOME=${omo.home}\0`
-  const left: number[] = []
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name)) continue
-    try {
-      const env = readFileSync(`/proc/${name}/environ`, 'latin1')
-      if (!env.includes(home) || !env.includes('\0OMO_SOCKET=') || env.includes('OMO_AGENT_ID=')) continue
-      const stat = readFileSync(`/proc/${name}/stat`, 'latin1')
-      if (stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) === 'Z') continue
-      left.push(Number(name))
-    } catch {
-      // gone, or not ours to read
-    }
-  }
-  return left
+  return recordedProcesses(join(omo.home, 'shell-pids'))
 }
 
 async function expectNoShellsLeft(omo: Omo): Promise<void> {
@@ -57,7 +43,11 @@ async function expectNoShellsLeft(omo: Omo): Promise<void> {
  * what a test types. An empty startup file stops it; other shells ignore it.
  */
 test.beforeEach(({ omo }) => {
-  writeFileSync(join(omo.home, '.zshrc'), '')
+  // The startup file also records the shell's process id: shellProcesses() asks the system about it.
+  const record = 'echo $$ >> "$HOME/shell-pids"\n'
+  writeFileSync(join(omo.home, 'shell-pids'), '')
+  writeFileSync(join(omo.home, '.zshrc'), record)
+  writeFileSync(join(omo.home, '.bashrc'), record)
 })
 
 const sidebar = (page: Page) => page.locator('[data-sidebar]')
@@ -100,7 +90,7 @@ test('a shell opened in the project runs commands and survives a reload with its
     await expectTerminalText(terminal, 'agent=none')
 
     // The process check sees a running shell, so an empty result later means something.
-    if (process.platform === 'linux') expect(shellProcesses(omo).length).toBeGreaterThan(0)
+    expect(shellProcesses(omo).length).toBeGreaterThan(0)
 
     // A reload keeps the shell running: its list entry opens it again with the output so far.
     await page.reload()

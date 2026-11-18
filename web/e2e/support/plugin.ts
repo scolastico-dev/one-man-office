@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { initRepo } from './git'
 import { REPO_DIR } from './omo'
 import { withoutShellConfig } from './env'
+import { isBelow } from './within'
 
 const GIT_ENV = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) =>
@@ -32,7 +33,7 @@ export function makePlugin(dir: string, manifest: object, files: Record<string, 
   const tmp = realpathSync(tmpdir())
   mkdirSync(dir, { recursive: true })
   const root = realpathSync(dir)
-  if (!root.startsWith(tmp + '/')) throw new Error(`${root} is not below the temporary folder ${tmp}`)
+  if (!isBelow(tmp, root)) throw new Error(`${root} is not below the temporary folder ${tmp}`)
   const work = join(root, 'work')
   const bare = join(root, 'plugin.git')
   initRepo(work)
@@ -42,7 +43,7 @@ export function makePlugin(dir: string, manifest: object, files: Record<string, 
     if (m !== null) writeFileSync(join(work, 'plugin.json'), JSON.stringify(m, null, 2))
     for (const [rel, text] of Object.entries(f)) {
       const p = resolve(work, rel)
-      if (!p.startsWith(work + '/')) throw new Error(`${rel} leaves the plugin folder`)
+      if (!isBelow(work, p)) throw new Error(`${rel} leaves the plugin folder`)
       mkdirSync(dirname(p), { recursive: true })
       writeFileSync(p, text)
     }
@@ -82,7 +83,7 @@ export function makePluginList(bare: string, extra: ListEntry[] = []): string {
   const tmp = realpathSync(tmpdir())
   mkdirSync(dirname(bare), { recursive: true })
   const root = realpathSync(dirname(bare))
-  if (!root.startsWith(tmp + '/')) throw new Error(`${root} is not below the temporary folder ${tmp}`)
+  if (!isBelow(tmp, root)) throw new Error(`${root} is not below the temporary folder ${tmp}`)
   const work = join(root, 'plugin-list-work')
   initRepo(work)
   cpSync(join(REPO_DIR, 'plugins'), join(work, 'plugins'), { recursive: true })
