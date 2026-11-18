@@ -23,7 +23,8 @@ import (
 //   - runtime.Gosched in a loop with a fixed bound or none, and a fixed-count
 //     loop around a select with a default clause: "nothing happened after N
 //     yields" is a negative observation that depends on how the scheduler runs
-//     the other goroutine, so it can miss the very bug it names. Observe the
+//     the other goroutine (a bound is a literal or a name bound once to one;
+//     a computed bound is not resolved), so it can miss the very bug it names. Observe the
 //     exact boundary instead (synctest.Wait, a held channel). The one allowed
 //     use is a yield inside a loop that polls a real positive condition
 //     (`for !cond() { ... runtime.Gosched() }`).
@@ -54,6 +55,39 @@ func completionGuesses(raw []byte) ([]string, error) {
 		id, ok := sel.X.(*ast.Ident)
 		return ok && id.Name == runtimeName && sel.Sel.Name == name
 	}
+	// Names bound once to an integer literal (`const tries = 2000`,
+	// `limit := 50`) count as literals in a loop bound.
+	intNames := map[string]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch d := n.(type) {
+		case *ast.ValueSpec:
+			for i, name := range d.Names {
+				if lit, ok := valueAt(d.Values, i).(*ast.BasicLit); ok && lit.Kind == token.INT {
+					intNames[name.Name] = true
+				}
+			}
+		case *ast.AssignStmt:
+			if d.Tok == token.DEFINE {
+				for i, lhs := range d.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						if lit, ok := valueAt(d.Rhs, i).(*ast.BasicLit); ok && lit.Kind == token.INT {
+							intNames[id.Name] = true
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	isInt := func(e ast.Expr) bool {
+		switch v := e.(type) {
+		case *ast.BasicLit:
+			return v.Kind == token.INT
+		case *ast.Ident:
+			return intNames[v.Name]
+		}
+		return false
+	}
 	// fixedBound reports a loop that runs a fixed number of times or forever.
 	fixedBound := func(loop ast.Node) bool {
 		switch l := loop.(type) {
@@ -68,7 +102,7 @@ func completionGuesses(raw []byte) ([]string, error) {
 				return false
 			}
 			for _, side := range []ast.Expr{bin.X, bin.Y} {
-				if lit, ok := side.(*ast.BasicLit); ok && lit.Kind == token.INT {
+				if isInt(side) {
 					return true
 				}
 			}
@@ -80,8 +114,7 @@ func completionGuesses(raw []byte) ([]string, error) {
 	counted := func(loop ast.Node) bool {
 		switch l := loop.(type) {
 		case *ast.RangeStmt:
-			lit, ok := l.X.(*ast.BasicLit)
-			return ok && lit.Kind == token.INT
+			return isInt(l.X)
 		case *ast.ForStmt:
 			return l.Cond != nil && fixedBound(loop)
 		}
@@ -162,6 +195,13 @@ func completionGuesses(raw []byte) ([]string, error) {
 	return problems, nil
 }
 
+func valueAt(values []ast.Expr, i int) ast.Expr {
+	if i < len(values) {
+		return values[i]
+	}
+	return nil
+}
+
 func TestCompletionGuessGuardRecognizesGuesses(t *testing.T) {
 	for name, body := range map[string]string{
 		"global count":      `n := runtime.NumGoroutine(); _ = n`,
@@ -171,6 +211,8 @@ func TestCompletionGuessGuardRecognizesGuesses(t *testing.T) {
 		"quiet window":      `for range 2000 { select { case <-done: t.Fatal("early"); default: runtime.Gosched() } }`,
 		"quiet window slow": `for i := 0; i < 50; i++ { select { case <-done: t.Fatal("early"); default: time.Sleep(time.Millisecond) } }`,
 		"bare yield":        `runtime.Gosched()`,
+		"named bound":       `const tries = 2000; for range tries { select { case <-done: t.Fatal("early"); default: } }`,
+		"named counter":     `limit := 50; for i := 0; i < limit; i++ { select { case <-done: t.Fatal("early"); default: } }`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := `package sample; import "runtime"; import "time"; func TestCase(t *testing.T) { var done chan struct{}; _ = time.Second; ` + body + ` }`

@@ -61,7 +61,10 @@ has not returned while a channel holds it), and `synctest.Test` returns only
 when every goroutine the code under test started has ended, which is the owned
 leak check. `internal/testguard/completion_scan_test.go` rejects both guesses in
 every Go file; a loop that polls a real condition (`for !cond() { runtime.Gosched() }`)
-stays valid.
+stays valid. The web side has the same rule for microtasks: `web/src/completion.guard.test.ts`
+rejects a counted loop of `await Promise.resolve()` (or three in a row), and
+fake-timer tests flush with one real macrotask (`flush` in
+`api/eventStream.test.ts`), the exact point after which no promise work is left.
 
 Separate a behavioral deadline (the timeout being tested) from a generous
 watchdog that only prevents a hung test. Explain watchdog choices in a comment.
