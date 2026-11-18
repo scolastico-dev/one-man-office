@@ -59,7 +59,8 @@ func TestOnlyKnownTestsBuildAndStartOmo(t *testing.T) {
 		data, _ := os.ReadFile(path)
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
-		if strings.Contains(string(data), `"go", "build"`) && !known[rel] {
+		builds := strings.Contains(string(data), `"go", "build"`) || strings.Contains(string(data), "childenvtest.GoBuild(")
+		if builds && !known[rel] {
 			t.Errorf("%s builds a binary: list it in this test, and give a started omo a PATH from testpath.Without", rel)
 		}
 		if rel == "cmd/omo/smoke_test.go" && !strings.Contains(string(data), "testpath.Without") {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
@@ -61,7 +62,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("GIT_AUTHOR_EMAIL", "omo@test")
 	os.Setenv("GIT_COMMITTER_NAME", "omo-test")
 	os.Setenv("GIT_COMMITTER_EMAIL", "omo@test")
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 func TestWorktreeAddRemove(t *testing.T) {

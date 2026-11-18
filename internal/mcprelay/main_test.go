@@ -102,7 +102,7 @@ func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *f
 	t.Helper()
 	f := &fixture{t: t, events: &events{}, logDir: t.TempDir(), home: t.TempDir(), servers: servers, store: NewMemoryStore()}
 	// Strip inherited board credentials before adding fixture-only samples.
-	f.env = childEnvironment(childenv.Inherited(), map[string]string{
+	f.env = childEnvironment(childenvtest.ShellEnv(childenv.Inherited(), f.home), map[string]string{
 		"HOME": f.home, "USERPROFILE": f.home, "XDG_CONFIG_HOME": t.TempDir(), "APPDATA": t.TempDir(),
 		"GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_SYSTEM": os.DevNull, "GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_PARAMETERS": "",

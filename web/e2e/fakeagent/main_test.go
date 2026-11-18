@@ -18,16 +18,14 @@ func build(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	if out, err := exec.Command("go", "build", "-o", exe, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	childenvtest.GoBuild(t, ".", exe)
 	return exe
 }
 
 // environment drops inherited omo state before adding this test's values.
-func environment(extra ...string) []string {
+func environment(t *testing.T, extra ...string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range childenvtest.ShellEnv(os.Environ(), t.TempDir()) {
 		if strings.HasPrefix(strings.ToUpper(kv), "OMO_") {
 			continue
 		}
@@ -38,7 +36,7 @@ func environment(extra ...string) []string {
 
 func TestRefusesWithoutEnable(t *testing.T) {
 	cmd := exec.Command(build(t))
-	cmd.Env = environment()
+	cmd.Env = environment(t)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -53,7 +51,7 @@ func TestRefusesWithoutEnable(t *testing.T) {
 
 func TestRunsWhenEnabled(t *testing.T) {
 	cmd := exec.Command(build(t))
-	cmd.Env = environment("OMO_FAKEAGENT=1", "OMO_FAKE_SCRIPT=print|hello from the fake")
+	cmd.Env = environment(t, "OMO_FAKEAGENT=1", "OMO_FAKE_SCRIPT=print|hello from the fake")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +63,6 @@ func TestRunsWhenEnabled(t *testing.T) {
 
 func TestEnvironmentDropsInheritedOmo(t *testing.T) {
 	childenvtest.SetOmo(t)
-	childenvtest.CheckOmo(t, environment(), nil)
-	childenvtest.CheckOmo(t, environment("OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
+	childenvtest.CheckOmo(t, environment(t), nil)
+	childenvtest.CheckOmo(t, environment(t, "OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
 }

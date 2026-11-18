@@ -23,16 +23,14 @@ func build(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	if out, err := exec.Command("go", "build", "-o", exe, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	childenvtest.GoBuild(t, ".", exe)
 	return exe
 }
 
 // environment drops inherited omo state before adding this test's values.
-func environment(extra ...string) []string {
+func environment(t *testing.T, extra ...string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range childenvtest.ShellEnv(os.Environ(), t.TempDir()) {
 		if strings.HasPrefix(strings.ToUpper(kv), "OMO_") || strings.HasPrefix(kv, fakemcp.EnvEnable+"=") {
 			continue
 		}
@@ -43,7 +41,7 @@ func environment(extra ...string) []string {
 
 func TestRefusesWithoutEnable(t *testing.T) {
 	cmd := exec.Command(build(t))
-	cmd.Env = environment()
+	cmd.Env = environment(t)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -58,7 +56,7 @@ func TestRefusesWithoutEnable(t *testing.T) {
 
 func TestServesItsToolsWhenEnabled(t *testing.T) {
 	cmd := exec.Command(build(t))
-	cmd.Env = environment(fakemcp.EnvEnable + "=1")
+	cmd.Env = environment(t, fakemcp.EnvEnable+"=1")
 	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	cs, err := c.Connect(context.Background(), &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
@@ -76,12 +74,12 @@ func TestServesItsToolsWhenEnabled(t *testing.T) {
 
 func TestEnvironmentDropsInheritedOmo(t *testing.T) {
 	t.Setenv(fakemcp.EnvEnable, "1")
-	for _, entry := range environment() {
+	for _, entry := range environment(t) {
 		if strings.HasPrefix(entry, fakemcp.EnvEnable+"=") {
 			t.Errorf("test environment leaks %s", fakemcp.EnvEnable)
 		}
 	}
 	childenvtest.SetOmo(t)
-	childenvtest.CheckOmo(t, environment(), nil)
-	childenvtest.CheckOmo(t, environment("OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
+	childenvtest.CheckOmo(t, environment(t), nil)
+	childenvtest.CheckOmo(t, environment(t, "OMO_FAKE_SCRIPT=test-owned"), map[string]string{"OMO_FAKE_SCRIPT": "test-owned"})
 }

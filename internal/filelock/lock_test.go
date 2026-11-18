@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func TestLockCoordinatesProcessesAndReleases(t *testing.T) {
@@ -20,7 +22,7 @@ func TestLockCoordinatesProcessesAndReleases(t *testing.T) {
 	child := func(want string) {
 		t.Helper()
 		cmd := exec.Command(os.Args[0], "-test.run=^TestLockChildProcess$")
-		cmd.Env = append(os.Environ(), "OMO_LOCK_TEST_PATH="+path, "OMO_LOCK_TEST_WANT="+want)
+		cmd.Env = append(childenvtest.ShellEnv(os.Environ(), t.TempDir()), "OMO_LOCK_TEST_PATH="+path, "OMO_LOCK_TEST_WANT="+want)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("child: %v %s", err, out)
 		}

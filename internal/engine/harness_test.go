@@ -17,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
@@ -34,7 +35,7 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeagent.Main())
 	}
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 // ---- fake runner and agent ----

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
@@ -47,6 +48,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	gittest.Isolate()
+	childenvtest.IsolateShell(home)
 	for k, v := range map[string]string{
 		"HOME":                home,
 		"XDG_CONFIG_HOME":     filepath.Join(home, ".config"),

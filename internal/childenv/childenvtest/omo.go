@@ -10,6 +10,20 @@ import (
 //go:embed testdata/omo-variables.txt
 var omoVariables string
 
+// WithoutOmo removes inherited session state before a test adds its own.
+// It also serves pure Go build commands, which need the existing build caches
+// but must never inherit the live board's identity.
+func WithoutOmo(base []string) []string {
+	env := make([]string, 0, len(base))
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.HasPrefix(strings.ToUpper(key), "OMO_") {
+			env = append(env, entry)
+		}
+	}
+	return env
+}
+
 // SetOmo poisons every known omo variable, plus future and mixed-case names.
 // It is for environment guards only: no process should use these values.
 func SetOmo(t testing.TB) {

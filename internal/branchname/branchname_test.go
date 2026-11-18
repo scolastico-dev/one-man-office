@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func TestCheck(t *testing.T) {
@@ -132,7 +134,7 @@ func TestExpandedNamesAreValidBranches(t *testing.T) {
 			}
 			cmd := exec.Command(git, "check-ref-format", "--branch", name)
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+			cmd.Env = append(childenvtest.WithoutOmo(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Errorf("%q, %q: git refuses %q: %v %s", tmpl, title, name, err, out)
 			}

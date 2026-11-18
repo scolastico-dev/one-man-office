@@ -22,6 +22,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 )
@@ -40,8 +41,8 @@ func shellServer(t *testing.T, mutate ...func(*serverconfig.Config)) (*Server, *
 func isolateShells(t *testing.T) {
 	t.Helper()
 	isolateAgents(t)
+	childenvtest.ClearShell(t)
 	t.Setenv("SHELL", "/bin/sh")
-	t.Setenv("ENV", "")
 }
 
 // openShell opens a user shell through the browser listener and expects 201.

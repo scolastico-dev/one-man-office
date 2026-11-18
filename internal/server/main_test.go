@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
@@ -20,5 +21,5 @@ func TestMain(m *testing.M) {
 		os.Exit(fakemcp.Main())
 	}
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
