@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
-import { type AgentRole, type Omo } from './omo'
-import { recordedProcesses } from './process'
+import { AGENT_MARK, type AgentRole, type Omo } from './omo'
+import { markedProcesses, recordedProcesses, unionOf } from './process'
 
 /** The fields of a session the tests read (the server sends more). */
 export interface AgentSession {
@@ -68,7 +68,8 @@ export function agentPidDir(omo: Omo): string {
  * started, says so by answering an empty list from a folder that is there.
  */
 export function agentProcesses(omo: Omo): number[] {
-  return recordedProcesses(agentPidDir(omo))
+  // The recorded agents on every platform, and on Linux also every process that inherited the test's mark (their children, the MCP bridge).
+  return unionOf(recordedProcesses(agentPidDir(omo)), markedProcesses((env) => env.includes(`${AGENT_MARK}=${omo.agentMark}\0`)))
 }
 
 /** Stops omo and expects that no agent process of this test is left (they end a moment after the server). */

@@ -11,7 +11,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
-import { recordedProcesses } from './support/process'
+import { markedProcesses, recordedProcesses, unionOf } from './support/process'
 import { openBoard } from './support/board'
 import { expect, FAKE_MCP_BINARY, test, type Omo } from './support/omo'
 import { expectTerminalText, terminalIn } from './support/terminal'
@@ -64,7 +64,7 @@ async function addFake(omo: Omo, name: string, o: { roles?: string[]; global?: b
 
 /** Ids of the fake MCP server processes of this test that still run: each recorded its own id (internal/mcprelay/fakemcp EnvPIDDir). */
 function fakeProcesses(omo: Omo): number[] {
-  return recordedProcesses(pidDir(omo))
+  return unionOf(recordedProcesses(pidDir(omo)), markedProcesses((env) => env.includes(`${MARK}=${omo.home}\0`)))
 }
 
 interface RpcAnswer {

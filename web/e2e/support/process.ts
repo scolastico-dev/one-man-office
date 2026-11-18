@@ -30,3 +30,28 @@ export function recordedProcesses(path: string): number[] {
   const ids = stat.isDirectory() ? readdirSync(path) : readFileSync(path, 'utf8').split(/\r?\n/)
   return ids.filter((id) => /^\d+$/.test(id)).map(Number).filter(processAlive)
 }
+
+/**
+ * Linux only, in addition to what the programs recorded: every process whose environment `matches`, which includes the
+ * descendants (shell children, git, the MCP bridge) that inherited the test's mark and recorded nothing. Elsewhere it
+ * adds nothing, and the recorded processes are still checked.
+ */
+export function markedProcesses(matches: (environ: string) => boolean): number[] {
+  const found: number[] = []
+  for (const name of process.platform === 'linux' ? readdirSync('/proc') : []) {
+    if (!/^\d+$/.test(name)) continue
+    try {
+      if (!matches(readFileSync(`/proc/${name}/environ`, 'latin1'))) continue
+      // A process that has exited but is not yet collected is no leftover.
+      const stat = readFileSync(`/proc/${name}/stat`, 'latin1')
+      if (stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) === 'Z') continue
+      found.push(Number(name))
+    } catch {
+      // gone, or not ours to read
+    }
+  }
+  return found
+}
+
+/** The union of two process lists, each id once. */
+export const unionOf = (a: number[], b: number[]): number[] => [...new Set([...a, ...b])].sort((x, y) => x - y)

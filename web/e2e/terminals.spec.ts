@@ -2,7 +2,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
-import { recordedProcesses } from './support/process'
+import { markedProcesses, recordedProcesses, unionOf } from './support/process'
 import { expectCardIn, nudgeReconnect, observe, openBoard } from './support/board'
 import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page, WebSocketRoute } from '@playwright/test'
@@ -30,7 +30,11 @@ async function closeAll(omo: Omo): Promise<void> {
  * process id to a file of the test's home, and the operating system is asked about every one.
  */
 function shellProcesses(omo: Omo): number[] {
-  return recordedProcesses(join(omo.home, 'shell-pids'))
+  const home = `HOME=${omo.home}\0`
+  return unionOf(
+    recordedProcesses(join(omo.home, 'shell-pids')),
+    markedProcesses((env) => env.includes(home) && env.includes('\0OMO_SOCKET=') && !env.includes('OMO_AGENT_ID=')),
+  )
 }
 
 async function expectNoShellsLeft(omo: Omo): Promise<void> {
