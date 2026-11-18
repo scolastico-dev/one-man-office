@@ -15,6 +15,7 @@ import type {
   MCPTestResult,
   MCPToken,
   Project,
+  ProxyForward,
   ServerInfo,
   SettingsResponse,
   TicketList,
@@ -277,6 +278,7 @@ export class FakeMcp {
 export class FakeOmo {
   /** omo's MCP routes. */
   mcp = new FakeMcp()
+  forwards: ProxyForward[] = []
   tickets: TicketSummary[] = []
   projects: Project[] = []
   paused = false
@@ -386,6 +388,8 @@ export class FakeOmo {
         const p = this.page(done)
         return { ...p, tickets: [...this.tickets.filter((t) => t.column !== 'done'), ...p.tickets], event_id: this.eventId } satisfies TicketList
       }
+      case '/api/proxy/forwards':
+        return { forwards: this.forwards.filter((f) => query?.ticket === undefined || f.ticket === Number(query.ticket)) }
       case '/api/projects':
         return this.projects
       case '/api/server':

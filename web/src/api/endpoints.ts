@@ -1,6 +1,9 @@
 import type { ApiClient, ApiResult, Query } from './client'
 import type {
   AgentEnvCheck,
+  ProxyForwardList,
+  CreateProxyForward,
+  ProxyForward,
   ImportApply,
   ImportPlan,
   ImportResult,
@@ -654,4 +657,22 @@ export function getOAuthConsent(c: ApiClient, query: string): R<OAuthConsent> {
 /** The user's answer to the authorization request; answers where the browser goes next. */
 export function decideOAuthConsent(c: ApiClient, query: string, approve: boolean): R<OAuthRedirect> {
   return c.send('POST', '/api/oauth/consent', { query, approve })
+}
+
+/** All forwards, or only the forwards owned by one ticket. */
+export function listProxyForwards(c: ApiClient, ticket?: number): R<ProxyForwardList> {
+  return c.get('/api/proxy/forwards', { ticket })
+}
+
+export function createProxyForward(c: ApiClient, body: CreateProxyForward): R<ProxyForward> {
+  return c.send('POST', '/api/proxy/forwards', body)
+}
+
+export function removeProxyForward(c: ApiClient, id: string): R<unknown> {
+  return c.send('DELETE', `/api/proxy/forwards/${seg(id)}`)
+}
+
+/** The server owns the destination and proxy sign-in; the board token stays in API headers. */
+export function openProxyForward(c: ApiClient, id: string): R<{ url: string }> {
+  return c.send('POST', `/api/proxy/forwards/${seg(id)}/open`, {})
 }

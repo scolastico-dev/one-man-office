@@ -15,6 +15,7 @@ import NewTicketButton from './NewTicketButton.vue'
 import PauseSwitch from './PauseSwitch.vue'
 import SettingsLink from './SettingsLink.vue'
 import StopAllButton from './StopAllButton.vue'
+import ForwardsButton from '../proxy/ForwardsButton.vue'
 
 const store = useBoard()
 const sidebar = useSidebar()
@@ -52,6 +53,7 @@ const onSettings = computed(() => route.name === 'settings' || onTicketPage(rout
           </svg>
         </IconButton>
         <slot name="notifications" />
+        <ForwardsButton />
         <SettingsLink />
       </div>
     </div>
