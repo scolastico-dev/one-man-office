@@ -201,6 +201,7 @@ export async function startFixture({
   env = fixtureEnv(),
   tmp = tmpdir(),
   end = {},
+  remove = (folder) => rmSync(folder, { recursive: true, force: true }),
   onSpawn,
   onOutput,
 } = {}) {
@@ -212,22 +213,40 @@ export async function startFixture({
   let dir
   let current // the process that is running now: the build, then the helper
   // Ends what runs and waits for its close, then removes the folder. Always runs both steps, whatever the first does.
+  // The folder is removed through `remove` (a test seam; default `rmSync`). A failure to end the process and a failure to remove
+  // the folder are both reported, together when both happen: the folder of a process that could not be ended may be impossible
+  // to delete (Windows cannot delete a running executable), and that must come out as a message, never as a folder left unseen.
+  const removeDir = () => {
+    try {
+      remove(dir)
+    } catch (error) {
+      throw new Error(`could not remove the build folder ${dir}: ${error.message}`, { cause: error })
+    }
+  }
   const teardown = async () => {
+    const errors = []
     try {
       if (current) {
         endProcess(current.child, { tree: current.tree, ...end })
         await current.ended
       }
-    } finally {
-      unwatch(entry)
-      if (dir) rmSync(dir, { recursive: true, force: true })
+    } catch (error) {
+      errors.push(error)
     }
+    unwatch(entry)
+    try {
+      if (dir) removeDir()
+    } catch (error) {
+      errors.push(error)
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1) throw new AggregateError(errors, errors.map((error) => error.message).join('\nand '))
   }
   const entry = {
     teardown,
     quick() {
       if (current) endProcess(current.child, { tree: current.tree, ...end })
-      if (dir) rmSync(dir, { recursive: true, force: true })
+      if (dir) removeDir()
     },
   }
   watch(entry)

@@ -267,14 +267,73 @@ describe('a kill that fails', () => {
         onSpawn: (pid) => { held = pid },
       })
       expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
-      await expect(run.stop()).rejects.toThrow(/not permitted/)
-      expect(readdirSync(tmp)).toEqual([])
+      const failure = await run.stop().then(() => new Error('stop did not reject'), (error: Error) => error)
+      expect(failure.message).toMatch(/not permitted/)
+      // The process still runs. Where a running executable can be deleted the folder is gone; where it cannot (Windows)
+      // the folder stays, and then the failure must say so: a folder is never left behind without being reported.
+      expect(readdirSync(tmp).length === 0 || /could not remove the build folder/.test(failure.message), failure.message).toBe(true)
       expect(process.listenerCount('SIGINT')).toBe(listeners)
     } finally {
       // The refused kill left the helper running: end it for real (a directly owned process, ended the same way on every platform).
       if (held > 0) process.kill(held, 'SIGKILL')
       await helperGone
       server.close()
+    }
+  }, 120_000)
+
+  it('is reported by stop for a helper that has no folder of its own, and the handlers are released', async () => {
+    const listeners = process.listenerCount('SIGINT')
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    const run = await startFixture({
+      command: process.execPath,
+      args: ['-e', `process.stdout.write('PROXY_BROWSER_FIXTURES []\\n'); process.stdin.resume()`],
+      end: { kill: denied },
+      onSpawn: (pid) => { held = pid },
+    })
+    try {
+      expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+      await expect(run.stop()).rejects.toThrow(/not permitted/)
+      expect(process.listenerCount('SIGINT')).toBe(listeners)
+      expect(alive(held)).toBe(true)
+    } finally {
+      process.kill(held, 'SIGKILL')
+    }
+  })
+})
+
+describe('a build folder that cannot be removed', () => {
+  it('is reported by stop after the helper was closed, with the handlers released', async () => {
+    const tmp = own()
+    const listeners = process.listenerCount('SIGINT')
+    let held = 0
+    let runningWhenRemoved: boolean | undefined
+    const remove = () => {
+      runningWhenRemoved = alive(held)
+      throw Object.assign(new Error('the folder is in use'), { code: 'EBUSY' })
+    }
+    const run = await startFixture({ cwd: goHelper(), build: { pkg: '.' }, args: HELPER_ARGS, tmp, remove, onSpawn: (pid) => { held = pid } })
+    expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+    await expect(run.stop()).rejects.toThrow(/could not remove the build folder.*in use/s)
+    // The removal was tried only once the process was closed, and the failure did not keep the handlers.
+    expect(runningWhenRemoved).toBe(false)
+    expect(process.listenerCount('SIGINT')).toBe(listeners)
+    // A failure that persists is reported again, not forgotten.
+    await expect(run.stop()).rejects.toThrow(/could not remove the build folder/)
+  }, 120_000)
+
+  it('is reported together with a kill that failed', async () => {
+    const tmp = own()
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    const stuck = () => { throw Object.assign(new Error('the folder is in use'), { code: 'EBUSY' }) }
+    const run = await startFixture({ cwd: goHelper(), build: { pkg: '.' }, args: HELPER_ARGS, tmp, end: { kill: denied }, remove: stuck, onSpawn: (pid) => { held = pid } })
+    try {
+      const failure = await run.stop().then(() => new Error('stop did not reject'), (error: Error) => error)
+      expect(failure.message).toMatch(/not permitted/)
+      expect(failure.message).toMatch(/could not remove the build folder.*in use/s)
+    } finally {
+      process.kill(held, 'SIGKILL')
     }
   }, 120_000)
 })

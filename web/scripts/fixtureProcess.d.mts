@@ -19,6 +19,8 @@ export interface FixtureOptions {
   env?: NodeJS.ProcessEnv
   /** Test seam: replaces the kill steps of `endProcess` for the helper. */
   end?: EndOptions
+  /** Test seam: removes the build folder (default a recursive, forced `rmSync`). A failure is reported with the folder named. */
+  remove?: (folder: string) => void
   /** Called with the process id as soon as the helper is started. */
   onSpawn?: (pid: number) => void
   /** Called after each piece of output with everything so far and a way to write to the helper's input. */

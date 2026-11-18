@@ -49,4 +49,37 @@ describe('running a program of the browser tests to completion', () => {
       server.close()
     }
   })
+
+  // The kill is asked for through the seam and takes effect only when the test lets it. One real macrotask lets every promise
+  // reaction queued so far run, so a run that rejected when the kill was asked for has settled by then, on every machine; the
+  // run that waits for the close has not, because the process is certainly still running.
+  it('does not settle while a held kill has not taken effect, and rejects once the process is closed', async () => {
+    const server = createServer()
+    const closed = new Promise<void>((ok) => server.once('connection', (socket: Socket) => { socket.once('close', () => ok()) }))
+    const running = new Promise<void>((ok) => server.once('connection', () => ok()))
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+    const port = (server.address() as { port: number }).port
+    const script = `process.stdout.write('PID ' + process.pid + '\\n'); require('node:net').connect(${port}, '127.0.0.1'); setInterval(() => {}, 1 << 30)`
+    const limit = new AbortController()
+    let release!: () => void
+    let asked!: () => void
+    const kill = new Promise<void>((ok) => { asked = ok })
+    try {
+      const pending = run(process.execPath, ['-e', script], process.env, undefined, 600_000, limit.signal, (child) => { release = () => { child.kill('SIGKILL') }; asked() })
+      let settled = false
+      pending.then(() => { settled = true }, () => { settled = true })
+      await running
+      limit.abort()
+      await kill
+      await new Promise<void>((ok) => setImmediate(ok))
+      expect(settled).toBe(false)
+      release()
+      const failure = await pending.then(() => new Error('the run did not reject'), (error: Error) => error)
+      expect(failure.message).toMatch(/did not finish within/)
+      expect(alive(Number(/PID (\d+)/.exec(failure.message)?.[1]))).toBe(false)
+      await closed
+    } finally {
+      server.close()
+    }
+  })
 })
