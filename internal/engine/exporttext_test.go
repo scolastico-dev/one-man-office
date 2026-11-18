@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/forge"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 )
@@ -110,7 +111,7 @@ func (h *harness) runExportCommand(job board.EngineSession, bin string, edit boo
 	log := filepath.Join(h.t.TempDir(), "gh.log")
 	cmd := exec.Command("sh", "-c", line)
 	cmd.Dir = job.Workdir
-	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "FAKE_LOG=" + log}
+	cmd.Env = childenvtest.ShellEnv([]string{"PATH=" + bin + ":/usr/bin:/bin", "FAKE_LOG=" + log}, h.t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		h.t.Fatalf("%s: %v\n%s", line, err, out)
 	}

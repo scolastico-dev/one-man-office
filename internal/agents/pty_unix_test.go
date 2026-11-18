@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	}
 	switch os.Getenv(helperEnv) {
 	case "":
-		os.Exit(m.Run())
+		os.Exit(childenvtest.Run(m))
 	case "parent":
 		// An agent that starts a long-running child, like a CLI running a
 		// build in the background.

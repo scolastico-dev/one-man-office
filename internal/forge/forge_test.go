@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func TestParseRemotes(t *testing.T) {
@@ -172,7 +174,7 @@ func checkLiteral(t *testing.T, sh, line, work, bin, log string, r Remote, title
 	}
 	cmd := exec.Command(sh, "-c", line)
 	cmd.Dir = work
-	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	cmd.Env = childenvtest.ShellEnv([]string{"PATH=" + bin + ":/usr/bin:/bin"}, t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v\n%s", line, err, out)
 	}

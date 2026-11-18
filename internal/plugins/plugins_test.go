@@ -18,6 +18,8 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 // TestMain doubles as the helper program of command hooks: the test binary
@@ -26,7 +28,7 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == "plugin-helper" {
 		os.Exit(helper(os.Args[2], os.Args[3:]))
 	}
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 func helper(mode string, args []string) int {

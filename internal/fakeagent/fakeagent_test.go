@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
@@ -22,7 +23,7 @@ func TestMain(m *testing.M) {
 		os.Exit(Main())
 	}
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 func contains(t *testing.T, got, want string) {

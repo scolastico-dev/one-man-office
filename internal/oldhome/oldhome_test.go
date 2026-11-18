@@ -12,13 +12,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
 func TestMain(m *testing.M) {
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 // old is a machine as omo 0.11 left it: a home, one office with a

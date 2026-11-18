@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func script(s string) func() (string, []string) {
@@ -79,7 +81,9 @@ func TestShellRunsWithEnvironmentWithoutIdentity(t *testing.T) {
 	m := New(Options{
 		Shell: script(fmt.Sprintf("env > %q", out)),
 		Env: func() []string {
-			return append(ShellEnv([]string{"PATH=/usr/bin:/bin", "OMO_AGENT_ID=zzz"}, "/s.sock"), "OMO_AGENT_ID=zzz")
+			env := childenvtest.ShellEnv([]string{"PATH=/usr/bin:/bin"}, t.TempDir())
+			env = append(env, "OMO_AGENT_ID=zzz")
+			return append(ShellEnv(env, "/s.sock"), "OMO_AGENT_ID=zzz")
 		},
 	})
 	defer m.CloseAll(time.Second)

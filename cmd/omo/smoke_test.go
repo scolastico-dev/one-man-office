@@ -68,7 +68,7 @@ func (s *smoke) mustFail(wantInOutput string, args ...string) {
 
 func environment(home string) []string {
 	env := []string{}
-	for _, kv := range os.Environ() {
+	for _, kv := range childenvtest.ShellEnv(os.Environ(), home) {
 		key, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(strings.ToUpper(key), "OMO_") {
 			continue
@@ -121,11 +121,7 @@ func TestSmokeServerAndAI(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", binary, ".")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	childenvtest.GoBuild(t, ".", binary)
 
 	s := &smoke{t: t, binary: binary, env: environment(root), home: filepath.Join(root, "omo")}
 	// Stop whatever this test started, also when it fails halfway.
@@ -140,6 +136,7 @@ func TestSmokeServerAndAI(t *testing.T) {
 		{"-c", "user.email=smoke@example.invalid", "-c", "user.name=smoke", "commit", "-q", "--allow-empty", "-m", "init"},
 	} {
 		cmd := exec.Command("git", args...)
+		cmd.Env = childenvtest.ShellEnv(os.Environ(), s.home)
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
