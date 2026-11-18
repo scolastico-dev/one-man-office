@@ -91,7 +91,10 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
       '--trusted-origins', '127.0.0.1:' + port, '--', folder];
   } else {
     args = [path.join(root, 'out', 'server-main.js'), '--host', '127.0.0.1', '--port', port,
-      '--without-connection-token', '--server-base-path', base, '--server-data-dir', server,
+      '--without-connection-token',
+      // The pinned publisher turns an explicit '/' into an empty client base,
+      // breaking WebSocket URLs. Omission keeps its '/' default for subdomains.
+      ...(base === '/' ? [] : ['--server-base-path', base]), '--server-data-dir', server,
       '--user-data-dir', user, '--extensions-dir', extensions, '--extensions-download-dir', downloads, '--logsPath', logs,
       '--default-folder', folder, '--telemetry-level', 'off'];
   }

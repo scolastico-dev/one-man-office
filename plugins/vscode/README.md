@@ -125,7 +125,11 @@ password/token and bind exclusively to IPv4 `127.0.0.1`. Inherited `PORT`,
 `CODE_SERVER_*`, `VSCODE_*`, password and Node selectors cannot override the
 editor launch. code-server uses prefix stripping plus the exact loopback trusted
 origin; OpenVSCode uses its native server base path without stripping. Dedicated
-proxy subdomains use `/`. Assets and WebSockets use omo's existing proxy and
+proxy subdomains use `/`: OpenVSCode must omit `--server-base-path` to use
+the publisher's root default. Explicit `--server-base-path /` becomes an empty
+client base in the pinned build and breaks its WebSocket URLs. Non-root path
+forwards pass the exact `/proxy/<id>/` flag value, including its trailing slash.
+Assets and WebSockets use omo's existing proxy and
 Open grant; board credentials never enter editor URLs. Loopback listeners are
 reachable to other local processes, as with other omo Web UI forwards.
 
@@ -190,6 +194,7 @@ node plugins/vscode/tests/probe.cjs openvscode
 # Optional dedicated-subdomain check:
 node plugins/vscode/tests/probe.cjs code-server --subdomain
 node plugins/vscode/tests/probe.cjs code-server --subdomain --cross-site
+node plugins/vscode/tests/probe.cjs openvscode --subdomain --cross-site
 ```
 
 Each runs the actual plugin first-click installation through the real board,
@@ -200,7 +205,11 @@ separate temporary directories, runs Git against disposable host configuration
 inside both integrated terminals, checks independent folder cleanup,
 keeps browsers connected beyond the configured one-minute idle timeout, tests
 reconnect and checks last-disconnect task/forward removal. Temp files and a
-secret-free `report.json` are retained at the printed path; the server and
+secret-free `report.json` are retained at the printed path. Reports distinguish
+publisher builds from the stand-in and record routing mode, bootstrap/exchange,
+unauthenticated refusal, asset loads, the OpenVSCode client base and live
+WebSocket sent/received frame counts (without payloads or connection queries).
+The server and
 browser are stopped on success and failure. Delete those disposable files when
 you no longer need the evidence. These probes are not part of routine tests.
 Append `--smoke` for the first-use, reuse, two-folder settings/terminal/edit and
@@ -222,7 +231,9 @@ npm --prefix web run e2e -- e2e/plugin-editor.spec.ts e2e/plugin-lifecycle.spec.
 ```
 
 They use temporary homes/repositories, a local HTTPS archive and a small editor
-protocol stand-in. Only the installed test copy's artifact URL/digest and idle
+protocol stand-in. It defaults OpenVSCode to root only when the base flag is
+omitted and refuses explicit `/`, which the publisher cannot use for WebSockets.
+Only the installed test copy's artifact URL/digest and idle
 interval change; the manifest, frontend polling, Lua orchestration, launcher,
 artifact extractor, task supervisor and authenticated proxy remain in use.
 The fixture runtime bridge uses the test runner's Node through a POSIX wrapper,

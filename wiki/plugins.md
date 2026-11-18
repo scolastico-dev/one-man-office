@@ -88,7 +88,10 @@ the refusal keeps the existing editor running. Different folders can run
 independently. Its default is code-server, its idle setting defaults to 30 minutes after the
 last connected browser disconnects, and its task output/Stop control lives on
 its settings page. First-use progress completes in the tab reserved by that
-same click; the editor has no separate sign-in. The Microsoft option would
+same click; the editor has no separate sign-in. OpenVSCode path forwards retain
+the advertised non-root prefix; subdomain launches omit `--server-base-path`
+to use its root default. An explicit `/` flag breaks the pinned publisher's
+WebSocket URLs. The Microsoft option would
 launch a verified official **server-web** payload directly, rather than
 literally invoking `code serve-web`, but is currently blocked: Microsoft's
 [terms](https://code.visualstudio.com/license/server) and

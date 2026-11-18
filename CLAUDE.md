@@ -258,6 +258,9 @@ settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
 Official browser editor: all editor policy is in `plugins/vscode/` (Lua,
 frontend and a JS launcher executed by the verified artifact's bundled Node;
 no editor-specific core package). Pins: code-server 4.145.2, OpenVSCode 1.109.5;
+OpenVSCode root/subdomain launches omit `--server-base-path`: explicit `/`
+becomes an empty publisher client base and breaks WebSocket URLs. Path-mode
+launches preserve the exact non-root prefix, including its trailing slash.
 platform URLs/SHA-256 live in editor.lua. Microsoft remains a visible unavailable
 choice pending affirmative licence permission; no checkbox/old saved consent can
 enable it and no Microsoft artifact is fetched. Hidden manual open/status hooks
@@ -289,7 +292,7 @@ controls, including the sample, while explicit declarations and own facade calls
 remain valid. It is presentation, not authorization.
 Verification: `lua5.1 plugins/vscode/tests/hooks.lua` and
 `node --test plugins/vscode/tests/*.test.cjs` are no-download fixtures; opt-in
-`node plugins/vscode/tests/probe.cjs code-server|openvscode [--subdomain]` runs
+`node plugins/vscode/tests/probe.cjs code-server|openvscode [--subdomain] [--cross-site]` runs
 actual publisher artifacts through isolated temporary omo/proxy/Chromium, including
 first-use tab, reuse, concurrent folders, shared profile retention, temporary-host
 Git through integrated terminals, connected-beyond-idle/reconnect and independent

@@ -64,7 +64,15 @@ async function main(){
  const p=await api('POST','/api/projects',{path:project,name:'Editor probe'});
  await api('POST','/api/projects',{path:otherProject,name:'Second editor probe'});
  await wait(async()=>{const list=await api('GET','/api/plugins');const v=list.plugins.find(p=>p.name==='vscode');if(v?.state==='invalid')throw new Error('Plugin invalid: '+JSON.stringify(v));return v?.state==='ready'});
- browser=await chromium.launch({headless:true,args:['--no-proxy-server']});const context=await browser.newContext();const board=await context.newPage();
+ browser=await chromium.launch({headless:true,args:['--no-proxy-server']});const context=await browser.newContext();
+ // Observe before the reserved tab navigates, including bootstrap/exchange.
+ // Retain paths/counts only: grants, connection queries and frame payloads stay private.
+ const observed=new WeakMap();context.on('page',p=>{
+  const traffic={responses:[],sockets:[]};observed.set(p,traffic);
+  p.on('response',r=>{const u=new URL(r.url());traffic.responses.push({origin:u.origin,path:u.pathname,status:r.status(),type:r.request().resourceType()})});
+  p.on('websocket',ws=>{const u=new URL(ws.url()),socket={host:u.host,path:u.pathname,sent:0,received:0};traffic.sockets.push(socket);ws.on('framesent',()=>socket.sent++);ws.on('framereceived',()=>socket.received++)});
+ });
+ const board=await context.newPage();
  await board.goto((subdomain&&!crossSite?'http://apps.localhost:'+port:base)+'/#'+token);await board.locator('[data-sidebar-toggle]').click();
  const button=board.locator('.sidebar-plugins > section[aria-label="Editor probe"] button').filter({hasText:'Open in VS Code'});await button.waitFor();
  const popup=context.waitForEvent('page',{timeout:35*60000});await button.click();const page=await popup;
@@ -79,6 +87,21 @@ async function main(){
  const first=await api('GET','/api/plugins/vscode/tasks'),forwards=await api('GET','/api/proxy/forwards');
  assert.equal(first.tasks.filter(t=>t.state==='running').length,1);assert.equal(forwards.forwards.length,1);
  const f=forwards.forwards[0];assert.equal(f.host,'127.0.0.1');assert.equal(f.strip_prefix,editor==='code-server');assert.ok(!page.url().includes(token));
+ const appURL=new URL(page.url()),traffic=observed.get(page);
+ assert.equal(appURL.pathname,subdomain?'/':f.base_path);assert.equal(appURL.hash,'');
+ assert.ok(traffic.responses.some(r=>r.path==='/_omo/proxy/bootstrap'&&r.status===200));
+ assert.ok(traffic.responses.some(r=>r.path==='/_omo/proxy/exchange'&&r.status===200));
+ assert.ok(traffic.responses.some(r=>r.origin===appURL.origin&&r.path===appURL.pathname&&r.type==='document'&&r.status===200));
+ const assets=traffic.responses.filter(r=>r.origin===appURL.origin&&r.path.startsWith(appURL.pathname)&&['script','stylesheet'].includes(r.type)&&r.status===200);assert.ok(assets.length>0);
+ await wait(()=>traffic.sockets.some(s=>s.host===appURL.host&&s.path.startsWith(appURL.pathname)&&s.sent>0&&s.received>0));
+ const unauthenticated=await browser.newContext();
+ try{assert.equal((await unauthenticated.request.get(appURL.origin+appURL.pathname)).status(),401)}finally{await unauthenticated.close()}
+ let clientBase;
+ if(editor==='openvscode'){
+  clientBase=await page.locator('#vscode-workbench-web-configuration').getAttribute('data-settings').then(JSON.parse).then(c=>c.serverBasePath);
+  assert.equal(clientBase,subdomain?'/':f.base_path.slice(0,-1));
+ }
+ const routing={publisher:true,version:editor==='code-server'?'4.145.2':'1.109.5',platform:process.platform+'-'+process.arch,mode:subdomain?'subdomain':'path',boardOutsideProxyDomain:subdomain&&crossSite,authenticatedBootstrap:true,unauthenticatedDenied:true,clientBase,assets:assets.length,websockets:traffic.sockets};
  // Second click must reuse exactly the same process and forward.
  const secondPage=context.waitForEvent('page');await button.click();const page2=await secondPage;await page2.locator('.monaco-workbench').waitFor({timeout:90000});
  const second=await api('GET','/api/plugins/vscode/tasks');assert.equal(second.tasks.filter(t=>t.state==='running').length,1);assert.equal(second.tasks.find(t=>t.state==='running').id,first.tasks.find(t=>t.state==='running').id);
@@ -100,7 +123,7 @@ async function main(){
  if(smoke){
   for(const task of both)await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(task.name)+'/stop',{});
   await wait(()=>!fs.existsSync(firstRuntime)&&!fs.existsSync(otherRuntime));assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,0);
-  const report={editor,smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
+  const report={editor,...routing,smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));return;
  }
  // Last-disconnect idle: active sockets must survive > 1 minute, then expire.
@@ -117,7 +140,7 @@ async function main(){
  await otherPage.close();await wait(async()=>!(await api('GET','/api/plugins/vscode/tasks')).tasks.some(t=>t.state==='running'),90000);
  assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,0);
  await wait(()=>!fs.existsSync(otherRuntime));assert.equal(fs.existsSync(env.XDG_RUNTIME_DIR),true);
- const report={editor,version:editor==='code-server'?'4.145.2':'1.109.5',platform:process.platform+'-'+process.arch,mode:subdomain?'subdomain':'path',boardOutsideProxyDomain:subdomain&&crossSite,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,separateTmp:true,runtimeCleanup:true,independentCleanup:true,activeBeyondIdle:true,reconnect:true,idleCleanup:true,failedRequests:failed};
+ const report={editor,...routing,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,separateTmp:true,runtimeCleanup:true,independentCleanup:true,activeBeyondIdle:true,reconnect:true,idleCleanup:true,failedRequests:failed};
  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }
 main().catch(async error=>{

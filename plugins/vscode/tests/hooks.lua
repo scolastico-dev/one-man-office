@@ -154,10 +154,14 @@ test('unverified artifact and failed attachment cannot execute or leak',function
  contains(f:run('status-ticket').message,'attach');same(f.tasks[1].state,'exited');same(#f.forwards,0)
 end)
 
-test('subdomain forwarding uses root base with exact same loopback launch',function()
- local f=fixture();local add=f.omo.forward_add
- f.omo.forward_add=function(a)local v=add(a);v.address='http://'..v.id..'.apps.localhost/';return v end
- f:opened();same(f.starts[1].args[9],'/');same(f.forward_options.host,'127.0.0.1')
+test('both editors preserve path bases and select root for subdomains',function()
+ for _,editor in ipairs({'code-server','openvscode'}) do
+  for _,subdomain in ipairs({false,true}) do
+   local f=fixture();f.config.editor=editor;local add=f.omo.forward_add
+   if subdomain then f.omo.forward_add=function(a)local v=add(a);v.address='http://'..v.id..'.apps.localhost/';return v end end
+   f:opened();same(f.starts[1].args[9],subdomain and '/' or '/proxy/00000000000000000000000000000001/');same(f.forward_options.host,'127.0.0.1');same(f.forward_options.strip_prefix,editor=='code-server')
+  end
+ end
 end)
 
 
