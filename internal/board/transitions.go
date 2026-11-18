@@ -411,7 +411,8 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 // so the next export pushes every project again. What a project's export
 // left out or failed with is forgotten with any move except the one that
 // closes the ticket as exported. Done sets the resolution
-// and closing time and closes the ticket's open questions; it is refused
+// and closing time, closes the ticket's open questions and removes its
+// proxy forwards (with removal events) in this transaction; it is refused
 // while the commits of a project's diff are not recorded (checkRecorded).
 // setColumn is the only writer of a ticket's column (guard test).
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
@@ -442,6 +443,9 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 		}
 	}
 	if col == api.ColumnDone {
+		if err := closeProxyForwards(tx, n); err != nil {
+			return err
+		}
 		return b.closeQuestions(tx, n, res)
 	}
 	return nil

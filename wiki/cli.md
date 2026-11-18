@@ -128,6 +128,7 @@ Available Commands:
   link        Make ticket N depend on ticket M (or remove that dependency)
   model       List the models you may choose for tickets
   project     List and search the registered projects
+  proxy       Register, list and remove web UI forwards
   ready       Tell omo this agent is up and print the instructions for its work
   ticket      Read, create, update and move tickets
   wait        Block until omo has something for you or the timeout passes, then print why
@@ -439,6 +440,104 @@ Examples:
 
 Flags:
   -h, --help   help for search
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai proxy`
+
+```text
+Register, list and remove web UI forwards
+
+Usage:
+  omo ai proxy [flags]
+  omo ai proxy [command]
+
+Examples:
+  omo ai proxy add --port 5173 --name "dev server"
+
+Available Commands:
+  add         Register a web UI forward and print its address and required app base path
+  list        List web UI forwards within your ticket read scope
+  remove      Remove a web UI forward by id
+
+Flags:
+  -h, --help   help for proxy
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+
+Use "omo ai proxy [command] --help" for more information about a command.
+```
+
+### `omo ai proxy add`
+
+```text
+Register a web UI that someone else runs on the omo host or another host.
+Agents register only for their own ticket; --ticket defaults to that ticket.
+As the user, omit --ticket for a global forward. The target process is not
+started by omo. Start the app with the printed base_path, or use --strip-prefix
+for an app that emits relative addresses. Registration never probes the target.
+Ticket forwards are removed when the ticket is done or cancelled.
+
+Usage:
+  omo ai proxy add --port N --name NAME [flags]
+
+Examples:
+  omo ai proxy add --port 5173 --name "dev server"
+
+Flags:
+  -h, --help                help for add
+      --host string         target host name or IP address, including IPv6 (default "127.0.0.1")
+      --name string         display name of the web UI
+      --port int            target port (1-65535)
+      --scheme string       target scheme: http or https (default "http")
+      --start-path string   start path within the forward, optionally with a query (default "/")
+      --strip-prefix        strip the proxy prefix for apps using relative addresses
+      --ticket int          ticket number (default: your own ticket; global for the user)
+      --verify-tls          verify an HTTPS target's certificate
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai proxy list`
+
+```text
+List forwards for your own ticket, or --ticket N for another ticket you
+may read. As the user, omitting --ticket lists all forwards, including globals.
+Targets are not probed, so an offline web UI remains listed.
+
+Usage:
+  omo ai proxy list [--ticket N] [flags]
+
+Examples:
+  omo ai proxy list
+
+Flags:
+  -h, --help         help for list
+      --ticket int   ticket number (default: your own ticket; all readable forwards for the user)
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai proxy remove`
+
+```text
+Remove a forward. Agents remove only forwards of their own ticket;
+the user may remove any forward, including globals. This does not stop the
+target process.
+
+Usage:
+  omo ai proxy remove ID [flags]
+
+Examples:
+  omo ai proxy remove FORWARD_ID
+
+Flags:
+  -h, --help   help for remove
 
 Global Flags:
       --json   print the server's JSON answer instead of text

@@ -69,6 +69,7 @@ func TestPrintedTextStaysOnItsLine(t *testing.T) {
 		"comment":  func(w io.Writer) { printComment(w, spoofed[api.Comment]()) },
 		"whoami":   func(w io.Writer) { printMe(w, spoofed[api.Me]()) },
 		"no reach": func(w io.Writer) { unreachableLines(w, 1, []api.Role{api.RolePM}) },
+		"forward":  func(w io.Writer) { printProxyForward(w, spoofed[api.ProxyForward]()) },
 	}
 	for name, print := range printers {
 		var out bytes.Buffer

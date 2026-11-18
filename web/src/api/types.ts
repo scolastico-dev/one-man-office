@@ -1012,6 +1012,8 @@ export interface EventDataByKind {
   'image.added': ImageEventData
   'image.deleted': ImageEventData
   'image.expired': ImageEventData
+  'proxy.forward_added': ProxyForward
+  'proxy.forward_removed': ProxyForward
   'mcp.changed': MCPServerState
   /** No data: the tools omo offers over MCP changed. */
   'mcp.tools_changed': Record<string, never>
@@ -1353,6 +1355,37 @@ export interface ImageEventData {
   id: string
   name: string
   size: number
+}
+
+/** A registered web UI. Null ticket means global; base_path is the app's required path-mode base. */
+export interface ProxyForward {
+  id: string
+  ticket: number | null
+  host: string
+  port: number
+  scheme: string
+  name: string
+  start_path: string
+  strip_prefix: boolean
+  verify_tls: boolean
+  base_path: string
+  address: string
+}
+
+/** Registration only; the target process is started separately. */
+export interface CreateProxyForward {
+  ticket: number | null
+  host: string
+  port: number
+  scheme: string
+  name: string
+  start_path: string
+  strip_prefix: boolean
+  verify_tls: boolean
+}
+
+export interface ProxyForwardList {
+  forwards: ProxyForward[]
 }
 
 /** manifest.json of a settings zip: which omo wrote it, for which database schema, when, and whether the database is inside. */

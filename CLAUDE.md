@@ -191,6 +191,31 @@ Export. An export goes project by project (`internal/engine/export.go`): a proje
 
 Limit of the model: the socket and the files in `OMO_HOME` are not a security boundary against agents. An agent runs as the same user, can leave out its session header on the socket and can write the settings files directly, and omo gives terminals anyway. The route rule above keeps an agent that goes through the API honest; it does not stop one that does not.
 
+## Web UI forward registry
+
+Web UI forward registry: `api/proxy.go`, `board/proxy.go` and
+`server/proxy_forwards.go`; persisted in `proxy_forwards` (schema version 8).
+`GET /api/proxy/forwards[?ticket=N]` returns `{forwards: []}`;
+`POST /api/proxy/forwards` takes `{ticket, host, port, scheme, name, start_path,
+strip_prefix, verify_tls}` and returns the record (201);
+`DELETE /api/proxy/forwards/{id}` returns 204. Omitted/null ticket is global;
+defaults are `127.0.0.1`, `http`, `/`, false, false. Board owns validation and
+permissions: user manages every forward, agents mutate only their own
+nonzero `Actor.Ticket`, reads follow ticket scope (globals visible with
+unrestricted reads). `ProxyForward` is the scoped id lookup;
+`LiveProxyForward(ctx, System, id)` is the server-internal live routing lookup.
+Records have a random lowercase DNS-safe `id`, `base_path=/proxy/<id>/` and
+`address` including the start path/query; HTTP adds `Server.Address()` to the
+board's relative address. IPv6 hosts are stored without brackets.
+`proxy.forward_added` and `proxy.forward_removed` carry the public record with
+a relative address. Every Done transition removes ticket forwards and emits
+removals within `setColumn`'s transaction, including cancellation cascades;
+globals survive. Closed tickets refuse new forwards. No target is probed or
+started. Shared `aicmd/proxy.go` supplies `omo ai proxy add|list|remove` and MCP
+tools; omitted CLI/MCP ticket uses the agent's own ticket (user add: global,
+user list: all). Add prints the address, required app base path and process
+reminder. This registry does not serve proxy traffic or implement Open/sign-in.
+
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
 ```text
