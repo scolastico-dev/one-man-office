@@ -21,6 +21,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/server"
@@ -182,11 +183,11 @@ type bridgeProc struct {
 }
 
 // bridgeCmd is the bridge process with env laid over the test's
-// environment (without OMO_AGENT_ID and OMO_SOCKET unless env sets them).
+// environment after dropping every inherited OMO_ variable.
 func bridgeCmd(env map[string]string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "OMO_AGENT_ID=") && !strings.HasPrefix(kv, "OMO_SOCKET=") {
+		if !strings.HasPrefix(strings.ToUpper(kv), "OMO_") {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
@@ -437,4 +438,10 @@ func TestBridgeEndsWhenItsInputCloses(t *testing.T) {
 		cmd.Process.Kill()
 		t.Fatal("the bridge kept running after its input closed")
 	}
+}
+
+func TestBridgeEnvironmentDropsInheritedOmo(t *testing.T) {
+	childenvtest.SetOmo(t)
+	childenvtest.CheckOmo(t, bridgeCmd(nil).Env, map[string]string{helperEnv: "1"})
+	childenvtest.CheckOmo(t, bridgeCmd(map[string]string{"OMO_HOME": "/test-owned/home"}).Env, map[string]string{helperEnv: "1", "OMO_HOME": "/test-owned/home"})
 }

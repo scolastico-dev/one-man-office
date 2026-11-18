@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/service"
 )
 
@@ -34,9 +35,10 @@ func (s *syncBuffer) String() string {
 }
 
 // isolate points the omo home and the login autostart location into the
-// test's temporary directories.
+// test's temporary directories and removes inherited omo state.
 func isolate(t *testing.T) string {
 	t.Helper()
+	childenvtest.ClearOmo(t)
 	home := t.TempDir()
 	t.Setenv("OMO_HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -127,4 +129,10 @@ func tokenFile(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(raw))
+}
+
+func TestIsolateDropsInheritedOmo(t *testing.T) {
+	childenvtest.SetOmo(t)
+	home := isolate(t)
+	childenvtest.CheckOmo(t, os.Environ(), map[string]string{"OMO_HOME": home})
 }

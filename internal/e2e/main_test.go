@@ -61,9 +61,7 @@ func TestMain(m *testing.M) {
 	} {
 		os.Setenv(k, v)
 	}
-	for _, k := range []string{"OMO_HOME", "OMO_SOCKET", "OMO_AGENT_ID", fakeagent.EnvScript} {
-		os.Unsetenv(k)
-	}
+	clearOmoEnvironment()
 	bin := filepath.Join(home, "forge-bin")
 	if err := writeFakeForgeTools(bin); err != nil {
 		panic(err)
@@ -153,4 +151,13 @@ func leftoverAgents() []int {
 func zombie(stat string) bool {
 	i := strings.LastIndexByte(stat, ')')
 	return i >= 0 && i+2 < len(stat) && stat[i+2] == 'Z'
+}
+
+func clearOmoEnvironment() {
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(strings.ToUpper(key), "OMO_") {
+			os.Unsetenv(key)
+		}
+	}
 }

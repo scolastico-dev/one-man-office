@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
@@ -68,10 +69,14 @@ func (s *smoke) mustFail(wantInOutput string, args ...string) {
 func environment(home string) []string {
 	env := []string{}
 	for _, kv := range os.Environ() {
-		switch strings.SplitN(kv, "=", 2)[0] {
-		case "OMO_HOME", "OMO_AGENT_ID", "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "USERPROFILE":
+		key, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(strings.ToUpper(key), "OMO_") {
 			continue
-		case "PATH", "Path":
+		}
+		switch strings.ToUpper(key) {
+		case "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "USERPROFILE":
+			continue
+		case "PATH":
 			// A first start looks for agent programs on PATH and runs their
 			// usage scripts: the real ones of this machine stay out of reach.
 			kv = "PATH=" + testpath.Without(strings.SplitN(kv, "=", 2)[1])
@@ -89,9 +94,13 @@ func environment(home string) []string {
 }
 
 // TestSmokeEnvironmentReachesNoAgentProgram fails when the environment the
-// smoke test hands to the omo binary lets omo find a real agent program.
+// smoke test hands to the omo binary inherits omo state or finds a real agent.
 func TestSmokeEnvironmentReachesNoAgentProgram(t *testing.T) {
-	for _, kv := range environment(t.TempDir()) {
+	childenvtest.SetOmo(t)
+	home := t.TempDir()
+	env := environment(home)
+	childenvtest.CheckOmo(t, env, map[string]string{"OMO_HOME": filepath.Join(home, "omo")})
+	for _, kv := range env {
 		if strings.HasPrefix(kv, "PATH=") {
 			if found := testpath.Reaches(strings.TrimPrefix(kv, "PATH=")); len(found) != 0 {
 				t.Fatalf("the omo binary of the smoke test can reach %v", found)

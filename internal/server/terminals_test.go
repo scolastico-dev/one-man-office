@@ -647,9 +647,10 @@ func TestTerminalSocketNeverEchoesToken(t *testing.T) {
 // (started from an agent's shell); the user's shell never inherits it.
 func TestShellEnvironmentHasNoAgentID(t *testing.T) {
 	isolateShells(t)
+	s := newTestServer(t)
+	// Add test-owned state after the server helper clears inherited state.
 	t.Setenv("OMO_AGENT_ID", "agent-secret-id")
 	t.Setenv("OMO_FAKE_SCRIPT_DEVELOPER", "fake-script")
-	s := newTestServer(t)
 	b := newBrowser(t, s)
 	sock, err := s.ListenSocket()
 	if err != nil {

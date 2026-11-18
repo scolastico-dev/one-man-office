@@ -23,15 +23,17 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/service"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 )
 
-// testHome isolates OMO_HOME and opens its layout.
+// testHome drops inherited omo state, isolates OMO_HOME and opens its layout.
 func testHome(t *testing.T) globalhome.Layout {
 	t.Helper()
+	childenvtest.ClearOmo(t)
 	t.Setenv("OMO_HOME", t.TempDir())
 	l, err := globalhome.Open()
 	if err != nil {
@@ -687,4 +689,10 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 	// Safe methods and the page need no Content-Type.
 	wantStatus(t, b.do("GET", "/api/server", nil, bearer(s)).StatusCode, http.StatusOK)
 	wantStatus(t, b.do("GET", "/", nil, nil).StatusCode, http.StatusOK)
+}
+
+func TestHomeDropsInheritedOmo(t *testing.T) {
+	childenvtest.SetOmo(t)
+	layout := testHome(t)
+	childenvtest.CheckOmo(t, os.Environ(), map[string]string{"OMO_HOME": layout.Root})
 }
