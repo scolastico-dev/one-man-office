@@ -287,12 +287,20 @@ router authenticates and selects a live forward on every request, and call
 verification policies; target connections bypass environment HTTP proxies.
 Path mode checks the literal `/proxy/<id>` prefix and strips it only when the
 record requests it; subdomain mode leaves the request path unchanged.
+`X-Forwarded-Prefix` is sent only for path mode with `strip_prefix=true`, naming
+what was removed; it is absent when the path prefix is retained or in subdomain
+mode. Conventional client-IP headers (`X-Real-IP`, `True-Client-IP`, provider IP
+headers and related legacy variants) are removed alongside client forwarding
+headers; `X-Forwarded-For` is derived from the accepted connection's RemoteAddr.
 
 The router supplies `proxy.WithRequestContext(r, proxy.RequestContext{...})`:
 `PublicScheme`/`PublicHost` are the accepted public request origin (never arbitrary
 forwarding headers), `BoardURL` is the board's accepted origin for the error-page
 link, and `RemoveAuthorization` is true only for positively identified omo
 credentials, including omo Basic auth. App Authorization otherwise survives.
+`OnError func(error)` optionally reports upstream connection/TLS failures to the
+router's logger; a cancelled client request produces neither a failure callback
+nor an unavailable page. The page explains both connect and TLS failures.
 The reserved cookie names are `proxy.SessionCookie` (`omo_proxy_session`) and
 `proxy.ForwardCookie` (`omo_proxy_forward`); neither is sent upstream or accepted
 from upstream Set-Cookie. `X-Omo-*`, `Omo-*`, client forwarding headers,
@@ -303,7 +311,14 @@ upgrades, without board security/cache headers. Target redirects and cookie
 paths/scopes are rewritten; connection failures get an escaped HTML page.
 Path-mode redirects with a path are resolved at the upstream request URL before
 being mapped into the forward; redirect dot segments (including encoded dots)
-are normalized before prefixing. Request path bytes are never normalized.
+are normalized before prefixing. Literal backslashes in redirect paths use the
+browser's separator interpretation; malformed path-mode Location values are
+dropped, preserving the rest of the response. Request path bytes are never
+normalized. Grant-query filtering recognizes both `&` and legacy `;` separators
+without reencoding unrelated query bytes.
 `__Host-` application cookies keep `Path=/`, which browsers require for those
 names; this is shared root scope, consistent with trusted apps, rather than a
 cookie isolation boundary. Other applicable cookie paths receive the prefix.
+
+Path-mode apps share the board's origin, including its localStorage; this
+transport provides credential filtering, not isolation from trusted app code.

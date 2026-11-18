@@ -45,6 +45,9 @@ type RequestContext struct {
 	PublicHost          string
 	BoardURL            string
 	RemoveAuthorization bool
+	// OnError receives upstream connect/TLS errors for caller logging. It is not
+	// invoked for requests whose client context has been cancelled.
+	OnError func(error)
 }
 type requestContextKey struct{}
 
@@ -122,7 +125,6 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 			}
 			filterRequest(out)
 			v := requestValues(in)
-			pr.Out = WithRequestContext(out, v)
 			if v.RemoveAuthorization {
 				out.Header.Del("Authorization")
 			}
@@ -132,16 +134,19 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 			}
 			out.Header.Set("X-Forwarded-Proto", v.PublicScheme)
 			out.Header.Set("X-Forwarded-Host", v.PublicHost)
-			if mode == PathMode {
+			if mode == PathMode && f.StripPrefix {
 				out.Header.Set("X-Forwarded-Prefix", prefix)
 			}
+			pr.Out = WithRequestContext(out, v)
 		},
 		ModifyResponse: func(res *http.Response) error {
 			v := requestValues(res.Request)
 			if locations := res.Header.Values("Location"); len(locations) > 0 {
 				res.Header.Del("Location")
 				for _, s := range locations {
-					res.Header.Add("Location", rewriteLocation(s, res.Request.URL, prefix, mode, v))
+					if location := rewriteLocation(s, res.Request.URL, prefix, mode, v); location != "" {
+						res.Header.Add("Location", location)
+					}
 				}
 			}
 			cookies := res.Header.Values("Set-Cookie")
@@ -153,7 +158,14 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 			}
 			return nil
 		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if r.Context().Err() != nil {
+				return
+			}
+			v := requestValues(r)
+			if v.OnError != nil {
+				v.OnError(err)
+			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
 			_ = unavailablePage.Execute(w, struct{ Target, Board string }{target.String(), requestValues(r).BoardURL})
@@ -172,7 +184,7 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 	})
 }
 
-var unavailablePage = template.Must(template.New("unavailable").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Web UI unreachable</title></head><body><h1>Web UI unreachable</h1><p>Nothing is listening at {{.Target}}, or the connection could not be established. The forward remains registered; try again when the app is running.</p><p><a href="{{.Board}}">Back to the board</a></p></body></html>`))
+var unavailablePage = template.Must(template.New("unavailable").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Web UI unreachable</title></head><body><h1>Web UI unreachable</h1><p>omo could not connect to or verify {{.Target}}. The app may not be listening, or its connection/TLS verification failed. The forward remains registered; try again when the app is running.</p><p><a href="{{.Board}}">Back to the board</a></p></body></html>`))
 
 func hasPrefix(path, prefix string) bool {
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
@@ -186,19 +198,38 @@ func withoutGrant(raw string) string {
 	parts := strings.Split(raw, "&")
 	keep := parts[:0]
 	for _, p := range parts {
-		key, _, _ := strings.Cut(p, "=")
-		decoded, _ := url.QueryUnescape(key)
-		if decoded != GrantQuery {
-			keep = append(keep, p)
+		// Some upstream frameworks still treat semicolons as query separators.
+		// Preserve their exact delimiters/bytes except reserved grant fields.
+		entries := strings.Split(p, ";")
+		keptEntries := entries[:0]
+		for _, entry := range entries {
+			key, _, _ := strings.Cut(entry, "=")
+			decoded, _ := url.QueryUnescape(key)
+			if decoded != GrantQuery {
+				keptEntries = append(keptEntries, entry)
+			}
+		}
+		if len(keptEntries) > 0 {
+			keep = append(keep, strings.Join(keptEntries, ";"))
 		}
 	}
 	return strings.Join(keep, "&")
 }
 
+func clientIPHeader(lower string) bool {
+	switch lower {
+	case "x-real-ip", "true-client-ip", "cf-connecting-ip", "cf-connecting-ipv6",
+		"x-client-ip", "client-ip", "x-cluster-client-ip", "fastly-client-ip",
+		"fly-client-ip", "x-envoy-external-address":
+		return true
+	}
+	return false
+}
+
 func filterRequest(r *http.Request) {
 	for k := range r.Header {
 		lower := strings.ToLower(k)
-		if strings.HasPrefix(lower, "x-omo-") || strings.HasPrefix(lower, "omo-") || strings.HasPrefix(lower, "x-forwarded-") || lower == "forwarded" {
+		if strings.HasPrefix(lower, "x-omo-") || strings.HasPrefix(lower, "omo-") || strings.HasPrefix(lower, "x-forwarded-") || lower == "forwarded" || clientIPHeader(lower) {
 			delete(r.Header, k)
 		}
 	}
@@ -233,8 +264,25 @@ func filterRequest(r *http.Request) {
 }
 
 func rewriteLocation(s string, target *url.URL, prefix string, mode Mode, v RequestContext) string {
+	if mode == PathMode {
+		// HTTP URL parsers treat literal backslashes in paths/authorities as
+		// separators. Query and fragment bytes have different semantics.
+		end := strings.IndexAny(s, "?#")
+		if end < 0 {
+			end = len(s)
+		}
+		s = strings.ReplaceAll(s[:end], "\\", "/") + s[end:]
+	}
 	u, err := url.Parse(s)
-	if err != nil || u.Opaque != "" || u.User != nil {
+	if err != nil {
+		// Browsers may remove controls then resolve a URL that Go refused.
+		// Dropping a malformed path-mode redirect keeps it off board routes.
+		if mode == PathMode {
+			return ""
+		}
+		return s
+	}
+	if u.Opaque != "" || u.User != nil {
 		return s
 	}
 	same := u.Host != "" && sameTarget(u, target)

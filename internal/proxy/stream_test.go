@@ -286,3 +286,36 @@ func TestWebSocketEchoAndCredentialIsolation(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelledRequestBeforeHeadersHasNoUnavailablePage(t *testing.T) {
+	started := make(chan struct{})
+	upstreamCancelled := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(upstreamCancelled)
+	}))
+	defer upstream.Close()
+	tr := NewTransport()
+	defer tr.CloseIdleConnections()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest("GET", "/proxy/abc/", nil).WithContext(ctx)
+	reported := make(chan error, 1)
+	req = WithRequestContext(req, RequestContext{OnError: func(err error) { reported <- err }})
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { tr.Handler(forwardFor(t, upstream.URL), PathMode).ServeHTTP(w, req); close(done) }()
+	await(t, started)
+	cancel()
+	await(t, done)
+	await(t, upstreamCancelled)
+	if w.Body.Len() != 0 || w.Code == 502 || len(w.Header()) != 0 {
+		t.Fatalf("cancelled request wrote unavailable response: %d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+	select {
+	case err := <-reported:
+		t.Fatalf("client cancellation reported as target failure: %v", err)
+	default:
+	}
+}

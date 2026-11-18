@@ -76,7 +76,12 @@ func TestRequestCredentialsAndForwarding(t *testing.T) {
 			"Cookie":        {"app=first; omo_proxy_session=SECRET; omo_proxy_session =SECRET; omo_proxy_forward =SECRET; app=second", "omo_proxy_forward=SECRET; other=ok"},
 			"Authorization": {"Bearer app-secret"}, "X-Omo-Session": {"SECRET"}, "X-Omo-Identity": {"SECRET"}, "Omo-Image-Name": {"SECRET"},
 			"X-Omo-Proxy-Grant": {"SECRET"}, "X-Forwarded-For": {"attacker"}, "X-Forwarded-Host": {"attacker"}, "X-Forwarded-Proto": {"attacker"}, "X-Forwarded-Prefix": {"attacker"}, "Forwarded": {"for=attacker"},
+			"X-Real-Ip": {"6.6.6.6"}, "True-Client-Ip": {"6.6.6.6"}, "Cf-Connecting-Ip": {"6.6.6.6"}, "X-Client-Ip": {"6.6.6.6"},
 			"Sec-Websocket-Protocol": {"app-chat, omo-token.SECRET", "other"},
+		}
+		clientIPNames := []string{"X-Real-IP", "True-Client-IP", "CF-Connecting-IP", "CF-Connecting-IPv6", "X-Client-IP", "Client-IP", "X-Cluster-Client-IP", "Fastly-Client-IP", "Fly-Client-IP", "X-Envoy-External-Address"}
+		for _, name := range clientIPNames {
+			r.Header.Set(name, "6.6.6.6")
 		}
 		original := r.Header.Clone()
 		r = WithRequestContext(r, RequestContext{PublicScheme: "https", PublicHost: "public.example:8443", BoardURL: "https://public.example:8443/", RemoveAuthorization: stripAuth})
@@ -96,9 +101,14 @@ func TestRequestCredentialsAndForwarding(t *testing.T) {
 		if got.Header.Get("Authorization") != wantAuth {
 			t.Fatalf("auth: %q", got.Header.Get("Authorization"))
 		}
-		for k, want := range map[string]string{"X-Forwarded-For": "192.0.2.8", "X-Forwarded-Host": "public.example:8443", "X-Forwarded-Proto": "https", "X-Forwarded-Prefix": "/proxy/abc", "Sec-WebSocket-Protocol": "app-chat, other", "Forwarded": ""} {
+		for k, want := range map[string]string{"X-Forwarded-For": "192.0.2.8", "X-Forwarded-Host": "public.example:8443", "X-Forwarded-Proto": "https", "X-Forwarded-Prefix": "", "Sec-WebSocket-Protocol": "app-chat, other", "Forwarded": "", "X-Real-IP": "", "True-Client-IP": "", "CF-Connecting-IP": "", "X-Client-IP": ""} {
 			if got.Header.Get(k) != want {
 				t.Errorf("%s: %q want %q", k, got.Header.Get(k), want)
+			}
+		}
+		for _, name := range clientIPNames {
+			if got.Header.Get(name) != "" {
+				t.Errorf("spoofed %s reached upstream", name)
 			}
 		}
 		if got.RequestURI != "/proxy/abc/a?app=%2f&b=1+2" {
@@ -400,5 +410,90 @@ func TestHostCookieRemainsUsable(t *testing.T) {
 	cookie := "__Host-app=key; Secure; HttpOnly; Path=/"
 	if got := rewriteCookie(cookie, "localhost", "/proxy/abc", PathMode); got != cookie {
 		t.Fatalf("__Host- cookie must retain Path=/: %q", got)
+	}
+}
+
+func TestForwardedPrefixOnlyWhenRemoved(t *testing.T) {
+	captured := make(chan http.Header, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { captured <- r.Header.Clone() }))
+	defer upstream.Close()
+	tr := NewTransport()
+	defer tr.CloseIdleConnections()
+	for _, mode := range []Mode{PathMode, SubdomainMode} {
+		for _, strip := range []bool{false, true} {
+			f := forwardFor(t, upstream.URL)
+			f.StripPrefix = strip
+			r := httptest.NewRequest("GET", "/proxy/abc/", nil)
+			r.Header.Set("X-Forwarded-Prefix", "/attacker")
+			tr.Handler(f, mode).ServeHTTP(httptest.NewRecorder(), r)
+			want := ""
+			if mode == PathMode && strip {
+				want = "/proxy/abc"
+			}
+			if got := (<-captured).Get("X-Forwarded-Prefix"); got != want {
+				t.Errorf("mode=%v strip=%v: %q want %q", mode, strip, got, want)
+			}
+		}
+	}
+}
+
+func TestBrowserRedirectSyntax(t *testing.T) {
+	for _, tc := range []struct{ location, want string }{
+		{"/.\t./.\t./x", ""},
+		{`/a/..\..\x`, "/proxy/abc/x"},
+		{`/a/..\..\x?q=keep\value#keep\fragment`, `/proxy/abc/x?q=keep\value#keep%5Cfragment`},
+	} {
+		t.Run(tc.location, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", tc.location)
+				w.WriteHeader(302)
+			}))
+			defer upstream.Close()
+			tr := NewTransport()
+			defer tr.CloseIdleConnections()
+			w := httptest.NewRecorder()
+			tr.Handler(forwardFor(t, upstream.URL), PathMode).ServeHTTP(w, httptest.NewRequest("GET", "/proxy/abc/start", nil))
+			if got := w.Header().Get("Location"); got != tc.want {
+				t.Fatalf("Location=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnavailableReportsTLSFailure(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("unverified request reached upstream") }))
+	defer upstream.Close()
+	tr := NewTransport()
+	defer tr.CloseIdleConnections()
+	f := forwardFor(t, upstream.URL)
+	f.VerifyTLS = true
+	reported := make(chan error, 1)
+	r := WithRequestContext(httptest.NewRequest("GET", "/proxy/abc/", nil), RequestContext{BoardURL: "https://board.test/", OnError: func(err error) { reported <- err }})
+	w := httptest.NewRecorder()
+	tr.Handler(f, PathMode).ServeHTTP(w, r)
+	if w.Code != 502 || !strings.Contains(w.Body.String(), "connect to or verify") || !strings.Contains(w.Body.String(), f.Host) {
+		t.Fatalf("TLS failure page: %d %s", w.Code, w.Body.String())
+	}
+	select {
+	case err := <-reported:
+		if err == nil || !strings.Contains(err.Error(), "certificate") {
+			t.Fatalf("lost TLS error: %v", err)
+		}
+	default:
+		t.Fatal("connection failure was not reported")
+	}
+}
+
+func TestGrantQuerySeparators(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"a=1;__omo_proxy_grant=SECRET&b=%2f;;x=1", "a=1&b=%2f;;x=1"},
+		{"%5F_omo_proxy_grant=SECRET;a=1;b=2", "a=1;b=2"},
+		{"a=1&__omo_proxy_grant=SECRET;b=2", "a=1&b=2"},
+		{"__omo_proxy_grant=SECRET", ""},
+		{"a=1;b=2&&c=%252f;d=+", "a=1;b=2&&c=%252f;d=+"},
+	} {
+		if got := withoutGrant(tc.raw); got != tc.want {
+			t.Errorf("grant filter %q: %q want %q", tc.raw, got, tc.want)
+		}
 	}
 }
