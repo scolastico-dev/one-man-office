@@ -57,6 +57,9 @@ type TrackerOptions struct {
 	// idle is called each time the loop is about to wait, with the time it
 	// wakes at and the number of runs under way. Tests only.
 	idle func(wake time.Time, running int)
+	// saving is called while the state file is being written, before the
+	// write starts. Tests only.
+	saving func()
 	// runTimeout replaces RunTimeout when not 0. Tests only.
 	runTimeout time.Duration
 }
@@ -557,6 +560,9 @@ func (t *Tracker) save() {
 	}
 	t.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	if t.o.saving != nil {
+		t.o.saving()
+	}
 	if err := saveKept(t.o.StatePath, out); err != nil {
 		t.log.Print("usage: the usage readings could not be kept: the file could not be written")
 	}

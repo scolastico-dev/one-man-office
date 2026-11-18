@@ -1114,3 +1114,42 @@ func TestTrackerRefreshReturnsAfterTheReadingsAreKept(t *testing.T) {
 		}
 	}
 }
+
+// Held at the boundary: while the state file is being written, Refresh has not
+// answered yet; it answers once the write is let go and the file is there.
+func TestTrackerRefreshWaitsForAHeldSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	inSave, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
+		saving: func() {
+			once.Do(func() { close(inSave) })
+			<-release
+		},
+		Run: func(context.Context, Job) (Result, error) {
+			return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
+		}})
+	done := make(chan struct{})
+	go func() {
+		tr.Refresh(context.Background())
+		close(done)
+	}()
+	<-inSave
+	// The save is held. Refresh may return only when it is let go. Yielding
+	// lets a Refresh that wrongly returns early run; it can never fail a
+	// correct tracker, whatever the machine's speed.
+	for range 2000 {
+		select {
+		case <-done:
+			close(release)
+			t.Fatal("Refresh answered while the readings were still being written")
+		default:
+			runtime.Gosched()
+		}
+	}
+	close(release)
+	<-done
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("after Refresh the state file is missing: %v", err)
+	}
+}
