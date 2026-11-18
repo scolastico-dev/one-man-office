@@ -310,7 +310,7 @@ test.describe('independently bounded export failure fields', () => {
   test('a long reason with a long project prefix keeps its own project error budget', async ({ page, omo }) => {
     const repo = join(omo.home, 'long-export')
     initRepo(repo)
-    const origin = bare(omo)
+    const origin = bare(omo, repo)
     git(repo, 'remote', 'add', 'origin', origin)
     const name = 'export-' + 'x'.repeat(57)
     const { id } = await omo.api<{ id: string }>('POST', '/api/projects', { path: repo, name })
