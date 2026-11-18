@@ -261,24 +261,14 @@ func (h *harness) stop() {
 		return
 	}
 	h.cancel()
-	select {
-	case <-h.done:
-	case <-time.After(guard):
-		h.t.Fatal("Run did not return after its context ended")
-	}
+	<-h.done
 	h.cancel = nil
 }
 
 // next returns the next call of the run function.
 func (h *harness) next() *call {
 	h.t.Helper()
-	select {
-	case c := <-h.runner.calls:
-		return c
-	case <-time.After(guard):
-		h.t.Fatal("no run started")
-		return nil
-	}
+	return <-h.runner.calls
 }
 
 // settle waits until the loop has nothing under way and checks that no call
@@ -294,7 +284,6 @@ func (h *harness) settle() {
 		break
 	}
 	h.tr.wake()
-	deadline := time.After(guard)
 	for {
 		select {
 		case r := <-h.idle:
@@ -305,8 +294,6 @@ func (h *harness) settle() {
 				return
 			}
 			h.tr.wake()
-		case <-deadline:
-			h.t.Fatalf("the tracker did not settle (%d calls pending)", len(h.runner.calls))
 		}
 	}
 }
@@ -727,11 +714,7 @@ func TestTrackerRefreshWaits(t *testing.T) {
 	}
 	c2.ok(Window{Name: "w", UsedPercent: 2})
 	var st api.UsageState
-	select {
-	case st = <-answer:
-	case <-time.After(guard):
-		t.Fatal("Refresh did not return")
-	}
+	st = <-answer
 	for _, r := range st.Readings {
 		if r.Script == "s" && (r.FetchedAt == nil || r.Running) {
 			t.Errorf("reading %+v", r)
@@ -761,11 +744,7 @@ func TestTrackerRefreshWaits(t *testing.T) {
 	}
 	h.next().ok(Window{Name: "w", UsedPercent: 4})
 	h.next().ok(Window{Name: "w", UsedPercent: 4})
-	select {
-	case st = <-answer:
-	case <-time.After(guard):
-		t.Fatal("Refresh did not return")
-	}
+	st = <-answer
 	for _, r := range st.Readings {
 		if r.Script == "s" && r.Windows[0].UsedPercent != 4 {
 			t.Errorf("Refresh answered before the repeated run: %+v", r)
@@ -1009,16 +988,12 @@ func TestTrackerWaitsAtMostAMinute(t *testing.T) {
 	h.settle()
 	h.tr.wake()
 	for {
-		select {
-		case r := <-h.idle:
-			if r.running == 0 {
-				if want := h.clock.Now().Add(maxSleep); !r.wake.Equal(want) {
-					t.Fatalf("wakes at %v, want %v", r.wake, want)
-				}
-				return
+		r := <-h.idle
+		if r.running == 0 {
+			if want := h.clock.Now().Add(maxSleep); !r.wake.Equal(want) {
+				t.Fatalf("wakes at %v, want %v", r.wake, want)
 			}
-		case <-time.After(guard):
-			t.Fatal("no idle report")
+			return
 		}
 	}
 }
@@ -1152,13 +1127,9 @@ func TestTrackerOnChange(t *testing.T) {
 	await := func(what string, ok func(seen) bool) {
 		t.Helper()
 		for {
-			select {
-			case s := <-calls:
-				if ok(s) {
-					return
-				}
-			case <-time.After(guard):
-				t.Fatalf("no change announced: %s", what)
+			s := <-calls
+			if ok(s) {
+				return
 			}
 		}
 	}

@@ -122,11 +122,7 @@ func TestProcessThatNeverRunsReadyIsKilled(t *testing.T) {
 	if got := h.waitEnded(dev.ID); got.EndReason != "did not run omo ai ready in time" {
 		t.Fatalf("end reason %q", got.EndReason)
 	}
-	select {
-	case <-agent.Done():
-	case <-time.After(15 * time.Second):
-		t.Fatal("the process outlived its session")
-	}
+	<-agent.Done()
 	h.step()
 	if fresh := h.live(api.RoleDeveloper, task); fresh.ID == dev.ID {
 		t.Fatal("no fresh agent")

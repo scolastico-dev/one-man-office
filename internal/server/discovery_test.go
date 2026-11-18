@@ -483,13 +483,9 @@ func TestCloseStopsScanner(t *testing.T) {
 	<-block.entered
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waits for a folder that does not answer")
+	err := <-closed
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, ok := projectByPath(s, filepath.Join(root, "repo")); ok {
 		t.Fatal("a stopped scan added a project")

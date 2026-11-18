@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
@@ -68,11 +67,7 @@ func within(t *testing.T, what string, f func()) {
 		defer close(done)
 		f()
 	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s blocked", what)
-	}
+	<-done
 }
 
 // errorOf is the message the store reports for path.

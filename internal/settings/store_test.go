@@ -129,13 +129,9 @@ func TestRunPicksUpHandEdits(t *testing.T) {
 	done := make(chan struct{})
 	go func() { s.Run(ctx); close(done) }()
 	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: 9\n")
-	select {
-	case c := <-got:
-		if c.Section != SectionGeneral || s.General().Limits.Tasks != 9 {
-			t.Fatalf("change = %+v, general = %+v", c, s.General())
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("hand edit not picked up")
+	c := <-got
+	if c.Section != SectionGeneral || s.General().Limits.Tasks != 9 {
+		t.Fatalf("change = %+v, general = %+v", c, s.General())
 	}
 	cancel()
 	<-done

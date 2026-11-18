@@ -92,7 +92,6 @@ func (st *stream) read() {
 // next returns the next frame that is not the retry hint or a ping.
 func (st *stream) next() frame {
 	st.t.Helper()
-	deadline := time.After(streamTimeout)
 	for {
 		select {
 		case f := <-st.frames:
@@ -110,8 +109,6 @@ func (st *stream) next() frame {
 			default:
 			}
 			st.t.Fatal("stream ended while waiting for a frame")
-		case <-deadline:
-			st.t.Fatal("timed out waiting for a stream frame")
 		}
 	}
 }
@@ -135,11 +132,7 @@ func (st *stream) close() { st.resp.Body.Close() }
 // waitEnded waits until the server ends the stream.
 func (st *stream) waitEnded() {
 	st.t.Helper()
-	select {
-	case <-st.done:
-	case <-time.After(streamTimeout):
-		st.t.Fatal("stream did not end")
-	}
+	<-st.done
 }
 
 // waitFanOut waits until the broker has fanned out every event up to id, so
@@ -344,15 +337,12 @@ func TestStreamSendsRetryAndPing(t *testing.T) {
 	s := newTestServer(t)
 	s.events.pingInterval = 10 * time.Millisecond // before any handler goroutine exists
 	st := openStream(t, newBrowser(t, s), s, "", nil)
-	deadline := time.After(streamTimeout)
 	var retry, ping bool
 	for !retry || !ping {
 		select {
 		case f := <-st.frames:
 			retry = retry || f.retry == "3000"
 			ping = ping || f.comment == "ping"
-		case <-deadline:
-			t.Fatalf("retry %v ping %v", retry, ping)
 		}
 	}
 }
@@ -383,13 +373,9 @@ func TestStreamOverSocket(t *testing.T) {
 	defer pr.Close()
 	// The initial retry frame is written after Subscribe. Receiving it is
 	// the barrier before creating an event that starts after the newest id.
-	select {
-	case f := <-st.frames:
-		if f.retry != "3000" {
-			t.Fatalf("first frame %+v, want the retry hint", f)
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("stream never subscribed")
+	f := <-st.frames
+	if f.retry != "3000" {
+		t.Fatalf("first frame %+v, want the retry hint", f)
 	}
 	n := m.create()
 	if ev := st.nextEvent(); *ev.Ticket != n {

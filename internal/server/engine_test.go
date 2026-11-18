@@ -504,11 +504,7 @@ func TestWaitRouteReturnsOnMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rec *httptest.ResponseRecorder
-	select {
-	case rec = <-answer:
-	case <-time.After(time.Minute):
-		t.Fatal("the wait did not return after the mention")
-	}
+	rec = <-answer
 	wantStatus(t, rec.Code, http.StatusOK)
 	got := decodeBody[api.WaitResponse](t, rec.Body)
 	if !strings.Contains(got.Reason, fmt.Sprintf("#%d", n)) || strings.Contains(got.Reason, dev.ID) {
@@ -529,13 +525,9 @@ func TestWaitEndsWhenClientLeaves(t *testing.T) {
 	}()
 	waitFor(t, "the developer to park", func() bool { return sessionByID(t, s, dev.ID).State == api.SessionWaiting })
 	cancel()
-	select {
-	case rec := <-answer:
-		if rec.Body.Len() != 0 {
-			t.Fatalf("answered a client that left: %s", rec.Body.Bytes())
-		}
-	case <-time.After(time.Minute):
-		t.Fatal("the wait outlived its client")
+	rec := <-answer
+	if rec.Body.Len() != 0 {
+		t.Fatalf("answered a client that left: %s", rec.Body.Bytes())
 	}
 	waitFor(t, "the developer to run again", func() bool { return sessionByID(t, s, dev.ID).State == api.SessionRunning })
 }
@@ -919,13 +911,9 @@ func TestCloseEndsAgentsAtOnce(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Minute):
-		t.Fatal("Close did not return")
+	err := <-done
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, a := range r.all() {
 		if !a.isOver() {

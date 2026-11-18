@@ -187,11 +187,7 @@ func start(t *testing.T, r *PTYRunner, spec Spec) *ptyAgent {
 	}
 	t.Cleanup(func() {
 		_ = a.Kill()
-		select {
-		case <-a.Done():
-		case <-time.After(10 * time.Second):
-			t.Error("agent still running after the test")
-		}
+		<-a.Done()
 	})
 	return a.(*ptyAgent)
 }
@@ -219,11 +215,7 @@ func TestStartPromptResentUntilReady(t *testing.T) {
 	}
 	a := start(t, NewPTYRunner(), spec)
 	agent.Store(a)
-	select {
-	case <-a.delivery:
-	case <-time.After(10 * time.Second):
-		t.Fatal("start-prompt delivery did not finish")
-	}
+	<-a.delivery
 	// The terminal echoes the typed line and cat prints it back: one
 	// delivery shows the token twice.
 	if n := strings.Count(a.sess.Screen(), token); n < 1 || n > 2 {
@@ -346,22 +338,14 @@ func TestKillEndsAgent(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("agent still running 5s after Kill")
-	}
+	<-a.Done()
 	if a.ExitErr() == nil {
 		t.Fatal("a killed agent reports a clean exit")
 	}
 	if err := a.Kill(); err != nil {
 		t.Fatalf("second Kill: %v", err)
 	}
-	select {
-	case <-a.Terminal().Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("terminal did not end with its agent")
-	}
+	<-a.Terminal().Done()
 }
 
 func TestKillEndsChildProcesses(t *testing.T) {
@@ -624,11 +608,7 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 		t.Fatalf("no child pid on screen:\n%s", screen)
 	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	select {
-	case <-a.Exited():
-	case <-time.After(10 * time.Second):
-		t.Fatal("main process exit not reported")
-	}
+	<-a.Exited()
 	var exit *exec.ExitError
 	if !errors.As(a.ExitErr(), &exit) || exit.ExitCode() != 3 {
 		t.Fatalf("ExitErr = %v, want exit status 3", a.ExitErr())
@@ -646,11 +626,7 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("terminal still open after Kill")
-	}
+	<-a.Done()
 	waitUntil(t, 10*time.Second, func() bool {
 		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 	})

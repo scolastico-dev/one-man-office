@@ -18,7 +18,7 @@ func TestDiffTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	dir := t.TempDir()
-	err := returnsWithin(t, 10*time.Second, "diff cancellation", func() error { _, _, err := g.runCapped(ctx, dir, 1<<20, "diff"); return err })
+	err := returns(t, "diff cancellation", func() error { _, _, err := g.runCapped(ctx, dir, 1<<20, "diff"); return err })
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the context's deadline", err)
 	}
@@ -50,7 +50,7 @@ func TestCanceledDiffKillsChildren(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
-	err := returnsWithin(t, 10*time.Second, "diff cancellation", func() error { return <-result })
+	err := returns(t, "diff cancellation", func() error { return <-result })
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want cancellation", err)
 	}

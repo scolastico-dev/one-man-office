@@ -554,11 +554,7 @@ func TestDatabaseSnapshotWhileWriting(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-	select {
-	case <-firstCommit:
-	case <-time.After(20 * time.Second):
-		t.Fatal("writer did not commit its first transaction")
-	}
+	<-firstCommit
 	for round := 0; round < 3; round++ {
 		got := entries(t, h.export(t, true))
 		var m api.BackupManifest

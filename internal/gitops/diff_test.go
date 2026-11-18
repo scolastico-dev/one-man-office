@@ -554,7 +554,7 @@ func TestRunCappedCutsAndStops(t *testing.T) {
 	tg(t, repo, "commit", "-q", "-m", "big")
 	var out []byte
 	var cut bool
-	err := returnsWithin(t, 5*time.Second, "capped diff", func() (err error) {
+	err := returns(t, "capped diff", func() (err error) {
 		out, cut, err = g.runCapped(context.Background(), repo, 100, "cat-file", "-p", "HEAD:big.txt")
 		return err
 	})

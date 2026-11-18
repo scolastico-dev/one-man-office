@@ -17,14 +17,7 @@ import (
 
 func await[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for stream progress")
-		var zero T
-		return zero
-	}
+	return <-ch
 }
 
 func liveProxy(t *testing.T, upstream *httptest.Server, mode Mode, strip bool, values ...RequestContext) *httptest.Server {

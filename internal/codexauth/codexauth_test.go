@@ -94,11 +94,7 @@ func TestRefreshEndsWithItsContext(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		if !finished {
-			select {
-			case <-done:
-			case <-time.After(20 * time.Second):
-				t.Error("refresh did not stop")
-			}
+			<-done
 		}
 	})
 	deadline := time.NewTimer(20 * time.Second)

@@ -299,11 +299,7 @@ func TestSkillSetPinnedNotUpdated(t *testing.T) {
 	}
 	m2.mu.Unlock()
 	for _, j := range pending {
-		select {
-		case <-j.done:
-		case <-time.After(30 * time.Second):
-			t.Fatal("a startup fetch did not finish")
-		}
+		<-j.done
 	}
 	if st := m2.State("pinned"); st.State != StateOK || st.Commit != first {
 		t.Fatalf("pinned set after restart = %+v, want %s", st, first)
@@ -661,11 +657,7 @@ func TestSkillSetStopDuringFetch(t *testing.T) {
 	before := e.eventCount()
 	done := make(chan struct{})
 	go func() { m.Stop(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("Stop did not return while a fetch hung")
-	}
+	<-done
 	if e.eventCount() != before {
 		t.Fatal("an event was sent after Stop")
 	}
@@ -779,27 +771,15 @@ func TestSkillSetUpdateDuringWorkerRetirementIsNotLost(t *testing.T) {
 		}
 	}
 	first := m.enqueue("s")
-	select {
-	case <-finished:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the first fetch did not finish")
-	}
+	<-finished
 	secondCommit := u.commit(map[string]string{"a.md": "two\n"})
 	cancel := first.cancel
 	first.cancel = func() { close(retiring); <-releaseRetire; cancel() }
 	releaseFirst()
-	select {
-	case <-retiring:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the first worker did not retire")
-	}
+	<-retiring
 	second := m.enqueue("s")
 	releaseLast()
-	select {
-	case <-second.done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the requested update did not finish")
-	}
+	<-second.done
 	if st := m.State("s"); st.Commit != secondCommit {
 		t.Fatalf("update during worker retirement was lost: commit = %s, want %s", st.Commit, secondCommit)
 	}

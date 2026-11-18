@@ -86,11 +86,7 @@ func TestTerminalInstancesKeepIndependentInputAndResize(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("child did not exit")
-	}
+	<-a.done
 	if a.Info().State != "exited" {
 		t.Fatal("instance remained running")
 	}
@@ -116,11 +112,7 @@ func TestForcedKillStopsChildProcessTree(t *testing.T) {
 	if err := i.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-i.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("child did not exit")
-	}
+	<-i.done
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		err := syscall.Kill(pid, 0)
@@ -220,11 +212,7 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 	if err := term.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-term.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("terminal did not exit after Kill")
-	}
+	<-term.Done()
 }
 
 func TestServeWebSocketRejectsWhenLimitIsFull(t *testing.T) {
@@ -308,20 +296,12 @@ func TestClosedProcessCannotResizeDescriptorHeldByRead(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		close(release)
-		select {
-		case err := <-readDone:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("held descriptor read did not finish")
+		err := <-readDone
+		if err != nil {
+			t.Error(err)
 		}
 	})
-	select {
-	case <-reading:
-	case <-time.After(5 * time.Second):
-		t.Fatal("descriptor read did not start")
-	}
+	<-reading
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}

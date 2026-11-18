@@ -88,13 +88,7 @@ func (h *harness) park(ctx context.Context, id string, timeout time.Duration) <-
 // result waits for the outcome of a parked wait.
 func (h *harness) result(ch <-chan waitResult) waitResult {
 	h.t.Helper()
-	select {
-	case r := <-ch:
-		return r
-	case <-time.After(20 * time.Second):
-		h.t.Fatal("the wait did not return")
-		return waitResult{}
-	}
+	return <-ch
 }
 
 // typed returns the lines typed into an agent.

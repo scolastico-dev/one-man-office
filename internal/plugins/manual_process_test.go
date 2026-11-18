@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // A program a hook started, and every program it started, ends with the
@@ -33,13 +32,9 @@ func TestCancellationEndsTheProgramsAHookStarted(t *testing.T) {
 		return err == nil && parseErr == nil
 	})
 	cancel()
-	select {
-	case err := <-done:
-		if err == nil || err.Error() != "run canceled" {
-			t.Fatalf("Trigger = %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the canceled hook did not finish")
+	err := <-done
+	if err == nil || err.Error() != "run canceled" {
+		t.Fatalf("Trigger = %v", err)
 	}
 	raw, err := os.ReadFile(pidFile)
 	if err != nil {

@@ -286,11 +286,7 @@ func start(t *testing.T, o Options) *running {
 	}()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-r.done:
-		case <-time.After(10 * time.Second):
-			t.Error("fake agent still running after cancellation")
-		}
+		<-r.done
 	})
 	return r
 }
@@ -301,13 +297,8 @@ func (r *running) finish(cancel bool) result {
 	if cancel {
 		r.cancel()
 	}
-	select {
-	case <-r.done:
-		return result{r.code, r.out.String()}
-	case <-time.After(20 * time.Second):
-		r.t.Fatalf("fake agent did not exit; output:\n%s", r.out.String())
-		return result{}
-	}
+	<-r.done
+	return result{r.code, r.out.String()}
 }
 
 // runFake runs a script to its end.

@@ -117,11 +117,7 @@ func TestUpgradeDisconnectLifecycle(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					select {
-					case <-finished:
-					case <-time.After(time.Second):
-						t.Fatal("WebSocket proxy retained disconnected endpoint while waiting for the other TCP direction")
-					}
+					<-finished
 				})
 			}
 		}

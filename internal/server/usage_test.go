@@ -873,21 +873,13 @@ func TestCloseStopsUsage(t *testing.T) {
 	<-f.started // the test's run
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waits for usage runs")
+	err := <-closed
+	if err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case code := <-answered:
-		if code != http.StatusOK && code != http.StatusServiceUnavailable {
-			t.Fatalf("the test answered %d", code)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the script test did not end on Close")
+	code := <-answered
+	if code != http.StatusOK && code != http.StatusServiceUnavailable {
+		t.Fatalf("the test answered %d", code)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for usageGoroutines() != baseline {

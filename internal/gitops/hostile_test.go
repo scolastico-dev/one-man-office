@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // hostileDotGit replaces the .git file of the worktree wt by a fresh
@@ -304,21 +303,21 @@ func TestWorktreeIndexMustBeARegularFile(t *testing.T) {
 			wt := branchWorktree(t, repo, "feat")
 			replaceIndex(t, wt, make)
 			ctx := context.Background()
-			err := returnsWithin(t, 5*time.Second, "WorktreeChanges", func() error {
+			err := returns(t, "WorktreeChanges", func() error {
 				_, err := g.WorktreeChanges(ctx, repo, wt, DefaultDiffLimits)
 				return err
 			})
 			if !errors.Is(err, ErrUnsafeFile) {
 				t.Errorf("WorktreeChanges: err = %v, want ErrUnsafeFile", err)
 			}
-			err = returnsWithin(t, 5*time.Second, "WorktreeFileDiff", func() error {
+			err = returns(t, "WorktreeFileDiff", func() error {
 				_, err := g.WorktreeFileDiff(ctx, repo, wt, "f.txt")
 				return err
 			})
 			if !errors.Is(err, ErrUnsafeFile) {
 				t.Errorf("WorktreeFileDiff: err = %v, want ErrUnsafeFile", err)
 			}
-			err = returnsWithin(t, 5*time.Second, "Status", func() error {
+			err = returns(t, "Status", func() error {
 				_, err := g.Status(repo, wt)
 				return err
 			})

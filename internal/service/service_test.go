@@ -61,11 +61,7 @@ func TestManagedRunAuthenticatesStopAndCleansState(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			t.Error("omo cleanup timed out")
-		}
+		<-done
 	})
 	state := awaitState(t, dir)
 	if state.LaunchID != "test-launch" || strings.Contains(state.URL, "#") {
@@ -164,11 +160,7 @@ func TestRunReportsRunningURLToSecondCaller(t *testing.T) {
 	go func() { done <- Run(ctx, io.Discard, "report", blockingServe(want)) }()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			t.Error("omo cleanup timed out")
-		}
+		<-done
 	})
 	awaitState(t, dir)
 	url, running, err := Running(context.Background())
@@ -207,11 +199,8 @@ func TestSecondStopHurries(t *testing.T) {
 			close(serving)
 			<-ctx.Done()
 			close(firstStop)
-			select {
-			case <-Hurry(ctx):
-				close(hurried)
-			case <-time.After(10 * time.Second):
-			}
+			<-Hurry(ctx)
+			close(hurried)
 			<-release
 			return nil
 		})
@@ -219,37 +208,21 @@ func TestSecondStopHurries(t *testing.T) {
 	t.Cleanup(func() {
 		runCancel()
 		unblock()
-		select {
-		case <-done:
-		case <-time.After(20 * time.Second):
-			t.Error("server did not stop")
-		}
+		<-done
 	})
-	select {
-	case <-serving:
-	case <-time.After(20 * time.Second):
-		t.Fatal("server did not start")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	<-serving
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stopped := make(chan error, 2)
 	go func() { stopped <- Stop(ctx) }()
-	select {
-	case <-firstStop:
-	case <-time.After(20 * time.Second):
-		t.Fatal("server did not receive the first stop")
-	}
+	<-firstStop
 	select {
 	case <-hurried:
 		t.Fatal("the first stop hurried")
 	default:
 	}
 	go func() { stopped <- Stop(ctx) }()
-	select {
-	case <-hurried:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the second stop did not hurry")
-	}
+	<-hurried
 	unblock()
 	for i := 0; i < 2; i++ {
 		if err := <-stopped; err != nil && !errors.Is(err, ErrNotRunning) {

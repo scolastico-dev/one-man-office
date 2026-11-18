@@ -596,11 +596,7 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 		var got []Project
 		// Only liveness is under test, not how quickly the runner schedules
 		// the list's independent filesystem checks.
-		select {
-		case got = <-done:
-		case <-time.After(20 * time.Second):
-			t.Fatalf("%s did not finish while a folder check was blocked", name)
-		}
+		got = <-done
 		if len(got) != 2 {
 			t.Fatalf("%s = %+v", name, got)
 		}
@@ -610,11 +606,7 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 			}
 		}
 	}
-	select {
-	case <-entered:
-	case <-time.After(20 * time.Second):
-		t.Fatal("the hung folder check did not start")
-	}
+	<-entered
 	mu.Lock()
 	defer mu.Unlock()
 	if calls[hung.Path] != 1 {

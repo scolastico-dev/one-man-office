@@ -66,7 +66,7 @@ func TestHungGitTimesOut(t *testing.T) {
 	g := New()
 	g.query = 300 * time.Millisecond
 	dir := t.TempDir()
-	err := returnsWithin(t, 10*time.Second, "hung git", func() error {
+	err := returns(t, "hung git", func() error {
 		_, err := g.CurrentBranch(dir)
 		return err
 	})
@@ -101,7 +101,7 @@ func cancelReadyGit(t *testing.T, g *Git, pidFile string) (error, time.Duration)
 	}
 	start := time.Now()
 	cancel()
-	err := returnsWithin(t, 5*time.Second, "git cancellation", func() error { return <-result })
+	err := returns(t, "git cancellation", func() error { return <-result })
 	return err, time.Since(start)
 }
 

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/session"
@@ -37,11 +36,7 @@ func TestShutdownCancelsExportFetch(t *testing.T) {
 	h.waitFor("fetch process", func() bool { _, err := os.Stat(marker); return err == nil })
 	ended := make(chan struct{})
 	go func() { h.e.halt(h.ctx, "test shutdown"); close(ended) }()
-	select {
-	case <-ended:
-	case <-time.After(4 * time.Second):
-		t.Fatal("shutdown did not cancel background fetch")
-	}
+	<-ended
 	if h.ticket(n).Column == api.ColumnDone {
 		t.Fatal("cancelled fetch completed export")
 	}

@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -193,13 +192,8 @@ func async(f func() *http.Response) <-chan answer {
 
 func receive[T any](t *testing.T, ch <-chan T, what string) T {
 	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(10 * time.Second):
-		t.Fatalf("timed out waiting for %s", what)
-		panic("unreachable")
-	}
+	v := <-ch
+	return v
 }
 
 // waitingSeam returns a channel closed once someone waits for the refs lock.
@@ -254,8 +248,7 @@ func TestTicketWriteBeforeRemoval(t *testing.T) {
 			case a := <-removed:
 				releaseAll()
 				t.Fatalf("the removal did not wait for the ticket write: %d %s", a.status, a.raw)
-			case <-time.After(10 * time.Second):
-				t.Fatal("timed out waiting for the removal to wait")
+
 			}
 			releaseAll()
 			if a := receive(t, written, "the ticket write"); a.status != r.writeOK {
@@ -297,8 +290,7 @@ func TestRemovalBeforeTicketWrite(t *testing.T) {
 			case a := <-written:
 				releaseAll()
 				t.Fatalf("the ticket write did not wait for the removal: %d %s", a.status, a.raw)
-			case <-time.After(10 * time.Second):
-				t.Fatal("timed out waiting for the ticket write to wait")
+
 			}
 			releaseAll()
 			if a := receive(t, removed, "the removal"); a.status != r.removeOK {

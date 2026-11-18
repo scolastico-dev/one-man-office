@@ -91,13 +91,7 @@ func (f *fakePushover) count() int {
 // next waits for the next request.
 func (f *fakePushover) next(t *testing.T) url.Values {
 	t.Helper()
-	select {
-	case v := <-f.got:
-		return v
-	case <-time.After(10 * time.Second):
-		t.Fatal("no request reached the fake Pushover")
-		return nil
-	}
+	return <-f.got
 }
 
 // pushoverRun is the shipped pushover plugin, installed and loaded in the

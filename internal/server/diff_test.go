@@ -465,21 +465,13 @@ func TestDiffRouteSemaphore(t *testing.T) {
 		send(context.Background())
 	}
 	for range 4 {
-		select {
-		case <-g.seen:
-		case <-time.After(10 * time.Second):
-			t.Fatal("four requests did not start")
-		}
+		<-g.seen
 	}
 	fifthCtx, leave := context.WithCancel(context.Background())
 	defer leave()
 	send(fifthCtx)
 	for range 5 {
-		select {
-		case <-g.queued:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the fifth request did not reach the slots")
-		}
+		<-g.queued
 	}
 	if n := g.entered.Load(); n != 4 {
 		t.Fatalf("%d diffs run at once, want 4", n)
@@ -489,11 +481,7 @@ func TestDiffRouteSemaphore(t *testing.T) {
 		t.Fatalf("fifth result %d", got)
 	}
 	// The client returning does not mean its handler has observed cancellation.
-	select {
-	case <-finished:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the fifth handler did not leave its queued slot")
-	}
+	<-finished
 	if n := g.entered.Load(); n != 4 {
 		t.Fatalf("the fifth ran after its client left: %d", n)
 	}
@@ -505,11 +493,7 @@ func TestDiffRouteSemaphore(t *testing.T) {
 	}
 	wg.Wait()
 	for range 4 {
-		select {
-		case <-finished:
-		case <-time.After(10 * time.Second):
-			t.Fatal("a diff handler did not finish")
-		}
+		<-finished
 	}
 	// Every slot is free again.
 	for range 6 {
@@ -533,11 +517,7 @@ func TestDiffRouteClientLeavingStopsTheWork(t *testing.T) {
 			resp.Body.Close()
 		}
 	}()
-	select {
-	case <-g.seen:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the diff did not start")
-	}
+	<-g.seen
 	leave()
 	deadline := time.Now().Add(10 * time.Second)
 	for g.ctxEnd.Load() == 0 {

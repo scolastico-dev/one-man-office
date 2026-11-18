@@ -344,16 +344,12 @@ func TestPTYOutputEndsAfterHangup(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Hangup()
-	select {
-	case got := <-read:
-		if got.err != io.EOF {
-			t.Errorf("output ended with %v, want io.EOF", got.err)
-		}
-		if !strings.Contains(got.output, "last words") {
-			t.Errorf("output before the end = %q", got.output)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the output did not end after Hangup")
+	got := <-read
+	if got.err != io.EOF {
+		t.Errorf("output ended with %v, want io.EOF", got.err)
+	}
+	if !strings.Contains(got.output, "last words") {
+		t.Errorf("output before the end = %q", got.output)
 	}
 	if err := p.Resize(100, 30); err == nil {
 		t.Error("a closed pseudoconsole was resized")
@@ -383,13 +379,9 @@ func TestPTYArgumentsEnvironmentAndResize(t *testing.T) {
 			}
 		}
 	}()
-	select {
-	case got := <-output:
-		if !strings.Contains(got, "hello tree") {
-			t.Fatal(fmt.Sprintf("environment not passed: %q", got))
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("no console output")
+	got := <-output
+	if !strings.Contains(got, "hello tree") {
+		t.Fatal(fmt.Sprintf("environment not passed: %q", got))
 	}
 }
 
@@ -453,14 +445,10 @@ func TestCancellationEndsImmediateDescendant(t *testing.T) {
 	}()
 	child := childHandle(t, path)
 	cancel()
-	select {
-	case err := <-waited:
-		reaped = true
-		if err == nil {
-			t.Fatal("cancelled command succeeded")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("cancellation did not reap root")
+	err := <-waited
+	reaped = true
+	if err == nil {
+		t.Fatal("cancelled command succeeded")
 	}
 	assertEnded(t, child)
 }

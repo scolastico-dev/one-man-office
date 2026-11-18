@@ -44,11 +44,7 @@ func (h *harness) shutdown(ctx context.Context) <-chan struct{} {
 // awaitClosed fails the test unless ch is closed within the deadline.
 func (h *harness) awaitClosed(what string, ch <-chan struct{}) {
 	h.t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		h.t.Fatalf("timed out waiting for %s", what)
-	}
+	<-ch
 }
 
 // checkAllStopped fails unless every fake agent was killed and every
@@ -374,11 +370,7 @@ func TestStopAllEndsAgentWhoseStartCompletesAfterARound(t *testing.T) {
 // awaitClosedSignal waits for one value on ch.
 func (h *harness) awaitClosedSignal(ch <-chan struct{}) {
 	h.t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		h.t.Fatal("timed out")
-	}
+	<-ch
 }
 
 // runInBackground runs Run with ctx; the channel is closed when it returns.

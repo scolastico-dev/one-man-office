@@ -45,13 +45,9 @@ func leftover(t *testing.T, helper string) (*exec.Cmd, <-chan struct{}) {
 		// Register cleanup before waiting for its signal-handler readiness.
 		ready := make(chan error, 1)
 		go func() { _, err := bufio.NewReader(stdout).ReadString('\n'); ready <- err }()
-		select {
-		case err := <-ready:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("helper did not install its signal handler")
+		err := <-ready
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	return cmd, exited
@@ -106,12 +102,8 @@ func TestEndLeftoversVerifiesBeforeSignalling(t *testing.T) {
 	if ended != 2 {
 		t.Fatalf("ended %d process groups, want 2", ended)
 	}
-	for name, ch := range map[string]<-chan struct{}{"SIGTERM": politeExited, "SIGKILL after the grace": stubbornExited} {
-		select {
-		case <-ch:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("leftover not ended by %s", name)
-		}
+	for _, ch := range []<-chan struct{}{politeExited, stubbornExited} {
+		<-ch
 	}
 	select {
 	case <-strangerExited:

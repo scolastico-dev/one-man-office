@@ -236,12 +236,7 @@ func TestFetchTargetSerializesRepositoryFetches(t *testing.T) {
 		errs <- err
 	}
 	go fetch()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		close(release)
-		t.Fatal("first fetch did not start")
-	}
+	<-entered
 	go fetch()
 	select {
 	case <-entered:

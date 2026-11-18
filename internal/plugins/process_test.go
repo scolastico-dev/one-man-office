@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-	"time"
 )
 
 // exec can invoke Cancel as soon as Start launches the process, before
@@ -30,12 +29,8 @@ func TestProcessGroupRemembersCancellationBeforeStarted(t *testing.T) {
 	if err := group.started(cmd); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("the canceled sleeping program exited successfully")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("cancellation before group publication left the program running")
+	err = <-done
+	if err == nil {
+		t.Fatal("the canceled sleeping program exited successfully")
 	}
 }

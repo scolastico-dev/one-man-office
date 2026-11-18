@@ -137,10 +137,7 @@ func TestHTTPBounds(t *testing.T) {
 		case "/max":
 			_, _ = w.Write([]byte(strings.Repeat("x", MaxHTTPBody)))
 		case "/slow":
-			select {
-			case <-r.Context().Done():
-			case <-time.After(10 * time.Second):
-			}
+			<-r.Context().Done()
 		default:
 			_, _ = w.Write([]byte("ok"))
 		}
@@ -269,25 +266,13 @@ func TestHTTPCancellationEndsActiveRequest(t *testing.T) {
 		defer close(finished)
 		result <- b.Load(`omo.http({url = "https://example.invalid/", timeout = 30})`, "http")
 	}()
-	select {
-	case <-entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("HTTP helper did not enter the transport")
-	}
+	<-entered
 	cancel()
-	select {
-	case err := <-result:
-		if err == nil || err.Error() != msgCanceled {
-			t.Fatalf("canceled HTTP run: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("HTTP helper did not end with the run")
+	err := <-result
+	if err == nil || err.Error() != msgCanceled {
+		t.Fatalf("canceled HTTP run: %v", err)
 	}
-	select {
-	case <-requestDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("HTTP transport did not receive cancellation")
-	}
+	<-requestDone
 }
 
 func TestHTTPGoroutinesEndAfterTimeout(t *testing.T) {

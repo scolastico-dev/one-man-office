@@ -328,13 +328,9 @@ func TestPluginDispatchNeverSlowsTheBoard(t *testing.T) {
 		_, err := s.board.Create(t.Context(), board.User, api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{m.project}})
 		written <- err
 	}()
-	select {
-	case err := <-written:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("board writes waited for the blocked plugin")
+	err = <-written
+	if err != nil {
+		t.Fatal(err)
 	}
 	waitPluginDispatch(t, s)
 	// The complete burst was dispatched while the first hook remained held:

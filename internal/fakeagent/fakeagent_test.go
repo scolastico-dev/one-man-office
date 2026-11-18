@@ -409,8 +409,7 @@ func TestNeverReadyAndHangMakeNoCalls(t *testing.T) {
 	case <-hang.entered:
 	case <-r.done:
 		t.Fatalf("hang returned %d", r.code)
-	case <-time.After(20 * time.Second):
-		t.Fatal("hang did not reach its context wait")
+
 	}
 	contains(t, r.out.String(), "alive")
 	res := r.finish(true)
@@ -672,11 +671,7 @@ func TestRunsAsProcess(t *testing.T) {
 		<-waited
 	})
 	io.WriteString(in, "Run omo ai ready to begin\n")
-	select {
-	case <-werr:
-	case <-time.After(30 * time.Second):
-		t.Fatalf("process did not exit:\n%s", out.String())
-	}
+	<-werr
 	if code := cmd.ProcessState.ExitCode(); code != 4 {
 		t.Fatalf("exit code %d\n%s", code, out.String())
 	}

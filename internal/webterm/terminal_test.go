@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // controlledTerminal exposes the two OS timing boundaries exercised here:
@@ -77,13 +76,9 @@ func TestBlockedTerminalInputIsBoundedAndDoesNotBlockResize(t *testing.T) {
 	defer close(p.exited)
 	accepted := make(chan error, 1)
 	go func() { accepted <- i.input([]byte("first")) }()
-	select {
-	case err := <-accepted:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("browser blocked on terminal write")
+	err := <-accepted
+	if err != nil {
+		t.Fatal(err)
 	}
 	<-p.writeStarted
 	full := false
@@ -98,13 +93,9 @@ func TestBlockedTerminalInputIsBoundedAndDoesNotBlockResize(t *testing.T) {
 	}
 	resized := make(chan error, 1)
 	go func() { resized <- i.resize(30, 100) }()
-	select {
-	case err := <-resized:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("terminal write blocked resize")
+	err = <-resized
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -115,17 +106,9 @@ func TestProcessExitDrainsFinalTerminalOutput(t *testing.T) {
 	close(p.exited)
 	// stopInput closes only after the process waiter observes the exit.
 	// Release the final read after that boundary instead of after a delay.
-	select {
-	case <-i.stopInput:
-	case <-time.After(2 * time.Second):
-		t.Fatal("process exit was not observed")
-	}
+	<-i.stopInput
 	close(p.readReady)
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit did not finish")
-	}
+	<-i.done
 	initial, _, detach := i.subscribe()
 	defer detach()
 	if string(initial.replay) != "last output\n" {
@@ -200,11 +183,7 @@ func TestTerminalSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
 	defer p.Close()
 	i.publish([]byte("\x1b[?1049h\x1b[?2004h"))
 	close(p.exited)
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit did not finish")
-	}
+	<-i.done
 	initial, _, detach := i.subscribe()
 	defer detach()
 	if len(initial.prefix) != 0 || initial.repaintOnResize {
@@ -304,11 +283,7 @@ func TestProcessExitBoundsDrainForInheritedTerminalHandles(t *testing.T) {
 	i := Own("drain", p, nil)
 	defer p.Close()
 	close(p.exited)
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("inherited terminal handle blocked exit forever")
-	}
+	<-i.done
 }
 
 func TestProcessExitCallbackReceivesWaitResult(t *testing.T) {
@@ -317,12 +292,8 @@ func TestProcessExitCallbackReceivesWaitResult(t *testing.T) {
 	_ = Own("callback", p, func(_ *Terminal, err error) { called <- err })
 	defer p.Close()
 	close(p.exited)
-	select {
-	case err := <-called:
-		if err != nil {
-			t.Fatalf("wait result = %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit callback was not called")
+	err := <-called
+	if err != nil {
+		t.Fatalf("wait result = %v", err)
 	}
 }

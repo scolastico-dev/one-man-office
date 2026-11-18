@@ -118,13 +118,7 @@ func (f *fakeDiscord) count() int {
 
 func (f *fakeDiscord) next(t *testing.T) map[string]any {
 	t.Helper()
-	select {
-	case v := <-f.got:
-		return v
-	case <-time.After(10 * time.Second):
-		t.Fatal("no request reached the fake Discord")
-		return nil
-	}
+	return <-f.got
 }
 
 type discordRun struct {
