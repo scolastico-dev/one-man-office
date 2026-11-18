@@ -7,8 +7,9 @@ import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
 import { expect, test, type Omo } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+const GIT_ENV = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, env: GIT_ENV, stdio: 'pipe' })
     .toString()

@@ -7,6 +7,7 @@ import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
 import { expect, test } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
 const createDialog = (page: Page) => page.getByRole('dialog', { name: 'Create ticket' })
 
@@ -14,7 +15,7 @@ const createDialog = (page: Page) => page.getByRole('dialog', { name: 'Create ti
 function repoOnFeature(): string {
   const dir = join(realpathSync(tmpdir()), `omo-e2e-feature-${process.pid}-${Date.now()}`)
   initRepo(dir)
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   execFileSync('git', ['checkout', '-q', '-b', 'feature'], { cwd: dir, env, stdio: 'pipe' })
   return dir
 }
@@ -51,6 +52,6 @@ test('the create dialog warns about a project on a non-default branch and not ab
     await expect(list.getByRole('row', { name: /onfeature/ })).toContainText('Not its default branch main.')
     await expect(list.getByRole('row', { name: /demo/ })).not.toContainText('Not its default branch')
   } finally {
-    execFileSync('rm', ['-rf', dir])
+    execFileSync('rm', ['-rf', dir], { env: withoutShellConfig() })
   }
 })

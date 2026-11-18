@@ -5,6 +5,7 @@
 // omo recorded when the ticket went to Done, and the Branch field names
 // them. With OMO_SCREENSHOTS=<folder> the test writes
 // diff-range-{branch,diff}-<theme>-1440.png there.
+import { withoutShellConfig } from './support/env'
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -32,7 +33,7 @@ test.use({
 })
 
 test('a done ticket shows its recorded diff after its worktree and branch are gone and git collected garbage', async ({ page, omo, repo }) => {
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env, stdio: 'pipe' }).toString().trim()
 
   await omo.api('PATCH', '/api/settings', { merge_defaults: { task: 'squash' } })

@@ -3,6 +3,7 @@
 // terminal, editing, a missing ticket, phones and accessibility. With
 // OMO_SCREENSHOTS=<folder> the layout tests also write the screenshots of
 // the page (ticket-page-<tab>-<theme>-<width>.png) there.
+import { withoutShellConfig } from './support/env'
 import AxeBuilder from '@axe-core/playwright'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -26,7 +27,7 @@ const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 /** 3 MiB of text in lines of 1 KiB: far over what one file may send in the whole diff. */
 const BIG = ('b'.repeat(1023) + '\n').repeat(3 * 1024)
 
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+const gitEnv = () => ({ ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
 
 /** Commits files into a worktree the way an agent would (folders made as needed), leaving every other change alone. */
 function commitInto(dir: string, files: Record<string, string>, message: string): void {

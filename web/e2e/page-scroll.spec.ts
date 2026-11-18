@@ -5,6 +5,7 @@
 // window) at two window sizes, and drives the Diff tab's file browser, which
 // once scrolled the whole document. With OMO_SCREENSHOTS=<folder> the diff
 // test writes page-scroll-after-<width>.png there.
+import { withoutShellConfig } from './support/env'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -23,7 +24,7 @@ const ticketPage = (page: Page) => page.locator('[data-ticket-page]')
 const tree = (page: Page) => ticketPage(page).locator('[data-diff-tree]')
 const filePane = (page: Page) => ticketPage(page).locator('[data-file-pane]')
 
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+const gitEnv = () => ({ ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
 
 function commitInto(dir: string, files: Record<string, string>, message: string): void {
   for (const [name, body] of Object.entries(files)) {

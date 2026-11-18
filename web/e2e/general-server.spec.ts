@@ -4,11 +4,12 @@ import type { Page } from '@playwright/test'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { openBoard } from './support/board'
 import { expect, test } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
+    env: { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
   })
 }
 

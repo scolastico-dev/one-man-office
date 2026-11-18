@@ -3,11 +3,12 @@ import { devNull } from 'node:os'
 import { expect, test } from './support/omo'
 import { card, expectCardIn, openBoard } from './support/board'
 import { agentProcesses, expectNoAgentProcesses, liveAgents, script, waitForNoLiveSession, waitForSession } from './support/agents'
+import { withoutShellConfig } from './support/env'
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
+    env: { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
   })
 }
 

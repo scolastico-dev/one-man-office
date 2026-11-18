@@ -4,8 +4,9 @@ import { devNull, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { initRepo } from './git'
 import { REPO_DIR } from './omo'
+import { withoutShellConfig } from './env'
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+const GIT_ENV = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, env: GIT_ENV, stdio: 'pipe' })
     .toString()

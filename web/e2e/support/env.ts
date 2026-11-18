@@ -5,6 +5,29 @@ import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 /** The agent programs omo knows; the real ones of the developer's machine must never be reachable from a test's omo (a first start or a usage script would run them). */
 const AGENT_PROGRAMS = ['claude', 'codex', 'agy', 'gemini'] as const
 
+// HOME alone does not isolate shell startup files, Readline, imported options
+// or the line editor's mode. These are runner settings, never test settings.
+const SHELL_OVERRIDES = new Set([
+  'ENV', 'INPUTRC', 'ZDOTDIR', 'SHELLOPTS', 'BASHOPTS', 'POSIXLY_CORRECT',
+  'EDITOR', 'VISUAL', 'CDPATH', 'GLOBIGNORE', 'FIGNORE', 'KEYTIMEOUT', 'SAVEHIST',
+])
+
+function shellOverride(key: string): boolean {
+  return SHELL_OVERRIDES.has(key) || key.startsWith('BASH_')
+    || key.startsWith('HIST') || key.startsWith('ZLE_')
+    || /^(?:PS\d+|RPS\d+|PSVAR|PROMPT.*|RPROMPT.*|SPROMPT)$/.test(key)
+}
+
+/** Every browser child drops runner shell config; a spec may overlay its own. */
+export function withoutShellConfig(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (!shellOverride(key.toUpperCase())) env[key] = value
+  }
+  // Do not fall back to a runner's machine-wide /etc/inputrc either.
+  return { ...env, INPUTRC: devNull }
+}
+
 export function holdsAgentProgram(dir: string): boolean {
   const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
   return AGENT_PROGRAMS.some((p) =>
@@ -48,7 +71,7 @@ export function terminalShell(inherited: string | undefined, path: string | unde
 export function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
   const cleanPath = path ?? pathWithoutAgentPrograms()
   const env: NodeJS.ProcessEnv = {}
-  for (const [k, v] of Object.entries(process.env)) {
+  for (const [k, v] of Object.entries(withoutShellConfig())) {
     const key = k.toUpperCase()
     if (key.startsWith('OMO_') || key === 'APPDATA' || key === 'USERPROFILE' || key.startsWith('XDG_') || key.startsWith('GIT_CONFIG')) continue
     env[k] = v

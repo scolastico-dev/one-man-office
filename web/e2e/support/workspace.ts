@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { devNull, tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { initRepo } from './git'
+import { withoutShellConfig } from './env'
 
 /**
  * What a path below a workspace folder is: a git repository, a plain folder,
@@ -41,7 +42,7 @@ export function makeWorkspace(layout: Record<string, WorkspaceEntry>, under: str
     if (kind === 'repo') initRepo(at(rel))
     else if (kind === 'dir') mkdirSync(at(rel), { recursive: true })
   }
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   let worktrees = 0
   for (const [rel, kind] of entries) {
     if (typeof kind !== 'object' || !('worktree' in kind)) continue

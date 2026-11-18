@@ -6,6 +6,7 @@ import type { Page } from '@playwright/test'
 import { script } from './support/agents'
 import { card, openBoard } from './support/board'
 import { expect, test, type Omo } from './support/omo'
+import { withoutShellConfig } from './support/env'
 
 // Export against the real server, real agents (the fake agent) and a remote
 // the test makes in its own home. The project's origin is a forge address;
@@ -44,7 +45,7 @@ const FORGE = 'https://example.invalid/you/app.git'
 const WITH_SECRET = 'https://exporter:s3cret-pass@example.invalid/you/app.git'
 const SECRET = 's3cret-pass'
 
-const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+const gitEnv = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv, stdio: 'pipe' }).toString().trim()
 
 /** A bare repository in the test's home. */
