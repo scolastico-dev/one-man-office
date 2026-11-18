@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +33,10 @@ func TestSessionAnswersTerminalQueries(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("no reply to OSC 11 query; screen:\n%s", s.Screen())
+	// The log holds what the terminal's program wrote: it shows whether the
+	// query reached omo at all (a Windows pseudoconsole may keep it).
+	written, _ := os.ReadFile(log)
+	t.Fatalf("no reply to OSC 11 query; screen:\n%s\nlog: %q", strings.TrimSpace(s.Screen()), written)
 }
 
 func TestAnswerQueriesCarriesSplitSequences(t *testing.T) {

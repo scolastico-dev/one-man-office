@@ -158,8 +158,9 @@ func TestDiffRouteFileContextRemoteBaseAndLinks(t *testing.T) {
 	if f.Patch == nil || strings.Contains(*f.Patch, "SECRET") {
 		t.Fatalf("link: %+v", f)
 	}
-	// The patch of a link is its target as git stored it.
-	want := "+" + secret
+	// The patch of a link is its target as git stored it: Git for Windows
+	// stores the target with forward slashes.
+	want := "+" + filepath.ToSlash(secret)
 	if !strings.Contains(*f.Patch, want) {
 		t.Fatalf("link: patch %q, want %q in it", *f.Patch, want)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -121,7 +122,9 @@ func TestEnsurePreservesFileMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
+	// Windows has no Unix file modes: every file reads as 0666 there, and
+	// who may read it is decided by the folder's access list.
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v, want 0600 (the file holds credentials)", fi.Mode().Perm())
 	}
 }
