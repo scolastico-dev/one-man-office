@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
-import { cleanEnv, holdsAgentProgram } from './env'
+import { cleanEnv, findGit, holdsAgentProgram, pathWithoutAgentPrograms } from './env'
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
 import { isPortCollision } from './startup'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
@@ -60,6 +60,17 @@ export interface OmoOptions {
    */
   path?: string
   /**
+   * Fake programs the test's server finds first on its PATH, made in the
+   * test's own home before the server starts and removed with it, so they
+   * exist exactly as long as the server that looks for them (never at module
+   * load, where a repeated or later group of the same file would find them
+   * removed). `files` maps a program's name to its content (written
+   * executable); `git` links the runner's git in (omo needs it to start);
+   * `inheritPath` appends the runner's PATH without any real agent program.
+   * `omo.programs` is the folder. Sets the PATH, so `path` is not given too.
+   */
+  programs?: { files: Readonly<Record<string, string>>; git?: boolean; inheritPath?: boolean }
+  /**
    * A true first start: no settings file is written before the server
    * starts, so omo looks for agent programs on its PATH and writes profiles
    * for those it finds. Needs `path` (the test's own fake programs).
@@ -76,6 +87,8 @@ export interface CliResult {
 export interface Omo {
   /** Temporary directory used as OMO_HOME (and HOME, XDG_*). Removed after the test. */
   readonly home: string
+  /** The folder of `omoOptions.programs` in the home, or "" when the test has none. */
+  readonly programs: string
   readonly port: number
   /** `http://127.0.0.1:<port>`, for direct API calls. */
   readonly base: string
@@ -176,7 +189,18 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
   if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
   mkdirSync(join(home, 'omo'), { recursive: true })
-  const env = cleanEnv(home, opts.path)
+  if (opts.programs !== undefined && opts.path !== undefined) throw new Error('give omoOptions.programs or omoOptions.path, not both')
+  const programs = opts.programs === undefined ? '' : join(home, 'programs')
+  if (opts.programs !== undefined) {
+    mkdirSync(programs)
+    for (const [name, content] of Object.entries(opts.programs.files)) {
+      writeFileSync(join(programs, name), content)
+      chmodSync(join(programs, name), 0o755)
+    }
+    if (opts.programs.git) symlinkSync(findGit(), join(programs, 'git'))
+  }
+  const ownPath = opts.programs === undefined ? opts.path : opts.programs.inheritPath ? [programs, pathWithoutAgentPrograms()].join(delimiter) : programs
+  const env = cleanEnv(home, ownPath)
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
@@ -188,7 +212,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
 
   const assertIsolated = () => {
     const path = (process.platform === 'win32' ? env.Path : env.PATH) ?? ''
-    if (opts.path === undefined && path.split(delimiter).some((dir) => holdsAgentProgram(dir))) {
+    if (ownPath === undefined && path.split(delimiter).some((dir) => holdsAgentProgram(dir))) {
       throw new Error('the test server can reach a real agent program through its PATH')
     }
     if (port === DEFAULT_PORT) throw new Error(`the test server must not use port ${DEFAULT_PORT}`)
@@ -204,6 +228,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
 
   const omo: Omo = {
     home,
+    programs,
     get port() {
       return port
     },
@@ -430,7 +455,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
     // never shows up in a test. (Written after the first command, which
     // creates the home; a file in an empty home before that is refused.)
     const settingsFile = join(home, 'omo', 'settings.yaml')
-    if (opts.firstStart && opts.path === undefined) throw new Error('a first start needs a PATH of the test\'s own fake programs')
+    if (opts.firstStart && ownPath === undefined) throw new Error('a first start needs a PATH of the test\'s own fake programs')
     if (!opts.firstStart && !existsSync(settingsFile)) writeFileSync(settingsFile, '# e2e: no agent detection at the first start\n')
     if (auth === 'basic') {
       await mustCli(['config', 'set', 'basic_auth', `${BASIC.username}:${BASIC.password}`])

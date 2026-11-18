@@ -5,12 +5,11 @@
 // `mcp add-json` and `mcp remove` would. With OMO_SCREENSHOTS=<folder> the
 // axe tests also write mcp-<section>-<theme>-<width>.png there.
 import AxeBuilder from '@axe-core/playwright'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
-import { expect, pathWithoutAgentPrograms, test, type Omo } from './support/omo'
+import { expect, test, type Omo } from './support/omo'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -75,13 +74,12 @@ const CLAUDE_FIXTURE = {
 }
 
 /**
- * A folder with a fake `claude` that edits $HOME/.claude.json (the test's
- * temporary home, which omo passes on) and logs its arguments there, and the
- * PATH that finds it first. Made once per worker, removed after the tests.
+ * A fake `claude` that edits $HOME/.claude.json (the test's temporary home,
+ * which omo passes on) and logs its arguments there. It is made in each test's
+ * own home (`omoOptions.programs`), first on the PATH, so it exists exactly as
+ * long as the server that runs it.
  */
-function fakeClaude(): { dir: string; path: string } {
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-fakeclaude-'))
-  const script = `#!${process.execPath}
+const FAKE_CLAUDE = `#!${process.execPath}
 const fs = require('node:fs')
 const path = require('node:path')
 const home = process.env.CLAUDE_CONFIG_DIR || process.env.HOME
@@ -95,12 +93,7 @@ else if (args[0] === 'mcp' && args[1] === 'remove') delete data.mcpServers[args[
 else { console.error('fake claude: unknown command'); process.exit(2) }
 fs.writeFileSync(file, JSON.stringify(data, null, 2))
 `
-  writeFileSync(join(dir, 'claude'), script)
-  chmodSync(join(dir, 'claude'), 0o755)
-  return { dir, path: [dir, pathWithoutAgentPrograms()].join(delimiter) }
-}
-const FAKE = fakeClaude()
-test.afterAll(() => rmSync(FAKE.dir, { recursive: true, force: true }))
+const FAKE = { files: { claude: FAKE_CLAUDE }, inheritPath: true }
 
 const claudeJson = (omo: Omo) => JSON.parse(readFileSync(join(omo.home, '.claude.json'), 'utf8')) as typeof CLAUDE_FIXTURE & { mcpServers: Record<string, unknown> }
 
@@ -191,7 +184,7 @@ test('a personal access token is created with its secret shown once, and revoked
 })
 
 test.describe('agent programs and take-over with a fake claude', () => {
-  test.use({ omoOptions: { path: FAKE.path } })
+  test.use({ omoOptions: { programs: FAKE } })
 
   test('omo is registered after its plan was shown, and removed again', async ({ page, omo }) => {
     writeFileSync(join(omo.home, '.claude.json'), JSON.stringify(CLAUDE_FIXTURE, null, 2))
@@ -262,7 +255,7 @@ test('at 390 px the page does not scroll sideways', async ({ page, omo }) => {
 for (const width of [1440, 390] as const) {
   for (const colorScheme of ['dark', 'light'] as const) {
     test.describe(`axe at ${width} px, ${colorScheme} theme`, () => {
-      test.use({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme, reducedMotion: 'reduce', omoOptions: { path: FAKE.path } })
+      test.use({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme, reducedMotion: 'reduce', omoOptions: { programs: FAKE } })
 
       test('every section has no violations and the page does not scroll sideways', async ({ page, omo }) => {
         writeFileSync(join(omo.home, '.claude.json'), JSON.stringify(CLAUDE_FIXTURE, null, 2))

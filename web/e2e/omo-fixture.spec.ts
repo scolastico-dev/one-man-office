@@ -1,6 +1,6 @@
 // Exercise resource acquisition against real children. A bind collision may be
 // retried before the test begins; an assertion or an unrelated error may not.
-import { copyFileSync, existsSync, unlinkSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { BINARY, createOmo, expect, test } from './support/omo'
@@ -68,4 +68,30 @@ test('a server executable that disappears after configuration fails and can be d
     await handle.dispose()
   }
   expect(existsSync(handle.omo.home)).toBe(false)
+})
+
+test('fake programs exist for the whole life of the test server and go with its home', async ({ repo }) => {
+  test.skip(process.platform === 'win32', 'the fake programs are executable files made with POSIX modes')
+  const handle = await createOmo({ programs: { files: { claude: '#!/bin/sh\n', agy: '' }, git: true } }, repo)
+  try {
+    const dir = handle.omo.programs
+    expect(dir).toBe(join(handle.omo.home, 'programs'))
+    expect(readdirSync(dir).sort()).toEqual(['agy', 'claude', 'git'])
+    for (const name of ['agy', 'claude', 'git']) expect(() => accessSync(join(dir, name), constants.X_OK)).not.toThrow()
+    await handle.omo.start()
+    await handle.omo.stop()
+    await handle.omo.start()
+    expect(readdirSync(dir).sort(), 'a restart of the server finds the same programs').toEqual(['agy', 'claude', 'git'])
+  } finally {
+    await handle.dispose()
+  }
+  expect(existsSync(handle.omo.programs)).toBe(false)
+})
+
+test('a test that has no fake programs has no programs folder', async ({ omo }) => {
+  expect(omo.programs).toBe('')
+})
+
+test('fake programs and an own PATH are alternatives', async ({ repo }) => {
+  await expect(createOmo({ programs: { files: {} }, path: '/bin' }, repo)).rejects.toThrow(/not both/)
 })

@@ -103,3 +103,12 @@ export function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
 export function pluginListPath(home: string): string {
   return join(home, 'plugin-list.git')
 }
+
+/** The runner's git, found on its own PATH: fake program folders link it in, because omo needs git to start. */
+export function findGit(path: string | undefined = process.env.PATH): string {
+  for (const dir of (path ?? '').split(delimiter)) {
+    const git = join(dir, 'git')
+    if (isExecutable(git)) return git
+  }
+  throw new Error('git is not on the PATH of the test runner')
+}
