@@ -51,6 +51,21 @@ about completion. Use bounded condition polling for external state and explicit
 channels/barriers for owned goroutines. Publish whole files by writing a private
 temporary file and renaming it; readers wait for the final name and contents.
 
+Do not guess completion from the scheduler or from global state. A fixed number
+of `runtime.Gosched` turns, or a counted loop around a `select` with a default,
+cannot show that something did not happen: the other goroutine may simply not
+have run yet. `runtime.NumGoroutine` is a global count that unrelated
+goroutines change. Inside a `synctest` bubble, `synctest.Wait` returns when
+every goroutine of the test is blocked (the exact point to assert that a call
+has not returned while a channel holds it), and `synctest.Test` returns only
+when every goroutine the code under test started has ended, which is the owned
+leak check. `internal/testguard/completion_scan_test.go` rejects both guesses in
+every Go file; a loop that polls a real condition (`for !cond() { runtime.Gosched() }`)
+stays valid. The web side has the same rule for microtasks: `web/src/completion.guard.test.ts`
+rejects a counted loop of `await Promise.resolve()` (or three in a row), and
+fake-timer tests flush with one real macrotask (`flush` in
+`api/eventStream.test.ts`), the exact point after which no promise work is left.
+
 Separate a behavioral deadline (the timeout being tested) from a generous
 watchdog that only prevents a hung test. Explain watchdog choices in a comment.
 Use `testing/synctest` for in-process clock behavior where possible. Real elapsed

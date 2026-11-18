@@ -5,6 +5,9 @@ import type { ApiEvent } from './types'
 
 const enc = new TextEncoder()
 
+// The real macrotask scheduler, taken before any test installs fake timers.
+const realSetImmediate = globalThis.setImmediate
+
 /** One request the reader made, answered by the test. */
 class Call {
   readonly signal: AbortSignal
@@ -76,8 +79,15 @@ function frame(e: ApiEvent): string {
 
 const resync = (latest: number) => `event: resync\ndata: {"latest":${latest}}\n\n`
 
-async function flush(): Promise<void> {
-  for (let i = 0; i < 30; i++) await Promise.resolve()
+/**
+ * Lets every pending promise reaction run, however long the chain: the microtask
+ * queue always drains completely before the next macrotask, so one real macrotask
+ * is the exact point after which no promise work is left. A fixed number of
+ * `await Promise.resolve()` turns would miss a chain that is longer, and
+ * a negative assertion after it would pass without proving anything.
+ */
+function flush(): Promise<void> {
+  return new Promise<void>((resolve) => realSetImmediate(resolve))
 }
 
 async function advance(ms: number): Promise<void> {
