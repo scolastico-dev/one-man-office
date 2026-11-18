@@ -17,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 func installTaskPlugin(t *testing.T, s *Server, name string) {
@@ -28,7 +29,7 @@ func installTaskPlugin(t *testing.T, s *Server, name string) {
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"hooks":[]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settings.PutPluginIf("", api.PluginSettings{Name: name, Source: "/local/plugin", Enabled: true, Config: map[string]any{}}); err != nil {
+	if err := s.settings.PutPluginIf("", api.PluginSettings{Name: name, Source: testpath.Abs("/local/plugin"), Enabled: true, Config: map[string]any{}}); err != nil {
 		t.Fatal(err)
 	}
 	s.reloadPlugins(true)

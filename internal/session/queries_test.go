@@ -16,10 +16,13 @@ func TestSessionAnswersTerminalQueries(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "q.log")
 	// Emit an OSC 11 background query, then consume one byte of the reply.
 	// Raw mode as termenv itself uses: an OSC reply carries no newline, so a
-	// canonical-mode read would never see it.
+	// canonical-mode read would never see it. The START line before all of
+	// it is only for the failure message: with it on the screen or in the
+	// log the script ran and the query or its reply got lost; without it the
+	// program wrote nothing at all.
 	s, err := Start(Options{
 		Cmd:     "sh",
-		Args:    []string{"-c", `stty raw; printf '\033]11;?\007'; head -c 1 >/dev/null; stty sane; echo GOT:reply`},
+		Args:    []string{"-c", `echo START; stty raw; printf '\033]11;?\007'; head -c 1 >/dev/null; stty sane; echo GOT:reply`},
 		LogPath: log, Rows: 24, Cols: 80,
 	})
 	if err != nil {
@@ -34,9 +37,10 @@ func TestSessionAnswersTerminalQueries(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	// The log holds what the terminal's program wrote: it shows whether the
-	// query reached omo at all (a Windows pseudoconsole may keep it).
-	written, _ := os.ReadFile(log)
-	t.Fatalf("no reply to OSC 11 query; screen:\n%s\nlog: %q", strings.TrimSpace(s.Screen()), written)
+	// script ran (START) and whether the query reached omo at all (a Windows
+	// pseudoconsole may keep it).
+	written, rerr := os.ReadFile(log)
+	t.Fatalf("no reply to OSC 11 query; screen:\n%s\nlog (read error %v): %q", strings.TrimSpace(s.Screen()), rerr, written)
 }
 
 func TestAnswerQueriesCarriesSplitSequences(t *testing.T) {

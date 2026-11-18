@@ -21,7 +21,7 @@ func TestNoUnboundedZIPConstructors(t *testing.T) {
 		if d.IsDir() {
 			return nil
 		}
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") || filepath.Dir(p) == "../boundedzip" {
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") || filepath.ToSlash(filepath.Dir(p)) == "../boundedzip" {
 			return nil
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), p, nil, 0)
