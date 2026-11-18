@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanEnv } from '../../e2e/support/env'
+import { cleanEnv, terminalShell } from '../../e2e/support/env'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -18,8 +18,17 @@ it('keeps only test-owned omo variables in server, CLI and seed environments', (
   })
 })
 
-it('uses the shell syntax the browser tests exercise regardless of the runner login shell', () => {
+it.skipIf(process.platform === 'win32')('uses a shell with line editing and bracketed paste, regardless of the runner login shell', () => {
   vi.stubEnv('SHELL', '/a/non-POSIX/login-shell')
   const env = cleanEnv('/temporary/omo-test', '/test/programs')
-  if (process.platform !== 'win32') expect(env.SHELL).toBe('/bin/sh')
+  expect(env.SHELL).toMatch(/(?:^|\/)bash$/)
+})
+
+it.skipIf(process.platform === 'win32')('preserves compatible interactive shells and resolves Bash for other login shells', () => {
+  for (const shell of ['/opt/bin/bash', '/opt/bin/zsh']) {
+    expect(terminalShell(shell, '/tools', (p) => p === shell)).toBe(shell)
+  }
+  expect(terminalShell('/bin/fish', '/tools:/elsewhere', (p) => p === '/tools/bash')).toBe('/tools/bash')
+  expect(terminalShell('/bin/sh', '', (p) => p === '/bin/bash')).toBe('/bin/bash')
+  expect(() => terminalShell('/bin/fish', '', () => false)).toThrow('Bash with line editing and bracketed paste')
 })

@@ -1,4 +1,3 @@
-import { expectSettingsReady } from './support/settings'
 // The board shell never scrolls as a document: the top bar, the sidebar and
 // the page's panes stay in the window and the panes inside scroll on their
 // own. This walks the full-height views (the board, the ticket page on every
@@ -16,6 +15,7 @@ import { expectNoAgentProcesses, script, waitForSession } from './support/agents
 import { openBoard } from './support/board'
 import { png, uploadImage } from './support/images'
 import { terminalIn } from './support/terminal'
+import { expectSettingsReady } from './support/settings'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 

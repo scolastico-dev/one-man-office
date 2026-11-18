@@ -48,7 +48,7 @@ test('an unrelated startup failure propagates without port reallocation and clea
   try {
     const port = handle.omo.port
     expect((await handle.omo.cli(['config', 'set', 'host', '203.0.113.1'])).code).toBe(0)
-    await expect(handle.omo.start()).rejects.toThrow(/cannot assign requested address|not valid in its context/i)
+    await expect(handle.omo.start()).rejects.toThrow(/can(?:no|')t assign requested address|not valid in its context/i)
     expect(handle.omo.port).toBe(port)
     expect(handle.omo.output().match(/--- start on port/g)).toHaveLength(1)
   } finally {

@@ -114,3 +114,20 @@ test('a failed throttle command is reported after its CDP session is cleaned up'
   await expect(dispose()).rejects.toThrow('rate command failed')
   expect(detach).toHaveBeenCalledOnce()
 })
+
+
+test.each(['attach', 'command'])('a popup that closes during %s does not fail teardown', async (phase) => {
+  const { context, page, send, detach } = fixture()
+  let reject!: (e: Error) => void
+  const gate = new Promise<never>((_, r) => { reject = r })
+  if (phase === 'attach') vi.mocked(context.newCDPSession).mockImplementationOnce(() => gate)
+  else send.mockImplementationOnce(() => gate)
+  const dispose = await installCPUThrottle(context, 4)
+  const opening = context.newPage()
+  await vi.waitFor(() => expect(phase === 'attach' ? context.newCDPSession : send).toHaveBeenCalled())
+  Object.assign(page, { isClosed: () => true })
+  reject(new Error('Target page, context or browser has been closed'))
+  await expect(opening).resolves.toBe(page)
+  await expect(dispose()).resolves.toBeUndefined()
+  expect(detach).toHaveBeenCalledTimes(phase === 'attach' ? 0 : 1)
+})

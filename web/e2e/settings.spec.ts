@@ -1,8 +1,8 @@
-import { expectSettingsReady } from './support/settings'
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
 import { expectBoardLive, openBoard } from './support/board'
 import { expect, test } from './support/omo'
+import { expectSettingsReady } from './support/settings'
 
 const SECTIONS = [
   ['projects', 'Projects'],

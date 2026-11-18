@@ -1,9 +1,9 @@
-import { expectSettingsReady } from './support/settings'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
 import { expect, FAKE_AGENT_BINARY, test, type Omo } from './support/omo'
+import { expectSettingsReady } from './support/settings'
 
 // The settings (the section list and the page beside it) stand in the middle
 // of the room next to the sidebar: on a wide screen the free space left of

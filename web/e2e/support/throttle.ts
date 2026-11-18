@@ -25,9 +25,13 @@ export async function installCPUThrottle(context: BrowserContext, rate: number):
     let task = pending.get(page)
     if (!task) {
       task = (async () => {
-        const cdp = await context.newCDPSession(page)
-        sessions.push({ page, cdp })
-        await cdp.send('Emulation.setCPUThrottlingRate', { rate })
+        try {
+          const cdp = await context.newCDPSession(page)
+          sessions.push({ page, cdp })
+          await cdp.send('Emulation.setCPUThrottlingRate', { rate })
+        } catch (e) {
+          if (!page.isClosed()) throw e
+        }
       })()
       pending.set(page, task)
     }

@@ -4,7 +4,7 @@ import type { SettingsSection } from '../../src/locations'
 // Each marker is rendered only after its form/list has loaded. A title, or
 // the absence of one particular loading message, can precede all this content.
 const CONTENT: Record<SettingsSection, readonly string[]> = {
-  projects: ['[data-workspace-roots]'],
+  projects: ['[data-workspace-roots]', '[data-projects], [data-no-projects]'],
   agents: ['[data-profile-list], [data-no-profiles]'],
   roles: ['[data-role-editor="ceo"] [data-assignment]', '[data-role-editor="pm"] [data-assignment]', '[data-role-editor="developer"] [data-assignment]', '[data-role-editor="reviewer"] [data-assignment]'],
   usage: ['[data-usage-limits] input', '[data-script-list], [data-no-scripts]'],
