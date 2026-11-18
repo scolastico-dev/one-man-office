@@ -118,7 +118,7 @@ func TestPluginForwardIdleAfterReloadDisconnect(t *testing.T) {
 				t.Fatalf("remaining socket was marked idle: %+v", a)
 			}
 			// Keep the replacement connected beyond the selected idle interval.
-			time.Sleep(150 * time.Millisecond)
+			expireWhenDue(t, s, f.ID)
 			tasks, _ := s.plugins.m.Tasks("one")
 			if len(tasks) != 1 || tasks[0].ID != task.ID || tasks[0].State != "running" {
 				t.Fatalf("live replacement stopped: %+v", tasks)

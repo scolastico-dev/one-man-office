@@ -77,6 +77,10 @@ func Enabled() bool { return os.Getenv(EnvEnable) == "1" }
 // With EnvSwallowEnters or EnvDeafFor set it reads its terminal like a
 // full-screen CLI with an input line (see composer).
 func Main() int {
+	if err := recordPID(); err != nil {
+		fmt.Fprintf(os.Stdout, "fake: %v\n", err)
+		return ExitFailed
+	}
 	if os.Getenv(EnvBridge) == "1" {
 		return bridgeMain()
 	}

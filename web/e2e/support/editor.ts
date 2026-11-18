@@ -6,15 +6,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { cleanEnv } from './env'
+import { processAlive } from './process'
 import { makePlugin, type PluginRepo } from './plugin'
-import { expect, REPO_DIR, test as base, type Omo } from './omo'
+import { expect, NODE_SHIM_BINARY, REPO_DIR, TEST_CERT_BINARY, test as base, type Omo } from './omo'
 import type { PluginSettings, PluginTask, ProxyForward } from '../../src/api/types'
 
 /** Minimal deterministic tar with executable modes, handled by the production artifact extractor. */
-function archive(files: Record<string, string>): Buffer {
+function archive(files: Record<string, string | Buffer>): Buffer {
   const chunks: Buffer[] = []
   for (const [name, value] of Object.entries(files)) {
-    const body = Buffer.from(value)
+    const body = Buffer.isBuffer(value) ? value : Buffer.from(value)
     const header = Buffer.alloc(512)
     header.write('fixture/' + name)
     const octal = (offset: number, length: number, n: number) => header.write(n.toString(8).padStart(length - 1, '0') + '\0', offset, length)
@@ -44,11 +45,16 @@ export const test = base.extend<{ editor: EditorFixture }>({
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'omo-editor-fixture-')))
     const ca = join(root, 'ca.pem'), key = join(root, 'key.pem')
     // Only this child receives a cleaned environment; no inherited agent/socket identity.
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', ca, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1'], { env: cleanEnv(root), stdio: 'pipe' })
+    // A native program of every platform writes the throw-away certificate: no openssl on the machine is needed.
+    execFileSync(TEST_CERT_BINARY, [root], { env: cleanEnv(root), stdio: 'pipe' })
     const entry = readFileSync(join(REPO_DIR, 'web/e2e/fixtures/editor.cjs'), 'utf8')
-    // Test-only runtime bridge. Publisher probes use actual bundled Node instead.
-    const node = '#!/bin/sh\nexec ' + "'" + process.execPath.replaceAll("'", "'\\''") + "'" + ' "$@"\n'
-    const raw = archive({ 'lib/node': node, node, 'out/node/entry.js': entry, 'out/node/util.js': 'exports.paths={};', 'out/server-main.js': entry })
+    // Test-only runtime bridge: the editor artifact's bundled Node is a native shim (web/e2e/nodeshim)
+    // that runs the Node of this test run, named by the file next to it. No POSIX shell is involved,
+    // so the same archive works on Linux, macOS and Windows. Publisher probes use actual bundled Node instead.
+    const shim = readFileSync(NODE_SHIM_BINARY)
+    const target = process.execPath + '\n'
+    const exe = process.platform === 'win32' ? '.exe' : ''
+    const raw = archive({ ['lib/node' + exe]: shim, 'lib/node-target': target, ['node' + exe]: shim, 'node-target': target, 'out/node/entry.js': entry, 'out/node/util.js': 'exports.paths={};', 'out/server-main.js': entry })
     let release = () => {}, gate: Promise<void> | undefined
     const requests: string[] = []
     let activeDownloads = 0
@@ -77,7 +83,12 @@ export const test = base.extend<{ editor: EditorFixture }>({
         lua = lua.replace(request, `local job,why=omo.artifact_start{key=artifact_key,url=${JSON.stringify(url)},sha256=${JSON.stringify(options.badChecksum ? '0'.repeat(64) : createHash('sha256').update(raw).digest('hex'))}`)
         expect(lua).toContain('idle*60')
         lua = lua.replaceAll('idle*60', String(IDLE_SECONDS))
+        // The shipped table pins publisher builds only for some platforms. The local stand-in runs on whichever platform the
+        // tests run on, so its copy accepts the host; the genuine refusal is the unsupported case, which keeps the shipped guard.
+        const guard = 'if not checksums[editor][platform] then'
+        expect(lua.split(guard)).toHaveLength(2)
         if (options.unsupported) lua = 'event.host.os="windows";event.host.arch="arm64"\n' + lua
+        else lua = lua.replace(guard, 'if false and not checksums[editor][platform] then')
         const repo = makePlugin(join(omo.home, 'editor-source'), JSON.parse(readFileSync(join(folder, 'plugin.json'), 'utf8')) as object, {
           'editor.lua': lua,
           'launch.cjs': readFileSync(join(folder, 'launch.cjs'), 'utf8'),
@@ -118,16 +129,6 @@ export async function expectClean(omo: Omo, name = 'vscode'): Promise<void> {
 /** Only inspect PIDs explicitly emitted by the fixture, never arbitrary process environments. */
 export function processTree(task: PluginTask): number[] {
   return task.output.filter(line => /^FIXTURE_(PID|CHILD):\d+$/.test(line)).map(line => Number(line.split(':')[1]))
-}
-export function processAlive(pid: number): boolean {
-  try {
-    if (process.platform === 'linux') {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-      if (stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z')) return false
-    }
-    process.kill(pid, 0)
-    return true
-  } catch { return false }
 }
 export async function expectTreeGone(pids: number[]): Promise<void> {
   expect(pids).toHaveLength(2)

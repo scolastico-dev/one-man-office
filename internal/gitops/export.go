@@ -28,9 +28,7 @@ func (g *Git) FetchTarget(ctx context.Context, repo string, r Remote, base strin
 	if err := ValidSourceURL(r.URL); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRemote, err)
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	ctx, cancel := context.WithTimeoutCause(ctx, g.op, ErrTimeout)
 	defer cancel()
 	common, err := g.commonDir(ctx, repo)
@@ -94,9 +92,7 @@ func (g *Git) FetchTarget(ctx context.Context, repo string, r Remote, base strin
 // are errors. All arguments must be full object IDs. Temporary merge objects
 // are discarded; no refs, index, HEAD or working files are changed.
 func (g *Git) ExportContained(repo, start, commit, target string) (bool, error) {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	for _, id := range []string{start, commit, target} {
 		if !fullID(id) {
 			return false, fmt.Errorf("%w: %q is not a full commit id", ErrNoCommit, oneLine(id))

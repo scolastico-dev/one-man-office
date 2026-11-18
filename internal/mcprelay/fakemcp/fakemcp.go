@@ -81,6 +81,10 @@ func Enabled() bool { return os.Getenv(EnvEnable) == "1" }
 
 // Main runs the fake server on standard input and output.
 func Main() int {
+	if err := recordPID(); err != nil {
+		fmt.Fprintln(os.Stderr, "fakemcp:", err)
+		return 2
+	}
 	if d, err := time.ParseDuration(os.Getenv(EnvDelay)); err == nil {
 		time.Sleep(d)
 	}

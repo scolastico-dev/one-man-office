@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -358,26 +359,37 @@ func TestStartupDoesNotBlockOnFullHookQueue(t *testing.T) {
 	e.m.Ready()
 }
 
+// A second Close that arrives while the first one is still joining the task's
+// reaping and its exit callback must wait for that join too. The test runs in
+// a synctest bubble: synctest.Wait returns only once every goroutine of the
+// bubble is blocked on something another goroutine of the bubble must resolve,
+// so "the second Close is waiting" is observed, not guessed with a clock. The
+// first Close is held inside the TaskExited callback, so the only thing that
+// can let the second one return is the missing join.
 func TestConcurrentCloseWaitsForTaskReapingAndCallbacks(t *testing.T) {
-	e := taskPlugin(t)
-	entered, release := make(chan struct{}), make(chan struct{})
-	e.m.o.TaskExited = func(_ string, _ api.PluginTask) { close(entered); <-release }
-	if _, err := e.m.StartTask(t.Context(), "p", taskRequest(t, "close", "sleep")); err != nil {
-		t.Fatal(err)
-	}
-	first := make(chan struct{})
-	go func() { e.m.Close(); close(first) }()
-	<-entered
-	second := make(chan struct{})
-	go func() { e.m.Close(); close(second) }()
-	select {
-	case <-second:
-		t.Error("concurrent Close returned before process callback finished")
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(release)
-	<-first
-	<-second
+	synctest.Test(t, func(t *testing.T) {
+		e := taskPlugin(t)
+		entered, release := make(chan struct{}), make(chan struct{})
+		e.m.o.TaskExited = func(_ string, _ api.PluginTask) { close(entered); <-release }
+		if _, err := e.m.StartTask(t.Context(), "p", taskRequest(t, "close", "sleep")); err != nil {
+			t.Fatal(err)
+		}
+		first, second := make(chan struct{}), make(chan struct{})
+		go func() { e.m.Close(); close(first) }()
+		<-entered
+		go func() { e.m.Close(); close(second) }()
+		synctest.Wait()
+		select {
+		case <-second:
+			t.Error("concurrent Close returned before the process callback finished")
+		case <-first:
+			t.Error("first Close returned before the process callback finished")
+		default:
+		}
+		close(release)
+		<-first
+		<-second
+	})
 }
 
 func TestTaskRunningLimit(t *testing.T) {

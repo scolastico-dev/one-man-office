@@ -541,9 +541,14 @@ describe('tests that are skipped', () => {
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') return []
       const path = join(dir, e.name)
-      return e.isDirectory() ? walk(path) : /\.(test|spec)\.(ts|mjs)$/.test(e.name) ? [path] : []
+      return e.isDirectory() ? walk(path) : isTestCode(path.slice(resolve('.').length + 1).split('\\').join('/')) ? [path] : []
     })
-  // Every web test file, guards included: unit tests, browser specs and the standalone drivers.
+  // Test files, and the helpers the browser specs call: a skip made by a fixture or a support module leaves out a test just as
+  // a spec's own does, so those are scanned too.
+  function isTestCode(path: string): boolean {
+    return /\.(test|spec)\.(ts|mjs)$/.test(path) || (path.startsWith('e2e/') && /\.(ts|mts|mjs)$/.test(path))
+  }
+  // Every web test file, guards included: unit tests, browser specs, their support modules and the standalone drivers.
   const files = walk(resolve('.')).map((path) => ({ path: path.slice(resolve('.').length + 1).split('\\').join('/'), text: readFileSync(path, 'utf8') }))
   // Every way a test is left out, whatever its condition says or hides: a variable, a helper, an import, a platform name.
   const SKIPS = /(?:\.(?:skipIf|runIf|skip|fixme|todo)|\b(?:xit|xtest|xdescribe))\s*\(/g
@@ -558,16 +563,6 @@ describe('tests that are skipped', () => {
     'e2e/filters.spec.ts': {
       count: 1,
       reason: 'not a platform skip: the screenshot-only test runs only when OMO_SCREENSHOTS names a folder to write to',
-    },
-    // Both were merged from main as whole-file skips on every platform but Linux. They are listed because they exist, not because they
-    // satisfy the rule above: a whole spec is wider than one assertion the platform truly cannot make (reported to the product owner).
-    'e2e/plugin-editor.spec.ts': {
-      count: 1,
-      reason: 'main\'s whole-file skip outside Linux: the spec drives a local editor protocol fixture through a POSIX runtime bridge; wider than the single-assertion rule allows, kept as merged and reported',
-    },
-    'e2e/plugin-lifecycle.spec.ts': {
-      count: 1,
-      reason: 'main\'s whole-file skip outside Linux: the spec runs a local process fixture that is exercised only on Linux there (native task tests cover other platforms); wider than the single-assertion rule allows, kept as merged and reported',
     },
   }
 
@@ -598,6 +593,7 @@ describe('tests that are skipped', () => {
     expect(skipsIn('expect(skipped).toBe(1); const skipIfNot = 1; items.skipped(2)')).toHaveLength(0)
     expect(files.some((f) => f.path.startsWith('e2e/') && f.path.endsWith('.spec.ts'))).toBe(true)
     expect(files.some((f) => f.path.startsWith('scripts/') && f.path.endsWith('.test.mjs'))).toBe(true)
+    expect(files.some((f) => f.path.startsWith('e2e/support/') && f.path.endsWith('editor.ts'))).toBe(true)
     expect(files.some((f) => f.path.endsWith('.guard.test.ts'))).toBe(true)
   })
 })

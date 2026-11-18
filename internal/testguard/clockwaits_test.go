@@ -190,9 +190,6 @@ var retainedClockWaits = map[string]struct {
 	"cmd/omo/smoke_test.go":                     {map[string]int{"context.WithTimeout": 2}, "the smoke test drives a built omo and its child programs; the bound makes a stuck child end with its own output instead of the binary's time limit"},
 	"internal/usage/tracker_test.go":            {map[string]int{"poll deadline": 1}, "the loop runs inside a synctest bubble: its deadline is virtual time, which advances only when every goroutine of the bubble is blocked, so it is no wall clock and decides a livelock deterministically"},
 	"internal/mcpbridge/bridge_test.go":         {map[string]int{"time.After": 3, "context.WithTimeout": 2}, "waits on a separate bridge process whose stderr belongs in the failure and which must be killed, and one loop that re-emits until the bridge's event stream is attached"},
-	"internal/gitops/export_test.go":            {map[string]int{"time.After": 1}, "one-sided window: a second fetch must not enter while the first holds the repository; a short window can only miss a violation, never fail a correct run, and the boundary has no observable point without a seam in the product"},
-	"internal/plugins/tasks_test.go":            {map[string]int{"time.After": 1}, "one-sided window: a concurrent Close must not return before the callback ends; same reason as the fetch window"},
-	"internal/plugins/forwards_test.go":         {map[string]int{"time.After": 1}, "one-sided window: cleanup must wait for an in-flight forward creation; same reason as the fetch window"},
 }
 
 func TestTestsWaitForEventsNotClocks(t *testing.T) {

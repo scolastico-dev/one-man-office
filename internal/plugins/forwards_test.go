@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"testing"
-	"time"
 )
 
 type blockedForwardDesk struct {
@@ -25,6 +24,8 @@ func TestForwardCreationCompletesBeforeUnloadCleanup(t *testing.T) {
 	d := blockedForwardDesk{entered: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
 	e.m.o.Forwards = d
 	cleaned := make(chan bool, 1)
+	blocked := make(chan struct{})
+	e.m.unloadBlocked = func() { close(blocked) }
 	e.m.o.Unloaded = func(string, string) {
 		select {
 		case <-d.finished:
@@ -44,21 +45,21 @@ func TestForwardCreationCompletesBeforeUnloadCleanup(t *testing.T) {
 		p.Enabled = false
 		e.m.Load([]api.PluginSettings{p})
 	}()
-	// The adapter is deliberately delayed past cancellation. Cleanup must wait.
+	// The adapter is held past cancellation. The unload either reports that it
+	// waits for the creation, or (the bug) runs the cleanup at once; both are
+	// events the code produces, so no interval is waited out.
 	select {
-	case good := <-cleaned:
+	case <-blocked:
+	case <-cleaned:
 		close(d.release)
 		<-actionDone
 		<-loaded
-		if !good {
-			t.Fatal("cleanup ran before in-flight forward creation")
-		}
-	case <-time.After(20 * time.Millisecond):
-		close(d.release)
-		<-actionDone
-		<-loaded
-		if !<-cleaned {
-			t.Fatal("cleanup preceded forward creation")
-		}
+		t.Fatal("cleanup ran before in-flight forward creation")
+	}
+	close(d.release)
+	<-actionDone
+	<-loaded
+	if !<-cleaned {
+		t.Fatal("cleanup preceded forward creation")
 	}
 }

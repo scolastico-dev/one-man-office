@@ -9,6 +9,7 @@ import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentProgr
 import { cpuThrottleRate, installCPUThrottle } from './throttle'
 import { findAddress, isPortCollision } from './startup'
 import { run, type CliResult } from './run'
+import { isBelow } from './within'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -23,6 +24,15 @@ export const SEED_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'wi
 export const FAKE_AGENT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakeagent.exe' : 'fakeagent')
 /** The scripted MCP server (stdio) a test lets omo relay; it runs only with FAKEMCP_SERVER=1 in its environment. */
 export const FAKE_MCP_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakemcp.exe' : 'fakemcp')
+/**
+ * omo's own command line (internal/cli, as cmd/omo) that trusts one fixture certificate authority, named by
+ * E2E_FIXTURE_CA_FILE, through Go's fallback roots on every platform. Used only for tests that set omoOptions.tlsCA.
+ */
+export const CA_OMO_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'omoca.exe' : 'omoca')
+/** Native stand-in for the Node an editor artifact bundles (built by the e2e global setup). */
+export const NODE_SHIM_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'nodeshim.exe' : 'nodeshim')
+/** Writes a throw-away loopback certificate for the local HTTPS fixtures, so no openssl is needed. */
+export const TEST_CERT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'testcert.exe' : 'testcert')
 
 /** The roles an agent script can be given. */
 export type AgentRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'
@@ -79,7 +89,7 @@ export interface OmoOptions {
    * for those it finds. Needs `path` (the test's own fake programs).
    */
   firstStart?: boolean
-  /** Additional trusted CA for a local HTTPS artifact fixture, passed only to this test's server/CLI. */
+  /** The one CA (a PEM file) that this test's omo, started from CA_OMO_BINARY, trusts for its local HTTPS artifact fixture. */
   tlsCA?: string
 }
 
@@ -154,7 +164,7 @@ export class ServerError extends Error {
  * anything is made, and the home is removed again when anything before the
  * handle is returned throws, so a failed creation leaves nothing behind.
  */
-export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY): Promise<{ omo: Omo; dispose(): Promise<void> }> {
+export async function createOmo(opts: OmoOptions, repo: string, binary = opts.tlsCA === undefined ? BINARY : CA_OMO_BINARY): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   if (!existsSync(binary)) {
     throw new Error(`the omo binary ${binary} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
   }
@@ -163,7 +173,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
   const root = realpathSync(tmpdir())
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
   try {
-    if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+    if (!isBelow(root, home)) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
     return await createOmoIn(home, opts, repo, binary)
   } catch (e) {
     rmSync(home, { recursive: true, force: true })
@@ -173,6 +183,7 @@ export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY)
 
 async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   mkdirSync(join(home, 'omo'), { recursive: true })
+  mkdirSync(join(home, 'agent-pids'), { recursive: true }) // fake agents record their process ids here
   const programs = opts.programs === undefined ? '' : join(home, 'programs')
   if (opts.programs !== undefined) {
     mkdirSync(programs)
@@ -184,7 +195,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
   }
   const ownPath = opts.programs === undefined ? opts.path : opts.programs.inheritPath ? [programs, pathWithoutAgentPrograms()].join(delimiter) : programs
   const env = cleanEnv(home, ownPath)
-  if (opts.tlsCA !== undefined) env.SSL_CERT_FILE = opts.tlsCA
+  if (opts.tlsCA !== undefined) env.E2E_FIXTURE_CA_FILE = opts.tlsCA
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
@@ -200,7 +211,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
       throw new Error('the test server can reach a real agent program through its PATH')
     }
     if (port === DEFAULT_PORT) throw new Error(`the test server must not use port ${DEFAULT_PORT}`)
-    if (env.OMO_HOME === undefined || !env.OMO_HOME.startsWith(home)) throw new Error('OMO_HOME is outside the temporary home')
+    if (env.OMO_HOME === undefined || !isBelow(home, env.OMO_HOME)) throw new Error('OMO_HOME is outside the temporary home')
   }
 
   const cli = (args: string[]) => run(binary, args, env)
@@ -376,6 +387,7 @@ async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary:
     const env: Record<string, string> = {
       OMO_FAKEAGENT: '1',
       [AGENT_MARK]: home,
+      OMO_FAKE_PID_DIR: join(home, 'agent-pids'),
       GIT_AUTHOR_NAME: 'Agent',
       GIT_AUTHOR_EMAIL: 'agent@example.invalid',
       GIT_COMMITTER_NAME: 'omo',
