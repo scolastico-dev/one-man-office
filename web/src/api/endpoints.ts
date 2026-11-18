@@ -145,6 +145,11 @@ export function rejectTicket(c: ApiClient, n: number, comment: string): R<Ticket
   return c.send('POST', `${ticketPath(n)}/reject`, body)
 }
 
+/** Requests a shared asynchronous merge check; ticket updates arrive on the event stream. */
+export function checkExport(c: ApiClient, n: number): R<{ checking: boolean }> {
+  return c.send('POST', `${ticketPath(n)}/check-export`, {})
+}
+
 /** Never asks the server to discard uncommitted work. */
 export function cancelTicket(c: ApiClient, n: number, deleteBranch: boolean): R<Ticket> {
   return c.send('POST', `${ticketPath(n)}/cancel`, { delete_branch: deleteBranch })

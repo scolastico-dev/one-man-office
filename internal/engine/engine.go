@@ -143,6 +143,10 @@ type Engine struct {
 	// exportMu serializes settling exports (see settleExport), which
 	// passes and start workers both do.
 	exportMu sync.Mutex
+	// exportCheckMu serializes target snapshots and their results, including
+	// checks requested by the user and recovery checks.
+	exportCheckMu       sync.Mutex
+	exportCheckFailures map[string]int
 	// nt delivers notifications (see notify.go).
 	nt *notifier
 	// health holds the health checks' memory (see health.go); shut the
@@ -368,6 +372,11 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 		return
 	}
 	defer close(halted)
+	e.disk.mu.Lock()
+	if e.disk.exportsCancel != nil {
+		e.disk.exportsCancel()
+	}
+	e.disk.mu.Unlock()
 	e.stopGitEnvironment()
 	e.workers.Wait()
 	var wg sync.WaitGroup

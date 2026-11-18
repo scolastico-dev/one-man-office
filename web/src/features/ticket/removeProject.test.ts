@@ -21,7 +21,7 @@ const proj = (id: string, branch = 'omo/1-s'): TicketProject => ({
   worktree: branch === '' ? '' : `/home/you/.local/omo/worktrees/${id}/1`,
   export_url: '',
   export_state: '',
-  export_error: '',
+  export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '',
 })
 
 test('a project with a branch can be removed while the ticket waits for the user', () => {

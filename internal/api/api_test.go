@@ -126,6 +126,11 @@ func TestEngineWireNames(t *testing.T) {
 			}
 		}
 	}
+	for _, key := range []string{"export_remote", "export_branch", "export_base", "export_commit", "export_target_commit"} {
+		if got := marshal(TicketProject{}); !strings.Contains(got, `"`+key+`":""`) {
+			t.Errorf("TicketProject lacks %s: %s", key, got)
+		}
+	}
 	if got := marshal(TicketProject{}); !strings.Contains(got, `"export_url":""`) || !strings.Contains(got, `"export_state":""`) || !strings.Contains(got, `"export_error":""`) ||
 		!strings.Contains(got, `"start_commit":""`) || !strings.Contains(got, `"end_commit":""`) {
 		t.Errorf("TicketProject = %s", got)

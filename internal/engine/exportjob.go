@@ -173,7 +173,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	if errors.As(err, &problem) {
 		return "", err
 	}
-	rec := pushRecord{Commit: x.commit, Branch: x.branch, Remote: x.remote.Name, Address: x.remote.Address()}
+	rec := pushRecord{Commit: x.commit, Branch: x.branch, Remote: x.remote.Name, Address: x.remote.Address(), SSHUser: exportSSHUser(x.remote), Base: x.base, Round: t.ReviewRound}
 	var prev pushRecord
 	if err == nil {
 		prev, _, err = e.pins.pushed(t.ID, project)
@@ -184,12 +184,22 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		err = e.checkOwnBranch(ctx, t, projectOf(t, project), x.repo, x.branch)
 	}
 	if err == nil {
+		// Keep the original remote snapshot across a retry of this push.
+		// A later review round starts a new watch, even at the same commit.
+		// exact: these are identities recorded for the same push destination.
+		if prev.Commit == rec.Commit && prev.Address == rec.Address && prev.SSHUser == rec.SSHUser && prev.Round == rec.Round && prev.Base == rec.Base && prev.Target != "" {
+			rec.Target = prev.Target
+		} else {
+			rec.Target, err = e.git.FetchTarget(ctx, x.repo, x.remote, x.base)
+		}
+	}
+	if err == nil {
 		// A push again after a failed job, or in a later review round,
 		// may move the branch from the commit omo pushed before; any other
 		// commit there is not omo's.
 		before := ""
 		// exact: both names are omo's own records of this ticket.
-		if prev.Branch == x.branch && prev.Address == x.remote.Address() {
+		if prev.Branch == x.branch && prev.Address == x.remote.Address() && prev.SSHUser == rec.SSHUser {
 			before = prev.Commit
 		}
 		e.at("export-push")
@@ -202,6 +212,12 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		// What the pull request shows: the pushed commit since it left
 		// the base branch.
 		err = e.recordCommits(ctx, t.ID, project, x.repo, gitops.BranchRef(x.base), x.commit)
+	}
+	if err == nil {
+		err = e.b.RecordExportWatch(ctx, t.ID, project, rec.Address, rec.Branch, rec.Base, rec.Commit, rec.Target)
+	}
+	if err == nil {
+		err = e.keepCommits(ctx, t.ID, x.repo)
 	}
 	if err != nil {
 		if hint := e.remoteHint(t.ID, project, err); hint != "" {

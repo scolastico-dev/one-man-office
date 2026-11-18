@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -24,6 +25,7 @@ type diskState struct {
 	// exportsRunning is set while a check runs.
 	exportsChecked time.Time
 	exportsRunning bool
+	exportsCancel  context.CancelFunc
 }
 
 // HoldWorktree keeps the worktree at path from being removed until release

@@ -84,11 +84,12 @@ type ReviewStage string
 
 // Review stages.
 const (
-	ReviewStageNone      ReviewStage = ""
-	ReviewStageAgent     ReviewStage = "agent"
-	ReviewStageHuman     ReviewStage = "human"
-	ReviewStageMerging   ReviewStage = "merging"
-	ReviewStageExporting ReviewStage = "exporting"
+	ReviewStageNone          ReviewStage = ""
+	ReviewStageAgent         ReviewStage = "agent"
+	ReviewStageHuman         ReviewStage = "human"
+	ReviewStageMerging       ReviewStage = "merging"
+	ReviewStageExporting     ReviewStage = "exporting"
+	ReviewStageAwaitingMerge ReviewStage = "awaiting_merge"
 )
 
 // SessionState is the state of an agent session.
@@ -126,16 +127,23 @@ type TicketProject struct {
 	Branch     string `json:"branch"`
 	Worktree   string `json:"worktree"`
 	ExportURL  string `json:"export_url"`
+	// Export watch fields describe the pushed work and its target at export.
+	// ExportRemote is a display address with credentials redacted.
+	ExportRemote       string `json:"export_remote"`
+	ExportBranch       string `json:"export_branch"`
+	ExportBase         string `json:"export_base"`
+	ExportCommit       string `json:"export_commit"`
+	ExportTargetCommit string `json:"export_target_commit"`
 	// ExportState says where the export of this project stands (see
 	// ExportState); ExportError is why it failed, for ExportFailedState only.
 	ExportState ExportState `json:"export_state"`
 	ExportError string      `json:"export_error"`
 	// StartCommit and EndCommit are the full ids of the commits the
-	// project's diff runs between, recorded when the ticket went from
-	// Review to Done: the merge base the reviewed work left its base at,
-	// and the reviewed tip. Both are "" for a ticket that is not done, one
-	// done without them (cancelled, or done before omo recorded them) and
-	// a project without a branch.
+	// project's diff runs between, recorded when it was merged or exported:
+	// the merge base the reviewed work left its base at, and the reviewed tip.
+	// Available while awaiting an exported merge and after Done. Both are ""
+	// before export or merge, for a ticket done without them (cancelled, or
+	// done before omo recorded them), and for a project without a branch.
 	StartCommit string `json:"start_commit"`
 	EndCommit   string `json:"end_commit"`
 }

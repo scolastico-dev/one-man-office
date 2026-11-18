@@ -26,8 +26,8 @@ func TestProxyMigrationFromVersionSeven(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if userVersion(t, d) != 8 {
-		t.Fatalf("schema %d want 8", userVersion(t, d))
+	if userVersion(t, d) != SchemaVersion {
+		t.Fatalf("schema %d want %d", userVersion(t, d), SchemaVersion)
 	}
 	var value string
 	if err := d.QueryRow(`SELECT value FROM server_state WHERE key='keep'`).Scan(&value); err != nil || value != "yes" {
