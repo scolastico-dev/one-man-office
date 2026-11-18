@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
+	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
 func TestStdioToolsAreOfferedUnderTheServersName(t *testing.T) {
@@ -319,23 +321,117 @@ func TestCallTimeoutAndCancellation(t *testing.T) {
 	}
 	s.Timeouts.Call = 0
 	f.set(s)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Progress proves the upstream is handling the call before cancellation.
-	done := make(chan error, 1)
-	go func() {
-		_, err := f.pool.Call(ctx, id, "fake__sleep", json.RawMessage(`{"millis":60000,"steps":600}`), func(float64, float64, string) { cancel() })
-		done <- err
-	}()
-	// A cancelled call that never returned would end only with the test
-	// binary's own time limit, which prints every goroutine: no short clock
-	// decides this verdict.
-	if err := <-done; !errors.Is(err, context.Canceled) {
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a cancelled call answered %v", err)
 	}
 	if res := f.call(id, "fake__echo", map[string]string{"text": "still"}); res.IsError {
 		t.Fatalf("the server is unusable after a cancelled call: %q", resultText(res))
 	}
+}
+
+// heldCall is a call of the fake server's "hold" tool: the server sends one
+// progress notification and then waits for the cancellation of the call. Its
+// phases are separate functions, so a test binary that ends in its own time
+// limit shows in its goroutine dump which phase never completed: the progress
+// that triggers the cancellation never reached the caller, the cancellation
+// was requested but the call did not return, or the upstream never learned of
+// it. No clock decides which.
+type heldCall struct {
+	t        *testing.T
+	cancel   context.CancelFunc
+	progress chan struct{}
+	done     chan error
+}
+
+// startHeldCall starts the call; onProgress runs for every progress
+// notification of it, after the first has been announced to waitForProgress.
+func startHeldCall(t *testing.T, f *fixture, id mcpserver.Identity, onProgress ...func(*heldCall)) *heldCall {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := &heldCall{t: t, cancel: cancel, progress: make(chan struct{}), done: make(chan error, 1)}
+	var once sync.Once
+	go func() {
+		_, err := f.pool.Call(ctx, id, "fake__hold", nil, func(float64, float64, string) {
+			once.Do(func() { close(c.progress) })
+			for _, fn := range onProgress {
+				fn(c)
+			}
+		})
+		c.done <- err
+	}()
+	return c
+}
+
+func (c *heldCall) waitForProgress() { <-c.progress }
+
+func (c *heldCall) waitForReturn() error { return <-c.done }
+
+// waitForUpstreamCancellations returns once the fake server has seen n calls
+// end by cancellation: it asks the server itself, which answers when it has.
+func waitForUpstreamCancellations(t *testing.T, f *fixture, id mcpserver.Identity, n int) {
+	t.Helper()
+	res := f.call(id, "fake__cancelled", map[string]int{"count": n})
+	if res.IsError || resultText(res) != fmt.Sprintf("cancelled %d", n) {
+		t.Fatalf("upstream cancellations: %q", resultText(res))
+	}
+}
+
+func TestACancelledCallIsCancelledUpstream(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// The notification that triggers the cancellation is still being handled while
+// the call must end: its handler is held until the call has returned.
+func TestACancelledCallEndsWhileItsProgressHandlerIsStillRunning(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	free := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(free)
+	c := startHeldCall(t, f, id, func(c *heldCall) {
+		c.cancel()
+		<-release
+	})
+	c.waitForProgress()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	free()
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// A call that ended by its time limit tells the upstream too, and does not
+// disturb the cancellation of the next call on the same process.
+func TestATimedOutCallAndACancelledCallAreBothCancelledUpstream(t *testing.T) {
+	s := stdioServer("fake", nil)
+	s.Timeouts.Call = api.Duration(100 * time.Millisecond)
+	f := newFixture(t, nil, s)
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	if res := f.call(id, "fake__hold", nil); !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
+		t.Fatalf("a held call answered %q", resultText(res))
+	}
+	s.Timeouts.Call = 0
+	f.set(s)
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 2)
 }
 
 func TestProgressIsHandedToTheCaller(t *testing.T) {
@@ -477,11 +573,7 @@ func TestEndedSessionsLeaveNoProcess(t *testing.T) {
 	}
 	f.pool.mu.Unlock()
 	f.pool.EndInstance("s")
-	select {
-	case <-proc.exited:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the process of an ended session still runs")
-	}
+	<-proc.exited
 }
 
 // A flood of change notices without a change lists the tools again a few

@@ -50,11 +50,7 @@ func TestStartupPublicationPrecedesReady(t *testing.T) {
 				f.events.emit(kind, data)
 			}
 			go inst.start()
-			select {
-			case <-inst.ready:
-			case <-time.After(10 * time.Second):
-				t.Fatal("startup did not complete")
-			}
+			<-inst.ready
 			err := inst.err
 			if !fail && err != nil {
 				t.Fatal(err)
@@ -145,11 +141,7 @@ func testControlledRelist(t *testing.T, change bool) {
 	f.pool.mu.Unlock()
 	gen := f.pool.Generation()
 	inst.toolListChanged()
-	select {
-	case <-entered:
-	case <-time.After(10 * time.Second):
-		t.Fatal("relist did not reach upstream")
-	}
+	<-entered
 	inst.mu.Lock()
 	queued := inst.relistQueued
 	inst.mu.Unlock()
@@ -161,11 +153,7 @@ func testControlledRelist(t *testing.T, change bool) {
 	}
 	unblock()
 	if change {
-		select {
-		case <-publishing:
-		case <-time.After(10 * time.Second):
-			t.Fatal("relist did not publish")
-		}
+		<-publishing
 		inst.mu.Lock()
 		active, done := inst.relistQueued, inst.relistDone
 		inst.mu.Unlock()
@@ -225,11 +213,7 @@ func TestStopDrainsPendingRelist(t *testing.T) {
 	inst.toolListChanged()
 	done := make(chan struct{})
 	go func() { f.pool.Restart("remote"); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("stop did not cancel pending relist")
-	}
+	<-done
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 	if inst.relistQueued || inst.relists != 0 {
@@ -310,22 +294,13 @@ func testRetiredRelist(t *testing.T, restart bool) {
 	defer unblock()
 	gen := f.pool.Generation()
 	inst.toolListChanged()
-	select {
-	case <-entered:
-	case <-time.After(10 * time.Second):
-		t.Fatal("relist did not reach upstream")
-	}
+	<-entered
 	wantEvents := 1
 	if restart {
 		restarted := make(chan error, 1)
 		go func() { restarted <- f.pool.Restart("remote") }()
-		select {
-		case err := <-restarted:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("restart did not cancel in-flight listing")
+		if err := <-restarted; err != nil {
+			t.Fatal(err)
 		}
 		wantEvents = 2
 	} else {
@@ -339,11 +314,7 @@ func testRetiredRelist(t *testing.T, restart bool) {
 	inst.mu.Lock()
 	done := inst.relistDone
 	inst.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("relist did not finish")
-	}
+	<-done
 	if f.pool.Generation() != gen || f.events.count(api.KindMCPChanged) != wantEvents || f.events.count(api.KindMCPToolsChanged) != 1 {
 		t.Fatalf("retired instance published a change:\n%s", f.events.all())
 	}
@@ -390,20 +361,12 @@ func TestRemovedStartupCannotPublish(t *testing.T) {
 			defer inst.stop("test ended")
 			defer unblock()
 			go inst.start()
-			select {
-			case <-entered:
-			case <-time.After(10 * time.Second):
-				t.Fatal("startup did not list tools")
-			}
+			<-entered
 			f.pool.mu.Lock()
 			f.pool.removeInstance(inst)
 			f.pool.mu.Unlock()
 			unblock()
-			select {
-			case <-inst.ready:
-			case <-time.After(10 * time.Second):
-				t.Fatal("startup did not finish")
-			}
+			<-inst.ready
 			f.pool.mu.Lock()
 			failures := len(inst.st.failures)
 			f.pool.mu.Unlock()
@@ -437,11 +400,7 @@ func TestRemovedWatcherCannotRecordFailure(t *testing.T) {
 	eventually(t, "watch to observe the ended connection", func() bool { inst.mu.Lock(); defer inst.mu.Unlock(); return inst.stopping })
 	f.pool.removeInstance(inst)
 	f.pool.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("watch did not finish")
-	}
+	<-done
 	f.pool.mu.Lock()
 	failures := len(inst.st.failures)
 	f.pool.mu.Unlock()
@@ -506,11 +465,7 @@ func TestStartupRefusalKeepsReplacementCredential(t *testing.T) {
 	toolsBefore := f.events.count(api.KindMCPToolsChanged)
 	done := make(chan struct{})
 	go func() { f.pool.Tools(context.Background(), agent("s", f.home, api.RoleDeveloper)); close(done) }()
-	select {
-	case <-entered:
-	case <-time.After(10 * time.Second):
-		t.Fatal("startup did not use its credential")
-	}
+	<-entered
 	// saveLogin stores the replacement before loginFinished resets instances.
 	f.pool.mu.Lock()
 	replacement, _, err := f.store.Load(context.Background(), "remote")
@@ -523,11 +478,7 @@ func TestStartupRefusalKeepsReplacementCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	unblock()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("startup did not finish")
-	}
+	<-done
 	if f.storedToken("remote") != "replacement-access" || f.state("remote").Auth.State != api.MCPAuthStateConnected {
 		t.Fatalf("old startup refusal invalidated replacement credential: %+v", f.state("remote").Auth)
 	}
@@ -561,11 +512,7 @@ func TestExpiredCredentialStartupPublishesOnce(t *testing.T) {
 		f.events.emit(kind, data)
 	}
 	go inst.start()
-	select {
-	case <-inst.ready:
-	case <-time.After(10 * time.Second):
-		t.Fatal("expired startup did not finish")
-	}
+	<-inst.ready
 	if got := f.events.count(api.KindMCPChanged) - before; got != 1 || f.pool.Generation() != gen+1 {
 		t.Fatalf("expired startup publication: statuses=%d generations=%d", got, f.pool.Generation()-gen)
 	}

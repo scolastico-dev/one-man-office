@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // A named pipe or a link at a server's log path is neither read nor
@@ -27,13 +26,8 @@ func TestTheServerLogRefusesPipesAndLinks(t *testing.T) {
 		_, err := f.pool.Log("piped", 10)
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("a named pipe was read as the log")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("reading a named pipe as the log hangs")
+	if err := <-done; err == nil {
+		t.Fatal("a named pipe was read as the log")
 	}
 
 	target := filepath.Join(t.TempDir(), "elsewhere")
