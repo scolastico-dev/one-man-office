@@ -517,6 +517,9 @@ func (i *instance) watch() {
 		case <-time.After(i.pool.t.stopWait):
 		}
 	}
+	// The line is written before the instance leaves the pool: whoever sees
+	// the crash in the state finds its line in the log.
+	i.st.log.printf("ended unexpectedly: %s", reason)
 	p := i.pool
 	p.mu.Lock()
 	current := p.instances[instanceKey{i.cfg.Name, i.key}] == i
@@ -525,7 +528,6 @@ func (i *instance) watch() {
 		p.recordFailure(i.cfg.Name, i.st, errors.New(reason))
 	}
 	p.mu.Unlock()
-	i.st.log.printf("ended unexpectedly: %s", reason)
 	i.closeConn()
 	i.waitRelist()
 	if current {
