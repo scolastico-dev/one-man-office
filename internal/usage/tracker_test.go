@@ -20,8 +20,9 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
-// guard bounds every wait of these tests for something the tracker does; it
-// is never reached when the tracker works.
+// guard is the virtual-time limit of bubbleWaitFor inside a synctest bubble:
+// virtual time advances only when every goroutine of the bubble is blocked, so
+// it is no wall clock and is never reached when the tracker works.
 const guard = 10 * time.Second
 
 // fakeSource is a settings store in memory.
@@ -757,7 +758,6 @@ func TestTrackerRefreshWaits(t *testing.T) {
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	for !cond() {
-
 		runtime.Gosched()
 	}
 }

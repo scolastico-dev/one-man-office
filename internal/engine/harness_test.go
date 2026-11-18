@@ -676,11 +676,11 @@ func (h *harness) flagged(n int64, want string) bool {
 	return false
 }
 
-// waitFor polls cond until it holds or the deadline passes.
+// waitFor polls cond until it holds; a condition that never holds ends with
+// the test binary's own time limit and a dump of every goroutine.
 func (h *harness) waitFor(what string, cond func() bool) {
 	h.t.Helper()
 	for !cond() {
-
 		time.Sleep(5 * time.Millisecond)
 	}
 }

@@ -41,7 +41,7 @@ func (h *harness) shutdown(ctx context.Context) <-chan struct{} {
 	return done
 }
 
-// awaitClosed fails the test unless ch is closed within the deadline.
+// awaitClosed waits until ch is closed.
 func (h *harness) awaitClosed(what string, ch <-chan struct{}) {
 	h.t.Helper()
 	<-ch

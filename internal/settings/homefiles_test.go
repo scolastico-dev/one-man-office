@@ -59,7 +59,8 @@ var portableReplacements = []replacement{
 	},
 }
 
-// within fails when f does not return within five seconds.
+// within runs f on its own goroutine and waits for it; one that never returns
+// ends with the test binary's own time limit and a dump of every goroutine.
 func within(t *testing.T, what string, f func()) {
 	t.Helper()
 	done := make(chan struct{})

@@ -242,7 +242,6 @@ func TestWaitLoopAnswersMentionsAndReviewerNeverJudgesAgain(t *testing.T) {
 	r := start(t, Options{Script: "wait-loop|1m|Yes, all tests ran"})
 	w.waits <- "omo: #" + itoa(task) + " comment 5 by user mentions @reviewer: omo ai comments " + itoa(task) + " --since 4"
 	for len(agentComments(t, w, task)) == 0 {
-
 		time.Sleep(5 * time.Millisecond)
 	}
 	w.waits <- "timeout: nothing arrived in 1m."
@@ -424,7 +423,6 @@ func TestFloodPrintsLines(t *testing.T) {
 	}
 	r := start(t, Options{Script: "flood"})
 	for strings.Count(r.out.String(), "\n") < 1000 {
-
 		time.Sleep(time.Millisecond)
 	}
 	if res := r.finish(true); res.code == 0 {

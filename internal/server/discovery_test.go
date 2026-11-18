@@ -287,7 +287,6 @@ func TestScanOnRootsChange(t *testing.T) {
 	okJSON[api.SettingsResponse](t, u, 200, "PUT", "/api/settings", g)
 	s.waitSettingsEvents(context.Background())
 	for s.scan.started() == scans || s.scan.state().Running {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -344,7 +343,6 @@ func TestScanOneAtATime(t *testing.T) {
 	<-block.entered
 	go post()
 	for s.scan.waiting() < 2 {
-
 		time.Sleep(5 * time.Millisecond)
 	}
 	if st := okJSON[api.ScanState](t, u, 200, "GET", "/api/projects/scan", nil); !st.Running {
@@ -488,7 +486,6 @@ func TestCloseStopsScanner(t *testing.T) {
 	// does, nothing of the scan is left.
 	close(block.release)
 	for scannerGoroutines() != 0 {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 	// A trigger after Close starts nothing.

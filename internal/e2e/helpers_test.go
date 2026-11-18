@@ -276,13 +276,12 @@ func (r *recordingRunner) transcript() string {
 
 // ---- waiting for the board ----
 
-// waitFor polls cond until it holds; after a deadline of two minutes the
-// test fails with what and the agents' transcripts. It is a condition wait:
-// nothing depends on how long anything takes.
+// waitFor polls cond until it holds. It is a condition wait: nothing depends
+// on how long anything takes, and a condition that never holds ends with the
+// test binary's own time limit and a dump of every goroutine.
 func (w *world) waitFor(what string, cond func() bool) {
 	w.t.Helper()
 	for !cond() {
-
 		time.Sleep(20 * time.Millisecond)
 	}
 }

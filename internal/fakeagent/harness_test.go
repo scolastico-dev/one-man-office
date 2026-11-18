@@ -129,7 +129,6 @@ func (w *world) seen(call string) bool {
 func (w *world) waitFor(call string) {
 	w.t.Helper()
 	for !w.seen(call) {
-
 		time.Sleep(5 * time.Millisecond)
 	}
 }

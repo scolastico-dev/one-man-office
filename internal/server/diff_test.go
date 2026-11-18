@@ -520,7 +520,6 @@ func TestDiffRouteClientLeavingStopsTheWork(t *testing.T) {
 	<-g.seen
 	leave()
 	for g.ctxEnd.Load() == 0 {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 }

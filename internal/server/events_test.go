@@ -140,7 +140,6 @@ func (st *stream) waitEnded() {
 func waitFanOut(t *testing.T, s *Server, id int64) {
 	t.Helper()
 	for s.events.sent() < id {
-
 		s.events.Wake()
 		time.Sleep(5 * time.Millisecond)
 	}

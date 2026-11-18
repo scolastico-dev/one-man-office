@@ -239,7 +239,6 @@ func (e *env) stored(plugin, key string) string {
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for !cond() {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 }

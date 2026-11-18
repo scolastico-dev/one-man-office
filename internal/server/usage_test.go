@@ -882,7 +882,6 @@ func TestCloseStopsUsage(t *testing.T) {
 		t.Fatalf("the test answered %d", code)
 	}
 	for usageGoroutines() != baseline {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 	// After Close nothing starts.

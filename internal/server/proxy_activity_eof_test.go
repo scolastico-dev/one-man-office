@@ -112,7 +112,6 @@ func TestPluginForwardIdleAfterReloadDisconnect(t *testing.T) {
 			}
 			first.Close()
 			for activity().ActiveWebSockets != 1 {
-
 				time.Sleep(time.Millisecond)
 			}
 			if a := activity(); a.NoClientSince != "" {

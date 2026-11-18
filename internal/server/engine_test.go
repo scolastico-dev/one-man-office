@@ -249,7 +249,6 @@ func fakeProfile() settings.Profile {
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for !cond() {
-
 		time.Sleep(10 * time.Millisecond)
 	}
 }

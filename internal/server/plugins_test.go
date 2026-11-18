@@ -403,7 +403,6 @@ func TestPluginSettingsReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	for s.pluginInfo("rec").State != plugins.StateDisabled {
-
 		time.Sleep(50 * time.Millisecond)
 	}
 	if after, _ := os.ReadDir(cached); len(after) != len(before) {
@@ -422,7 +421,6 @@ func TestPluginNotInstalledThenUpdate(t *testing.T) {
 	}
 	s.waitSettingsEvents(context.Background())
 	for s.pluginInfo("hand").State != plugins.StateNotInstalled {
-
 		time.Sleep(20 * time.Millisecond)
 	}
 	// StateNotInstalled is published by the completed settings reload;

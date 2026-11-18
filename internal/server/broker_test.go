@@ -194,7 +194,6 @@ func TestSubscriptionRemovedAfterClientDisconnect(t *testing.T) {
 	}
 	st.close()
 	for subscriberCount(s.events) != 0 {
-
 		time.Sleep(5 * time.Millisecond)
 	}
 }
