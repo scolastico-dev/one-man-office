@@ -13,6 +13,10 @@ export interface FixtureOptions {
   env?: NodeJS.ProcessEnv
   /** Called with the process id as soon as the helper is started. */
   onSpawn?: (pid: number) => void
+  /** Called after each piece of output with everything so far and a way to write to the helper's input. */
+  onOutput?: (output: string, send: (text: string) => void) => void
 }
+/** The first complete line of `output` (ended by a newline) that starts with `prefix`, without its line end; an unterminated tail is never a line. */
+export function completeLine(output: string, prefix: string): string | undefined
 export function fixtureEnv(base?: NodeJS.ProcessEnv, extra?: Record<string, string>, platform?: NodeJS.Platform): NodeJS.ProcessEnv
 export function startFixture(options?: FixtureOptions): Promise<FixtureRun>

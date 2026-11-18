@@ -23,6 +23,13 @@ export function fixtureEnv(base = process.env, extra = {}, platform = process.pl
   return { ...env, CGO_ENABLED: '0', ...extra }
 }
 
+/** The first complete line of `output` (ended by a newline) that starts with `prefix`, without its line end. A pipe write may arrive in pieces, so the unterminated tail is never a line yet. */
+export function completeLine(output, prefix) {
+  const lines = output.split('\n')
+  lines.pop()
+  return lines.map((line) => line.replace(/\r$/, '')).find((line) => line.startsWith(prefix))
+}
+
 function kill(child) {
   try {
     // The helper runs under `go test`; its process group takes the test binary along.
@@ -44,11 +51,15 @@ export async function startFixture({
   cwd,
   env = fixtureEnv(),
   onSpawn,
+  onOutput,
 } = {}) {
   const child = spawn(command, args, { cwd, env, detached: process.platform !== 'win32' })
   let output = ''
-  child.stdout.on('data', (data) => { output += data })
-  child.stderr.on('data', (data) => { output += data })
+  const send = (text) => { child.stdin.write(text) }
+  const collect = (data) => { output += data; onOutput?.(output, send) }
+  child.stdout.on('data', collect)
+  child.stderr.on('data', collect)
+  child.stdin.on('error', () => {})
   const exited = new Promise((resolve) => {
     child.once('close', (code) => resolve(code))
     child.once('error', () => resolve(null))
@@ -59,7 +70,7 @@ export async function startFixture({
   try {
     fixtures = await new Promise((resolve, reject) => {
       const look = () => {
-        const line = output.split('\n').find((l) => l.startsWith(prefix))
+        const line = completeLine(output, prefix)
         if (!line) return
         try {
           resolve(JSON.parse(line.slice(prefix.length)))

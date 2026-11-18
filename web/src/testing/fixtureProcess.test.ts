@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { delimiter, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { fixtureEnv, startFixture } from '../../scripts/fixtureProcess.mjs'
+import { completeLine, fixtureEnv, startFixture } from '../../scripts/fixtureProcess.mjs'
 
 // An owned temporary root that is not below the shared one and has a space in it.
 const owned = resolve('owned temporary root', 'tmp')
@@ -103,5 +103,28 @@ describe('the standalone browser drivers', () => {
     const source = readFileSync(join(dir, 'proxy-subdomain.test.mjs'), 'utf8')
     expect(source).toMatch(/fixtureEnv\(process\.env, \{ PROXY_BROWSER_FIXTURE: '1' \}\)/)
     expect(readFileSync(join(dir, 'fixtureProcess.mjs'), 'utf8')).not.toMatch(/PROXY_BROWSER_FIXTURE(?!S)/)
+  })
+})
+
+describe('reading a printed line from a child\'s output', () => {
+  it('ignores an unterminated tail and finds the line once its newline arrived', () => {
+    const part = 'noise\nPROXY_BROWSER_FIXTURES [{"stop":"x",'
+    expect(completeLine(part, 'PROXY_BROWSER_FIXTURES ')).toBeUndefined()
+    expect(completeLine(part + '"board":"b"}]', 'PROXY_BROWSER_FIXTURES ')).toBeUndefined()
+    expect(completeLine(part + '"board":"b"}]\n', 'PROXY_BROWSER_FIXTURES ')).toBe('PROXY_BROWSER_FIXTURES [{"stop":"x","board":"b"}]')
+    expect(completeLine('PROXY_BROWSER_FIXTURES []\r\n', 'PROXY_BROWSER_FIXTURES ')).toBe('PROXY_BROWSER_FIXTURES []')
+  })
+
+  it('accepts a fixtures line that arrives in two reads, the second only after the first was read', async () => {
+    // The stand-in writes the second half when a byte arrives on its input; the byte is sent once the reader
+    // holds the first half, so the reader certainly sees the line in two pieces, with no timing involved.
+    const script = `process.stdout.write('PROXY_BROWSER_FIXTURES [{"stop":"x",');process.stdin.once('data',()=>process.stdout.write('"board":"b"}]\\n'))`
+    const run = await startFixture({
+      command: process.execPath,
+      args: ['-e', script],
+      onOutput: (output, send) => { if (output.endsWith('"stop":"x",')) send('go') },
+    })
+    expect(run.fixtures).toEqual([{ stop: 'x', board: 'b' }])
+    await run.stop()
   })
 })
