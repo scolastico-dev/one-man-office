@@ -69,3 +69,29 @@ func TestShellFixtureGatesStayNarrow(t *testing.T) {
 		}
 	}
 }
+
+// Every workflow job that runs the Go suite needs the shells the shell
+// fixtures drive, after a package index update (a stale index makes the
+// install itself nondeterministic).
+func TestWorkflowsThatRunTheGoSuiteInstallShells(t *testing.T) {
+	files, err := filepath.Glob(repoFile(t, ".github/workflows/*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		runsGo := strings.Contains(text, "make check") || strings.Contains(text, "go test ./...") || strings.Contains(text, "scripts/stress/ci.sh")
+		if !runsGo {
+			continue
+		}
+		update := strings.Index(text, "sudo apt-get update")
+		install := strings.Index(text, "sudo apt-get install -y --no-install-recommends bash zsh")
+		if update < 0 || install < update {
+			t.Errorf("%s runs the Go suite without 'apt-get update' followed by installing bash and zsh", filepath.Base(file))
+		}
+	}
+}

@@ -30,7 +30,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install the shells the shell-isolation tests drive
-        run: sudo apt-get install -y --no-install-recommends bash zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bash zsh
 
       - name: Build the board
         run: make web

@@ -52,8 +52,9 @@ func TestShellEnvPreventsHostileShellConfiguration(t *testing.T) {
 				// The one retained capability skip: BASHOPTS appeared in Bash
 				// 4.1 and macOS still ships Bash 3.2, which cannot consume it.
 				// TestShellEnvDropsConfigurationAndOwnsHome (portable, no
-				// shell needed) still checks its removal. Probe without the injected variable so an ordinary imported
-				// environment value cannot look like native shell support.
+				// shell needed) still checks its removal. Probe without the
+				// injected variable so an ordinary imported environment value
+				// cannot look like native shell support.
 				probe := exec.Command(shell, "--norc", "-c", `test "${BASHOPTS+x}" = x`)
 				probe.Env = ShellEnv(base, t.TempDir())
 				if err := probe.Run(); err != nil {
