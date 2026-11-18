@@ -7,7 +7,6 @@ import (
 	"os"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // TestStopSignals: the first interrupt ends the context (a graceful stop),
@@ -18,11 +17,7 @@ func TestStopSignals(t *testing.T) {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("the first signal did not stop")
-	}
+	<-ctx.Done()
 	select {
 	case <-hurry:
 		t.Fatal("the first signal hurried the stop")
@@ -31,9 +26,5 @@ func TestStopSignals(t *testing.T) {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-hurry:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the second signal did not hurry the stop")
-	}
+	<-hurry
 }

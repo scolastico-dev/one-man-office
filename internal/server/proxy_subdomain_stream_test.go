@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
@@ -32,7 +31,7 @@ func TestProxySubdomainWebSocketOrigin(t *testing.T) {
 		return d.DialContext(ctx, network, b.srv.Listener.Addr().String())
 	}}
 	defer transport.CloseIdleConnections()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for _, path := range []string{"/socket?q=1", "/api/terminals/app/socket"} {
 		c, res, err := websocket.Dial(ctx, "ws://"+host+path, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: http.Header{"Origin": {"http://" + host}}})

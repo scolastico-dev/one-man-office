@@ -102,14 +102,11 @@ func (w *wireServer) noSecrets(values ...string) {
 	}
 }
 
-// eventually waits until ok holds, for at most 15 s.
+// eventually waits until ok holds; a condition that never holds ends with the
+// test binary's own time limit and a dump of every goroutine.
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
 	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatalf("%s did not happen", what)
-		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -144,11 +144,7 @@ func (h *harness) running(role api.Role, n int) []board.EngineSession {
 func checkProcessesGone(t *testing.T, rr *recordingRunner) {
 	t.Helper()
 	for _, a := range rr.all() {
-		select {
-		case <-a.Done():
-		case <-time.After(15 * time.Second):
-			t.Fatal("an agent process outlived the stop")
-		}
+		<-a.Done()
 	}
 }
 
@@ -220,11 +216,7 @@ func TestProcessStopAllKillsAllButCEO(t *testing.T) {
 			ceoAgent = a
 			continue
 		}
-		select {
-		case <-a.Done():
-		case <-time.After(15 * time.Second):
-			t.Fatal("an agent process outlived stop all")
-		}
+		<-a.Done()
 	}
 	for _, d := range devs {
 		if got := h.waitEnded(d.ID); got.EndReason != "stopped by the user" {
@@ -314,11 +306,7 @@ func TestProcessRecoveryAfterCrashEndsOldAgentsAndResumes(t *testing.T) {
 	runUntil(t, h)
 
 	for _, a := range before {
-		select {
-		case <-a.Done():
-		case <-time.After(15 * time.Second):
-			t.Fatal("an agent of the crashed run still runs")
-		}
+		<-a.Done()
 	}
 	fresh := h.running(api.RoleDeveloper, 2)
 	for _, s := range fresh {

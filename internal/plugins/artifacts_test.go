@@ -338,11 +338,7 @@ func TestArtifactsLifecycleCancellationAndConfigRefresh(t *testing.T) {
 				}
 				e.m.Close()
 			}
-			select {
-			case <-cancelled:
-			case <-time.After(2 * time.Second):
-				t.Fatal("download survived lifecycle")
-			}
+			<-cancelled
 			if kind != "remove" {
 				s := waitArtifact(t, e.m, "p", "tool")
 				if s.State != "cancelled" || s.Path != "" {

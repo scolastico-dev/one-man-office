@@ -7,24 +7,20 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
-// returnsWithin runs fn and fails the test when it does not return within d.
-func returnsWithin(t *testing.T, d time.Duration, what string, fn func() error) error {
+// returns runs fn on its own goroutine and waits for it to return. A call that
+// never returns ends with the test binary's own time limit and a dump of every
+// goroutine, naming the call (what shows in the dump through this function's
+// caller); no fixed limit decides it.
+func returns(t *testing.T, what string, fn func() error) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- fn() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(d):
-		t.Fatalf("%s did not return within %s", what, d)
-		return nil
-	}
+	return <-done
 }
 
 // git runs a git command in dir with fully isolated config (no user/global

@@ -15,7 +15,7 @@
 //
 // Its tools: echo, whoami (process id and working folder), printenv (the
 // names of its environment variables, never values), sleep (with progress),
-// crash, big (a text of the given size), rpcerror (a JSON-RPC error),
+// hold and cancelled (cancellation seen from the server), crash, big (a text of the given size), rpcerror (a JSON-RPC error),
 // add_tool (adds the tool "added", which announces a changed list) and
 // stderr (writes a text to standard error). Modes replace them with hostile
 // behaviour; see the Mode constants.
@@ -213,6 +213,31 @@ func New(cfg Config) *mcp.Server {
 			}
 		}
 		return text("slept"), nil, nil
+	})
+	// hold and cancelled let a test observe a cancellation at the upstream's
+	// own boundary: hold sends one progress notification, then waits until the
+	// call is cancelled and records that; cancelled answers once the given
+	// number of held calls have been cancelled (it waits for them itself).
+	cancelledCalls := make(chan struct{}, 1024)
+	mcp.AddTool(s, &mcp.Tool{Name: "hold", Description: "Reports progress once, then waits for its cancellation."}, func(ctx context.Context, req *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
+		if tok := req.Params.GetProgressToken(); tok != nil {
+			req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: tok, Progress: 1, Total: 2, Message: "step"})
+		}
+		<-ctx.Done()
+		cancelledCalls <- struct{}{}
+		return nil, nil, ctx.Err()
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "cancelled", Description: "Answers once the given number of held calls were cancelled."}, func(ctx context.Context, _ *mcp.CallToolRequest, in struct {
+		Count int `json:"count"`
+	}) (*mcp.CallToolResult, any, error) {
+		for range in.Count {
+			select {
+			case <-cancelledCalls:
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+		return text(fmt.Sprintf("cancelled %d", in.Count)), nil, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "crash", Description: "Ends the process."}, func(context.Context, *mcp.CallToolRequest, empty) (*mcp.CallToolResult, any, error) {
 		os.Exit(3)

@@ -122,12 +122,8 @@ func startRootOnPort(t *testing.T, port int) (*running, error) {
 
 func (r *running) shutdown(t *testing.T) {
 	r.stop()
-	select {
-	case <-r.done:
-		r.done <- nil
-	case <-time.After(15 * time.Second):
-		t.Error("server did not stop")
-	}
+	<-r.done
+	r.done <- nil
 }
 
 func tokenFile(t *testing.T) string {

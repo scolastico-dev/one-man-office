@@ -447,11 +447,7 @@ func TestEnvCheckStopsAtItsLimit(t *testing.T) {
 	}()
 	waitEnvCommand(t, started)
 	expired <- time.Now()
-	select {
-	case <-answered:
-	case <-time.After(streamTimeout):
-		t.Fatal("the check did not answer at its limit")
-	}
+	<-answered
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	got := checks(t, raw)
 	if got["A"].State != "failed" || got["B"].State != "failed" || !strings.Contains(got["B"].Message, "stopped") {

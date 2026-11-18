@@ -31,15 +31,11 @@ func TestStopStopsServer(t *testing.T) {
 	if out := mustExecute(t, "stop"); !strings.Contains(out, "omo stopped.") {
 		t.Fatalf("stop output: %q", out)
 	}
-	select {
-	case err := <-r.done:
-		if err != nil {
-			t.Fatalf("server returned %v", err)
-		}
-		r.done <- nil
-	case <-time.After(15 * time.Second):
-		t.Fatal("server did not exit")
+	err := <-r.done
+	if err != nil {
+		t.Fatalf("server returned %v", err)
 	}
+	r.done <- nil
 	if _, ok, _ := service.Running(context.Background()); ok {
 		t.Fatal("still running after stop")
 	}

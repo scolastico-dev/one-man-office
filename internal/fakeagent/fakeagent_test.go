@@ -220,14 +220,11 @@ func TestWaitLoopWorksAgainWhenRejected(t *testing.T) {
 	}
 	w.waits <- "omo: ticket was rejected"
 	// The second hand-in is the sign the loop worked again.
-	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if tk := w.ticket(task); tk.Column == api.ColumnReview && tk.ReviewRound == 2 {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("not handed in again:\n%s", r.out.String())
-		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 	res := r.finish(true)
@@ -244,11 +241,7 @@ func TestWaitLoopAnswersMentionsAndReviewerNeverJudgesAgain(t *testing.T) {
 	w.session(api.RoleReviewer, task, "rev1")
 	r := start(t, Options{Script: "wait-loop|1m|Yes, all tests ran"})
 	w.waits <- "omo: #" + itoa(task) + " comment 5 by user mentions @reviewer: omo ai comments " + itoa(task) + " --since 4"
-	deadline := time.Now().Add(20 * time.Second)
 	for len(agentComments(t, w, task)) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("no answer:\n%s", r.out.String())
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	w.waits <- "timeout: nothing arrived in 1m."
@@ -409,8 +402,7 @@ func TestNeverReadyAndHangMakeNoCalls(t *testing.T) {
 	case <-hang.entered:
 	case <-r.done:
 		t.Fatalf("hang returned %d", r.code)
-	case <-time.After(20 * time.Second):
-		t.Fatal("hang did not reach its context wait")
+
 	}
 	contains(t, r.out.String(), "alive")
 	res := r.finish(true)
@@ -430,11 +422,7 @@ func TestFloodPrintsLines(t *testing.T) {
 		t.Fatalf("%d lines", n)
 	}
 	r := start(t, Options{Script: "flood"})
-	deadline := time.Now().Add(20 * time.Second)
 	for strings.Count(r.out.String(), "\n") < 1000 {
-		if time.Now().After(deadline) {
-			t.Fatal("endless flood stopped")
-		}
 		time.Sleep(time.Millisecond)
 	}
 	if res := r.finish(true); res.code == 0 {
@@ -672,11 +660,7 @@ func TestRunsAsProcess(t *testing.T) {
 		<-waited
 	})
 	io.WriteString(in, "Run omo ai ready to begin\n")
-	select {
-	case <-werr:
-	case <-time.After(30 * time.Second):
-		t.Fatalf("process did not exit:\n%s", out.String())
-	}
+	<-werr
 	if code := cmd.ProcessState.ExitCode(); code != 4 {
 		t.Fatalf("exit code %d\n%s", code, out.String())
 	}

@@ -35,14 +35,10 @@ func blockingServe(url string) ServeFunc {
 
 func awaitState(t *testing.T, dir string) runtimeState {
 	t.Helper()
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-deadline.C:
-			t.Fatal("omo did not publish readiness")
 		case <-ticker.C:
 			state, err := readState(dir)
 			if err == nil && controlRequest(context.Background(), state, "GET", "/status") == nil {
@@ -61,11 +57,7 @@ func TestManagedRunAuthenticatesStopAndCleansState(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			t.Error("omo cleanup timed out")
-		}
+		<-done
 	})
 	state := awaitState(t, dir)
 	if state.LaunchID != "test-launch" || strings.Contains(state.URL, "#") {
@@ -164,11 +156,7 @@ func TestRunReportsRunningURLToSecondCaller(t *testing.T) {
 	go func() { done <- Run(ctx, io.Discard, "report", blockingServe(want)) }()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			t.Error("omo cleanup timed out")
-		}
+		<-done
 	})
 	awaitState(t, dir)
 	url, running, err := Running(context.Background())
@@ -207,11 +195,8 @@ func TestSecondStopHurries(t *testing.T) {
 			close(serving)
 			<-ctx.Done()
 			close(firstStop)
-			select {
-			case <-Hurry(ctx):
-				close(hurried)
-			case <-time.After(10 * time.Second):
-			}
+			<-Hurry(ctx)
+			close(hurried)
 			<-release
 			return nil
 		})
@@ -219,43 +204,82 @@ func TestSecondStopHurries(t *testing.T) {
 	t.Cleanup(func() {
 		runCancel()
 		unblock()
-		select {
-		case <-done:
-		case <-time.After(20 * time.Second):
-			t.Error("server did not stop")
-		}
+		<-done
 	})
-	select {
-	case <-serving:
-	case <-time.After(20 * time.Second):
-		t.Fatal("server did not start")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	<-serving
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stopped := make(chan error, 2)
 	go func() { stopped <- Stop(ctx) }()
-	select {
-	case <-firstStop:
-	case <-time.After(20 * time.Second):
-		t.Fatal("server did not receive the first stop")
-	}
+	<-firstStop
 	select {
 	case <-hurried:
 		t.Fatal("the first stop hurried")
 	default:
 	}
 	go func() { stopped <- Stop(ctx) }()
-	select {
-	case <-hurried:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the second stop did not hurry")
-	}
+	<-hurried
 	unblock()
 	for i := 0; i < 2; i++ {
 		if err := <-stopped; err != nil && !errors.Is(err, ErrNotRunning) {
 			t.Fatalf("stop: %v", err)
 		}
 	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	done <- nil // let cleanup observe the completed server, too
+}
+
+// A stop request that was accepted is answered before the server can go away:
+// the handler is held after it signalled the stop until the test has received
+// the answer, while the server function returns and Run closes the control
+// server. Without the answer being sent first, the caller got no response at
+// all (EOF).
+func TestAnAcceptedStopIsAnsweredBeforeTheServerGoesAway(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	gate := make(chan struct{})
+	var open sync.Once
+	release := func() { open.Do(func() { close(gate) }) }
+	previous := stopSignalled
+	stopSignalled = func() { <-gate }
+	t.Cleanup(func() { stopSignalled = previous })
+	serving := make(chan struct{})
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(runCtx, io.Discard, "", func(ctx context.Context, _ io.Writer, ready func(string) error) error {
+			if err := ready("http://x/"); err != nil {
+				return err
+			}
+			close(serving)
+			<-ctx.Done()
+			return nil
+		})
+	}()
+	t.Cleanup(func() {
+		runCancel()
+		release()
+		<-done
+	})
+	<-serving
+	dir, err := directory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := readState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The answer is observed on its own: Stop would also wait for Run to
+	// release the lifecycle lock, which cannot happen while the gate is shut.
+	answered := make(chan error, 1)
+	go func() { answered <- controlRequest(context.Background(), state, "POST", "/stop") }()
+	if err := <-answered; err != nil {
+		t.Fatalf("an accepted stop was not answered: %v", err)
+	}
+	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}

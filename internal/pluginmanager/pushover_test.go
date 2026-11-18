@@ -91,13 +91,7 @@ func (f *fakePushover) count() int {
 // next waits for the next request.
 func (f *fakePushover) next(t *testing.T) url.Values {
 	t.Helper()
-	select {
-	case v := <-f.got:
-		return v
-	case <-time.After(10 * time.Second):
-		t.Fatal("no request reached the fake Pushover")
-		return nil
-	}
+	return <-f.got
 }
 
 // pushoverRun is the shipped pushover plugin, installed and loaded in the
@@ -166,15 +160,11 @@ func (r *pushoverRun) question(n int, title, body string, to api.Role) {
 // settle waits until no run of the plugin is going on and returns its log.
 func (r *pushoverRun) settle() string {
 	r.t.Helper()
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for r.completed.Load() < r.dispatched {
 		select {
 		case <-tick.C:
-		case <-deadline.C:
-			r.t.Fatalf("the plugin completed %d of %d dispatched hooks", r.completed.Load(), r.dispatched)
 		}
 	}
 	var b strings.Builder

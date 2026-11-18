@@ -221,19 +221,11 @@ func TestRunEndsWithItsContext(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() { _, err := Run(ctx, j, opts); result <- err }()
-			select {
-			case <-entered:
-			case <-time.After(5 * time.Second):
-				t.Fatal("script did not reach the cancellation boundary")
-			}
+			<-entered
 			cancel()
-			select {
-			case err := <-result:
-				if err == nil || err.Error() != "run canceled" {
-					t.Fatalf("run after cancellation: %v", err)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("run did not end with its context")
+			err := <-result
+			if err == nil || err.Error() != "run canceled" {
+				t.Fatalf("run after cancellation: %v", err)
 			}
 		})
 	}

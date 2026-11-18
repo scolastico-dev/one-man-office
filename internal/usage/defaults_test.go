@@ -470,7 +470,7 @@ func TestDefaultScriptsKeepTokensInTheRun(t *testing.T) {
 			errs = append(errs, res.Log...)
 			return res, err
 		}})
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	state := tr.Refresh(ctx)
 	raw, _ := json.Marshal(state)

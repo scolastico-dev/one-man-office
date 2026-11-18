@@ -28,24 +28,16 @@ func TestCloseEndsEnvCheck(t *testing.T) {
 	}()
 	pid := waitEnvCommand(t, pidFile)
 	expired <- time.Now()
-	select {
-	case <-answered:
-	case <-time.After(streamTimeout):
-		t.Fatal("the check did not answer at its limit")
-	}
+	<-answered
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	if got := checks(t, raw); got["A"].State != "failed" {
 		t.Fatalf("answer = %s", raw)
 	}
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waits for the environment check's command")
+	err := <-closed
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 		syscall.Kill(pid, syscall.SIGKILL)

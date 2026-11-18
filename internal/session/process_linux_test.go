@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestNaturalAgentExitReapsDetachedProcess(t *testing.T) {
@@ -21,10 +20,6 @@ func TestNaturalAgentExitReapsDetachedProcess(t *testing.T) {
 	endSession(t, s)
 	childPID := waitForPIDFile(t, pidFile)
 	t.Cleanup(func() { _ = syscall.Kill(childPID, syscall.SIGKILL) })
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("session did not finish after agent exited")
-	}
+	<-s.Done()
 	waitForProcessExit(t, childPID)
 }

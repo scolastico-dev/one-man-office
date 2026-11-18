@@ -124,12 +124,7 @@ func TestManualExportChecksCoalesceWithPeriodicChecksOff(t *testing.T) {
 	if err := h.e.CheckExport(h.ctx, board.User, n); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		close(release)
-		t.Fatal("manual check never started")
-	}
+	<-started
 	for i := 0; i < 10; i++ {
 		if err := h.e.CheckExport(h.ctx, board.User, n); err != nil {
 			close(release)

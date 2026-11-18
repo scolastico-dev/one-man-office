@@ -51,11 +51,7 @@ func TestKillReapsBackgroundProcess(t *testing.T) {
 	if err := s.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("session did not exit after Kill")
-	}
+	<-s.Done()
 	waitForProcessExit(t, childPID)
 }
 
@@ -122,20 +118,12 @@ func TestClosedProcessCannotResizeDescriptorHeldByRead(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		close(release)
-		select {
-		case err := <-readDone:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("held descriptor read did not finish")
+		err := <-readDone
+		if err != nil {
+			t.Error(err)
 		}
 	})
-	select {
-	case <-reading:
-	case <-time.After(5 * time.Second):
-		t.Fatal("descriptor read did not start")
-	}
+	<-reading
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}

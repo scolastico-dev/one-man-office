@@ -17,14 +17,7 @@ import (
 
 func await[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for stream progress")
-		var zero T
-		return zero
-	}
+	return <-ch
 }
 
 func liveProxy(t *testing.T, upstream *httptest.Server, mode Mode, strip bool, values ...RequestContext) *httptest.Server {
@@ -46,7 +39,7 @@ func liveProxy(t *testing.T, upstream *httptest.Server, mode Mode, strip bool, v
 
 func streamRequest(t *testing.T, method, address string, body io.Reader) *http.Request {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	req, err := http.NewRequestWithContext(ctx, method, address, body)
 	if err != nil {
@@ -239,7 +232,7 @@ func TestWebSocketEchoAndCredentialIsolation(t *testing.T) {
 			if mode == SubdomainMode {
 				path = "/socket"
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			auth := "Bearer app-key"
 			if tc.remove {

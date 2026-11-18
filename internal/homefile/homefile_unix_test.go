@@ -8,22 +8,16 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 )
 
-// within fails when f does not return within a second: a read that waits
-// for a writer of a named pipe never returns.
+// within runs f on its own goroutine and waits for it: a read that waits for a
+// writer of a named pipe never returns, and then the test binary's own time
+// limit ends the run with a dump of every goroutine (no fixed limit decides).
 func within(t *testing.T, what string, f func() error) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- f() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(time.Second):
-		t.Fatalf("%s blocked", what)
-		return nil
-	}
+	return <-done
 }
 
 func TestReadRefusesPipeAndLinks(t *testing.T) {

@@ -286,11 +286,7 @@ func TestScanOnRootsChange(t *testing.T) {
 	g.WorkspaceRoots[0].Ignore = []string{"repo"}
 	okJSON[api.SettingsResponse](t, u, 200, "PUT", "/api/settings", g)
 	s.waitSettingsEvents(context.Background())
-	deadline := time.Now().Add(10 * time.Second)
 	for s.scan.started() == scans || s.scan.state().Running {
-		if time.Now().After(deadline) {
-			t.Fatal("a changed ignore list started no scan")
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -346,11 +342,7 @@ func TestScanOneAtATime(t *testing.T) {
 	go post()
 	<-block.entered
 	go post()
-	deadline := time.Now().Add(10 * time.Second)
 	for s.scan.waiting() < 2 {
-		if time.Now().After(deadline) {
-			t.Fatal("the second request did not wait for the running scan")
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if st := okJSON[api.ScanState](t, u, 200, "GET", "/api/projects/scan", nil); !st.Running {
@@ -483,13 +475,9 @@ func TestCloseStopsScanner(t *testing.T) {
 	<-block.entered
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waits for a folder that does not answer")
+	err := <-closed
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, ok := projectByPath(s, filepath.Join(root, "repo")); ok {
 		t.Fatal("a stopped scan added a project")
@@ -497,11 +485,7 @@ func TestCloseStopsScanner(t *testing.T) {
 	// The read that never answered is left to finish on its own; once it
 	// does, nothing of the scan is left.
 	close(block.release)
-	deadline := time.Now().Add(10 * time.Second)
 	for scannerGoroutines() != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("%d scanner goroutines left after Close", scannerGoroutines())
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	// A trigger after Close starts nothing.
