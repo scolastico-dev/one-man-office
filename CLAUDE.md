@@ -93,6 +93,8 @@ Package map (`internal/`):
 | `oldhome` | the upgrade from omo 0.11 and older: `Find` lists the old home, offices and worktrees, `Remove` deletes exactly that, `DisableUpdateCheck`; used only by `cli` |
 | `gittest`, `testpath` | test support: `gittest.Isolate` keeps tests away from the developer's git configuration; `testpath.Without` hands a started omo a `PATH` without the real agent programs |
 
+Default role prompts reserve supervisor mentions and questions for clarifications and decisions the agent cannot make itself; progress needs no supervisor message, and useful notes may be comments without mentions. This includes the CEO on user-supervised tickets. `TestRolePromptsReserveSupervisorNotificationsForQuestions` guards all four roles; omo's own notifications are independent of this prompt rule.
+
 ## Frontend (`web/`)
 
 The board is a Vue 3 + TypeScript single-page app (Vite, Tailwind CSS v4, vue-router, markdown-it). `web/` is also the Go package `web`, which embeds `web/dist`; `internal/server/spa.go` serves `/assets/*` with immutable caching and `index.html` for every other non-API path. Packages are pinned exactly; install with `npm --prefix web ci`.

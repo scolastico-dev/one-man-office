@@ -255,6 +255,42 @@ func TestEveryRoleExplainsCommunication(t *testing.T) {
 	}
 }
 
+// Supervisor notifications are for questions that need a decision, while
+// ordinary progress can stay on the board or in an unmentioned comment.
+func TestRolePromptsReserveSupervisorNotificationsForQuestions(t *testing.T) {
+	check := func(t *testing.T, out string) {
+		t.Helper()
+		for _, want := range []string{
+			"only for a clarification or a decision you cannot make yourself",
+			"Do not send status updates",
+			"progress, planning being finished, tasks released, hand-ins and what comes next",
+			"the board already shows them",
+			"Useful notes for the record may go in a comment without a mention",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("prompt lacks supervisor notification rule %q", want)
+			}
+		}
+		if !strings.Contains(out, "or use `omo ai ask` only") {
+			t.Error("prompt does not restrict questions as well as mentions")
+		}
+		if !strings.Contains(out, "Mention your supervisor") && !strings.Contains(out, "mention the user (`@user`, `@supervisor`)") {
+			t.Error("prompt does not restrict mentions to the supervising role")
+		}
+	}
+	for label, c := range roleCases() {
+		if c.name == "export" {
+			continue
+		}
+		t.Run(label, func(t *testing.T) { check(t, renderCase(t, label)) })
+	}
+	for _, role := range []string{"developer", "reviewer"} {
+		t.Run(role+" without project", func(t *testing.T) {
+			check(t, mustRender(t, role, noProjectData(role)))
+		})
+	}
+}
+
 func TestVerificationTexts(t *testing.T) {
 	checks := []struct{ label, want string }{
 		{"developer in story", "Do not run the project's full end-to-end suite"},
@@ -285,6 +321,9 @@ func TestReleaseAndApprovalTexts(t *testing.T) {
 	}
 	if out := renderCase(t, "pm user release"); strings.Contains(out, "ticket move") || !strings.Contains(out, "the user releases them") {
 		t.Error("pm with user release is told to release tasks itself")
+	}
+	if out := renderCase(t, "pm user release"); !strings.Contains(out, "ask the user in a comment on the story (mention @user) to decide whether to release them") {
+		t.Error("pm with user release is not told to request the user's release decision")
 	}
 	if out := renderCase(t, "ceo may approve"); !strings.Contains(out, "only after the user has agreed") {
 		t.Error("CEO approval is not tied to the user's agreement")
