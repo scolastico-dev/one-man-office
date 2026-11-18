@@ -67,6 +67,11 @@ func StartPTY(command string, args []string, dir string, env []string, cols, row
 	}
 	si := windows.StartupInfoEx{ProcThreadAttributeList: attrs.List()}
 	si.Cb = uint32(unsafe.Sizeof(si))
+	// Without this flag Windows hands the child omo's own standard handles
+	// whenever those are redirected (a service, a pipe, a log file), and the
+	// program then writes past the pseudoconsole into omo's output. With the
+	// flag and no handles named, the child takes the pseudoconsole's.
+	si.Flags |= windows.STARTF_USESTDHANDLES
 	line, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{command}, args...)))
 	if err != nil {
 		return nil, err
