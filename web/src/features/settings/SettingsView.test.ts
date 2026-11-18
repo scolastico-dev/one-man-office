@@ -80,16 +80,17 @@ test('sections load lazily and the nav marks the current one', async () => {
   expect(w.find('main').exists()).toBe(false)
 })
 
-test('every section opens its own page with its title', async () => {
-  const { w, router } = await mountSettings('/settings/projects')
-  for (const s of SETTINGS_SECTIONS) {
-    await router.push(`/settings/${s.id}`)
-    await flushPromises()
-    await vi.dynamicImportSettled()
-    await flushPromises()
-    expect(title(w)).toBe(s.label)
-    expect(current(w)).toEqual([s.id])
-  }
+// Each page has its own test budget: compiling all lazy chunks in one test
+// made the result depend on the runner's load rather than routing behavior.
+const sectionTransitions = SETTINGS_SECTIONS.map((section, i) => ({ section, from: SETTINGS_SECTIONS[Math.max(0, i - 1)]!.id }))
+test.each(sectionTransitions)('$section.id opens its own page with its title', async ({ section: s, from }) => {
+  const { w, router } = await mountSettings(`/settings/${from}`)
+  await router.push(`/settings/${s.id}`)
+  await flushPromises()
+  await vi.dynamicImportSettled()
+  await flushPromises()
+  expect(title(w)).toBe(s.label)
+  expect(current(w)).toEqual([s.id])
 })
 
 test('/settings shows Projects on a wide screen; an address naming no section shows Projects with a notice', async () => {

@@ -17,3 +17,9 @@ it('keeps only test-owned omo variables in server, CLI and seed environments', (
     OMO_PLUGIN_CATALOG: join(home, 'plugin-list.git'),
   })
 })
+
+it('uses the shell syntax the browser tests exercise regardless of the runner login shell', () => {
+  vi.stubEnv('SHELL', '/a/non-POSIX/login-shell')
+  const env = cleanEnv('/temporary/omo-test', '/test/programs')
+  if (process.platform !== 'win32') expect(env.SHELL).toBe('/bin/sh')
+})

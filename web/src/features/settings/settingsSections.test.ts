@@ -9,14 +9,16 @@ test('the section list has the thirteen sections in order', () => {
   expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual(['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'mcp', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'])
 })
 
-test('the sections are listed in the order of the section list, each with a page', async () => {
+test('the sections are listed in the order of the section list', () => {
   expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([...SETTINGS_SECTIONS_IN_ORDER])
-  for (const s of SETTINGS_SECTIONS) {
-    expect(s.label).not.toBe('')
-    expect(s.description).not.toMatch(/\.$/)
-    const page = await s.component()
-    expect(page).toBeTruthy()
-  }
+})
+
+// Lazy chunk compilation is independent per section; do not share one timeout
+// across all pages on a loaded runner.
+test.each(SETTINGS_SECTIONS)('$id has a label, description and page', async (s) => {
+  expect(s.label).not.toBe('')
+  expect(s.description).not.toMatch(/\.$/)
+  expect(await s.component()).toBeTruthy()
 })
 
 test('the settings are loaded only when shown: nothing outside them imports their code statically', () => {

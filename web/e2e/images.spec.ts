@@ -61,7 +61,7 @@ test('the user adds images to a comment by the button, a paste and a drop; they 
     const img = body.getByRole('img', { name })
     await expect(img).toBeVisible()
     await expect(img).toHaveAttribute('src', /^blob:/)
-    expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(48)
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(48)
   }
   // Fits the column.
   const fits = await body.locator('img').first().evaluate((el) => el.getBoundingClientRect().width <= el.closest('[data-comment-body]')!.getBoundingClientRect().width)

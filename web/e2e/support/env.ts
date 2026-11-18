@@ -44,6 +44,8 @@ export function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: join(home, 'xdg-config'),
     XDG_STATE_HOME: join(home, 'xdg-state'),
     XDG_DATA_HOME: join(home, 'xdg-data'),
+    // The shell specs send POSIX commands; a runner may log in with fish.
+    ...(process.platform === 'win32' ? {} : { SHELL: '/bin/sh' }),
     // omo's plugin list: a repository at this place in the test's home (see
     // pluginListPath), never the real one on the network.
     OMO_PLUGIN_CATALOG: pluginListPath(home),

@@ -59,6 +59,7 @@ test('Ctrl+C with a selection copies it and leaves the program running; the next
     await typeInTerminal(page, terminal, 'cat')
     // The output line of echo: a double click selects the word.
     const row = terminal.locator('.xterm-rows > div', { hasText: /^copyme-word\s*$/ })
+    await expect(row).toBeVisible()
     const box = (await row.boundingBox())!
     // The emulator's screen above the rows takes the pointer.
     await page.mouse.dblclick(box.x + 20, box.y + box.height / 2)
@@ -75,6 +76,7 @@ test('Ctrl+C with a selection copies it and leaves the program running; the next
     await page.evaluate(() => navigator.clipboard.writeText('echo pasted=$((40 + 2))'))
     await terminal.locator('.xterm-helper-textarea').focus()
     await page.keyboard.press('Control+V')
+    await expectTerminalText(terminal, 'echo pasted=$((40 + 2))')
     await page.keyboard.press('Enter')
     await expectTerminalText(terminal, 'pasted=42')
   } finally {
@@ -140,10 +142,23 @@ test.describe('images dropped onto an agent terminal', () => {
     await expect(panel.locator('[data-terminal-note]')).toHaveText('Only images can be dropped here.')
     expect(stored()).toEqual([])
 
+    // Keep the upload response in flight after the atomic rename. File
+    // publication and pasting its path are separate completion boundaries.
+    let deliver: (() => Promise<void>) | undefined
+    await page.route('**/api/terminal-images', async (route) => {
+      const response = await route.fetch()
+      deliver = () => route.fulfill({ response })
+    })
     await drop(terminal, [image])
+    await expect.poll(() => deliver !== undefined).toBe(true)
     await expect.poll(stored).toHaveLength(1)
     const file = join(folder, stored()[0]!)
     expect(file).toMatch(/\/images\/terminal\/[0-9a-f-]{36}\.png$/)
+    await expect(panel.locator('[data-terminal-note]')).toHaveText('Uploading the image…')
+    await deliver!()
+    // The response handler clears Uploading after it pastes the path. The
+    // fake echoes complete lines only, so wait for that UI completion first.
+    await expect(panel.locator('[data-terminal-note]')).toHaveCount(0)
     // The path went to the program without a line break: only Enter sends the line it waits for.
     await terminal.locator('.xterm-helper-textarea').focus()
     await page.keyboard.press('Enter')

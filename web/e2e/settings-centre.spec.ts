@@ -1,3 +1,4 @@
+import { expectSettingsReady } from './support/settings'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -79,7 +80,7 @@ async function show(page: Page, omo: Omo, section: string, heading: string) {
     await expect(page.locator('[data-profile-editor="fake"]')).toBeVisible()
   }
   if (section === 'limits') await expect(page.getByRole('spinbutton', { name: 'Tasks in work' })).toBeVisible()
-  if (section === 'projects') await expect(page.locator('[data-settings-loading]')).toHaveCount(0)
+  if (section === 'projects') await expectSettingsReady(page, section)
 }
 
 const SECTIONS = [

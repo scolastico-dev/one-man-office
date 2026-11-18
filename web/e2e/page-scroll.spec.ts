@@ -1,3 +1,4 @@
+import { expectSettingsReady } from './support/settings'
 // The board shell never scrolls as a document: the top bar, the sidebar and
 // the page's panes stay in the window and the panes inside scroll on their
 // own. This walks the full-height views (the board, the ticket page on every
@@ -231,7 +232,7 @@ test.describe('every full-height view', () => {
       })
       await visit(`/ticket/${story}?tab=tasks`, 'tasks', () => expect(ticketPage(page).locator('[data-task]')).toHaveCount(12))
       for (const section of SETTINGS) {
-        await visit(`/settings/${section}`, `settings ${section}`, () => expect(page.locator('[data-settings-page] [data-settings-loading]')).toHaveCount(0))
+        await visit(`/settings/${section}`, `settings ${section}`, () => expectSettingsReady(page, section))
       }
 
       // The sidebar with a shell in it (on a phone the sidebar is a sheet).
