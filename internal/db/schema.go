@@ -300,7 +300,12 @@ ALTER TABLE ticket_projects ADD COLUMN export_base TEXT NOT NULL DEFAULT '';
 ALTER TABLE ticket_projects ADD COLUMN export_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE ticket_projects ADD COLUMN export_target_commit TEXT NOT NULL DEFAULT '';
 `,
-	// Version 10: attention ownership is state, independent of display text.
+	// Version 10: plugin ownership is assigned only by server-bound helpers.
+	`ALTER TABLE proxy_forwards ADD COLUMN plugin_owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE proxy_forwards ADD COLUMN task_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX proxy_forwards_plugin ON proxy_forwards(plugin_owner,task_id);
+`,
+	// Version 11: attention ownership is state, independent of display text.
 	`ALTER TABLE agent_sessions ADD COLUMN end_kind TEXT NOT NULL DEFAULT '';
 UPDATE agent_sessions SET end_kind = 'user' WHERE end_reason = 'stopped by the user';
 ALTER TABLE tickets ADD COLUMN attention_owner TEXT NOT NULL DEFAULT '';

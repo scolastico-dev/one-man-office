@@ -59,7 +59,7 @@ test('agents tab: running agents get a terminal, ended ones a log; list follows 
   const term = w.get('[data-terminal]')
   expect(term.attributes('data-src')).toBe('/api/agents/t9/terminal')
   expect(term.attributes('aria-label')).toBe('Terminal of developer Ada on #12')
-  expect(w.text()).toContain('Typing here types into the agent.')
+  expect(w.text()).toContain('Write to the agent in the box below the terminal.')
 
   // Ended: Show log replaces the open terminal with the log.
   await w.get('[data-show-log]').trigger('click')

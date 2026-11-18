@@ -83,7 +83,7 @@ test('a restored CEO tab sends no request; a click sends POST /api/ceo once', as
   await flushPromises()
   expect(sent).toEqual([{ method: 'POST', path: '/api/ceo', body: {} }])
   expect(w.find('[data-ceo-live]').exists()).toBe(true)
-  expect(w.text()).toContain('Typing here types into the CEO.')
+  expect(w.text()).toContain('Write to the CEO in the box below the terminal.')
 })
 
 test('a tab the user opened starts the CEO by itself, once the live agents are known', async () => {

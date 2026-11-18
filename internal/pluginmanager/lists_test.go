@@ -301,3 +301,18 @@ func TestCombineKeepsOmosOwnEntries(t *testing.T) {
 		t.Fatal("Combine changed the lists it was given")
 	}
 }
+
+func TestFetchListRedirectDoesNotDiscloseSourceQuery(t *testing.T) {
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Referer() != "" {
+			t.Error("source query disclosed through Referer")
+		}
+		w.Write([]byte(goodList))
+	}))
+	defer destination.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, destination.URL, http.StatusFound) }))
+	defer source.Close()
+	if _, err := FetchList(t.Context(), source.URL+"/?token=source-secret"); err != nil {
+		t.Fatal(err)
+	}
+}

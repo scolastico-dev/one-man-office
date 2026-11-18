@@ -105,7 +105,7 @@ function toggle(s: AgentSession): void {
         <div v-if="open && open.id === s.id" class="atab__detail">
           <LogView v-if="!isRunning(s)" :session-id="s.id" />
           <template v-else-if="s.terminal_id">
-            <p class="atab__muted">Typing here types into the agent.</p>
+            <p class="atab__muted">Write to the agent in the box below the terminal.</p>
             <LazyTerminal :key="s.terminal_id" :src="agentTerminalPath(s.terminal_id)" :label="label(s)" ended-text="This agent ended." :fill="onPage" />
           </template>
           <p v-else class="atab__muted" role="status">The terminal is not ready yet.</p>

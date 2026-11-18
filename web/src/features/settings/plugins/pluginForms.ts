@@ -47,9 +47,9 @@ export function eventNoun(event: string): string {
   return EVENT_NOUNS[event] ?? event
 }
 
-/** The manual actions of a plugin with the given scope, in the manifest's order. */
+/** The visible automatic manual actions with the given scope, in manifest order. */
 export function manualActions(info: Pick<PluginInfo, 'hooks'>, scope: 'ticket' | 'global'): PluginHook[] {
-  return info.hooks.filter((h) => h.event === 'manual' && (h.scope || 'global') === scope && h.name !== '')
+  return info.hooks.filter((h) => h.event === 'manual' && !h.hidden && (h.scope || 'global') === scope && h.name !== '')
 }
 
 /** The configuration as the editor shows it: indented JSON. */
@@ -63,7 +63,10 @@ export const CONFIG_PARSE_MESSAGE = 'Enter a JSON object, such as {"key": "value
 export function parseConfig(text: string): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   let v: unknown
   try {
-    v = JSON.parse(text)
+    v = JSON.parse(text, (_key: string, value: unknown) => {
+      if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Non-finite number')
+      return value
+    })
   } catch {
     return { ok: false, message: CONFIG_PARSE_MESSAGE }
   }

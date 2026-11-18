@@ -79,7 +79,7 @@ const label = computed(() => {
       </p>
       <p v-if="ended" class="agents__ended" role="status" data-agent-ended>This agent ended.</p>
       <template v-else-if="shown">
-        <p class="agents__note">Typing here types into the agent.</p>
+        <p class="agents__note">Write to the agent in the box below the terminal.</p>
         <LazyTerminal v-if="shown.terminal_id" :key="shown.terminal_id" :src="agentTerminalPath(shown.terminal_id)" :label="label" :ended-text="'This agent ended.'" fill />
         <p v-else-if="!shown.terminal_id" class="agents__muted" role="status">The terminal is not ready yet.</p>
       </template>

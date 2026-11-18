@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/coder/websocket"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 )
 
@@ -28,6 +29,16 @@ func TestProxySubdomainBrowserFixture(t *testing.T) {
 		var upstream *httptest.Server
 		upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
+			case r.URL.Path == "/socket":
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer conn.CloseNow()
+				kind, data, err := conn.Read(r.Context())
+				if err == nil {
+					conn.Write(r.Context(), kind, data)
+				}
 			case strings.HasSuffix(r.URL.Path, "/inspect"):
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{"path": r.URL.RequestURI(), "cookie": r.Header.Get("Cookie"), "authorization": r.Header.Get("Authorization"), "host": r.Header.Get("X-Forwarded-Host")})
@@ -61,7 +72,10 @@ func TestProxySubdomainBrowserFixture(t *testing.T) {
 		}
 		t.Cleanup(server.Close)
 		_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
-		boardHost := "board.localhost"
+		boardHost := "127.0.0.1"
+		if variant == "https" {
+			boardHost = "board.localhost"
+		}
 		if variant == "same-base" {
 			boardHost = "apps.localhost"
 		}

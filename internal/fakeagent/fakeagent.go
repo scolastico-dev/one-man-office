@@ -81,12 +81,12 @@ func Main() int {
 		return bridgeMain()
 	}
 	var in io.Reader = os.Stdin
-	if swallow, deaf, ok := composerSettings(); ok {
+	if swallow, deaf, paste, ok := composerSettings(); ok {
 		if err := rawInput(os.Stdin); err != nil {
 			fmt.Fprintf(os.Stdout, "fake: %v\n", err)
 			return ExitFailed
 		}
-		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf))
+		in = pasteComposer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf), paste)
 	}
 	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: in, Stdout: os.Stdout})
 }

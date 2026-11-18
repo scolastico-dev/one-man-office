@@ -106,7 +106,7 @@ Start with something small in one repository.
    panel. omo starts a developer agent as soon as a slot is free: the card moves
    to **In Progress**, and the sidebar's **Agents** tab lists the agent.
 3. **Watch** (optional): open the ticket and its **Agents** tab. You see the
-   agent's terminal and can type into it. The agent works on its own branch
+   agent's terminal and can write to it in the message box below (see [Terminals](terminals.md)). The agent works on its own branch
    (`omo/add-a-version-flag`) in a worktree under `OMO_HOME/worktrees/`; your
    project folder is not touched. If it asks you something, the card says
    "question for you" and the bell rings: answer in the Comments tab.

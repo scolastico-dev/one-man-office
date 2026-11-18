@@ -44,18 +44,48 @@ func NewRedactor() *Redactor {
 	return &Redactor{secrets: map[string]struct{}{}, marked: map[string]struct{}{}}
 }
 
-// Add registers a secret. Texts shorter than 6 bytes are ignored.
+// Clone takes an independent snapshot of the secrets and marked sources.
+// Adding task-specific values to the copy cannot affect its calling hook.
+func (r *Redactor) Clone() *Redactor {
+	copy := NewRedactor()
+	if r == nil {
+		return copy
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for value := range r.secrets {
+		copy.secrets[value] = struct{}{}
+	}
+	for value := range r.marked {
+		copy.marked[value] = struct{}{}
+	}
+	copy.replacer = r.replacer
+	return copy
+}
+
+// Add registers a secret. Texts shorter than 6 bytes are ignored. For
+// multiline secrets, register each CR/LF-separated line too: output sinks may
+// split lines before cleaning, but must not disclose the credential that way.
 func (r *Redactor) Add(secret string) {
 	if len(secret) < minSecret {
 		return
 	}
+	candidates := []string{secret}
+	if strings.ContainsAny(secret, "\r\n") {
+		candidates = append(candidates, strings.FieldsFunc(secret, func(c rune) bool { return c == '\r' || c == '\n' })...)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.secrets[secret]; ok {
-		return
+	for _, candidate := range candidates {
+		if len(candidate) < minSecret {
+			continue
+		}
+		if _, ok := r.secrets[candidate]; ok {
+			continue
+		}
+		r.secrets[candidate] = struct{}{}
+		r.replacer = nil
 	}
-	r.secrets[secret] = struct{}{}
-	r.replacer = nil
 }
 
 // MarkSource registers text as a secret and marks it as coming from a

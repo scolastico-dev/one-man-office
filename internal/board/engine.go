@@ -399,12 +399,9 @@ func (b *Board) SetAttentionOwned(ctx context.Context, n int64, owner AttentionO
 	})
 }
 
-// setAttention applies an unowned attention flag and its notification in the
-// caller's transaction, allowing guarded engine updates to share the behavior.
-func (b *Board) setAttention(tx *sql.Tx, t ticketRow, reason string) error {
-	return b.setAttentionOwned(tx, t, "", reason)
-}
-
+// setAttentionOwned applies an attention flag, its producer and its
+// notification in the caller's transaction, so guarded engine updates share
+// the behaviour.
 func (b *Board) setAttentionOwned(tx *sql.Tx, t ticketRow, owner AttentionOwner, reason string) error {
 	reason = strings.TrimSpace(reason)
 	line := attentionLine(reason)

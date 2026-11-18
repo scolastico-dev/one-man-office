@@ -130,7 +130,7 @@ const pluginDetailId = useId()
 const plugin = computed<SamplePluginInfo>(() => samplePlugins.find((p) => p.name === openPlugin.value)!)
 const pluginOn = ref<Record<string, boolean>>(Object.fromEntries(samplePlugins.map((p) => [p.name, p.enabled])))
 const configText = ref(JSON.stringify(samplePlugins[1]!.config, null, 2))
-const globalActions = computed(() => plugin.value.hooks.filter((h) => h.event === 'manual' && h.scope === 'global'))
+const globalActions = computed(() => plugin.value.hooks.filter((h) => h.event === 'manual' && !h.hidden && h.scope === 'global'))
 const logText = samplePluginLog.map((l) => `${new Date(l.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}  ${l.message}`).join('\n')
 </script>
 

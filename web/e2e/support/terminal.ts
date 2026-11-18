@@ -24,3 +24,10 @@ export function expectNoTokenInUrls(observed: Observed, token: string): void {
   for (const url of observed.requestUrls) expect(url, 'a request address carries the token').not.toContain(token)
   for (const url of observed.websocketUrls) expect(url, 'a websocket address carries the token').not.toContain(token)
 }
+
+/** Switches an agent terminal inside `scope` from read-only to writable (it starts read-only); does nothing when it is writable. */
+export async function makeWritable(scope: Locator): Promise<void> {
+  const toggle = scope.locator('[data-terminal-mode]').first()
+  if ((await toggle.getAttribute('data-writable')) === null) await toggle.click()
+  await expect(toggle).toHaveAttribute('data-writable', '')
+}

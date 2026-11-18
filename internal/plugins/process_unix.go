@@ -12,8 +12,9 @@ import (
 // program runs in its own process group, and cancelling its command or
 // closing the group kills the whole group.
 type processGroup struct {
-	mu  sync.Mutex
-	pid int
+	mu     sync.Mutex
+	pid    int
+	killed bool
 }
 
 // newProcessGroup prepares cmd to run in its own group. Call started after
@@ -32,13 +33,17 @@ func (g *processGroup) started(cmd *exec.Cmd) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pid = cmd.Process.Pid
+	if g.killed {
+		_ = syscall.Kill(-g.pid, syscall.SIGKILL)
+	}
 	return nil
 }
 
 func (g *processGroup) kill() {
 	g.mu.Lock()
+	g.killed = true
 	pid := g.pid
-	g.mu.Unlock()
+	defer g.mu.Unlock()
 	if pid <= 0 {
 		return
 	}
