@@ -41,10 +41,17 @@ async function mark(page: Page, scope: string): Promise<{ id: number; name: stri
   )
 }
 
-/** Every element of the scope with its scroll offsets, kept on the window, and the offsets they have now. */
+/**
+ * The scroll offsets of every element of the scope and of everything around it
+ * (each ancestor of the scope and the document), kept on the window: a wheel
+ * that a box hands on moves the box around it, which may lie outside the scope.
+ */
 async function snapshot(page: Page, scope: string): Promise<void> {
   await page.evaluate((scope) => {
-    ;(window as unknown as { __wheelAuditOffsets: [Element, number, number][] }).__wheelAuditOffsets = [...document.querySelectorAll<HTMLElement>(`${scope}, ${scope} *`)].map((el) => [el, el.scrollTop, el.scrollLeft])
+    const kept = new Set<Element>(document.querySelectorAll<HTMLElement>(`${scope}, ${scope} *`))
+    for (const el of [...kept]) for (let up = el.parentElement; up; up = up.parentElement) kept.add(up)
+    kept.add(document.scrollingElement ?? document.documentElement)
+    ;(window as unknown as { __wheelAuditOffsets: [Element, number, number][] }).__wheelAuditOffsets = [...kept].map((el) => [el, (el as HTMLElement).scrollTop, (el as HTMLElement).scrollLeft])
   }, scope)
 }
 

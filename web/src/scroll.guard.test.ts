@@ -123,7 +123,6 @@ const AUDITED_CLEAN: Record<string, string> = {
   '/src/features/ticket/page/TicketPage.vue .tpage__side': 'page-scroll (the ticket page)',
   '/src/features/ticket/tabs/TicketTabs.vue .ptabs--page :deep(.tabs__list)': 'page-scroll (the ticket page)',
   '/src/features/ticket/tabs/TicketTabs.vue .ptabs--page :deep(.tabs__panel)': 'page-scroll (the ticket page)',
-  '/src/styles/markdown.css .md table': 'wheel-states (markdown with a wide table)',
   // The scroller of a text field is the browser's own (a text area's inner box): no style composites it.
   '/src/features/settings/plugins/PluginConfigEditor.vue .plugin-config__code :deep(textarea)': 'a text area',
   '/src/features/settings/usage/ScriptEditor.vue .script-editor__code :deep(textarea)': 'a text area',

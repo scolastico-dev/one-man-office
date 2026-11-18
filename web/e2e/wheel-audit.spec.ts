@@ -49,3 +49,29 @@ test('an audit of a scope with no scroll box is an error', async ({ page }) => {
   await page.setContent('<div class="plain">nothing scrolls here</div>')
   await expect(auditWheels(page, '.plain', 'a plain box')).rejects.toThrow('nothing to scroll in a plain box')
 })
+
+test('an audit of a box inside a scrolling box puts back the box around it, which lies outside the scope', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 600 })
+  await page.setContent(`
+    <style>
+      body { margin: 0 }
+      .outer { width: 400px; height: 240px; overflow-y: auto }
+      .scope { height: 60px; overflow: auto; will-change: transform }
+      .scope > div { width: 900px; height: 50px }
+      .spacer { height: 600px }
+    </style>
+    <div class="outer"><div class="scope"><div>wide, and no room to scroll up or down</div></div><div class="spacer">spacer</div></div>`)
+  await page.evaluate(() => {
+    const w = window as unknown as { chained: number }
+    w.chained = 0
+    document.querySelector('.outer')!.addEventListener('scroll', (e) => (w.chained = Math.max(w.chained, (e.target as Element).scrollTop)))
+  })
+
+  const audit = await auditWheels(page, '.scope', 'the scoped box')
+
+  expect(audit.visited.sort()).toEqual(['div.scope x', 'div.scope y'])
+  // The vertical wheel over the scope has no room in it and went on to the box around it (that is what is restored) ...
+  expect(await page.evaluate(() => (window as unknown as { chained: number }).chained)).toBeGreaterThan(0)
+  // ... and nothing, outside the scope or in it, is left displaced.
+  expect(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.outer, .outer *'), document.scrollingElement!].map((el) => [el.scrollTop, el.scrollLeft]).flat().every((v) => v === 0))).toBe(true)
+})

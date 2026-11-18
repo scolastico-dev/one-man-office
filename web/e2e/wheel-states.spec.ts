@@ -6,30 +6,46 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { initRepo } from './support/git'
+import type { Locator } from '@playwright/test'
 import { expect, FAKE_AGENT_BINARY, test } from './support/omo'
 import { openBoard } from './support/board'
-import { script, waitForSession } from './support/agents'
+import { script, waitForNoLiveSession } from './support/agents'
 import { makePlugin } from './support/plugin'
 import { auditWheels } from './support/wheelAudit'
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
-const markdown = `Intro\n\n\`\`\`\n${'a'.repeat(300)}\n${'a'.repeat(300)}\n\`\`\`\n\n| ${Array.from({ length: 20 }, (_, i) => `col${i}`).join(' | ')} |\n| ${Array.from({ length: 20 }, () => '---').join(' | ')} |\n| ${Array.from({ length: 20 }, (_, i) => `value number ${i}`).join(' | ')} |\n\n${'More text.\n\n'.repeat(60)}`
+const COLUMNS = 100
+const table = `| ${Array.from({ length: COLUMNS }, (_, i) => `column ${i}`).join(' | ')} |\n| ${Array.from({ length: COLUMNS }, () => '---').join(' | ')} |\n| ${Array.from({ length: COLUMNS }, (_, i) => `value number column ${i}`).join(' | ')} |`
+const markdown = `Intro\n\n\`\`\`\n${'a'.repeat(300)}\n${'a'.repeat(300)}\n\`\`\`\n\n${table}\n\n${'More text.\n\n'.repeat(60)}`
 
-test('rendered Markdown with a code block and a wide table, on the ticket page and in the panel', async ({ page, omo }) => {
+/** A scroll box that really scrolls sideways: the audit of one with no room to scroll proves little. */
+async function expectSidewaysRoom(box: Locator, what: string): Promise<void> {
+  expect(await box.first().evaluate((el) => el.scrollWidth - el.clientWidth), `${what} has horizontal scroll room`).toBeGreaterThan(200)
+}
+
+test('rendered Markdown with a code block and a wide table, in a description and in a comment, on the ticket page and in the panel', async ({ page, omo }) => {
   const n = await omo.createTicket({ title: 'Markdown with wide blocks' })
   const { description_version } = await omo.api<{ description_version: number }>('GET', `/api/tickets/${n}`)
   await omo.api('PUT', `/api/tickets/${n}/description`, { text: markdown, base_version: description_version })
+  await omo.api('POST', `/api/tickets/${n}/comments`, { body: `A comment with a table:\n\n${table}\n`, question: false })
   await openBoard(page, omo)
-  for (const [path, where] of [
-    [`/ticket/${n}`, 'the ticket page'],
-    [`/${n}`, 'the ticket panel'],
+  for (const [path, scope, where] of [
+    [`/ticket/${n}`, '[data-ticket-page]', 'the description on the ticket page'],
+    [`/${n}`, 'dialog[data-ticket-panel]', 'the description in the panel'],
+    [`/ticket/${n}?tab=comments`, '[data-ticket-page]', 'the comment on the ticket page'],
+    [`/${n}?tab=comments`, 'dialog[data-ticket-panel]', 'the comment in the panel'],
   ] as const) {
     await page.goto(omo.url(path))
-    await expect(page.locator('.md pre').first()).toBeVisible()
-    await expect(page.locator('.md table').first()).toBeVisible()
-    const audit = await auditWheels(page, path.includes('/ticket/') ? '[data-ticket-page]' : 'dialog[data-ticket-panel]', where)
-    expect(audit.visited.some((v) => v.startsWith('pre'))).toBe(true)
+    const root = page.locator(scope)
+    await expect(root.locator('.md table, .cmt__body table').first()).toBeVisible()
+    await expectSidewaysRoom(root.locator('.md table, .cmt__body table'), `the table of ${where}`)
+    if (path.includes('comments') === false) {
+      await expect(root.locator('.md pre').first()).toBeVisible()
+      await expectSidewaysRoom(root.locator('.md pre'), `the code block of ${where}`)
+    }
+    const audit = await auditWheels(page, scope, where)
+    expect(audit.visited.some((v) => v.startsWith('table x')), `${where}: the audit turned a wheel over the table`).toBe(true)
     expect(audit.bad, where).toEqual([])
   }
 })
@@ -89,15 +105,22 @@ test.describe('an agent that exits', () => {
   test("the saved log of an ended agent in the ticket's Agents tab", async ({ page, omo }) => {
     const n = await omo.createTicket({ title: 'Ends at once' })
     await omo.moveTicket(n, 'ready')
-    const session = await waitForSession(omo, n, 'developer')
+    // The agent has finished before anything asks for it: the session is read from what was saved, never observed running.
+    await expect
+      .poll(async () => (await omo.api<{ ticket: number | null; role: string; state: string }[]>('GET', '/api/agents')).some((s) => s.ticket === n && s.role === 'developer' && s.state === 'ended'), {
+        message: `waiting for the saved, ended developer session of #${n}`,
+        timeout: 30_000,
+      })
+      .toBe(true)
+    await waitForNoLiveSession(omo, n)
     await openBoard(page, omo)
     await page.goto(omo.url(`/ticket/${n}?tab=agents`))
-    const item = page.locator(`[data-ticket-page] li[data-session="${session.id}"]`)
-    await expect(item).toBeVisible()
+    const item = page.locator('[data-ticket-page] li[data-session]').first()
+    await expect(item.locator('[data-ended]')).toBeVisible()
     await item.getByRole('button', { name: 'Show log' }).click()
     await expect(item.locator('pre')).toContainText('line 100 of the log')
     expect(await item.locator('pre').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
-    expect((await auditWheels(page, `[data-ticket-page] li[data-session="${session.id}"]`, "an ended agent's log")).bad).toEqual([])
+    expect((await auditWheels(page, '[data-ticket-page] li[data-session]', "an ended agent's log")).bad).toEqual([])
   })
 })
 

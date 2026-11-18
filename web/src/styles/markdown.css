@@ -44,6 +44,8 @@
   display: block;
   max-width: 100%;
   overflow-x: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: transform;
   border-collapse: collapse;
   font-size: var(--omo-text-sm);
 }
