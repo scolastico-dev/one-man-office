@@ -1,11 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect, test, REPO_DIR, type Omo } from './support/omo'
 import { installSample } from './support/samplePlugin'
 import { configure, expectClean, expectTreeGone, forwards, processTree, tasks } from './support/editor'
 import { openBoard, markPage, expectNotReloaded, nudgeReconnect } from './support/board'
-import { cleanEnv } from './support/env'
+import { git } from './support/git'
 
 test.skip(process.platform !== 'linux', 'local process fixture is exercised on Linux; native task tests cover other platforms')
 async function status(omo: Omo) {
@@ -153,7 +152,7 @@ for (const boundary of ['cancel', 'cascade', 'disable', 'remove', 'shutdown', 'n
 test.describe('review completion', () => {
   test.use({ omoOptions: { seed: { projects: [{ path: '{{repo}}', name: 'demo' }], tickets: [{ ref: 'review', type: 'task', title: 'Reviewed task', projects: ['demo'], review: 'human', to: 'review', branch: 'test-reviewed' }] } } })
   test('normal Done transition reaps sample descendants and its owned forward', async ({ omo, repo }) => {
-    execFileSync('git', ['worktree', 'add', '-b', 'test-reviewed', join(omo.home, 'omo/worktrees/test-reviewed'), 'main'], { cwd: repo, env: cleanEnv(omo.home), stdio: 'pipe' })
+    git(repo, 'worktree', 'add', '-b', 'test-reviewed', join(omo.home, 'omo/worktrees/test-reviewed'), 'main')
     await installSample(omo)
     const n = omo.refs.review!
     const tree = await start(omo, n)
