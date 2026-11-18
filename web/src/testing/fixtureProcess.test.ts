@@ -1,9 +1,11 @@
 // @vitest-environment node
-import { spawnSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { completeLine, fixtureEnv, startFixture } from '../../scripts/fixtureProcess.mjs'
+import { afterEach, describe, expect, it } from 'vitest'
+import { completeLine, endProcess, fixtureEnv, isLauncher, startFixture, taskkillArgs } from '../../scripts/fixtureProcess.mjs'
 
 // An owned temporary root that is not below the shared one and has a space in it.
 const owned = resolve('owned temporary root', 'tmp')
@@ -127,4 +129,237 @@ describe('reading a printed line from a child\'s output', () => {
     expect(run.fixtures).toEqual([{ stop: 'x', board: 'b' }])
     await run.stop()
   })
+})
+
+
+// ---- ownership of the helper process through complete shutdown ----
+
+const made: string[] = []
+afterEach(() => {
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+/** A folder of this test's own, the `tmp` a fixture makes its build folder in. */
+const own = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), 'omo-fixture-test-'))
+  made.push(dir)
+  return dir
+}
+
+/** A Go module with one test that prints its process id as its fixtures line and then waits, as the real helper waits for its stop request. */
+function goHelper(body = 'io.Copy(io.Discard, os.Stdin)'): string {
+  const dir = own()
+  writeFileSync(join(dir, 'go.mod'), 'module helper\n\ngo 1.21\n')
+  writeFileSync(
+    join(dir, 'helper_test.go'),
+    `package helper
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"testing"
+)
+
+var _ = io.Discard
+
+func TestHelper(t *testing.T) {
+	if flag.NArg() > 0 {
+		conn, err := net.Dial("tcp", flag.Arg(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+	fmt.Printf("PROXY_BROWSER_FIXTURES [{\\"pid\\":\\"%d\\"}]\\n", os.Getpid())
+	${body}
+}
+`,
+  )
+  return dir
+}
+const HELPER_ARGS = ['-test.run=^TestHelper$', '-test.count=1']
+
+describe('the helper process is the process that owns the servers', () => {
+  it('runs the built test binary directly: the process held is the one that printed its fixtures', async () => {
+    const module = goHelper()
+    const tmp = own()
+    let held = 0
+    const run = await startFixture({ cwd: module, build: { pkg: '.' }, args: HELPER_ARGS, tmp, onSpawn: (pid) => { held = pid } })
+    // `go test` would be the held child and the test binary its child with another id.
+    expect(run.fixtures).toEqual([{ pid: String(held) }])
+    expect(readdirSync(tmp)).toHaveLength(1)
+    expect(await run.stop()).toBeNull()
+    expect(alive(held)).toBe(false)
+    expect(readdirSync(tmp)).toEqual([])
+  }, 120_000)
+
+  it('waits for the exit and removes the build folder when the helper ends by its own stop address', async () => {
+    const module = goHelper('select {}')
+    const tmp = own()
+    // The helper is a Go test binary that does not serve a stop address, so give it one with a stand-in: node ends by itself once asked.
+    const script = `
+      const server = require('node:http').createServer((request, response) => response.end('ok', () => process.exit(0)))
+      server.listen(0, '127.0.0.1', () => process.stdout.write('PROXY_BROWSER_FIXTURES ' + JSON.stringify([{ stop: 'http://127.0.0.1:' + server.address().port + '/stop' }]) + '\\n'))`
+    const run = await startFixture({ cwd: module, build: { pkg: '.' }, command: process.execPath, args: ['-e', script], tmp })
+    expect(await run.stop(run.fixtures[0]!.stop)).toBe(0)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
+  it('reports a failed build with its output and leaves no folder', async () => {
+    const module = goHelper()
+    writeFileSync(join(module, 'broken_test.go'), 'package helper\n\nfunc broken( {\n')
+    const tmp = own()
+    await expect(startFixture({ cwd: module, build: { pkg: '.' }, args: HELPER_ARGS, tmp })).rejects.toThrow(/building the helper failed.*broken_test\.go/s)
+    expect(readdirSync(tmp)).toEqual([])
+  }, 120_000)
+
+  it('ends the built helper and removes the folder when its fixtures line cannot be read', async () => {
+    const module = goHelper()
+    writeFileSync(join(module, 'helper_test.go'), readFileSync(join(module, 'helper_test.go'), 'utf8').replace('[{\\"pid', 'not-json [{\\"pid'))
+    const tmp = own()
+    let held = 0
+    await expect(startFixture({ cwd: module, build: { pkg: '.' }, args: HELPER_ARGS, tmp, onSpawn: (pid) => { held = pid } })).rejects.toThrow(/not JSON/)
+    expect(held).toBeGreaterThan(0)
+    expect(alive(held)).toBe(false)
+    expect(readdirSync(tmp)).toEqual([])
+  }, 120_000)
+
+  it('leaves no folder behind when the program cannot be started', async () => {
+    const tmp = own()
+    await expect(startFixture({ command: 'omo-no-such-program-for-the-test', tmp })).rejects.toThrow(/ENOENT/)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+})
+
+describe('the helper must be the process that owns the servers', () => {
+  it.each(['go', 'npm', 'npx', 'sh', '/bin/bash', 'C:\\Program Files\\Go\\bin\\go.exe', 'CMD.EXE', 'pwsh'])('refuses the launcher %s as the helper', async (command) => {
+    const tmp = own()
+    expect(isLauncher(command)).toBe(true)
+    await expect(startFixture({ command, args: ['test', './internal/server'], tmp })).rejects.toThrow(/launcher/)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
+  it('accepts a program that is not a launcher, including a path with a launcher\'s name inside it', () => {
+    for (const command of [process.execPath, '/home/x/go/bin/server.test', 'C:\\gopher\\fixture.exe']) expect(isLauncher(command), command).toBe(false)
+  })
+})
+
+describe('a kill that fails', () => {
+  it('is reported by stop, and the build folder and the interrupt handlers are released all the same', async () => {
+    const tmp = own()
+    const listeners = process.listenerCount('SIGINT')
+    // The helper reports through a connection that closes when its process is gone, so the test can end it afterwards without sleeping.
+    const server = createServer()
+    const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+    let held = 0
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    try {
+      const run = await startFixture({
+        cwd: goHelper(),
+        build: { pkg: '.' },
+        args: [...HELPER_ARGS, '--', `127.0.0.1:${(server.address() as { port: number }).port}`],
+        tmp,
+        end: { killGroup: denied },
+        onSpawn: (pid) => { held = pid },
+      })
+      expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
+      await expect(run.stop()).rejects.toThrow(/not permitted/)
+      expect(readdirSync(tmp)).toEqual([])
+      expect(process.listenerCount('SIGINT')).toBe(listeners)
+    } finally {
+      // The refused kill left the helper running: end it for real.
+      if (held > 0) process.kill(-held, 'SIGKILL')
+      await helperGone
+      server.close()
+    }
+  }, 120_000)
+})
+
+describe('ending a process', () => {
+  const running = (extra: object = {}) => ({ pid: 4242, exitCode: null, signalCode: null, kill: () => true, ...extra })
+
+  it('ends a Windows process tree with taskkill when the program starts others itself, and fails loudly when that fails', () => {
+    // Injected platform: this checks the command, not a Windows run.
+    const asked: number[] = []
+    endProcess(running(), { tree: true, platform: 'win32', killTree: (pid: number) => { asked.push(pid) } })
+    expect(asked).toEqual([4242])
+    expect(taskkillArgs(4242)).toEqual(['/PID', '4242', '/T', '/F'])
+    const refuse = () => { throw new Error('Access is denied') }
+    expect(() => endProcess(running(), { tree: true, platform: 'win32', killTree: refuse })).toThrow(/Access is denied/)
+    // A failure of a process that has ended meanwhile is no failure.
+    expect(() => endProcess(running({ exitCode: 1 }), { tree: true, platform: 'win32', killTree: refuse })).not.toThrow()
+  })
+
+  it('kills a directly owned Windows program with child.kill and a POSIX one through its process group', () => {
+    const killed: string[] = []
+    endProcess(running({ kill: (signal: string) => { killed.push(signal); return true } }), { platform: 'win32' })
+    expect(killed).toEqual(['SIGKILL'])
+    const groups: number[] = []
+    endProcess(running(), { platform: 'linux', killGroup: (pid: number) => { groups.push(pid) } })
+    expect(groups).toEqual([4242])
+  })
+
+  it('does not call a refused kill "already gone": only an empty group is', () => {
+    const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
+    const empty = () => { throw Object.assign(new Error('no such process'), { code: 'ESRCH' }) }
+    expect(() => endProcess(running(), { platform: 'linux', killGroup: denied })).toThrow(/not permitted/)
+    expect(() => endProcess(running(), { platform: 'linux', killGroup: empty })).not.toThrow()
+    expect(() => endProcess(running({ pid: undefined }), { platform: 'linux', killGroup: denied })).not.toThrow()
+  })
+})
+
+describe('a driver that is interrupted', () => {
+  // The Go helper connects to this test (its address after `--`); the kernel closes that connection when the helper's
+  // process is gone, so the close is the proof that it ended: no sleeping, and no lookup of a process nobody reaped.
+  // The driver's kill is held back (`end.killGroup`) until the test lets it through, as if the platform ended the
+  // process late: the folder of a running program must stay until the close has been awaited, and then go.
+  it.skipIf(process.platform === 'win32')('waits for the helper to be closed, removes the build folder, then ends itself with the signal', async () => {
+    // Windows does not deliver a catchable interrupt signal to a process (process.kill ends it at once), so the handler cannot run there.
+    const tmp = own()
+    const module = goHelper('io.Copy(io.Discard, os.Stdin)')
+    const driver = join(own(), 'driver.mjs')
+    writeFileSync(
+      driver,
+      `import { startFixture } from ${JSON.stringify(new URL('../../scripts/fixtureProcess.mjs', import.meta.url).href)}
+const held = []
+await startFixture({
+  cwd: process.argv[3], build: { pkg: '.' }, tmp: process.argv[4],
+  args: ['-test.run=^TestHelper$', '-test.count=1', '--', '127.0.0.1:' + process.argv[2]],
+  end: { killGroup: (pid) => { process.stdout.write('KILL-HELD\\n'); process.stdin.once('data', () => process.kill(-pid, 'SIGKILL')) } },
+})
+process.stdout.write('READY\\n')
+setInterval(() => {}, 1 << 30)
+`,
+    )
+    const server = createServer()
+    const helperGone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+    const port = (server.address() as { port: number }).port
+    const child = spawn(process.execPath, [driver, String(port), module, tmp], { stdio: ['pipe', 'pipe', 'inherit'] })
+    const closed = new Promise<string | null>((ok) => child.once('close', (_code, signal) => ok(signal)))
+    const printed = (word: string) => new Promise<void>((ok, bad) => {
+      let seen = ''
+      child.stdout.on('data', (d: Buffer) => { seen += d; if (seen.includes(word)) ok() })
+      child.once('close', () => bad(new Error(`the driver ended before it printed ${word}`)))
+    })
+    try {
+      const ready = printed('READY')
+      const held = printed('KILL-HELD')
+      await ready
+      expect(readdirSync(tmp)).toHaveLength(1)
+      child.kill('SIGINT')
+      await held
+      // The kill was asked for and has not taken effect: the process is running, so its folder is still there.
+      expect(readdirSync(tmp)).toHaveLength(1)
+      child.stdin.write('go')
+      expect(await closed).toBe('SIGINT')
+      await helperGone
+      expect(readdirSync(tmp)).toEqual([])
+    } finally {
+      server.close()
+    }
+  }, 120_000)
 })
