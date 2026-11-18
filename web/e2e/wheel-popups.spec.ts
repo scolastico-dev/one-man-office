@@ -65,7 +65,7 @@ test.describe('the wheel over popups and lists', () => {
     await picker.getByLabel('Folder', { exact: true }).fill(outside)
     await picker.getByLabel('Folder', { exact: true }).press('Enter')
     await expect(picker.locator('[data-folder="tool"]')).toBeVisible()
-    expect(await scrollBoxesTakingWheelsBadly(page, 'dialog[open]'), 'the folder picker').toEqual([])
+    expect(await scrollBoxesTakingWheelsBadly(page, 'dialog[open]:has([data-folder-picker])', 'the folder picker'), 'the folder picker').toEqual([])
   })
 
   test("a ticket's description history dialog and its create dialog take the wheel on the compositor", async ({ page, omo }) => {

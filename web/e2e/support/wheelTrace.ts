@@ -59,8 +59,10 @@ function completed(events: readonly TraceEvent[]): { done: TraceEvent[]; unfinis
       if (started) done.push(started)
     }
   }
+  // The browser's `InputLatency::*` async spans end when it hears the page's acknowledgement, which can come after the trace stopped:
+  // they are bookkeeping, and the pipeline's own events (acknowledged, begun, updated, ended) are what a complete trace must show.
   let unfinished = 0
-  for (const left of open.values()) unfinished += left.length
+  for (const left of open.values()) unfinished += left.filter((e) => !e.name?.startsWith('InputLatency::')).length
   return { done, unfinished }
 }
 
@@ -87,17 +89,21 @@ export function summarizeWheelTrace(events: readonly TraceEvent[]): WheelTrace {
  * every wheel forwarded and acknowledged, a scroll begun, every wheel applied
  * as a compositor update and the gesture ended, with no span left open. A trace
  * cut short fails here instead of counting as "no main-thread hit tests".
+ * `platformMainThread` is for the one page where Chromium cannot avoid the main thread.
  */
-export function wheelTraceProblems(t: WheelTrace, expected: number): string[] {
+export function wheelTraceProblems(t: WheelTrace, expected: number, options: { platformMainThread?: boolean } = {}): string[] {
   const problems: string[] = []
   if (t.events === 0) problems.push('the trace is empty')
   if (t.unfinished > 0) problems.push(`${t.unfinished} trace spans never finished: the trace was cut short`)
   if (t.wheels !== expected) problems.push(`the trace shows ${t.wheels} wheel events, expected ${expected}`)
   if (t.acknowledged < t.forwarded) problems.push(`the page acknowledged ${t.acknowledged} of ${t.forwarded} wheel events`)
   if (t.scrollBegins < 1) problems.push('the trace shows no scroll gesture begin')
-  if (t.compositorUpdates < expected) problems.push(`the compositor applied ${t.compositorUpdates} scroll updates for ${expected} wheels`)
-  if (t.scrollEnds < expected) problems.push(`the compositor ended ${t.scrollEnds} scroll gestures for ${expected} wheels`)
-  if (t.mainThreadHitTests > 0) problems.push(`${t.mainThreadHitTests} wheel hit tests went to the main thread, where a wheel can be dropped`)
+  // Where Chromium itself asks the main thread (see wheelAudit: a page with many text fields), a wheel can be dropped, so the test
+  // asserts the page scrolled and the trace needs one wheel's whole path, not all of them.
+  const needed = options.platformMainThread ? Math.min(expected, 1) : expected
+  if (t.compositorUpdates < needed) problems.push(`the compositor applied ${t.compositorUpdates} scroll updates for ${expected} wheels`)
+  if (t.scrollEnds < needed) problems.push(`the compositor ended ${t.scrollEnds} scroll gestures for ${expected} wheels`)
+  if (t.mainThreadHitTests > 0 && !options.platformMainThread) problems.push(`${t.mainThreadHitTests} wheel hit tests went to the main thread, where a wheel can be dropped`)
   return problems
 }
 

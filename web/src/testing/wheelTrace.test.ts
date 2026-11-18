@@ -70,9 +70,15 @@ test('spans that began and never ended are not counted and refuse the trace', ()
 })
 
 test('async spans are matched by their id and a wheel with no delta is not a wheel', () => {
-  const b = { name: 'InputLatency::MouseWheel', ph: 'b', pid: 1, tid: 1, cat: 'input', id: '0x1' }
+  const b = { name: 'InputHandlerProxy::HandleGestureScrollUpdate', ph: 'b', pid: 1, tid: 1, cat: 'input', id: '0x1' }
   expect(summarizeWheelTrace([b]).unfinished).toBe(1)
   expect(summarizeWheelTrace([b, { ...b, ph: 'e' }]).unfinished).toBe(0)
   expect(summarizeWheelTrace([{ ...b, id: '0x2' }, { ...b, ph: 'e' }]).unfinished).toBe(1)
   expect(summarizeWheelTrace([...wheel(0, -400), ...wheel(-300, 0), ...wheel(0, 0)]).wheels).toBe(2)
+})
+
+test("the browser's input latency spans are bookkeeping: one still open when the trace stops does not make it incomplete", () => {
+  const latency = { name: 'InputLatency::GestureScrollEnd', ph: 'b', pid: 1, tid: 1, cat: 'input', id: '0x9' }
+  expect(summarizeWheelTrace([...compositorOnly, latency]).unfinished).toBe(0)
+  expect(problems([...compositorOnly, latency])).toBe('')
 })

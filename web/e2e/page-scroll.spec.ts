@@ -262,9 +262,9 @@ test.describe('every full-height view', () => {
         await page.goto(omo.url(path))
         await ready()
         await expectStill(page, `${where} at ${size.width} px`)
-        // Two views are left out, each for what the platform does, not for the app: ten or more text fields make Chromium ask the
+        // Two views are left out, each for what the platform does, not for the app (the wheel on the first is checked in settings-wheel.spec.ts): ten or more text fields make Chromium ask the
         // main thread for every wheel on the page (no style changes that), and a terminal's wheel is xterm.js's own listener.
-        if (audit && where !== 'settings environment' && where !== 'terminal window') expect(await scrollBoxesTakingWheelsBadly(page, 'body', `${where} at ${size.width} px`), `${where} at ${size.width} px`).toEqual([])
+        if (audit && where !== 'settings environment' && where !== 'terminal window') expect(await scrollBoxesTakingWheelsBadly(page, /^\/\d+/.test(path) ? 'dialog[data-ticket-panel]' : 'body', `${where} at ${size.width} px`), `${where} at ${size.width} px`).toEqual([])
       }
       if (board) {
         await visit(`/ticket/${n}`, 'overview', () => expect(ticketPage(page).locator('[data-description]')).toContainText('Paragraph 120'))
