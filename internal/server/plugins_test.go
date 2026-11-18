@@ -633,8 +633,8 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 			}
 		}
 	}
-	if rows != 8 {
-		t.Fatalf("%d plugin rows in the route table, want 8", rows)
+	if rows != 10 {
+		t.Fatalf("%d plugin rows in the route table, want 10", rows)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if after := snapshotPluginFiles(t, s); !maps.Equal(before, after) {

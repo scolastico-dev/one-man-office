@@ -251,8 +251,11 @@ it is empty for unavailable or invalid manifests. Files outside the public
 frontend and manifest do not affect it. A consumer can use it to invalidate its
 frontend cache after reload.
 
-`omo_started` is accepted as a hook event; automatic lifecycle dispatch is not
-part of the manifest reader. Legacy `startup` and `load` remain errors pointing
+`omo_started` runs once per enabled lifecycle, after omo's HTTP API and local
+socket are serving, and when a plugin is installed or enabled while omo runs.
+An unrelated plugin reload or configuration save does not repeat it. Disabling
+and enabling starts a new lifecycle. Startup uses a reserved delivery slot, so a
+full ordinary hook queue cannot drop it. Legacy `startup` and `load` remain errors pointing
 to `hooks` with `event: omo_started`; `javascript`, `files` and `company_load`
 point to `frontend.script`/`frontend.assets`. The other removed names remain
 refused with their replacement guidance.
@@ -272,6 +275,7 @@ the same as the global table `event`.
 | `ticket_needs_attention` | `ticket`, `reason` |
 | `agent_started`, `agent_exited` | `ticket` (null for the CEO), `agent`; for exits also `reason`: `finished`, `stopped`, `crashed`, `usage` or `omo stopped` |
 | `omo_paused`, `omo_resumed` | nothing (`{}`): **Paused** was switched on (also by **Stop all agents**) or off |
+| `omo_started` | `at` (readiness/enable time) |
 | `timer` | `at` |
 | `manual` | `action`, `ticket` (null without a ticket), `project` (`{id}` for a selected project, otherwise null) |
 
@@ -317,6 +321,9 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `config` | the plugin's configuration |
 | `omo.exec(program, args...)` | runs a program without a shell in the plugin's folder, with the environment of a command hook; returns its output (standard output and error, at most 1 MiB) and `""` or an error text |
 | `omo.http{method, url, headers, json \| form \| body, timeout}` | an HTTP request: https to any host, http only to localhost; at most 8 per run, bodies at most 1 MiB, 10 s by default and at most 30 s, redirects only to the same host. Returns `{status, body, headers}`, or `nil` and an error text |
+| `omo.task_start{ name, command, args, cwd, env, ticket }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
+| `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
+| `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
 | `omo.sleep(seconds)` | waits at most 10 s, within the run's time limit |
 | `omo.store_get(key)`, `omo.store_set(key, value)`, `omo.store_delete(key)`, `omo.store_keys()` | the plugin's own storage in omo's database: keys of 1 to 200 bytes, values up to 64 KiB as JSON, at most 1,000 keys |
 | `omo.data_dir()` | the plugin's data folder |
@@ -328,6 +335,114 @@ A run ends at the hook's time limit, and memory is watched. Every configuration
 string of six characters or more is replaced by `[redacted]` in the log, in
 error texts and in answer messages, and so are the header values the hook sent with
 `omo.http`.
+
+### Background tasks
+
+A task runs independently of the hook that started it. The hook can return or
+reach its time limit while the process continues. omo never restarts a task or
+persists its process state. A new omo server starts with an empty task list;
+startup hooks may explicitly start fresh tasks.
+
+```lua
+local task, err = omo.task_start{
+  name = "worker",
+  command = "my-worker",
+  args = {"--listen", "127.0.0.1:9090"},
+  cwd = omo.data_dir(),
+  env = {WORKER_MODE = "local"},
+  ticket = event.data.ticket and event.data.ticket.number or nil
+}
+if not task then return {message = err} end
+return {message = "Worker started"}
+```
+
+`name` and `command` are required strings. Names are 1–64 ASCII letters,
+digits, dots, underscores or hyphens, starting alphanumeric. They are unique
+among running tasks of a plugin, including simultaneous starts. The same name
+can be used by another plugin, and reused after a process ends; each run has a
+fresh opaque `id`. Names containing redacted configuration/environment values
+are refused. `command` is an executable, with no implicit shell. `args` is an
+optional array of at most 64 strings (each argument and the command at most
+4096 bytes, no NUL). `cwd` defaults to the plugin folder; relative folders
+resolve there, absolute folders are allowed (at most 4096 bytes, no NUL).
+`env` is an optional object of at most 64 literal overrides: keys match
+`[A-Za-z_][A-Za-z0-9_]*`, at most 128 bytes, case-insensitively unique; values
+are strings up to 32 KiB without NUL. Every `OMO_*` override is refused in any
+case. Processes inherit the cleaned command-hook environment, with
+`OMO_PLUGIN_EVENT=task`; they receive no agent session identifier. Unknown
+options and wrong types are refused. Helpers are bound to the executing
+plugin: there is no `plugin` option or command-side task endpoint.
+
+`ticket` is an optional positive ticket number (omitted/zero means global).
+The server validates that it exists and is open before and after process
+registration. Every committed transition to Done, including cancel and story
+cascade, stops bound tasks directly from the reliable event-log follower;
+cleanup does not pass through a plugin's droppable hook queue.
+
+Each task record has `id`, `name`, optional `ticket`, `started_at` (RFC 3339),
+`state` (`running` or `exited`) and `output` (an array, never null). A terminal
+record also has `ended_at`, `reason` and, for a failed natural exit, `error`.
+Reasons are `exited`, `stopped`, `ticket_done`, `plugin_disabled`,
+`plugin_removed`, `plugin_replaced` and `shutdown`; the first stop reason wins.
+No commands, arguments, environments or PIDs appear in records. A failed start
+returns a fixed error and retains no task or child. A quick nonzero exit keeps
+its status and diagnostic output in the terminal record.
+
+At most 32 tasks run or await their exit callback per plugin. Pending callbacks
+keep their identity and remain under that cap; they cannot be evicted as old
+history. The newest 64 completed terminal records remain until
+they age out or the plugin is removed. Each combined stdout/stderr tail holds
+100 lines of at most 1024 characters. Complete lines are redacted before
+truncation, including secrets split across writes; raw lines over 64 KiB are
+discarded whole with a marker. An unfinished line appears only on process
+exit, to avoid exposing a secret prefix before its rest arrives. Configuration
+strings, task environment values, inherited credential values and HTTP secrets
+known to the calling Lua hook use omo's existing redactor (values shorter than
+six bytes are ignored; multiline secrets also register their CR/LF-separated
+fragments). Hidden characters are escaped visibly. Unbounded
+output cannot grow stored logs or lines without limit.
+
+Stop waits for the process and its ordinary descendants to end. The same
+cleanup also runs after natural parent exit, plugin disable/removal, code or
+installed-tree replacement, and server shutdown. Unix uses a process group;
+Windows assigns the suspended process to a kill-on-close job before resuming
+it. Configuration refresh cancels old hooks and timers as needed, preserves
+background tasks, and keeps the startup lifecycle. An unchanged runtime is
+kept intact. Code replacement (manifest/frontend, loaded Lua source, install
+record, source/ref/subpath) stops old tasks with `plugin_replaced` and does not
+repeat a startup event already delivered. Removal followed by install, re-enable and an actual server restart are
+explicit new lifecycles.
+
+The user-only API is:
+
+| Route | Result |
+|---|---|
+| `GET /api/plugins/{name}/tasks` | `200 {"tasks": [...]}`, including an empty array |
+| `POST /api/plugins/{name}/tasks/{task}/stop` with `{}` | `204`; `{task}` is the plugin-local name |
+
+Agent sessions receive 403. Unknown plugins/names or a wrong owner give
+`not_found`; stopping a retained exited name succeeds. After name reuse, a
+name-based stop targets the latest run. JSON/content-type/size rules are the
+normal API rules. `plugin.tasks_changed` carries `{name}` at most once per
+plugin per second for starts, accumulating output and exits. Clients refetch
+GET after this invalidation, reconnect or event-stream resync. TypeScript
+clients have `getPluginTasks` and `stopPluginTask`.
+
+Runtime adapters use `Manager.StartTask(ctx, plugin, TaskStart)`,
+`Tasks(plugin)`, `StopTask(plugin, name)`, `StopTaskID(plugin, id, reason)` and
+`StopTicketTasks(ticket)`. The context bounds creation only. Use the stable
+`id` for resources attached to a single run, such as forwards.
+`Options.TaskExited func(plugin string, task api.PluginTask)` receives every
+successful start's terminal record outside manager locks, before Stop returns.
+It must not wait for its own task or call manager shutdown. Configure callbacks
+before use; adapters should serialize resource attachment with their exit
+callback and verify the task is still running. `Options.TasksChanged
+func(string)` is a concurrent, nonblocking invalidation callback;
+`Options.TaskTicketLive func(context.Context, int) bool` is the board adapter.
+Server integration lives in `plugin_tasks.go`: ticket cleanup runs before hook
+Dispatch; `Server.PluginsReady()` is called after launching both listeners in
+`Run`. Embedders call it after serving their own handlers. No automatic task
+restart, persistence, editor management or command-side task identity is added.
 
 ### Buttons (manual hooks)
 

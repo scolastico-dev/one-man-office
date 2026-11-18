@@ -480,6 +480,7 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 		}
 	}
 	if ctx.Err() == nil {
+		s.PluginsReady()
 		s.StartEngine()
 	}
 	select {

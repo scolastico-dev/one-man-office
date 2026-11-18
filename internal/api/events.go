@@ -32,6 +32,7 @@ const (
 	KindProjectsScanned     = "projects.scanned"
 	KindUsageChanged        = "usage.changed"         // data UsageState
 	KindSkillSetChanged     = "skillset.changed"      // data SkillSetState
+	KindPluginTasksChanged  = "plugin.tasks_changed"  // data PluginTasksChangedData
 	KindPluginChanged       = "plugin.changed"        // data PluginInfo
 	KindImageAdded          = "image.added"           // data ImageEventData
 	KindImageDeleted        = "image.deleted"         // data ImageEventData

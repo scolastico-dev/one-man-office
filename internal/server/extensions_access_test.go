@@ -38,6 +38,8 @@ var extensionRoutes = []extensionRoute{
 	{"POST /api/plugins/{name}/update", api.PluginUpdate{}},
 	{"DELETE /api/plugins/{name}", nil},
 	{"GET /api/plugins/{name}/log", nil},
+	{"GET /api/plugins/{name}/tasks", nil},
+	{"POST /api/plugins/{name}/tasks/{task}/stop", map[string]any{}},
 	{"POST /api/plugins/{name}/actions/{action}", api.PluginRun{}},
 }
 

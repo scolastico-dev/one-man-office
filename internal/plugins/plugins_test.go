@@ -61,15 +61,24 @@ func helper(mode string, args []string) int {
 	case "config-to-stderr": // the plugin's configuration on standard error, status 3
 		fmt.Fprintln(os.Stderr, "config was "+os.Getenv("OMO_PLUGIN_CONFIG"))
 		return 3
+	case "lines":
+		for range 100 {
+			fmt.Println(strings.Repeat("x", 1024))
+		}
 	case "sleep":
 		time.Sleep(time.Minute)
-	case "spawn": // spawn <pidfile>: start a sleeping child, write its pid, sleep
+	case "spawn", "spawn-exit": // spawn <pidfile>: start a sleeping child, write its pid, sleep
 		exe, _ := os.Executable()
 		child := newHelperCommand(exe, "sleep")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
 		if err := child.Start(); err != nil {
 			return 2
 		}
 		_ = os.WriteFile(args[0], []byte(fmt.Sprint(child.Process.Pid)), 0o600)
+		if mode == "spawn-exit" {
+			return 0
+		}
 		time.Sleep(time.Minute)
 	}
 	return 0
