@@ -1096,3 +1096,60 @@ func TestTrackerOnChange(t *testing.T) {
 		t.Fatal("no change after the settings changed")
 	}
 }
+
+// Refresh answers only after the readings of the runs it waited for are
+// kept: whoever reads the state file, or removes its folder, right after
+// Refresh must not meet a write that is still under way.
+func TestTrackerRefreshReturnsAfterTheReadingsAreKept(t *testing.T) {
+	for i := range 200 {
+		path := filepath.Join(t.TempDir(), "usage.json")
+		tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
+			Run: func(context.Context, Job) (Result, error) {
+				return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
+			}})
+		tr.Refresh(context.Background())
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || len(entries) != 1 || entries[0].Name() != "usage.json" {
+			t.Fatalf("round %d: after Refresh the folder holds %v (%v), want only usage.json", i, entries, err)
+		}
+	}
+}
+
+// Held at the boundary: while the state file is being written, Refresh has not
+// answered yet; it answers once the write is let go and the file is there.
+func TestTrackerRefreshWaitsForAHeldSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	inSave, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
+		saving: func() {
+			once.Do(func() { close(inSave) })
+			<-release
+		},
+		Run: func(context.Context, Job) (Result, error) {
+			return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
+		}})
+	done := make(chan struct{})
+	go func() {
+		tr.Refresh(context.Background())
+		close(done)
+	}()
+	<-inSave
+	// The save is held. Refresh may return only when it is let go. Yielding
+	// lets a Refresh that wrongly returns early run; it can never fail a
+	// correct tracker, whatever the machine's speed.
+	for range 2000 {
+		select {
+		case <-done:
+			close(release)
+			t.Fatal("Refresh answered while the readings were still being written")
+		default:
+			runtime.Gosched()
+		}
+	}
+	close(release)
+	<-done
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("after Refresh the state file is missing: %v", err)
+	}
+}

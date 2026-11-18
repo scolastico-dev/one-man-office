@@ -189,6 +189,38 @@ func TestACrashedProcessRestartsOnTheNextCall(t *testing.T) {
 	}
 }
 
+// The crash is announced (the instance leaves the pool) only after the line
+// about it is in the log: whoever sees the instance gone finds the line.
+func TestACrashIsNotAnnouncedBeforeItsLogLine(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	f.call(id, "fake__whoami", nil)
+	reached, release := make(chan struct{}), make(chan struct{})
+	f.pool.mu.Lock()
+	lg := f.pool.servers["fake"].log
+	f.pool.mu.Unlock()
+	var once sync.Once
+	lg.setBeforeWrite(func(msg string) {
+		if strings.Contains(msg, "ended unexpectedly") {
+			once.Do(func() { close(reached) })
+			<-release
+		}
+	})
+	f.call(id, "fake__crash", nil)
+	<-reached
+	// The line is about to be written and is held: the crash must not be
+	// published yet.
+	instances := f.state("fake").Instances
+	close(release)
+	if instances == 0 {
+		t.Fatal("the crash was announced before its log line was written")
+	}
+	eventually(t, "the crash to be noticed", func() bool { return f.state("fake").Instances == 0 })
+	if !strings.Contains(f.logText("fake"), "ended unexpectedly") {
+		t.Fatalf("the log does not mention the crash:\n%s", f.logText("fake"))
+	}
+}
+
 func TestAServerThatKeepsFailingIsStoppedUntilRestarted(t *testing.T) {
 	f := newFixture(t, func(t *tunables) { t.maxFailures = 3 }, stdioServer("fake", map[string]string{fakemcp.EnvMode: string(fakemcp.ModeExit)}))
 	id := agent("s", t.TempDir(), api.RoleDeveloper)
