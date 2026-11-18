@@ -2,4 +2,6 @@
 
 package session
 
-func lowerProcessPriority(int, int) error { return nil }
+// startWithLoweredPriority runs start; lowering the priority of the started
+// program is done on Linux only.
+func startWithLoweredPriority(_ int, start func() error) error { return start() }

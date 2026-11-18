@@ -39,19 +39,21 @@ func startProcess(o Options) (terminalProcess, error) {
 	}
 	marker := hex.EncodeToString(markerBytes[:])
 	cmd.Env = processEnvironment(append(o.Env, sessionMarkerEnv+"="+marker))
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
-	if err != nil {
-		return nil, err
+	var ptmx *os.File
+	var err error
+	start := func() (err error) {
+		ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
+		return err
 	}
 	if o.LowerPriority {
-		// Go exposes no safe pre-exec callback. Adjust the new child by PID
-		// before exposing the session; its descendants inherit this nice value.
-		if err := lowerProcessPriority(cmd.Process.Pid, o.NiceIncrement); err != nil {
-			_ = cmd.Process.Kill()
-			_ = ptmx.Close()
-			_ = cmd.Wait()
-			return nil, fmt.Errorf("lower process priority: %w", err)
-		}
+		// The program is born with the lowered priority, so every thread and
+		// every program it starts has it from the first instruction.
+		err = startWithLoweredPriority(o.NiceIncrement, start)
+	} else {
+		err = start()
+	}
+	if err != nil {
+		return nil, err
 	}
 	p := &ptyProcess{cmd: cmd, ptmx: ptmx, marker: marker, exited: make(chan struct{})}
 	go p.watch()
