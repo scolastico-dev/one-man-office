@@ -1096,3 +1096,21 @@ func TestTrackerOnChange(t *testing.T) {
 		t.Fatal("no change after the settings changed")
 	}
 }
+
+// Refresh answers only after the readings of the runs it waited for are
+// kept: whoever reads the state file, or removes its folder, right after
+// Refresh must not meet a write that is still under way.
+func TestTrackerRefreshReturnsAfterTheReadingsAreKept(t *testing.T) {
+	for i := range 200 {
+		path := filepath.Join(t.TempDir(), "usage.json")
+		tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
+			Run: func(context.Context, Job) (Result, error) {
+				return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
+			}})
+		tr.Refresh(context.Background())
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || len(entries) != 1 || entries[0].Name() != "usage.json" {
+			t.Fatalf("round %d: after Refresh the folder holds %v (%v), want only usage.json", i, entries, err)
+		}
+	}
+}
