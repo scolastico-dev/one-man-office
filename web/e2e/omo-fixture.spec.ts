@@ -1,8 +1,8 @@
 // Exercise resource acquisition against real children. A bind collision may be
 // retried before the test begins; an assertion or an unrelated error may not.
-import { accessSync, constants, copyFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { BINARY, createOmo, expect, test } from './support/omo'
 
 async function occupy(port: number) {
@@ -92,6 +92,19 @@ test('a test that has no fake programs has no programs folder', async ({ omo }) 
   expect(omo.programs).toBe('')
 })
 
-test('fake programs and an own PATH are alternatives', async ({ repo }) => {
-  await expect(createOmo({ programs: { files: {} }, path: '/bin' }, repo)).rejects.toThrow(/not both/)
+test('fake programs and an own PATH are alternatives, and a refused creation leaves no home behind', async ({ repo }) => {
+  // Homes are made below TMPDIR: point it at a folder of this test (inside the repo fixture's removed folder) and watch it.
+  const watched = join(dirname(repo), 'homes')
+  mkdirSync(watched)
+  const inherited = process.env.TMPDIR
+  process.env.TMPDIR = watched
+  try {
+    await expect(createOmo({ programs: { files: {} }, path: '/bin' }, repo)).rejects.toThrow(/not both/)
+    // Fails after the home exists: a program name with a folder in it cannot be written.
+    await expect(createOmo({ programs: { files: { 'a/b': '' } } }, repo)).rejects.toThrow()
+    expect(readdirSync(watched)).toEqual([])
+  } finally {
+    if (inherited === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = inherited
+  }
 })

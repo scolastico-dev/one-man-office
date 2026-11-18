@@ -180,16 +180,30 @@ export class ServerError extends Error {
   }
 }
 
-/** Creates a fresh isolated omo. Not started yet. */
+/**
+ * Creates a fresh isolated omo. Not started yet. The options are checked before
+ * anything is made, and the home is removed again when anything before the
+ * handle is returned throws, so a failed creation leaves nothing behind.
+ */
 export async function createOmo(opts: OmoOptions, repo: string, binary = BINARY): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   if (!existsSync(binary)) {
     throw new Error(`the omo binary ${binary} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
   }
+  if (opts.programs !== undefined && opts.path !== undefined) throw new Error('give omoOptions.programs or omoOptions.path, not both')
+  if (opts.programs?.git) findGit()
   const root = realpathSync(tmpdir())
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
-  if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+  try {
+    if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+    return await createOmoIn(home, opts, repo, binary)
+  } catch (e) {
+    rmSync(home, { recursive: true, force: true })
+    throw e
+  }
+}
+
+async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   mkdirSync(join(home, 'omo'), { recursive: true })
-  if (opts.programs !== undefined && opts.path !== undefined) throw new Error('give omoOptions.programs or omoOptions.path, not both')
   const programs = opts.programs === undefined ? '' : join(home, 'programs')
   if (opts.programs !== undefined) {
     mkdirSync(programs)
