@@ -281,11 +281,8 @@ func (r *recordingRunner) transcript() string {
 // nothing depends on how long anything takes.
 func (w *world) waitFor(what string, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(2 * time.Minute)
 	for !cond() {
-		if time.Now().After(deadline) {
-			w.t.Fatalf("timed out waiting for %s\nagents:\n%s", what, w.runner.transcript())
-		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 }

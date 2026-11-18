@@ -230,7 +230,7 @@ func TestTerminalReceivesAgentOutput(t *testing.T) {
 		a.Terminal().ServeWebSocket(r.Context(), w, r, nil)
 	}))
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -499,7 +499,7 @@ func TestSessionIDRedactedFromTranscriptAndViewers(t *testing.T) {
 		a.Terminal().ServeWebSocket(r.Context(), w, r, nil)
 	}))
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
@@ -413,16 +415,80 @@ func TestACancelledCallEndsWhileItsProgressHandlerIsStillRunning(t *testing.T) {
 	waitForUpstreamCancellations(t, f, id, 1)
 }
 
-// A call that ended by its time limit tells the upstream too, and does not
-// disturb the cancellation of the next call on the same process.
+// expiry is a call's time limit that a test ends itself: the limit runs out
+// when expire is called, not after some time, and then reads as the deadline
+// of the call (context.DeadlineExceeded), as the real limit does.
+type expiry struct {
+	mu      sync.Mutex
+	expired bool
+	cancel  context.CancelFunc
+	used    bool
+	ready   chan struct{} // closed when the limit exists, i.e. the call is about to be sent
+}
+
+type expiringContext struct {
+	context.Context
+	e *expiry
+}
+
+func (c expiringContext) Err() error {
+	c.e.mu.Lock()
+	defer c.e.mu.Unlock()
+	if c.e.expired {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
+
+func newExpiry() *expiry { return &expiry{ready: make(chan struct{})} }
+
+// callContext gives the first call a limit of this kind and every later call
+// the real one.
+func (e *expiry) callContext(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	e.mu.Lock()
+	if e.used {
+		e.mu.Unlock()
+		return context.WithTimeout(ctx, d)
+	}
+	e.used = true
+	inner, cancel := context.WithCancel(ctx)
+	e.cancel = cancel
+	e.mu.Unlock()
+	close(e.ready)
+	return expiringContext{inner, e}, cancel
+}
+
+func (e *expiry) expire() {
+	<-e.ready
+	e.mu.Lock()
+	e.expired = true
+	cancel := e.cancel
+	e.mu.Unlock()
+	cancel()
+}
+
+// The limit of a call that the upstream is already handling ends: the upstream
+// is told, as for any cancelled call, and the next call is not disturbed. The
+// limit runs out only after the upstream's handler reported progress.
 func TestATimedOutCallAndACancelledCallAreBothCancelledUpstream(t *testing.T) {
 	s := stdioServer("fake", nil)
 	s.Timeouts.Call = api.Duration(100 * time.Millisecond)
-	f := newFixture(t, nil, s)
+	ex := newExpiry()
+	f := newFixture(t, func(tn *tunables) { tn.callContext = ex.callContext }, s)
 	id := agent("s", t.TempDir(), api.RoleDeveloper)
-	if res := f.call(id, "fake__hold", nil); !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
+	first := make(chan *mcp.CallToolResult, 1)
+	progress := make(chan struct{})
+	var once sync.Once
+	go func() {
+		res, _ := f.pool.Call(context.Background(), id, "fake__hold", nil, func(float64, float64, string) { once.Do(func() { close(progress) }) })
+		first <- res
+	}()
+	<-progress
+	ex.expire()
+	if res := <-first; !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
 		t.Fatalf("a held call answered %q", resultText(res))
 	}
+	waitForUpstreamCancellations(t, f, id, 1)
 	s.Timeouts.Call = 0
 	f.set(s)
 	c := startHeldCall(t, f, id)
@@ -431,7 +497,35 @@ func TestATimedOutCallAndACancelledCallAreBothCancelledUpstream(t *testing.T) {
 	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a cancelled call answered %v", err)
 	}
-	waitForUpstreamCancellations(t, f, id, 2)
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// The other legal order: the limit runs out before the request is written.
+// The SDK then refuses the write, the upstream never handles the call, so there
+// is nothing to cancel there; the caller still gets the timeout result and the
+// next call is cancelled upstream on its own.
+func TestATimeoutBeforeTheRequestIsSentNeverReachesTheUpstream(t *testing.T) {
+	s := stdioServer("fake", nil)
+	s.Timeouts.Call = api.Duration(100 * time.Millisecond)
+	ex := newExpiry()
+	f := newFixture(t, func(tn *tunables) {
+		tn.callContext = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+			cctx, cancel := ex.callContext(ctx, d)
+			ex.expire()
+			return cctx, cancel
+		}
+	}, s)
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	if res := f.call(id, "fake__hold", nil); !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
+		t.Fatalf("a call whose limit ran out before it was sent answered %q", resultText(res))
+	}
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
 }
 
 func TestProgressIsHandedToTheCaller(t *testing.T) {

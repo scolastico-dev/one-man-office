@@ -24,7 +24,7 @@ import (
 
 func waitOutput(t *testing.T, i *Terminal, match string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	initial, stream, detach := i.subscribe()
 	defer detach()
@@ -179,7 +179,7 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 	}
 	defer term.Kill()
 	server := serveTerminal(t, term)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {

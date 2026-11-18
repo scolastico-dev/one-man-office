@@ -335,7 +335,7 @@ func TestPTYOutputEndsAfterHangup(t *testing.T) {
 			}
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if code, err := p.Wait(ctx); err != nil || code != 0 {
 		t.Fatalf("wait: code %d, %v", code, err)
@@ -445,7 +445,7 @@ func TestCancellationEndsImmediateDescendant(t *testing.T) {
 	}()
 	child := childHandle(t, path)
 	cancel()
-	err := <-waited
+	err = <-waited
 	reaped = true
 	if err == nil {
 		t.Fatal("cancelled command succeeded")

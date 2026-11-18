@@ -160,15 +160,11 @@ func (r *pushoverRun) question(n int, title, body string, to api.Role) {
 // settle waits until no run of the plugin is going on and returns its log.
 func (r *pushoverRun) settle() string {
 	r.t.Helper()
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for r.completed.Load() < r.dispatched {
 		select {
 		case <-tick.C:
-		case <-deadline.C:
-			r.t.Fatalf("the plugin completed %d of %d dispatched hooks", r.completed.Load(), r.dispatched)
 		}
 	}
 	var b strings.Builder

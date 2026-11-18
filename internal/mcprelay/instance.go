@@ -635,7 +635,7 @@ func (i *instance) call(ctx context.Context, tool string, args json.RawMessage, 
 		}()
 		params.SetProgressToken(tok)
 	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := i.pool.t.callContext(ctx, timeout)
 	defer cancel()
 	res, err := i.session.CallTool(cctx, params)
 	switch {

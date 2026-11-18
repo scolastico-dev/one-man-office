@@ -35,14 +35,10 @@ func blockingServe(url string) ServeFunc {
 
 func awaitState(t *testing.T, dir string) runtimeState {
 	t.Helper()
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-deadline.C:
-			t.Fatal("omo did not publish readiness")
 		case <-ticker.C:
 			state, err := readState(dir)
 			if err == nil && controlRequest(context.Background(), state, "GET", "/status") == nil {

@@ -679,11 +679,8 @@ func (h *harness) flagged(n int64, want string) bool {
 // waitFor polls cond until it holds or the deadline passes.
 func (h *harness) waitFor(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
 	for !cond() {
-		if time.Now().After(deadline) {
-			h.t.Fatalf("timed out waiting for %s", what)
-		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 }

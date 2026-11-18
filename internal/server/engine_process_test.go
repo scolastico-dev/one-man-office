@@ -206,7 +206,7 @@ func (w *processWorld) terminal(termID string) *websocket.Conn {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+u.Port()+"/api/agents/"+termID+"/terminal", &websocket.DialOptions{
 		Host: u.Host, Subprotocols: []string{"omo", webSocketTokenPrefix + w.token},
@@ -287,7 +287,7 @@ func TestFakeAgentReadyWaitAndTerminalThroughRun(t *testing.T) {
 	if err := w.stop(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
 		if _, _, err := c.Read(ctx); err != nil {

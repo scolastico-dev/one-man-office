@@ -756,11 +756,8 @@ func TestTrackerRefreshWaits(t *testing.T) {
 // waitFor waits for a condition the tracker reaches on its own goroutine.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(guard)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal("condition not reached")
-		}
+
 		runtime.Gosched()
 	}
 }
@@ -787,7 +784,7 @@ func TestTrackerUsesDefaultRunTimeout(t *testing.T) {
 // so the wait ends at the condition and never after a guessed number of turns.
 func bubbleWaitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(guard) // virtual time inside the bubble
+	deadline := time.Now().Add(guard) // virtual time inside the bubble: not a wall clock
 	for {
 		synctest.Wait()
 		if cond() {

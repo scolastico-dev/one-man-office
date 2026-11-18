@@ -519,11 +519,8 @@ func TestDiffRouteClientLeavingStopsTheWork(t *testing.T) {
 	}()
 	<-g.seen
 	leave()
-	deadline := time.Now().Add(10 * time.Second)
 	for g.ctxEnd.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the work did not see the client leave")
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }

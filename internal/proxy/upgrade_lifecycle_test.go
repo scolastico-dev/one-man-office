@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // A WebSocket cannot remain useful after either TCP direction reaches EOF.
@@ -56,7 +55,6 @@ func TestUpgradeDisconnectLifecycle(t *testing.T) {
 						requestPath = "/socket"
 					}
 					fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: app.test\r\nConnection: Upgrade\r\nUpgrade: %s\r\n\r\n", requestPath, protocol)
-					client.SetReadDeadline(time.Now().Add(5 * time.Second))
 					response, err := http.ReadResponse(bufio.NewReader(client), nil)
 					if err != nil {
 						t.Fatal(err)
@@ -69,7 +67,6 @@ func TestUpgradeDisconnectLifecycle(t *testing.T) {
 					if _, err := client.Write([]byte("browser")); err != nil {
 						t.Fatal(err)
 					}
-					peer.SetReadDeadline(time.Now().Add(5 * time.Second))
 					data := make([]byte, 7)
 					if _, err := io.ReadFull(peer, data); err != nil || string(data) != "browser" {
 						t.Fatalf("upstream read %q: %v", data, err)

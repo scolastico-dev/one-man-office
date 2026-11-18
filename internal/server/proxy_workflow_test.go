@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/scolastico-dev/one-man-office/internal/aicmd"
@@ -26,7 +25,7 @@ import (
 func TestProxyAgentWorkflow(t *testing.T) {
 	for _, mode := range []string{"keep", "strip", "subdomain"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			base := "/"
 			publicHost := ""

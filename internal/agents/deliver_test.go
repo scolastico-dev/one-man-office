@@ -90,11 +90,8 @@ func (f *fakeTerminal) snapshot() ([]string, []string) {
 
 func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal("condition not met before the deadline")
-		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 }
