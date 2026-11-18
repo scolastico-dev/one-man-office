@@ -22,7 +22,7 @@ const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 const MARK = 'FAKEMCP_E2E_MARK'
 
 /** The tools of the fake server. */
-const FAKE_TOOLS = ['add_tool', 'big', 'crash', 'echo', 'printenv', 'rpcerror', 'sleep', 'stderr', 'whoami']
+const FAKE_TOOLS = ['add_tool', 'big', 'cancelled', 'crash', 'echo', 'hold', 'printenv', 'rpcerror', 'sleep', 'stderr', 'whoami']
 
 const row = (page: Page, name: string) => page.locator(`[data-mcp-server="${name}"]`)
 const editor = (page: Page, name: string) => page.locator(`[data-mcp-server-editor="${name}"]`)
@@ -129,7 +129,7 @@ test('a stdio server made through the form is tested, goes live for a token, log
   // Test starts the draft once, before it is saved, and stops it.
   await ed.locator('[data-mcp-test]').click()
   await expect(ed.locator('[data-mcp-test-result]')).toContainText(`${FAKE_TOOLS.length} tools in`)
-  await expect(ed.locator('[data-mcp-test-result]')).toContainText('fake__echo, fake__printenv')
+  await expect(ed.locator('[data-mcp-test-result]')).toContainText('fake__echo, fake__hold, fake__printenv')
   await expect.poll(() => fakeProcesses(omo)).toEqual([])
   await expect(ed).toContainText('(not saved yet)')
 
