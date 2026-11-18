@@ -84,11 +84,12 @@ test('the settings frame is the one scroll box of the settings area: the wheel s
   expect(rule('/src/features/settings/SettingsPage.vue', '.settings-page')).not.toMatch(/overflow/)
 })
 
-test('a scroll box a wheel can land on inside the board, the ticket panel and the image lightbox is a composited scroller, so the compositor finds it without asking the main thread (which can drop the wheel)', () => {
+test('a scroll box a wheel can land on inside the board, the ticket panel, the image lightbox and the searched pickers is a composited scroller, so the compositor finds it without asking the main thread (which can drop the wheel)', () => {
   for (const [file, selector] of [
     ['/src/features/board/BoardColumn.vue', '.column__body'],
     ['/src/features/ticket/TicketPanel.vue', '.tpanel__scroll'],
     ['/src/features/images/ImageLightbox.vue', '.lightbox'],
+    ['/src/components/ui/SearchPicker.vue', '.pick__list'],
   ] as const) {
     expect(rule(file, selector), `${file} ${selector}`).toMatch(/will-change:\s*scroll-position/)
   }

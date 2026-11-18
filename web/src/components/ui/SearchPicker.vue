@@ -217,6 +217,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDownO
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  /* A composited scroller: the compositor then finds it under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: scroll-position;
   list-style: none;
 }
 .pick__item {
