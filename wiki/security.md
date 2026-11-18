@@ -55,6 +55,8 @@ only, without a token.
 
 ## Web UI forwards
 
+See [Web UI forwards](proxy.md) for commands, app configuration and HTTPS setup.
+
 Registered web UIs run through omo's existing browser address under
 `/proxy/<id>/`. With token sign-in, open a forward through the board's Open API
 (`POST /api/proxy/forwards/<id>/open`): its one-use sign-in grant expires after
@@ -74,7 +76,15 @@ omo removes its own cookies and recognized credentials before sending requests
 to the app. Forwarded apps are trusted code: in path mode they share the board's
 origin and can access its browser storage. Only register apps you trust. The
 app controls its own response headers and cross-origin policy; the board keeps
-its own checks. Use an HTTPS reverse proxy with `public_url` set to its external
+its own checks. Subdomains also carry trusted apps: upstream Domain cookies
+may cover the base, and JavaScript can plant duplicate reserved cookies, which fail closed.
+Choose a base that supports Domain cookies (not a public suffix). Use a
+canonical board `public_url` so Back to board reaches the origin where you
+signed in; a different base has separate browser token storage. A base used
+for board access behind HTTPS needs `public_url` or `allowed_hosts` for the
+board's existing Origin checks.
+
+Use an HTTPS reverse proxy with `public_url` set to its external
 HTTPS address so proxy cookies are Secure and Open uses the right host and port.
 
 ## Plugins, scripts and relayed servers

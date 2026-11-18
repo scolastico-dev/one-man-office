@@ -197,6 +197,12 @@ ticket's own value overrides these.
   home folder. Host, port and sign-in are changed with `omo config`.
 - **Theme**: **Colours** System, Dark or Light, remembered in this browser.
 
+Web UI forward subdomains use the server start options `proxy_base_host`,
+`proxy_label_prefix` and `proxy_label_suffix`, changed with `omo config` and
+applied on restart. They are separate from `settings.yaml` and the General
+page. See [Web UI forwards](proxy.md#optional-subdomains) for DNS, accepted
+patterns and [HTTPS deployment](proxy.md#behind-an-https-reverse-proxy).
+
 ## Backup
 
 *Export the settings to a zip file and import them again.* See

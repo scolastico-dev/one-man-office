@@ -20,6 +20,8 @@ other's work, and omo merges the result or opens pull requests. The
 - [The board](board.md): cards, moving them, filters, creating tickets, the
   ticket panel and page, comments, images, the Diff tab, the sidebar and the
   CEO tab, notifications, keys.
+- [Web UI forwards](proxy.md): live dev servers through the board, app base
+  paths, optional subdomains, sign-in and HTTPS deployment.
 - [Terminals](terminals.md): your shells, typing into agents, copy and paste,
   images, Shift+Enter, terminals in their own window.
 - [Merging and export](merging-and-export.md): local merges, merge commit or

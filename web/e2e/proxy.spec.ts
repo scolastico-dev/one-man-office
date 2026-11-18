@@ -146,3 +146,38 @@ test('overall form uses the keyboard, links to the owner and shows API validatio
   await expect(all).toHaveCount(0)
   await expect(page.locator('[data-ticket-panel] [data-forward]')).toHaveCount(1)
 })
+
+test('an app without a base path loads root assets through the Referer fallback', async ({ page, context, omo }) => {
+  const upstream = await fixture()
+  try {
+    const n = await omo.createTicket({ title: 'Relative app preview' })
+    const f = await omo.api('POST', '/api/proxy/forwards', {
+      ticket: n, port: upstream.port, name: 'No base path', strip_prefix: true,
+    }) as ProxyForward
+    const before = await page.request.get(omo.url('/'))
+    const securityPolicy = before.headers()['content-security-policy']
+    expect(securityPolicy).toBeTruthy()
+    await openBoard(page, omo)
+    await page.goto(omo.url(`/${n}`))
+    const tab = context.waitForEvent('page')
+    await page.getByRole('button', { name: 'Open No base path in new tab', exact: true }).click()
+    const opened = await tab
+    await expect(opened.getByRole('heading', { name: 'Real upstream' })).toBeVisible()
+    await expect(opened.locator('#asset')).toHaveText('Asset loaded')
+    expect(opened.url()).toBe(omo.url(f.base_path))
+    expect(upstream.requests.some(r => r.url === '/asset.js')).toBe(true)
+    expect(upstream.requests.every(r => !(r.headers.cookie ?? '').includes('omo_proxy_'))).toBe(true)
+    // A proxy cookie alone never authenticates the board API, and the board's
+    // own page retains its security policy while the app tab is open.
+    const board = await page.request.get(omo.url('/'))
+    expect(board.headers()['content-security-policy']).toBe(securityPolicy)
+    expect(board.headers()['cache-control']).toBe('no-store')
+    const unauthenticated = await opened.request.get(omo.url('/api/server'))
+    expect(unauthenticated.status()).toBe(401)
+    await opened.close()
+    await page.getByRole('button', { name: 'Remove No base path', exact: true }).click()
+    await expect(page.locator(`[data-forward="${f.id}"]`)).toHaveCount(0)
+  } finally {
+    await upstream.stop()
+  }
+})

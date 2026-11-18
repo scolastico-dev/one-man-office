@@ -59,6 +59,7 @@ Package map (`internal/`):
 | `agentsetup` | the catalog of the agent programs omo knows (Claude Code `fable`/`opus`/`sonnet`/`haiku`, Codex `astra`/`sol`/`luna`, Antigravity `opus`/`sonnet`/`flash-high`/`flash-low`/`gpt-oss` (two quota groups: each model lists its group's weekly window), Gemini `carbon`/`argon`/`hydrogen`/`flash`; the strongest of each is not selectable and goes to the CEO), `Detect`, which plans profiles and role assignments from the programs found on `PATH` (it skips a program that has a profile and never changes profiles on disk), and `AddMissingModels` ("Add missing models": the catalog models a profile lacks, by name); it never runs a program |
 | `folderlist` | the folder listing behind the folder picker: folder names only, bounded, links marked, names with hidden characters escaped |
 | `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker. Settings routes are registered through one table (`access.go`, `registerRoutes`) whose rows carry the access rule. Beyond tickets: `diff.go` (`/api/tickets/{n}/diff`, `/diff/file`; `/diff/file?context=<0..1048576|all>` reads one file of git's own list again with that much context, never cut: a patch over 1 MiB is refused with 422, so the web shows hidden lines through the same parser and rendering path (`features/diff/expand.ts`, `useDiff` `expand`/`expansionOf`, kept per file while its patch is unchanged); each project says how far its local base branch is behind and ahead of its remote-tracking branch, and `?base=remote` compares with that branch, never fetching; the Diff tab says when the base is behind and offers that comparison per ticket and project for the browser session, `features/diff/useDiff.ts`), `thread.go` (`/api/tickets/{n}/thread`, `/api/notifications`, `/api/sessions/{id}/log`), `images.go` (`POST /api/tickets/{n}/images` takes the raw bytes as `application/octet-stream` with the percent-encoded name in `Omo-Image-Name`, from the user and from agents that may comment on the ticket (route rule `agentWrite`), checked before the body is read; `GET /api/tickets/{n}/images`, `GET /api/images/{id}` and `/content` follow the read scope of the image's own ticket; `DELETE /api/images/{id}` is the user's; `POST /api/terminal-images` (userOnly, raw upload like the ticket upload, same sniffing and 10 MiB limit, 2 GiB for the folder) stores an image dropped or pasted into a terminal in `images/terminal/` with no record and answers `api.TerminalImage` `{path, name, content_type, size}`, the absolute path the browser pastes; the bytes go out with their sniffed type, `nosniff`, an inline made-up file name, their own CSP and private immutable caching; `sweepImages` expires images hourly, and deletes terminal images `keep_days_after_done` days after their upload by file time, `images.Store.RemoveOlder`), `terminals.go` (`/api/terminals` and its websocket; `POST` takes a project or ticket, or `{home: true}` for a shell in the OS home folder, titled "Home", with no project or ticket, 422 when combined with either). The terminal, notification and log routes are for the user only; an agent session gets 403 |
+| `proxy` | streaming reverse-proxy transport for trusted Web UI forwards; shared TLS pools, credential filtering and redirect/cookie rewriting; browser auth/routing belongs to `server` |
 | `transport` | socket / named pipe endpoints and dialers |
 | `service` | lifecycle of the one server process |
 | `apiclient`, `cli` | `omo ai` and the human commands; `apiclient.NewWithTransport` with `HandlerTransport` serves a client's requests in process through a handler (the socket handler) |
@@ -215,7 +216,15 @@ globals survive. Closed tickets refuse new forwards. No target is probed or
 started. Shared `aicmd/proxy.go` supplies `omo ai proxy add|list|remove` and MCP
 tools; omitted CLI/MCP ticket uses the agent's own ticket (user add: global,
 user list: all). Add prints the address, required app base path and process
-reminder. Browser routing and Open/sign-in are implemented separately in `server/proxy_routes.go` and `proxy_auth.go`.
+reminder. Browser routing and Open/sign-in are implemented separately in
+`server/proxy_routes.go` and `proxy_auth.go`. The browser uses shared
+`features/proxy/ForwardList.vue` / `ForwardForm.vue` in both ticket views and
+the topbar overall dialog; authoritative live reads follow forward events,
+reconnect and resync. `openForward.ts` reserves one detached new tab during the
+user gesture, calls Open with normal API auth, and navigates the returned
+opaque URL unchanged. It closes failed blank reservations and reports errors;
+it never constructs proxy hosts or places board credentials in destinations.
+See [Web UI forwards](wiki/proxy.md).
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
@@ -434,3 +443,33 @@ and `node --test web/scripts/proxy-subdomain.test.mjs`. The standalone browser
 fixture uses httptest handlers only, never an omo process, CLI/socket or engine;
 it checks actual Chromium domain/Secure cookie acceptance, two forward hosts,
 HTTP/HTTPS, unrelated-board path mode, target redirects/cookies and Host refusal.
+
+## Web UI workflow verification
+
+Developer/reviewer/PM defaults teach register → configure returned base →
+start separately → name the forward in hand-in, within each role's existing
+filesystem rules. Path mode keeps the prefix unless `strip_prefix`; subdomain
+mode uses `/`. A task forward expires when that task completes, including
+merge into a story; it is not a persistent story preview. The shared CLI/MCP
+add output describes both app bases; schemas/options remain in `aicmd`.
+
+`go test ./internal/server -run '^TestProxyAgentWorkflow$' -count=1` composes
+shared aicmd add/list/remove, own-ticket defaults, real browser Open/exchange,
+base-aware app/assets, WebSocket echo, SSE before close and removal in
+keep/strip/forced-subdomain modes. It uses temporary homes and httptest
+listeners, no CLI process/socket/engine. `web/e2e/proxy.spec.ts` checks actual
+new-tab board controls, browser cookies/history, cleanup and root-asset
+Referer fallback, including board security/auth isolation. Reuse the existing
+transport, registry cleanup and standalone bootstrap/subdomain browser tests.
+
+Deployment caveats: localhost resolves on the browser machine, so remote
+clients need real wildcard DNS. Domain cookies require a usable base that is
+not a public suffix. App Domain cookies may cover the base; trusted app JS
+can plant duplicate reserved cookies, which fail closed. There is no cookie
+isolation promise. Set canonical `public_url` for Back to board links and
+consistent token storage. Behind HTTPS termination, a base used for board
+access also needs `public_url` or `allowed_hosts` for existing board Origin
+checks. External proxies must preserve Host, support upgrades/long-lived
+streams, avoid response buffering for SSE and request buffering where upload
+streaming matters. Path mode and subdomain app bases are different: routing
+coexists, but a target may need reconfiguration to serve both.

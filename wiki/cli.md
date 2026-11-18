@@ -51,6 +51,14 @@ omo ai comment 12 "@developer the retry count should be configurable"
   browser; `omo ai` has no command for it (see
   [Approval and release](concepts.md#approval-and-release)).
 
+## Web UI forwards
+
+`omo ai proxy add --port 5173 --name "dev server"` registers a forward and
+prints its address/base path. Agents default to their own ticket; the user
+defaults to global. List with `omo ai proxy list`, remove with
+`omo ai proxy remove FORWARD_ID`. Start the app separately after configuring
+its base. See [Web UI forwards](proxy.md) for options, examples and sign-in.
+
 ## Reference
 
 The help text of every command, exactly as this version prints it
@@ -458,7 +466,7 @@ Examples:
   omo ai proxy add --port 5173 --name "dev server"
 
 Available Commands:
-  add         Register a web UI forward and print its address and required app base path
+  add         Register a web UI forward for your own ticket (global for the user), returning address and base_path; start the target separately
   list        List web UI forwards within your ticket read scope
   remove      Remove a web UI forward by id
 
@@ -477,8 +485,12 @@ Use "omo ai proxy [command] --help" for more information about a command.
 Register a web UI that someone else runs on the omo host or another host.
 Agents register only for their own ticket; --ticket defaults to that ticket.
 As the user, omit --ticket for a global forward. The target process is not
-started by omo. Start the app with the printed base_path, or use --strip-prefix
-for an app that emits relative addresses. Registration never probes the target.
+started by omo. Register first, then configure path-mode apps with the printed
+base_path. With --strip-prefix the upstream receives paths without that prefix;
+use it for relative-address apps. Subdomain addresses always send unprefixed
+paths: configure the app at /. Path URLs remain available. HTTPS targets accept
+self-signed certificates by default; --verify-tls enables certificate checks.
+Registration never probes the target.
 Ticket forwards are removed when the ticket is done or cancelled.
 
 Usage:
@@ -496,7 +508,7 @@ Flags:
       --start-path string   start path within the forward, optionally with a query (default "/")
       --strip-prefix        strip the proxy prefix for apps using relative addresses
       --ticket int          ticket number (default: your own ticket; global for the user)
-      --verify-tls          verify an HTTPS target's certificate
+      --verify-tls          verify an HTTPS target's certificate (default: accept self-signed)
 
 Global Flags:
       --json   print the server's JSON answer instead of text

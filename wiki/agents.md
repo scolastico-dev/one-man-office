@@ -5,12 +5,25 @@ ticket. omo knows four programs and can run any other through a custom
 profile. This page covers which program runs with which model, and how omo
 keeps agents off accounts that are nearly used up.
 
+- [Live web UIs](#live-web-uis)
 - [The agent programs](#the-agent-programs)
 - [Detection](#detection)
 - [Profiles and models](#profiles-and-models)
 - [Roles and assignment](#roles-and-assignment)
 - [Usage](#usage)
 - [Usage scripts](#usage-scripts)
+
+## Live web UIs
+
+Developer, reviewer and product-manager default prompts teach agents to register
+a [Web UI forward](proxy.md) whenever they start an app the user should inspect.
+They register before starting it, configure path mode with the returned base
+path, and name the forward in their hand-in. Registration never starts the
+process. Each role keeps its existing filesystem/review restrictions.
+
+Forwards default to the agent's own ticket and disappear when that ticket
+completes or is cancelled. A developer's task preview does not survive the
+task's merge into its story; a PM's own forward belongs to the story.
 
 ## The agent programs
 

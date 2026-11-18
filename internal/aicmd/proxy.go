@@ -20,7 +20,7 @@ type proxyAddIn struct {
 	Scheme      string `json:"scheme,omitempty" flag:"scheme" default:"http" help:"target scheme: http or https" jsonschema:"target scheme, http or https; default http"`
 	StartPath   string `json:"start_path,omitempty" flag:"start-path" default:"/" help:"start path within the forward, optionally with a query" jsonschema:"start path within the forward, optionally with a query; default /"`
 	StripPrefix bool   `json:"strip_prefix,omitempty" flag:"strip-prefix" help:"strip the proxy prefix for apps using relative addresses" jsonschema:"strip the proxy prefix for apps using relative addresses; default false"`
-	VerifyTLS   bool   `json:"verify_tls,omitempty" flag:"verify-tls" help:"verify an HTTPS target's certificate" jsonschema:"verify an HTTPS target's certificate; default false"`
+	VerifyTLS   bool   `json:"verify_tls,omitempty" flag:"verify-tls" help:"verify an HTTPS target's certificate (default: accept self-signed)" jsonschema:"verify an HTTPS target's certificate; default false accepts self-signed certificates"`
 }
 
 type proxyListIn struct {
@@ -43,12 +43,16 @@ func (in proxyListIn) check() error { return checkProxyTicket(in.Ticket) }
 
 func proxyCommands() []Command {
 	return []Command{
-		Def("proxy add", "Register a web UI forward and print its address and required app base path", everyone, proxyAdd).help("add --port N --name NAME",
+		Def("proxy add", "Register a web UI forward for your own ticket (global for the user), returning address and base_path; start the target separately", everyone, proxyAdd).help("add --port N --name NAME",
 			`Register a web UI that someone else runs on the omo host or another host.
 Agents register only for their own ticket; --ticket defaults to that ticket.
 As the user, omit --ticket for a global forward. The target process is not
-started by omo. Start the app with the printed base_path, or use --strip-prefix
-for an app that emits relative addresses. Registration never probes the target.
+started by omo. Register first, then configure path-mode apps with the printed
+base_path. With --strip-prefix the upstream receives paths without that prefix;
+use it for relative-address apps. Subdomain addresses always send unprefixed
+paths: configure the app at /. Path URLs remain available. HTTPS targets accept
+self-signed certificates by default; --verify-tls enables certificate checks.
+Registration never probes the target.
 Ticket forwards are removed when the ticket is done or cancelled.`,
 			`  omo ai proxy add --port 5173 --name "dev server"`),
 		Def("proxy list", "List web UI forwards within your ticket read scope", everyone, proxyList).help("list [--ticket N]",
@@ -96,7 +100,18 @@ func proxyAdd(ctx context.Context, c *apiclient.Client, in proxyAddIn) (Result, 
 	}
 	return last(c, textOf(func(w *strings.Builder) {
 		printProxyForward(w, f)
-		fmt.Fprintln(w, "Start the app with the required base_path above. The target process is not started by omo.")
+		if f.StripPrefix {
+			fmt.Fprintln(w, "Path mode: strip_prefix is enabled; serve unprefixed paths and use relative app addresses.")
+		} else {
+			fmt.Fprintln(w, "Path mode: start the app with the required base_path above (prefix kept).")
+		}
+		fmt.Fprintln(w, "Subdomain mode: serve at /; no path prefix is sent. Path URLs remain available.")
+		fmt.Fprintln(w, "The target process is not started by omo. Name this forward in your hand-in.")
+		if f.Ticket != nil {
+			fmt.Fprintln(w, "This forward is removed when its owning ticket is done or cancelled.")
+		} else {
+			fmt.Fprintln(w, "This global forward remains until the user removes it.")
+		}
 	})), nil
 }
 

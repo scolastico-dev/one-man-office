@@ -137,6 +137,11 @@ The ticket shows:
   ("Locked while the branch omo/login exists."). Changing a field while an
   agent works tells the agent in a comment.
 - **The description**, with **Edit** and its **History**.
+- **Forwards**, beneath the description (in Overview on the full page): add a
+  named web UI target, copy its base path, Open in a new tab or Remove it.
+  The topbar **Forwards** button lists ticket and global forwards. Ticket
+  forwards disappear when their owning ticket completes or is cancelled;
+  globals stay until removed. See [Web UI forwards](proxy.md) for setup.
 - **Tabs**: **Comments**, **Diff** (not for a task without a project),
   **Agents** (every agent of the ticket: a running one's terminal, an ended
   one's log and why it ended) and **Tasks** (stories). The page adds

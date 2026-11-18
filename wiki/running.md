@@ -228,6 +228,9 @@ mapping is what keeps it on the host's loopback.
 
 ## Optional Web UI subdomains
 
+The [Web UI forwards guide](proxy.md) covers registration, app bases,
+fallback limits, sign-in and [proxy streaming deployment](proxy.md#behind-an-https-reverse-proxy).
+
 By default a forward uses `/proxy/<id>/`. Set `proxy_base_host` to serve each
 forward at `<prefix><id><suffix>.<base>` and have Open prefer that address.
 The path URL and its advertised `base_path` remain available.
@@ -246,6 +249,11 @@ serves the board. No extra port is opened. When using an HTTPS reverse proxy,
 route the base and wildcard hosts to omo and supply a matching certificate;
 set `public_url` to the external board address so Open uses its scheme and port.
 The board may use a different host, such as `https://board.example.com/`.
+Set a canonical `public_url` for reliable Back to board links and sign-in
+storage. A base used as a board address behind HTTPS also needs `public_url`
+or an `allowed_hosts` entry for board Origin checks. Use a base that accepts
+Domain cookies, not a public suffix. Subdomains do not isolate trusted apps
+from shared Domain cookies; see [Security](security.md#web-ui-forwards).
 
 The base must contain at least two DNS labels, without scheme, port, path,
 trailing dot, IP literal or wildcard. Prefix + 32-character hexadecimal id +

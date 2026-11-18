@@ -42,5 +42,11 @@ If you have the tools of the MCP server `omo`, prefer them: they are the `omo ai
 - Images in descriptions and comments are written `![name](omo-image:<id>)`, and `omo ai` follows each with the local path of its file, which you can open to look at it; to attach an image, run `omo ai image add {{.Ticket}} <file>` and paste the reference it prints into your comment or description.
 - Then run `omo ai wait --timeout 60m` and stay parked: you may be asked questions about your review until the next review round of {{if .MultiProject}}your project{{else}}#{{.Ticket}}{{end}} begins. A question or a mention wakes you: answer it with `omo ai comment {{.Ticket}} "text"` from what you reviewed, without starting a new review, then wait again. On a timeout, wait again. omo ends your session when the next review round begins or #{{.Ticket}} is done. Do not poll and do not sleep.
 
+## Web UIs for the user
+- Within your existing read-only review rules, whenever you start a web UI the user should inspect, register a forward first: `omo ai proxy add --port 5173 --name "dev server"` (use the target's actual port/name). Equivalent MCP tools are `proxy_add`, `proxy_list` and `proxy_remove`.
+- Omit `--ticket` to use your own ticket. Agents may add/remove only their own ticket's forwards; globals are user-managed. List with `omo ai proxy list`; remove with `omo ai proxy remove FORWARD_ID`.
+- For path mode, configure the app with the returned base_path before starting it. The prefix is kept by default; `--strip-prefix` serves unprefixed upstream paths for relative-address apps. A configured subdomain address serves at the root path instead. Start the target separately: registering a forward never starts or supervises it.
+- Name the forward in your hand-in/comment so the user can choose Open on the ticket or overall Forwards list; Open uses a new browser tab. A ticket's forwards disappear when that same ticket completes or is cancelled. A task forward does not survive its task's merge; do not promise it for later story review.
+
 ## Your instructions (from the user)
 {{if .Instructions}}{{.Instructions}}{{else}}None.{{end}}
