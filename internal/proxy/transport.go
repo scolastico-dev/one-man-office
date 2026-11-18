@@ -166,9 +166,18 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 			if v.OnError != nil {
 				v.OnError(err)
 			}
+			// Generated pages must not send a proxy Referer when returning to
+			// the board, where the app compatibility fallback would catch it.
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			board := v.BoardURL
+			if u, err := url.Parse(board); err == nil && u.Path == "" {
+				u.Path = "/"
+				board = u.String()
+			}
 			w.WriteHeader(http.StatusBadGateway)
-			_ = unavailablePage.Execute(w, struct{ Target, Board string }{target.String(), requestValues(r).BoardURL})
+			_ = unavailablePage.Execute(w, struct{ Target, Board string }{target.String(), board})
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +193,7 @@ func (t *Transport) Handler(f api.ProxyForward, mode Mode) http.Handler {
 	})
 }
 
-var unavailablePage = template.Must(template.New("unavailable").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Web UI unreachable</title></head><body><h1>Web UI unreachable</h1><p>omo could not connect to or verify {{.Target}}. The app may not be listening, or its connection/TLS verification failed. The forward remains registered; try again when the app is running.</p><p><a href="{{.Board}}">Back to the board</a></p></body></html>`))
+var unavailablePage = template.Must(template.New("unavailable").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Web UI unreachable</title></head><body><h1>Web UI unreachable</h1><p>omo could not connect to or verify {{.Target}}. The app may not be listening, or its connection/TLS verification failed. The forward remains registered; try again when the app is running.</p><p><a href="{{.Board}}" referrerpolicy="no-referrer">Back to the board</a></p></body></html>`))
 
 func hasPrefix(path, prefix string) bool {
 	return path == prefix || strings.HasPrefix(path, prefix+"/")

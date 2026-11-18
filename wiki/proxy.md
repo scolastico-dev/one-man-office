@@ -110,6 +110,8 @@ For apps that ignore the base, requests outside `/proxy/` whose same-origin
 This includes root `/assets/…` and `/api/…`, ahead of board HTTP routes. Method,
 body and query survive. Use strip-prefix for an upstream that serves at root.
 A browser/referrer policy that omits the Referer prevents this fallback.
+omo's own error and sign-in pages suppress Referer and use `no-store`, so
+their **Back to board** links reach the board without entering the fallback.
 
 WebSockets usually have no Referer. Unprefixed WebSocket requests use the
 last-opened forward remembered in the browser's HttpOnly cookie. Opening or
@@ -196,10 +198,18 @@ board host. Every new request checks that the forward still exists. Basic
 mode checks the board's Basic credentials on each proxy request; none mode
 adds no sign-in. Proxy cookies do not authenticate the board API.
 
+Removing a forward or completing/cancelling its ticket prevents new proxied
+requests. Existing WebSocket, SSE and other streaming connections are not
+forcibly closed; they can continue until the app or client closes them.
+
 omo removes its reserved cookies, recognized omo Authorization, internal
 identity headers and omo WebSocket token protocols before forwarding. App
 cookies and unrelated app Authorization remain. Apps are **trusted**: path
-apps share the board's origin and localStorage. Subdomains do not promise
+apps share the board's origin and localStorage. Upstream headers such as
+`Service-Worker-Allowed` and `Clear-Site-Data` pass through too: a trusted app
+can install a service worker with broader origin scope or clear origin data,
+with effects that can persist after its forward is removed. omo itself does
+not install a service worker. Subdomains do not promise
 cookie isolation either: an app can set Domain cookies covering the base;
 JavaScript can plant duplicate reserved cookies, which omo rejects by failing
 closed. Register only trusted apps; this is not a sandbox. See [Security](security.md).

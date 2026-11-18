@@ -311,6 +311,10 @@ credentials, including omo Basic auth. App Authorization otherwise survives.
 `OnError func(error)` optionally reports upstream connection/TLS failures to the
 router's logger; a cancelled client request produces neither a failure callback
 nor an unavailable page. The page explains both connect and TLS failures.
+All generated proxy HTML (including router denial/missing pages and sign-in)
+uses `Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so board
+links avoid the app Referer fallback. The unavailable page adds the board
+origin's root slash without reencoding its query and keeps template escaping.
 The reserved cookie names are `proxy.SessionCookie` (`omo_proxy_session`) and
 `proxy.ForwardCookie` (`omo_proxy_forward`); neither is sent upstream or accepted
 from upstream Set-Cookie. `X-Omo-*`, `Omo-*`, client forwarding headers,
@@ -341,6 +345,10 @@ cookie isolation boundary. Other applicable cookie paths receive the prefix.
 
 Path-mode apps share the board's origin, including its localStorage; this
 transport provides credential filtering, not isolation from trusted app code.
+Upstream `Service-Worker-Allowed` and `Clear-Site-Data` remain intact, including
+persistent origin effects; omo itself installs no service worker. Removing a
+forward or completing/cancelling its ticket blocks new requests, but does not
+forcibly close existing WebSocket/SSE/streaming connections.
 
 
 ## Web UI browser routing and sign-in

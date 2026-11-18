@@ -92,6 +92,13 @@ for (const width of [1440, 390]) {
       await ticketPage.getByRole('button', { name: 'Open Working preview in new tab', exact: true }).click()
       const dead = await deadTab
       await expect(dead.getByRole('heading')).toContainText(/unreachable/i)
+      const back = dead.waitForResponse((r) => r.url() === omo.url('/') && r.request().isNavigationRequest())
+      await dead.getByRole('link', { name: 'Back to the board', exact: true }).click()
+      const boardResponse = await back
+      expect(boardResponse.status()).toBe(200)
+      expect(boardResponse.request().headers().referer).toBeUndefined()
+      await expect(dead).toHaveURL(omo.url('/'))
+      await expect(dead.getByRole('button', { name: 'Forwards', exact: true })).toBeVisible()
       await dead.close()
       await expect(ticketPage.locator(`[data-forward="${f.id}"]`)).toBeVisible()
       await page.getByRole('button', { name: 'Forwards', exact: true }).click()

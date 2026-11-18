@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"fmt"
+	"html"
 
 	"net"
 	"net/http"
@@ -277,6 +278,41 @@ func TestTLSAndUnavailable(t *testing.T) {
 	}
 }
 
+func TestUnavailablePageNavigation(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	f := forwardFor(t, upstream.URL)
+	upstream.Close()
+	tr := NewTransport()
+	defer tr.CloseIdleConnections()
+	for _, mode := range []Mode{PathMode, SubdomainMode} {
+		for _, tc := range []struct{ board, want string }{
+			{"", "http://forward.test/"},
+			{"https://board.test", "https://board.test/"},
+			{"https://board.test/", "https://board.test/"},
+			{"https://board.test?next=%2f&x=1+2", "https://board.test/?next=%2f&x=1+2"},
+			{"https://board.test/?next=%2F&x=%22%3E", "https://board.test/?next=%2F&x=%22%3E"},
+		} {
+			t.Run(fmt.Sprintf("%d/%s", mode, tc.board), func(t *testing.T) {
+				r := WithRequestContext(httptest.NewRequest("GET", "http://forward.test/proxy/abc/", nil), RequestContext{BoardURL: tc.board})
+				w := httptest.NewRecorder()
+				tr.Handler(f, mode).ServeHTTP(w, r)
+				if w.Code != http.StatusBadGateway {
+					t.Fatalf("status = %d", w.Code)
+				}
+				for name, want := range map[string]string{"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"} {
+					if got := w.Header().Get(name); got != want {
+						t.Errorf("%s = %q, want %q", name, got, want)
+					}
+				}
+				body := w.Body.String()
+				if !strings.Contains(html.UnescapeString(body), `href="`+tc.want+`"`) || !strings.Contains(body, `referrerpolicy="no-referrer"`) || !strings.Contains(body, upstream.URL) {
+					t.Errorf("unsafe board link or missing target: %s", body)
+				}
+			})
+		}
+	}
+}
+
 func TestIPv6(t *testing.T) {
 	l, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
@@ -365,6 +401,8 @@ func TestApplicationStatusesAndConnectionReuse(t *testing.T) {
 		w.Header().Add("Vary", "Accept-Language")
 		w.Header().Set("Content-Encoding", "custom-app-encoding")
 		w.Header().Set("Cache-Control", "private, max-age=120")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.Header().Set("Referrer-Policy", "same-origin")
 		w.WriteHeader(status)
 		fmt.Fprint(w, "unchanged bytes")
 	}))
@@ -383,6 +421,9 @@ func TestApplicationStatusesAndConnectionReuse(t *testing.T) {
 		remote = gotRemote
 		if w.Code != status || w.Body.String() != "unchanged bytes" || w.Header().Get("ETag") != `"upstream"` || len(w.Header().Values("Vary")) != 2 || w.Header().Get("Content-Encoding") != "custom-app-encoding" || w.Header().Get("Cache-Control") != "private, max-age=120" {
 			t.Fatalf("application response changed: %d %v %s", w.Code, w.Header(), w.Body.String())
+		}
+		if w.Header().Get("Content-Security-Policy") != "default-src 'none'" || w.Header().Get("Referrer-Policy") != "same-origin" {
+			t.Fatalf("application security headers changed: %v", w.Header())
 		}
 	}
 }
