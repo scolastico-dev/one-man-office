@@ -311,15 +311,21 @@ func (t *Tracker) finish(a *account, res Result, err error, deadline bool) {
 		a.staleSince = now
 	}
 	a.lastEnd = now
+	var waiters []chan struct{}
 	if a.again {
 		a.again = false
 		t.launch(a)
 	} else {
 		a.next = nextDue(a.lastEnd, a.backoff, a.windows, refreshInterval(t.th), now)
-		t.release(a)
+		waiters, a.waiters = a.waiters, nil
 	}
 	t.mu.Unlock()
 	t.save()
+	// Only now are the runs over for those who wait: the readings are kept,
+	// so a Refresh never answers while the state file is still being written.
+	for _, ch := range waiters {
+		close(ch)
+	}
 	t.changed()
 	t.wake()
 }
