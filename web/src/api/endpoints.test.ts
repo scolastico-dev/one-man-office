@@ -362,6 +362,16 @@ describe('endpoints', () => {
     ])
   })
 
+  it('plugin task requests scope and encode plugin/name and stop with an empty object', async () => {
+    const { client, seen } = spy()
+    await e.getPluginTasks(client, 'a/b')
+    await e.stopPluginTask(client, 'a/b', 'editor name')
+    expect(seen).toMatchObject([
+      { method: 'GET', path: '/api/plugins/a%2Fb/tasks' },
+      { method: 'POST', path: '/api/plugins/a%2Fb/tasks/editor%20name/stop', body: {} },
+    ])
+  })
+
   it('extension names are encoded', async () => {
     const { client, seen } = spy()
     await e.getUsageScript(client, '../x?')

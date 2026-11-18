@@ -68,6 +68,7 @@ import type {
   PluginInfo,
   PluginInstall,
   PluginLogLine,
+  PluginTasks,
   PluginRun,
   PluginRunResult,
   PluginsResponse,
@@ -525,6 +526,15 @@ export function deletePlugin(c: ApiClient, name: string): R<unknown> {
 
 export function getPluginLog(c: ApiClient, name: string): R<PluginLogLine[]> {
   return c.get(`/api/plugins/${seg(name)}/log`)
+}
+
+export function getPluginTasks(c: ApiClient, name: string): R<PluginTasks> {
+  return c.get(`/api/plugins/${seg(name)}/tasks`)
+}
+
+/** Stops the latest run under a plugin-local name; retained exited runs succeed. */
+export function stopPluginTask(c: ApiClient, name: string, task: string): R<unknown> {
+  return c.send('POST', `/api/plugins/${seg(name)}/tasks/${seg(task)}/stop`, {})
 }
 
 export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number, project?: string): R<PluginRunResult> {

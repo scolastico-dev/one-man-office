@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
@@ -13,6 +14,16 @@ import (
 // starts it as an agent process, and as the fake MCP server when the relay
 // starts it as a stdio server.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "plugin-task-output" {
+		os.Exit(taskOutputHelper())
+	}
+	if len(os.Args) > 2 && os.Args[1] == "plugin-task-probe" {
+		os.Exit(taskSocketProbe())
+	}
+	if len(os.Args) > 1 && os.Args[1] == "plugin-task-sleeper" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	if fakeagent.Enabled() {
 		os.Exit(fakeagent.Main())
 	}

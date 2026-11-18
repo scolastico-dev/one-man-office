@@ -226,11 +226,8 @@ func (p *Pool) runHeadersCommand(ctx context.Context, s api.MCPServer, st *serve
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startGrouped(cmd, group); err != nil {
 		return nil, fmt.Errorf("the header command cannot start: %w", err)
-	}
-	if err := group.started(cmd); err != nil {
-		st.log.printf("cannot put the header command into its own group: %s", err)
 	}
 	st.log.copyLines(stderr, "header command stderr: ")
 	if err := cmd.Wait(); err != nil {

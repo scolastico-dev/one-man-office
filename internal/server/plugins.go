@@ -79,10 +79,13 @@ type pluginFeature struct {
 	// pending holds the newest info of every plugin whose state changed
 	// and that is not recorded yet, in the order they changed first;
 	// changed wakes the writer.
-	pendingMu sync.Mutex
-	pending   map[string]api.PluginInfo
-	order     []string
-	changed   chan struct{}
+	pendingMu         sync.Mutex
+	pending           map[string]api.PluginInfo
+	taskPending       map[string]bool
+	taskOutputPending map[string]bool
+	taskOutputAt      map[string]time.Time
+	order             []string
+	changed           chan struct{}
 
 	// The plugin list omo provides, as last fetched: the list or the
 	// failure and when. catMu is held during a fetch, so one fetch runs at a
@@ -127,6 +130,8 @@ func (s *Server) registerPlugins(mux *http.ServeMux) {
 		{"POST /api/plugins/{name}/update", s.updatePlugin, userOnly},
 		{"DELETE /api/plugins/{name}", s.deletePlugin, userOnly},
 		{"GET /api/plugins/{name}/log", s.pluginLog, userOnly},
+		{"GET /api/plugins/{name}/tasks", s.pluginTasks, userOnly},
+		{"POST /api/plugins/{name}/tasks/{task}/stop", s.stopPluginTask, userOnly},
 		{"POST /api/plugins/{name}/actions/{action}", s.runPluginAction, userOnly},
 	})
 }
@@ -144,17 +149,21 @@ func (s *Server) startPlugins(ctx context.Context) {
 	f.busy = map[string]bool{}
 	f.pending = map[string]api.PluginInfo{}
 	f.m = plugins.New(plugins.Options{
-		Root:    s.opts.Layout.Plugins,
-		DB:      s.db,
-		Socket:  s.socketEndpoint,
-		Log:     s.log,
-		Changed: s.pluginChanged,
-		Agents:  pluginAgents{s},
+		Root:              s.opts.Layout.Plugins,
+		DB:                s.db,
+		Socket:            s.socketEndpoint,
+		Log:               s.log,
+		Changed:           s.pluginChanged,
+		Agents:            pluginAgents{s},
+		TaskTicketLive:    s.pluginTaskTicketLive,
+		TasksChanged:      s.pluginTasksChanged,
+		TaskOutputChanged: s.pluginTaskOutputChanged,
 	})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)
 	s.background(f.m.Run)
 	s.background(s.writePluginEvents)
+	s.background(s.writePluginTaskEvents)
 	s.background(s.runPluginReloads)
 	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att, after) })
 }
@@ -262,7 +271,8 @@ func (s *Server) runPluginReloads(ctx context.Context) {
 
 // reloadPlugins loads the runtime with the current plugin settings. Without
 // force it does nothing when no plugin's settings changed since the last
-// load: a load restarts every plugin and cancels its running hooks.
+// load. Manager.Load reconciles runtimes, preserving unchanged plugins and
+// retaining tasks/startup state across configuration refreshes.
 func (s *Server) reloadPlugins(force bool) {
 	f := &s.plugins
 	f.mu.Lock()
@@ -1100,6 +1110,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string, a
 			}
 			for _, e := range evs {
 				after = e.ID
+				s.stopTasksForEvent(toAPIEvent(e))
 				for _, pe := range pluginEvents(toAPIEvent(e), att, ticket, s.Address()) {
 					s.plugins.m.Dispatch(pe)
 				}

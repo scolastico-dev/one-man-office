@@ -1009,6 +1009,7 @@ export interface EventDataByKind {
   'usage.changed': UsageState
   'skillset.changed': SkillSetState
   'plugin.changed': PluginInfo
+  'plugin.tasks_changed': PluginTasksChangedData
   'image.added': ImageEventData
   'image.deleted': ImageEventData
   'image.expired': ImageEventData
@@ -1735,4 +1736,26 @@ export interface OAuthDecision {
 /** Answer of `POST /api/oauth/consent`. */
 export interface OAuthRedirect {
   redirect: string
+}
+
+/** One supervised plugin process. IDs identify runs; names can be reused. */
+export interface PluginTask {
+  id: string
+  name: string
+  ticket?: number
+  started_at: string
+  ended_at?: string
+  state: 'running' | 'exited'
+  reason?: string
+  error?: string
+  output: string[]
+}
+
+export interface PluginTasks {
+  tasks: PluginTask[]
+}
+
+/** Refetch a plugin's task snapshot on this event and after reconnect/resync. */
+export interface PluginTasksChangedData {
+  name: string
 }
