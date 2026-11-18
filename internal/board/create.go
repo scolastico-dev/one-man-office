@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -30,7 +31,7 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 	}
 	projects, err := b.resolveProjects(req)
 	if err != nil {
-		return api.Ticket{}, err
+		return api.Ticket{}, createFieldError(err, "projects")
 	}
 
 	var out api.Ticket
@@ -38,16 +39,16 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 		var story ticketRow
 		if req.Story != nil {
 			if story, err = b.checkCreateInStory(tx, a, req); err != nil {
-				return err
+				return createFieldError(err, "story")
 			}
 		}
 		supervisor, err := createSupervisor(p, a, req)
 		if err != nil {
-			return err
+			return createFieldError(err, "supervisor")
 		}
 		deps, err := createDependencies(tx, req.DependsOn)
 		if err != nil {
-			return err
+			return createFieldError(err, "depends_on")
 		}
 
 		now := b.stamp()
@@ -101,7 +102,7 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 		}
 
 		if err := linkNewTicket(tx, id, deps, now); err != nil {
-			return err
+			return createFieldError(err, "depends_on")
 		}
 
 		if out, err = b.ticket(tx, id); err != nil {
@@ -181,38 +182,42 @@ func (b *Board) checkCreate(p Policy, a Actor, req api.CreateTicket) (string, er
 
 	title, err := checkTitle(req.Title)
 	if err != nil {
-		return "", err
+		return "", createFieldError(err, "title")
 	}
 	if req.Type == api.TypeStory {
 		if inStory {
-			return "", api.Errorf(api.CodeValidation, "a story cannot belong to another story")
+			return "", createFieldError(api.Errorf(api.CodeValidation, "a story cannot belong to another story"), "story")
 		}
 	} else {
 		if len(req.Projects) > 1 {
-			return "", api.Errorf(api.CodeValidation, "a task has one project or none, got %d", len(req.Projects))
+			return "", createFieldError(api.Errorf(api.CodeValidation, "a task has one project or none, got %d", len(req.Projects)), "projects")
 		}
 		if len(req.Projects) == 0 && req.WhenApproved != "" {
-			return "", api.Errorf(api.CodeValidation, noProjectWhenApproved)
+			return "", createFieldError(api.Errorf(api.CodeValidation, noProjectWhenApproved), "when_approved")
 		}
 		if req.TaskRelease != "" || req.MaxParallel != nil {
-			return "", api.Errorf(api.CodeValidation, "task_release and max_parallel apply to stories only")
+			field := "task_release"
+			if req.MaxParallel != nil {
+				field = "max_parallel"
+			}
+			return "", createFieldError(api.Errorf(api.CodeValidation, "task_release and max_parallel apply to stories only"), field)
 		}
 	}
 	if err := checkReview(req.Review); err != nil {
-		return "", err
+		return "", createFieldError(err, "review")
 	}
 	if err := checkWhenApproved(req.WhenApproved, req.Type == api.TypeTask && inStory); err != nil {
-		return "", err
+		return "", createFieldError(err, "when_approved")
 	}
 	if err := checkTaskRelease(req.TaskRelease); err != nil {
-		return "", err
+		return "", createFieldError(err, "task_release")
 	}
 	if req.MaxParallel != nil && *req.MaxParallel < 1 {
-		return "", api.Errorf(api.CodeValidation, "max_parallel must be at least 1")
+		return "", createFieldError(api.Errorf(api.CodeValidation, "max_parallel must be at least 1"), "max_parallel")
 	}
 	if req.Model != "" {
 		if err := b.checkModel(a, req.Model); err != nil {
-			return "", err
+			return "", createFieldError(err, "model")
 		}
 	}
 	return title, nil
@@ -355,7 +360,7 @@ func (b *Board) checkCreateInStory(q db.Queryer, a Actor, req api.CreateTicket) 
 		return story, err
 	}
 	if count == 0 {
-		return story, api.Errorf(api.CodeValidation, "project %q is not a project of story #%d", req.Projects[0], n)
+		return story, createFieldError(api.Errorf(api.CodeValidation, "project %q is not a project of story #%d", req.Projects[0], n), "projects")
 	}
 	return story, nil
 }
@@ -434,4 +439,16 @@ func createDependencies(q db.Queryer, req []int) ([]int64, error) {
 		out = append(out, dep)
 	}
 	return out, nil
+}
+
+// createFieldError attaches the input field at the check that knows it.
+// Error text may change without changing where a client shows the problem.
+func createFieldError(err error, field string) error {
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Details != nil {
+		return err
+	}
+	out := *ae
+	out.Details = api.FieldDetail{Field: field}
+	return &out
 }

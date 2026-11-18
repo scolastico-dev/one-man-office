@@ -47,8 +47,8 @@ such as `main~3` is refused). A task in a story has none: it builds on the story
 | **Planning** | The ticket is being written. Nothing runs. |
 | **Ready For Dev** | Approved: omo starts it as soon as the limits allow. |
 | **In Progress** | Its agent works (or waits, or is stopped by a limit; the ticket keeps its slot). |
-| **Review** | Handed in: reviewer agents and/or you check it; then omo merges or exports. |
-| **Done** | Completed, exported or cancelled. Done tickets cannot be changed. |
+| **Review** | Handed in: reviewer agents and/or you check it; then omo merges or exports. Exported tickets stay here, waiting for their remote target branches to contain the work. |
+| **Done** | Completed, exported and merged, or cancelled. Done tickets cannot be changed. |
 
 A ticket enters In Progress when its agent starts or its review is rejected,
 and enters Review when its agent hands it in; you do not drag it there. What

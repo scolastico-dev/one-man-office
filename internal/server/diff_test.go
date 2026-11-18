@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -133,6 +134,9 @@ func TestDiffRouteRefusesLinkedWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(wtTwo, wtOne); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("links need privileges on Windows:", err)
+		}
 		t.Fatal(err)
 	}
 	p := e.diff(e.u, one.Number).Projects[0]
@@ -340,14 +344,22 @@ func TestDiffRouteOddNames(t *testing.T) {
 	e := newDiffEnv(t)
 	task := newTask(t, e.u, e.project, "work")
 	wt := e.cut(e.repo, e.project, task.Number, "omo/1-work", "main")
-	odd := []string{"line\nbreak.txt", "bad\xffbyte.txt", "rlo‮exe.txt", "tab\there.txt", "-dash.txt", "plain.txt"}
+	odd := []string{"rlo‮exe.txt", "-dash.txt", "plain.txt"}
+	// The file changed again without a commit, and how its name is shown.
+	changed, changedShown := "rlo‮exe.txt", `rlo\u{202e}exe.txt`
+	if runtime.GOOS != "windows" {
+		// Windows allows no control characters in a file name and keeps
+		// names as UTF-16, so a name that is not UTF-8 cannot exist there.
+		odd = append(odd, "line\nbreak.txt", "bad\xffbyte.txt", "tab\there.txt")
+		changed, changedShown = "bad\xffbyte.txt", `bad\xffbyte.txt`
+	}
 	for _, name := range odd {
 		writeIn(t, wt, name, "content of "+strings.ToValidUTF8(name, "?")+"\n")
 	}
 	gitIn(t, wt, "add", "-A")
 	gitIn(t, wt, "commit", "-q", "-m", "odd")
 	writeIn(t, wt, "base.txt", "changed\n")
-	writeIn(t, wt, "bad\xffbyte.txt", "changed again\n")
+	writeIn(t, wt, changed, "changed again\n")
 	n := task.Number
 
 	status, data := e.u.do("GET", tp(n)+"/diff", nil)
@@ -371,11 +383,14 @@ func TestDiffRouteOddNames(t *testing.T) {
 			t.Fatalf("round trip of %q: %+v", f.Path, got)
 		}
 	}
-	if findFile(d.Files, `bad\xffbyte.txt`) == nil || findFile(d.Files, `line\u{a}break.txt`) == nil {
+	if findFile(d.Files, `rlo\u{202e}exe.txt`) == nil {
+		t.Fatalf("names %+v", d.Files)
+	}
+	if runtime.GOOS != "windows" && (findFile(d.Files, `bad\xffbyte.txt`) == nil || findFile(d.Files, `line\u{a}break.txt`) == nil) {
 		t.Fatalf("names %+v", d.Files)
 	}
 	// Uncommitted list, same rule.
-	u := findFile(d.Uncommitted, `bad\xffbyte.txt`)
+	u := findFile(d.Uncommitted, changedShown)
 	if u == nil {
 		t.Fatalf("uncommitted %+v", d.Uncommitted)
 	}
@@ -384,7 +399,7 @@ func TestDiffRouteOddNames(t *testing.T) {
 		t.Fatalf("uncommitted round trip %+v", got)
 	}
 	// Not the raw name.
-	e.u.fails(404, api.CodeNotFound, "GET", fileURL(n, e.project, "bad\xffbyte.txt", ""), nil)
+	e.u.fails(404, api.CodeNotFound, "GET", fileURL(n, e.project, changed, ""), nil)
 }
 
 // slots blocks every diff in its slot until released.

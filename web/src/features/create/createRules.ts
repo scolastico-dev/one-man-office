@@ -166,7 +166,7 @@ export interface FieldProblem {
   message: string
 }
 
-/** The server's message and, when the code or the message names it, the field it concerns. */
+/** The server's message and the field named by structured details or its code. */
 export function problemOf(e: unknown, fallback = 'The ticket could not be created.', lost?: string): FieldProblem {
   if (!(e instanceof ApiError)) return { field: null, message: fallback }
   if (lost !== undefined && isLostAnswer(e)) return { field: null, message: lost }
@@ -175,30 +175,13 @@ export function problemOf(e: unknown, fallback = 'The ticket could not be create
     const f = (d as { field: unknown }).field
     if (typeof f === 'string' && FIELD_KEYS.includes(f)) return { field: f as FieldKey, message: e.message }
   }
-  return { field: fieldFor(e.code, e.message), message: e.message }
+  return { field: fieldFor(e.code), message: e.message }
 }
 
-function fieldFor(code: string, message: string): FieldKey | null {
+function fieldFor(code: string): FieldKey | null {
   if (code === 'project_unavailable') return 'projects'
   if (code === 'dependency_scope' || code === 'dependency_cycle') return 'depends_on'
   if (code === 'invalid_transition') return 'story'
-  if (code !== 'validation') return null
-  const m = message.toLowerCase()
-  const rules: [RegExp, FieldKey][] = [
-    [/^the title/u, 'title'],
-    [/^task_release and max_parallel/u, 'max_parallel'],
-    [/^(a task inside a story|when_approved)/u, 'when_approved'],
-    [/^task_release/u, 'task_release'],
-    [/^max_parallel/u, 'max_parallel'],
-    [/^review must/u, 'review'],
-    [/^model /u, 'model'],
-    [/supervise/u, 'supervisor'],
-    [/^dependency/u, 'depends_on'],
-    [/^a task without a project/u, 'when_approved'],
-    [/^(a task has one project|project )/u, 'projects'],
-    [/^#\d+ is not a story/u, 'story'],
-  ]
-  for (const [re, key] of rules) if (re.test(m)) return key
   return null
 }
 

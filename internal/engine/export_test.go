@@ -56,19 +56,19 @@ func TestExportJobsPerProjectAndSuccess(t *testing.T) {
 	h.steps(3)
 
 	tk := h.ticket(n)
-	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/pr/1" {
+	if tk.Column != api.ColumnReview || tk.ReviewStage != "awaiting_merge" || tk.Resolution != "" || tk.ExportURL != "https://example.invalid/pr/1" {
 		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
 	}
-	if pathExists(dir) {
-		t.Fatal("the worktree of an exported ticket stayed")
+	if !pathExists(dir) {
+		t.Fatal("the worktree was removed before the merge")
 	}
 	if !slices.Contains(h.branches(h.repo), branch) {
 		t.Fatal("the exported branch was deleted")
 	}
-	if p := tk.Projects[0]; p.Worktree != "" || p.Branch != branch {
+	if p := tk.Projects[0]; p.Worktree != dir || p.Branch != branch {
 		t.Fatalf("ticket records %q %q", p.Worktree, p.Branch)
 	}
-	if h.liveCount() != 0 {
+	if h.liveCount() != 1 {
 		t.Fatalf("%d sessions still live", h.liveCount())
 	}
 }
@@ -105,7 +105,7 @@ func TestExportCrashLoopFailsExport(t *testing.T) {
 	}
 }
 
-func TestExportedBranchMergedLocallySatisfiesDependents(t *testing.T) {
+func TestExportedBranchMergedRemotelySatisfiesDependents(t *testing.T) {
 	h := gitHarness(t)
 	n, job, _, branch := h.exportedTask("Export me")
 	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/2"}); err != nil {
@@ -115,7 +115,7 @@ func TestExportedBranchMergedLocallySatisfiesDependents(t *testing.T) {
 	dep := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Needs the export", DependsOn: []int{int(n)}})
 	waiting := func() bool {
 		return slices.ContainsFunc(h.ticket(dep).WaitingFor, func(w api.Waiting) bool {
-			return w.Ticket == int(n) && w.Reason == api.WaitingExportNotMerged
+			return w.Ticket == int(n)
 		})
 	}
 	if !waiting() {
@@ -127,6 +127,7 @@ func TestExportedBranchMergedLocallySatisfiesDependents(t *testing.T) {
 	}
 
 	gitRun(t, h.repo, "merge", "-q", "--no-ff", "-m", "merge the pull request", branch)
+	gitRun(t, h.repo, "push", "-q", "origin", "refs/heads/main:refs/heads/main")
 	h.e.checkExportsMerged(h.ctx)
 	if !h.ticket(n).ExportMerged {
 		t.Fatal("the export was not found merged")
@@ -136,7 +137,7 @@ func TestExportedBranchMergedLocallySatisfiesDependents(t *testing.T) {
 	}
 }
 
-func TestExportCheckRunsOnRescanInterval(t *testing.T) {
+func TestExportCheckRunsOnExportInterval(t *testing.T) {
 	h := gitHarness(t)
 	n, job, _, branch := h.exportedTask("Export me")
 	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/3"}); err != nil {
@@ -149,15 +150,16 @@ func TestExportCheckRunsOnRescanInterval(t *testing.T) {
 	}
 	tick() // the first tick checks
 	gitRun(t, h.repo, "merge", "-q", "--no-ff", "-m", "merge the pull request", branch)
+	gitRun(t, h.repo, "push", "-q", "origin", "refs/heads/main:refs/heads/main")
 	h.clock.Advance(time.Minute)
 	tick()
 	if h.ticket(n).ExportMerged {
-		t.Fatal("checked again before the rescan interval passed")
+		t.Fatal("checked again before the export interval passed")
 	}
-	h.clock.Advance(time.Duration(h.st.General().RescanInterval))
+	h.clock.Advance(time.Duration(h.st.General().ExportCheckInterval))
 	tick()
 	if !h.ticket(n).ExportMerged {
-		t.Fatal("not checked once the rescan interval passed")
+		t.Fatal("not checked once the export interval passed")
 	}
 	if strings.Contains(h.logs.String(), "panicked") {
 		t.Fatal("a worker panicked")
@@ -259,7 +261,7 @@ func TestExportGoesOnPerProject(t *testing.T) {
 			}
 			h.steps(2)
 			tk = h.ticket(s)
-			if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported ||
+			if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge ||
 				tk.ExportURL != "https://example.invalid/a/pull/1\nhttps://example.invalid/b/pull/2" {
 				t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
 			}
@@ -309,18 +311,32 @@ func TestMergeLocallyAfterPartialExport(t *testing.T) {
 	if tk := h.ticket(s); tk.ReviewStage != api.ReviewStageHuman {
 		t.Fatalf("stage %q", tk.ReviewStage)
 	}
+	parked := h.live(api.RolePM, s).ID
 	if _, err := h.b.Approve(h.ctx, board.User, s, api.ApproveRequest{Merge: true}); err != nil {
 		t.Fatal(err)
 	}
 	h.steps(3)
 	tk := h.ticket(s)
-	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCompleted {
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge || tk.Resolution != "" {
 		t.Fatalf("ticket is %s/%s (attention %q)", tk.Column, tk.Resolution, tk.Attention)
+	}
+	if !slices.ContainsFunc(h.snap().Sessions, func(session board.EngineSession) bool { return session.ID == parked }) {
+		t.Fatal("the parked PM ended before the outstanding remote merge")
 	}
 	if got := gitRun(t, h.repos[a], "rev-parse", "main"); got != mainA {
 		t.Fatal("the exported project was merged locally too")
 	}
 	if got := gitRun(t, h.repos[b], "show", "main:new.txt"); got != b {
 		t.Fatalf("project b main has new.txt %q", got)
+	}
+	remote := h.origin(a)
+	gitRun(t, remote, "update-ref", "refs/heads/main", remoteHead(t, remote, tk.Projects[0].ExportBranch))
+	h.e.checkExportsMerged(h.ctx)
+	if tk := h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported || !tk.ExportMerged {
+		t.Fatalf("mixed local/remote completion did not finish: %+v", tk.TicketSummary)
+	}
+	h.steps(2)
+	if h.liveCount() != 0 {
+		t.Fatal("confirmed Done did not end the parked agents")
 	}
 }

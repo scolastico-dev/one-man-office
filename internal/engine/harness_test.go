@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -326,6 +327,20 @@ func isolate(t *testing.T) string {
 	return home
 }
 
+// symlink makes link a symbolic link to target. Windows makes symbolic
+// links only for a user with the privilege for it (an administrator, or
+// anyone in developer mode): without it the test is skipped there.
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err != nil && runtime.GOOS == "windows" {
+		t.Skipf("this user may not make symbolic links on Windows: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // gitRun runs git in dir and fails the test on error.
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -635,6 +650,30 @@ func (h *harness) comments(n int64) []string {
 		out = append(out, c.Body)
 	}
 	return out
+}
+
+// flagged reports whether the attention flag of ticket n says want. The
+// flag holds one line of at most 200 characters (the board cuts a longer
+// reason with "…") and many reasons name a folder first, which is long
+// in a test (the temporary folder carries the test's name, on Windows
+// below the user's AppData folder). For a flag that was cut, the comment
+// the board posted with the whole reason is read instead.
+func (h *harness) flagged(n int64, want string) bool {
+	h.t.Helper()
+	flag := h.ticket(n).Attention
+	if strings.Contains(flag, want) {
+		return true
+	}
+	head, cut := strings.CutSuffix(flag, "…")
+	if !cut {
+		return false
+	}
+	for _, c := range h.comments(n) {
+		if strings.Contains(c, head) && strings.Contains(c, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitFor polls cond until it holds or the deadline passes.

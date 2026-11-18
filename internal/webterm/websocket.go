@@ -38,15 +38,36 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 		return
 	}
 	defer c.CloseNow()
-	c.SetReadLimit(terminalInputLimit)
+	// A message frame carries up to terminalInputLimit bytes of text as JSON.
+	c.SetReadLimit(4 * terminalInputLimit)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	initial, stream, detach := i.subscribe()
 	defer detach()
-	written := make(chan error, 8)
+	// What the writer reports: the write of a binary frame (id 0) or of a message.
+	type result struct {
+		err     error
+		message int64
+	}
+	written := make(chan result, 8)
 	acknowledge := func(err error) {
 		select {
-		case written <- err:
+		case written <- result{err: err}:
+		case <-ctx.Done():
+		}
+	}
+	acknowledgeMessage := func(id int64) func(error) {
+		return func(err error) {
+			select {
+			case written <- result{err: err, message: id}:
+			case <-ctx.Done():
+			}
+		}
+	}
+	// A message that cannot be written is answered, and the connection stays.
+	refuseMessage := func(id int64, err error) {
+		select {
+		case written <- result{err: err, message: id}:
 		case <-ctx.Done():
 		}
 	}
@@ -86,10 +107,26 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 				}
 			case websocket.MessageText:
 				var size struct {
+					Type string `json:"type"`
+					ID   int64  `json:"id"`
+					Text string `json:"text"`
+					Keys string `json:"keys"`
 					Rows uint16 `json:"rows"`
 					Cols uint16 `json:"cols"`
 				}
-				if json.Unmarshal(data, &size) != nil || !validTerminalSize(size.Rows, size.Cols) {
+				if json.Unmarshal(data, &size) != nil {
+					return
+				}
+				if size.Type == "message" {
+					if size.ID <= 0 {
+						continue // nobody could be answered; the message is dropped
+					}
+					if err := i.queueMessage(size.Text, size.Keys, acknowledgeMessage(size.ID)); err != nil {
+						refuseMessage(size.ID, err)
+					}
+					continue
+				}
+				if !validTerminalSize(size.Rows, size.Cols) {
 					return
 				}
 				if repaintOnResize {
@@ -116,8 +153,23 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 			default:
 				return
 			}
-		case err := <-written:
-			if err != nil {
+		case res := <-written:
+			if res.message != 0 {
+				ack := struct {
+					Type  string `json:"type"`
+					ID    int64  `json:"id"`
+					Error string `json:"error,omitempty"`
+				}{Type: "message-ack", ID: res.message}
+				if res.err != nil {
+					ack.Error = res.err.Error()
+				}
+				frame, _ := json.Marshal(ack)
+				if err := write(websocket.MessageText, frame); err != nil {
+					return
+				}
+				continue
+			}
+			if res.err != nil {
 				return
 			}
 			if err := write(websocket.MessageText, []byte(`{"type":"input-ack"}`)); err != nil {

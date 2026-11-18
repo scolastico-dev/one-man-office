@@ -66,7 +66,7 @@ func (c *Clients) inspect(t Target) inspection {
 		in.state.Entries = append(in.state.Entries, c.mapEntry(t.CLI, name, v))
 	}
 	for _, p := range fc.projects {
-		in.state.Entries = append(in.state.Entries, api.MCPClientEntry{Name: p.name, Notes: []string{},
+		in.state.Entries = append(in.state.Entries, api.MCPClientEntry{Name: p.name, Notes: []string{}, ProjectScoped: true,
 			Reason: fmt.Sprintf("it belongs to the project %s (Claude's local scope) and stays there; omo has no per-project servers", p.folder)})
 	}
 	return in

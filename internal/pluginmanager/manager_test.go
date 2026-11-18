@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -217,6 +218,11 @@ func TestInstallFromLocalRepository(t *testing.T) {
 		}
 	}
 	for rel, perm := range map[string]os.FileMode{"demo/plugin.json": 0o600, "demo/run.sh": 0o700, "demo/lib": 0o700} {
+		if runtime.GOOS == "windows" {
+			// Windows has no Unix file modes: every file reads as 0666
+			// and every folder as 0777, whatever it was created with.
+			break
+		}
 		info, err := os.Lstat(filepath.Join(e.root, rel))
 		if err != nil {
 			t.Fatal(err)
@@ -718,5 +724,36 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(e.root, ".old-*")); len(left) != 0 {
 		t.Fatalf("left over: %v", left)
+	}
+}
+
+func TestFrontendInstallStaging(t *testing.T) {
+	e := newEnv(t)
+	u := newUpstream(t)
+	manifest := `{"hooks":[],"frontend":{"script":"ui/main.js","assets":"ui/assets"},"default_config":{"editor":"code","custom":{"keep":true}},"config_fields":[{"key":"editor","label":"Editor","type":"select","choices":[{"value":"code","label":"Code"}]}]}`
+	u.publish(map[string]string{"plugin.json": manifest, "ui/main.js": "export {}", "ui/assets/icon.txt": "icon"})
+	settings := api.PluginSettings{Name: "ui", Source: u.bare, Enabled: true, Config: map[string]any{"editor": "code", "extra": "preserved"}}
+	out, commit, err := e.install(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Config["extra"] != "preserved" || out.Config["custom"] == nil {
+		t.Fatalf("config lost: %+v", out.Config)
+	}
+	// A missing entry or private asset is rejected before activation. The previous
+	// installed commit and frontend bytes must remain usable after either update.
+	for _, files := range []map[string]string{{"ui/main.js": ""}, {"ui/main.js": "export const newer = 1", "ui/assets/settings.yaml": "secret"}} {
+		u.publish(files)
+		if _, _, err := e.install(settings); err == nil {
+			t.Fatal("invalid frontend update succeeded")
+		}
+		installed, err := Installed(e.o, "ui")
+		if err != nil || installed.Commit != commit {
+			t.Fatalf("previous install lost: %+v %v", installed, err)
+		}
+		b, err := os.ReadFile(filepath.Join(e.root, "ui/ui/main.js"))
+		if err != nil || string(b) != "export {}" {
+			t.Fatalf("previous frontend lost: %q %v", b, err)
+		}
 	}
 }

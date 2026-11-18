@@ -22,7 +22,7 @@ var gitStartsElsewhere = map[string]string{
 // without going through (*Git).command, the one place that sets a resolved
 // worktree's repository explicitly and refuses to let git look for a
 // repository in the agents' folder. Inside this package every process start
-// must be in command (or the Windows tree kill); outside it only the
+// must be in command; outside it only the
 // reviewed places of gitStartsElsewhere may start git, and every entry of
 // gitStartsElsewhere must still start git (a stale entry would let a new
 // git start there pass unreviewed).
@@ -71,7 +71,7 @@ func TestGitStartsOnlyThroughCommand(t *testing.T) {
 					switch {
 					case inGitops:
 						seen++
-						if fn.Name.Name != "command" && !(rel == "internal/gitops/procgroup_windows.go" && name == "taskkill") {
+						if fn.Name.Name != "command" {
 							t.Errorf("%s:%d: %s starts a process outside (*Git).command", rel, pos.Line, fn.Name.Name)
 						}
 					case name == "git" && gitStartsElsewhere[rel] == "":

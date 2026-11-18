@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -39,18 +40,6 @@ func (p *recordingProcess) Close() error                { return nil }
 func (p *recordingProcess) Exited() <-chan struct{}     { return nil }
 func (p *recordingProcess) Pid() int                    { return 0 }
 
-func cleanupSession(t *testing.T, s *Session) {
-	t.Helper()
-	t.Cleanup(func() {
-		_ = s.Kill()
-		select {
-		case <-s.Done():
-		case <-time.After(5 * time.Second):
-			t.Error("session still running after cleanup")
-		}
-	})
-}
-
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -63,13 +52,28 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatal("condition not met before timeout")
 }
 
+// endSession ends a session a test does not wait for and waits until it let
+// go of its log file: Windows removes no folder that holds an open file.
+func endSession(t *testing.T, s *Session) {
+	t.Helper()
+	t.Cleanup(func() {
+		select {
+		case <-s.Done():
+			return
+		default:
+		}
+		_ = s.Kill()
+		<-s.Done()
+	})
+}
+
 func TestScreenAndLogCaptureOutput(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "a.log")
 	s, err := Start(Options{Cmd: "sh", Args: []string{"-c", "printf 'hello-omo\\n'"}, LogPath: log, Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "hello-omo") {
 		t.Fatalf("screen missing output:\n%s", s.Screen())
@@ -93,7 +97,7 @@ func TestPublishesDeduplicatedLogLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	<-s.Done()
 	select {
 	case line := <-lines:
@@ -111,7 +115,7 @@ func TestSendLineReachesProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	if err := s.SendLine("ping"); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +196,7 @@ func TestKillClosesDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	if err := s.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +214,7 @@ func TestEnvInjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "id=developer-jason") {
 		t.Fatalf("env not injected:\n%s", s.Screen())
@@ -233,7 +237,7 @@ func TestOnOutputReceivesRawBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupSession(t, s)
+	endSession(t, s)
 	select {
 	case <-s.Done():
 	case <-time.After(10 * time.Second):
@@ -242,6 +246,15 @@ func TestOnOutputReceivesRawBytes(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	if runtime.GOOS == "windows" {
+		// A Windows pseudoconsole has no byte stream of the program: it
+		// draws the program's screen with sequences of its own. What stays
+		// true is that OnOutput gets the terminal's sequences unstripped.
+		if !bytes.Contains(got, []byte("a")) || !bytes.Contains(got, []byte("\x1b[1m")) {
+			t.Fatalf("OnOutput bytes = %q, want the text and its bold sequence", got)
+		}
+		return
+	}
 	if string(got) != "a\x1b[1mb" {
 		t.Fatalf("OnOutput bytes = %q, want %q", got, "a\x1b[1mb")
 	}

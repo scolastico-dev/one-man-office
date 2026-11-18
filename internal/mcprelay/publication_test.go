@@ -77,7 +77,9 @@ func TestRelistTracksWorkThroughPublication(t *testing.T) {
 
 // A flood without a real change must neither advance the generation nor
 // emit status/tools events. Block a request to define the burst explicitly.
-func TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced(t *testing.T) {
+// (stdio_test.go holds the same rule over a real stdio server, where the
+// burst is only bounded by the re-listing's end.)
+func TestControlledBurstWithoutAChangeAnnouncesNothing(t *testing.T) {
 	testControlledRelist(t, false)
 }
 

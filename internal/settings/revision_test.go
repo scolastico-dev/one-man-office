@@ -256,7 +256,7 @@ func TestEveryGuardedWriteChecksTheRevision(t *testing.T) {
 func TestUpdateGeneralChangesOnlyItsKeys(t *testing.T) {
 	s, home, log := openTest(t)
 	g := s.General()
-	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/ws", MaxDepth: 3, Ignore: []string{"node_modules"}}}
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 3, Ignore: []string{"node_modules"}}}
 	g.AgentEnv = map[string]string{"A": "1"}
 	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
@@ -330,21 +330,21 @@ func TestValidationNamesTheField(t *testing.T) {
 		"rescan_interval":                     func(g *General) { g.RescanInterval = Duration(time.Second) },
 		"workspace_roots": func(g *General) {
 			for range 33 {
-				g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: "/ws"})
+				g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: abs("/ws")})
 			}
 		},
 		"workspace_roots.1.max_depth": func(g *General) {
-			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a"}, {Path: "/b", MaxDepth: 17}}
+			g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a")}, {Path: abs("/b"), MaxDepth: 17}}
 		},
-		"workspace_roots.0.path": func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a\u202e"}} },
+		"workspace_roots.0.path": func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a\u202e")}} },
 		"workspace_roots.0.ignore": func(g *General) {
-			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: make([]string, 101)}}
+			g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), Ignore: make([]string, 101)}}
 			for i := range g.WorkspaceRoots[0].Ignore {
 				g.WorkspaceRoots[0].Ignore[i] = "x"
 			}
 		},
 		"workspace_roots.0.ignore.1": func(g *General) {
-			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: []string{"ok", "a/**"}}}
+			g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), Ignore: []string{"ok", "a/**"}}}
 		},
 		"agent_env": func(g *General) {
 			g.AgentEnv = map[string]string{}
@@ -382,7 +382,7 @@ func TestValidationNamesTheField(t *testing.T) {
 		"command":                 func(p *Profile) { p.Command = " " },
 		"args":                    func(p *Profile) { p.Args = many },
 		"env.A":                   func(p *Profile) { p.Env = map[string]string{"A": strings.Repeat("x", 32<<10+1)} },
-		"account_dir":             func(p *Profile) { p.AccountDir = "/a\x1b" },
+		"account_dir":             func(p *Profile) { p.AccountDir = abs("/a\x1b") },
 		"usage_script":            func(p *Profile) { p.UsageScript = "Bad" },
 		"prompt_delivery.retries": func(p *Profile) { n := -1; p.PromptDelivery.Retries = &n },
 		"models":                  func(p *Profile) { p.Models = nil },
@@ -438,7 +438,7 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 		"general map key":       {"settings.yaml", "agent_env:\n  ? [" + secret + "]\n  : x\n", ""},
 		"general twice":         {"settings.yaml", "limits:\n  tasks: 1\n  tasks: " + secret + "\n", "line 3"},
 		"general root":          {"settings.yaml", "workspace_roots:\n  - path: " + secret + "\n", "workspace_roots.0.path"},
-		"general ignore":        {"settings.yaml", "workspace_roots:\n  - path: /a\n    ignore: [\"**" + secret + "\"]\n", "workspace_roots.0.ignore.0"},
+		"general ignore":        {"settings.yaml", "workspace_roots:\n  - path: " + abs("/a") + "\n    ignore: [\"**" + secret + "\"]\n", "workspace_roots.0.ignore.0"},
 		"general env name":      {"settings.yaml", "agent_env:\n  \"A=" + secret + "\": x\n", "agent_env"},
 		"profile cli":           {"profiles/x.yaml", "cli: " + secret + "\ncommand: x\nmodels:\n  a: {}\n", "cli"},
 		"profile usage script":  {"profiles/x.yaml", "cli: custom\ncommand: x\nusage_script: " + secret + "\nmodels:\n  a: {}\n", "usage_script"},
@@ -447,23 +447,23 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 		"role assignment":       {"roles/developer.yaml", "models: []\nassignment: " + secret + "\n", "assignment"},
 		"role model":            {"roles/developer.yaml", "models: [\"" + secret + "\"]\n", "models.0"},
 		"role type":             {"roles/developer.yaml", "models: " + secret + "\n", "line 1"},
-		"project unknown key":   {"projects/p.yaml", "name: p\npath: /p\nstory_merge: " + secret + "\n", "story_merge"},
-		"project merge mode":    {"projects/p.yaml", "name: p\npath: /p\nmerge:\n  task: " + secret + "\n", "merge.task"},
+		"project unknown key":   {"projects/p.yaml", "name: p\npath: " + abs("/p") + "\nstory_merge: " + secret + "\n", "story_merge"},
+		"project merge mode":    {"projects/p.yaml", "name: p\npath: " + abs("/p") + "\nmerge:\n  task: " + secret + "\n", "merge.task"},
 		"general merge default": {"settings.yaml", "merge_defaults:\n  story_task: " + secret + "\n", "merge_defaults.story_task"},
 		"project path":          {"projects/p.yaml", "name: p\npath: " + secret + "\n", "path"},
-		"project type":          {"projects/p.yaml", "name: [" + secret + "]\npath: /p\n", "line 1"},
+		"project type":          {"projects/p.yaml", "name: [" + secret + "]\npath: " + abs("/p") + "\n", "line 1"},
 		"model usage window":    {"profiles/x.yaml", "cli: custom\ncommand: x\nmodels:\n  a:\n    usage_windows: [" + secret + "]\n", "models.a.usage_windows.0"},
 		"usage threshold":       {"settings.yaml", "usage:\n  soft_percent: " + secret + "\n", "line 2"},
 		"usage window name":     {"settings.yaml", "usage:\n  windows:\n    " + secret + ": {}\n", "usage.windows"},
 		"usage script":          {"usage/x.lua", secret + "\u202e\n", "usage script"},
 		"skill set repository":  {"skillsets/x.yaml", "repository: ext::" + secret + "\n", "repository"},
-		"skill set ref":         {"skillsets/x.yaml", "repository: /r\nref: -" + secret + "\n", "ref"},
-		"skill set update":      {"skillsets/x.yaml", "repository: /r\nupdate: " + secret + "\n", "update"},
-		"skill set role":        {"skillsets/x.yaml", "repository: /r\ninstructions:\n  " + secret + ": x\n", "instructions"},
-		"skill set text":        {"skillsets/x.yaml", "repository: /r\ninstructions:\n  pm: \"" + secret + "\\u202e\"\n", "instructions.pm"},
+		"skill set ref":         {"skillsets/x.yaml", "repository: " + abs("/r") + "\nref: -" + secret + "\n", "ref"},
+		"skill set update":      {"skillsets/x.yaml", "repository: " + abs("/r") + "\nupdate: " + secret + "\n", "update"},
+		"skill set role":        {"skillsets/x.yaml", "repository: " + abs("/r") + "\ninstructions:\n  " + secret + ": x\n", "instructions"},
+		"skill set text":        {"skillsets/x.yaml", "repository: " + abs("/r") + "\ninstructions:\n  pm: \"" + secret + "\\u202e\"\n", "instructions.pm"},
 		"plugin source":         {"plugins/x.yaml", "source: fd::" + secret + "\n", "source"},
-		"plugin subpath":        {"plugins/x.yaml", "source: /p\nsubpath: ../" + secret + "\n", "subpath"},
-		"plugin config":         {"plugins/x.yaml", "source: /p\nconfig: " + secret + "\n", "line 2"},
+		"plugin subpath":        {"plugins/x.yaml", "source: " + abs("/p") + "\nsubpath: ../" + secret + "\n", "subpath"},
+		"plugin config":         {"plugins/x.yaml", "source: " + abs("/p") + "\nconfig: " + secret + "\n", "line 2"},
 	}
 	for name, c := range files {
 		t.Run(name, func(t *testing.T) {
@@ -493,7 +493,7 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 	s, _, _ := openTest(t)
 	g := Defaults()
 	g.ReviewDefaults.Task = secret
-	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: []string{secret + "/"}}}
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), Ignore: []string{secret + "/"}}}
 	writes := map[string]error{}
 	writes["general"] = s.SetGeneralIf("", g)
 	g = Defaults()
@@ -559,7 +559,7 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		pr.Models = map[string]Model{"a": {Env: map[string]string{name: "v"}}}
 		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		pr = fakeProfile("x")
-		pr.AccountDir = "/" + name
+		pr.AccountDir = abs("/" + name)
 		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 		wantCode(t, s.PutProfileIf("", fakeProfile(name)), api.CodeValidation)
 		wantCode(t, s.PutRoleIf("", Role{Name: "developer", Models: []string{"x/" + name}}), api.CodeValidation)
@@ -574,7 +574,7 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		k.Instructions = map[string]string{"pm": name}
 		wantCode(t, s.PutSkillSetIf("", k), api.CodeValidation)
 		k = superpowers()
-		k.Repository = "/" + name
+		k.Repository = abs("/" + name)
 		wantCode(t, s.PutSkillSetIf("", k), api.CodeValidation)
 		pl := pushover()
 		pl.Name = name
@@ -583,15 +583,15 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		pl.Subpath = name
 		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
 		pl = pushover()
-		pl.Source = "/" + name
+		pl.Source = abs("/" + name)
 		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
 		pr = fakeProfile("x")
 		pr.Models = map[string]Model{"a": {UsageWindows: []string{name}}}
 		wantCode(t, s.PutProfileIf("", pr), api.CodeValidation)
 
 		for _, g := range []func(*General){
-			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/" + name}} },
-			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: []string{name}}} },
+			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/" + name)}} },
+			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), Ignore: []string{name}}} },
 			func(g *General) { g.AgentEnv = map[string]string{name: "v"} },
 			func(g *General) { g.Usage.Windows = map[string]api.UsageThreshold{name: {}} },
 		} {

@@ -188,7 +188,7 @@ test.describe('settings pages share one document', () => {
     await saveButton(page).click()
     await expect(bar(page)).toContainText('Saved')
     expect(bodies).toHaveLength(1)
-    expect(Object.keys(bodies[0]!).sort()).toEqual(['health', 'images', 'limits', 'rescan_interval', 'stop', 'waiting'])
+    expect(Object.keys(bodies[0]!).sort()).toEqual(['export_check_interval', 'health', 'images', 'limits', 'rescan_interval', 'stop', 'waiting'])
     const text = readFileSync(settingsFile(omo), 'utf8')
     expect(text).toMatch(/keep_days_after_done: 12\b/)
     expect(text).toMatch(/open_tickets_as_page: true/)

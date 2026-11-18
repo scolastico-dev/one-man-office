@@ -26,6 +26,9 @@ type sourceRecord struct {
 // RecordSource notes in the checkout at path that it was fetched from
 // repository at ref.
 func RecordSource(path, repository, ref string) error {
+	// The rename replaces a file omo's readers open (fromSource).
+	checkouts.Lock()
+	defer checkouts.Unlock()
 	gitDir := filepath.Join(path, ".git")
 	if err := os.MkdirAll(gitDir, 0o700); err != nil {
 		return err
@@ -41,6 +44,8 @@ func RecordSource(path, repository, ref string) error {
 // fromSource reports whether the checkout at path was fetched from the
 // repository and ref k names now.
 func fromSource(path string, k api.SkillSet) bool {
+	checkouts.RLock()
+	defer checkouts.RUnlock()
 	data, err := homefile.Read(filepath.Join(path, ".git", sourceFile), maxSourceFile)
 	if err != nil {
 		return false

@@ -214,7 +214,7 @@ func TestExportTextWrittenPerProject(t *testing.T) {
 		}
 	}
 	h.steps(2)
-	if tk := h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported {
+	if tk := h.ticket(s); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge {
 		t.Fatalf("story is %s/%s", tk.Column, tk.Resolution)
 	}
 }
@@ -293,7 +293,7 @@ func TestExportTextFallsBackToOmosOwn(t *testing.T) {
 		t.Errorf("the comment does not say the check was skipped:\n%s", strings.Join(h.comments(s), "\n---\n"))
 	}
 	h.steps(2)
-	if tk := h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported {
+	if tk := h.ticket(s); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge {
 		t.Fatalf("story is %s/%s", tk.Column, tk.Resolution)
 	}
 }

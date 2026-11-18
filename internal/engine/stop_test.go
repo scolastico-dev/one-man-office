@@ -68,7 +68,7 @@ func (h *harness) checkAllStopped(reason string) {
 		h.t.Fatal(err)
 	}
 	for _, s := range all {
-		if s.EndReason != reason {
+		if s.EndReason != reason || s.EndKind != api.SessionEndShutdown {
 			h.t.Fatalf("a %s session ended with %q, want %q", s.Role, s.EndReason, reason)
 		}
 	}
@@ -222,8 +222,8 @@ func TestStopAllPausesAndKillsAllButCEO(t *testing.T) {
 		if a := h.agent(id); !a.isKilled() {
 			t.Fatal("an agent survived stop all")
 		}
-		if got := h.waitEnded(id); got.EndReason != "stopped by the user" {
-			t.Fatalf("ended with %q", got.EndReason)
+		if got := h.waitEnded(id); got.EndReason != "stopped by the user" || got.EndKind != api.SessionEndUser {
+			t.Fatalf("ended with %q, kind %q", got.EndReason, got.EndKind)
 		}
 	}
 	if h.agent(ceo.ID).isOver() || len(h.ceoSessions()) != 1 {

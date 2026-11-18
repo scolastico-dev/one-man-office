@@ -489,7 +489,7 @@ func TestBlockedMergeStaysInReviewWithRetry(t *testing.T) {
 		t.Fatalf("ticket is %s/%s failed %q, want review/merging failed merge", tk.Column, tk.ReviewStage, tk.FailedStep)
 	}
 	h.checkClaimEnded(n)
-	if !strings.Contains(tk.Attention, "a.txt") {
+	if !h.flagged(n, "a.txt") {
 		t.Fatalf("attention does not name the file: %q", tk.Attention)
 	}
 	if !strings.Contains(h.lastComment(n).Body, h.repo) {

@@ -553,6 +553,9 @@ func route(ev api.Event, w routeView) routing {
 			supervisor = api.RoleUser
 		}
 		ceo := w.sessionsOf(api.RoleCEO, ticketInfo{}, ev.ID)
+		if d.Ticket.ReviewStage == api.ReviewStageAwaitingMerge && d.Action == board.ActionExported && supervisor == api.RoleCEO {
+			add(ceo, fmt.Sprintf("%s#%d is exported, waiting for the merge: omo ai ticket show %d", linePrefix, n, n), 0)
+		}
 		if d.To == api.ColumnDone {
 			if d.Ticket.Story != nil && d.Ticket.Type == api.TypeTask {
 				s := int64(*d.Ticket.Story)

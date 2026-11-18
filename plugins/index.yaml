@@ -21,3 +21,7 @@ plugins:
     tag: official
     description: Tells every running agent to halt when you pause omo, and to continue where it stopped when you lift the pause.
     path: plugins/pause-notice
+  - name: vscode
+    tag: official
+    description: Open ticket worktrees and project repositories in a verified browser editor through omo's sign-in.
+    path: plugins/vscode

@@ -47,9 +47,10 @@ const gitEnv = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv, stdio: 'pipe' }).toString().trim()
 
 /** A bare repository in the test's home. */
-function bare(omo: Omo, name = 'origin.git'): string {
+function bare(omo: Omo, repo: string, name = 'origin.git'): string {
   const dir = join(omo.home, name)
   git(omo.home, 'init', '-q', '--bare', dir)
+  git(dir, 'fetch', '-q', repo, 'refs/heads/main:refs/heads/main')
   return dir
 }
 
@@ -123,8 +124,9 @@ async function exportFromPanel(page: Page, n: number) {
   await expect(dialog).toBeHidden()
 }
 
-test('Export… pushes the reviewed commit, says so, and the export job ends the ticket in Done with its pull request', async ({ page, omo, repo }) => {
-  const origin = bare(omo)
+test('Export… waits in Review with its pull request until Check now finds the remote merge', async ({ page, omo, repo }) => {
+  const origin = bare(omo, repo)
+  const initialMain = head(repo, 'main')
   git(repo, 'remote', 'add', 'origin', FORGE)
   await sendGitTo(omo, FORGE, origin)
   const t = await reviewed(omo, 'Export me')
@@ -144,10 +146,15 @@ test('Export… pushes the reviewed commit, says so, and the export job ends the
   expect(head(origin, branch)).toBe(commit)
   expect(branch).toMatch(/^omo\//)
 
-  // The export job reports its pull request: Done, with the link.
-  await expect.poll(async () => (await ticketOf(omo, n)).column, { timeout: 30_000 }).toBe('done')
-  const done = await ticketOf(omo, n)
-  expect(done.resolution).toBe('exported')
+  // Opening the pull request leaves the ticket open until the remote target contains the work.
+  await expect.poll(async () => (await ticketOf(omo, n)).review_stage, { timeout: 30_000 }).toBe('awaiting_merge')
+  const waiting = await ticketOf(omo, n)
+  expect(waiting.column).toBe('review')
+  expect(waiting.resolution).toBe('')
+  await expect(panel(page).locator('[data-ticket-caption]')).toHaveText('Exported, waiting for the merge')
+  await expect(panel(page).locator('[data-export-target]')).toContainText(FORGE)
+  await expect(panel(page).locator('[data-export-target]')).toContainText(branch)
+  await expect(panel(page).locator('[data-export-target]')).toContainText('main')
   const link = panel(page).locator('[data-pull-requests] a')
   await expect(link).toHaveText(`demo: https://example.invalid/you/app/pull/${n}`)
   await expect(link).toHaveAttribute('href', `https://example.invalid/you/app/pull/${n}`)
@@ -157,11 +164,18 @@ test('Export… pushes the reviewed commit, says so, and the export job ends the
   expect(sessions.find((s) => s.purpose === 'export')).toBeDefined()
   expect(await promptOf(omo, n)).toContain(`Work in your current folder, ${join(omo.home, 'omo', 'run', 'export', `${n}-${t.projects[0]!.project}`)}.`)
   // main did not move.
-  expect(head(repo, 'main')).toBe(git(repo, 'rev-parse', 'main'))
+  expect(head(repo, 'main')).toBe(initialMain)
+
+  // Publish the reviewed commit only to the isolated test remote's target branch.
+  git(origin, 'update-ref', 'refs/heads/main', commit)
+  await panel(page).getByRole('button', { name: 'Check now', exact: true }).click()
+  await expect.poll(async () => (await ticketOf(omo, n)).column, { timeout: 30_000 }).toBe('done')
+  expect((await ticketOf(omo, n)).resolution).toBe('exported')
+  await expect(panel(page).locator('[data-ticket-resolution]')).toHaveText('exported, merged')
 })
 
 test('a remote that cannot be reached leaves the ticket in Review with the reason and no credentials; approving again after the fix exports it', async ({ page, omo, repo }) => {
-  const origin = bare(omo)
+  const origin = bare(omo, repo)
   git(repo, 'remote', 'add', 'origin', WITH_SECRET)
   // Pushes go to a folder that does not exist: the remote cannot be reached.
   await sendGitTo(omo, WITH_SECRET, join(omo.home, 'missing.git'))
@@ -189,7 +203,7 @@ test('a remote that cannot be reached leaves the ticket in Review with the reaso
   await panel(page).locator('[data-action="export"]').click()
   const dialog = page.getByRole('dialog', { name: `Export #${n}?` })
   await dialog.getByRole('button', { name: 'Export', exact: true }).click()
-  await expect.poll(async () => (await ticketOf(omo, n)).column, { timeout: 30_000 }).toBe('done')
+  await expect.poll(async () => (await ticketOf(omo, n)).review_stage, { timeout: 30_000 }).toBe('awaiting_merge')
   expect(head(origin, branch)).toBe(head(repo, branch))
   await expect(panel(page).locator('[data-pull-requests] a')).toHaveText(`demo: https://example.invalid/you/app/pull/${n}`)
   await expect(panel(page)).not.toContainText(SECRET)
@@ -202,7 +216,7 @@ test.describe('with a remote that is a folder on this machine', () => {
   test.use({ omoOptions: { agents: { export: script('ready', `save-prompt|${PROMPT_SCRIPT_PATH}`, `done-failed|${LOCAL}`, 'wait|10m') } } })
 
   test('the push works, the job is told there is no pull request to open, and its failure leaves the ticket in Review', async ({ page, omo, repo }) => {
-    const origin = bare(omo)
+    const origin = bare(omo, repo)
     git(repo, 'remote', 'add', 'origin', origin)
     const t = await reviewed(omo, 'Export to a folder')
     const n = t.number
@@ -255,7 +269,7 @@ test('a project without a remote cannot be exported: the ticket stays in Review 
   await panel(page).locator('[data-action="export"]').click()
   const dialog = page.getByRole('dialog', { name: `Export #${n}?` })
   await expect(dialog.locator('[data-approve-effect]')).toHaveText(
-    'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket is done once the pull request exists.',
+    'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket waits in Review until the exported work is merged into the remote target branch.',
   )
   await dialog.getByRole('button', { name: 'Export', exact: true }).click()
 
@@ -270,7 +284,7 @@ test.describe('a developer who hands in without a commit', () => {
   test.use({ omoOptions: { agents: { developer: script('ready', 'done|nothing to change') } } })
 
   test('the export leaves the project out and the ticket is done with nothing to export', async ({ page, omo, repo }) => {
-    const origin = bare(omo)
+    const origin = bare(omo, repo)
     git(repo, 'remote', 'add', 'origin', FORGE)
     await sendGitTo(omo, FORGE, origin)
     const t = await reviewed(omo, 'Nothing to export')

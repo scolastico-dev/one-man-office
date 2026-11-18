@@ -14,7 +14,7 @@ import (
 // The batch handles each project as the single routes would and answers
 // per id; one refusal stops nothing.
 func TestProjectBatch(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "found"))
 	l := scanHome(t, base)

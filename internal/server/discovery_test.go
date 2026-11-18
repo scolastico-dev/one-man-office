@@ -23,6 +23,20 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
+// scanBase is a temporary folder under the name a scan reports for it. A
+// scan resolves a root's links before it walks it, and what it finds lies
+// below the resolved name: on Windows the temporary folder has a short name
+// (RUNNER~1), on macOS it lies behind a link. Tests that compare a found
+// path with a path they built start from the resolved name.
+func scanBase(t *testing.T) string {
+	t.Helper()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
 // scanHome isolates OMO_HOME in a folder of its own below base.
 func scanHome(t *testing.T, base string) globalhome.Layout {
 	t.Helper()
@@ -99,7 +113,7 @@ func projectByPath(s *Server, path string) (settings.Project, bool) {
 }
 
 func TestScanAtStart(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "a", "one"))
 	gitInit(t, filepath.Join(root, "b", "two"))
@@ -136,7 +150,7 @@ func TestScanAtStart(t *testing.T) {
 }
 
 func TestScanNeverEntersOmoHome(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	l := scanHome(t, base)
 	// The home and its worktrees lie below the root.
 	gitInit(t, filepath.Join(l.Worktrees, "demo", "1"))
@@ -172,7 +186,7 @@ func TestNoAutomaticScanWithoutRoots(t *testing.T) {
 }
 
 func TestRescanRouteAddsNewRepos(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "first"))
 	l := scanHome(t, base)
@@ -206,7 +220,7 @@ func TestRescanRouteAddsNewRepos(t *testing.T) {
 }
 
 func TestRescanRouteKeepsRenames(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "a", "one"))
 	gitInit(t, filepath.Join(root, "b", "two"))
@@ -249,7 +263,7 @@ func TestRescanRouteKeepsRenames(t *testing.T) {
 }
 
 func TestScanOnRootsChange(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "repo"))
 	s := openScanServer(t, scanHome(t, base), nil)
@@ -308,7 +322,7 @@ func (b *blockingReadDir) read(dir string) ([]os.DirEntry, error) {
 }
 
 func TestScanOneAtATime(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "repo"))
 	l := scanHome(t, base)
@@ -356,7 +370,7 @@ func TestScanOneAtATime(t *testing.T) {
 }
 
 func TestScanTimer(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "repo"))
 	l := scanHome(t, base)
@@ -376,7 +390,7 @@ func TestScanTimer(t *testing.T) {
 }
 
 func TestScanReservesTicketProjectIDs(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "demo"))
 	l := scanHome(t, base)
@@ -458,7 +472,7 @@ func scannerGoroutines() int {
 }
 
 func TestCloseStopsScanner(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	root := filepath.Join(base, "work")
 	gitInit(t, filepath.Join(root, "repo"))
 	l := scanHome(t, base)
@@ -503,7 +517,7 @@ func TestCloseStopsScanner(t *testing.T) {
 // answer: the scan ends at its overall limit, the first root is cut and
 // the second, not reached, is reported cut too, without being read.
 func TestScanStopsAtItsOverallLimit(t *testing.T) {
-	base := t.TempDir()
+	base := scanBase(t)
 	slow, later := filepath.Join(base, "slow"), filepath.Join(base, "later")
 	gitInit(t, filepath.Join(later, "repo"))
 	if err := os.MkdirAll(slow, 0o700); err != nil {

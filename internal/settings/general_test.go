@@ -37,6 +37,49 @@ func TestOpenWritesDefaultSettings(t *testing.T) {
 	}
 }
 
+func TestExportCheckIntervalDefaultsAndRoundTrip(t *testing.T) {
+	s, home, _ := openTest(t)
+	if got := time.Duration(s.General().ExportCheckInterval); got != 10*time.Minute {
+		t.Fatalf("export_check_interval = %s, want 10m", got)
+	}
+	for _, value := range []Duration{0, Duration(time.Minute), Duration(25 * time.Minute)} {
+		g := s.General()
+		g.ExportCheckInterval = value
+		if err := s.SetGeneralIf("", g); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := Open(home, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := reopened.General().ExportCheckInterval; got != value {
+			t.Fatalf("reopened interval = %v, want %v", got, value)
+		}
+		data, err := json.Marshal(api.General(reopened.General()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]json.RawMessage
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatal(err)
+		}
+		var got Duration
+		if err := json.Unmarshal(wire["export_check_interval"], &got); err != nil || got != value {
+			t.Fatalf("JSON interval = %s: %v, want %v", wire["export_check_interval"], err, value)
+		}
+	}
+}
+
+func TestExportCheckIntervalRejectsNegativeAndSubMinute(t *testing.T) {
+	for _, value := range []Duration{-1, Duration(59 * time.Second)} {
+		g := Defaults()
+		g.ExportCheckInterval = value
+		if err := g.Validate(); err == nil || !strings.Contains(err.Error(), "export_check_interval") {
+			t.Fatalf("interval %v: %v, want export_check_interval error", value, err)
+		}
+	}
+}
+
 func TestMalformedHandEditKeepsLastValidAndReportsError(t *testing.T) {
 	s, home, log := openTest(t)
 	g := s.General()
@@ -116,7 +159,7 @@ func TestSetGeneralValidates(t *testing.T) {
 		"handoff_timeout":             func(g *General) { g.Stop.HandoffTimeout = -1 },
 		"rescan_interval":             func(g *General) { g.RescanInterval = 0 },
 		"max_depth": func(g *General) {
-			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/ws", MaxDepth: 17}}
+			g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 17}}
 		},
 		"workspace_roots.0.path": func(g *General) {
 			g.WorkspaceRoots = []WorkspaceRoot{{Path: "relative/ws", MaxDepth: 4}}
@@ -210,9 +253,9 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 		field string
 		roots []WorkspaceRoot
 	}{
-		{"workspace_roots.1.path", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4}, {Path: "/ws/./x/..", MaxDepth: 2}}},
-		{"workspace_roots.2.path", []WorkspaceRoot{{Path: "~/ws", MaxDepth: 4}, {Path: "/other", MaxDepth: 4}, {Path: filepath.Join(homeDir, "ws") + "/", MaxDepth: 4}}},
-		{"workspace_roots.0.ignore.2", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4, Ignore: []string{"a", "b", "a"}}}},
+		{"workspace_roots.1.path", []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 4}, {Path: abs("/ws/./x/.."), MaxDepth: 2}}},
+		{"workspace_roots.2.path", []WorkspaceRoot{{Path: "~/ws", MaxDepth: 4}, {Path: abs("/other"), MaxDepth: 4}, {Path: filepath.Join(homeDir, "ws") + "/", MaxDepth: 4}}},
+		{"workspace_roots.0.ignore.2", []WorkspaceRoot{{Path: abs("/ws"), MaxDepth: 4, Ignore: []string{"a", "b", "a"}}}},
 	} {
 		g := Defaults()
 		g.WorkspaceRoots = c.roots
@@ -227,13 +270,13 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	}
 	// The same pattern in two roots is fine.
 	g := Defaults()
-	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", MaxDepth: 4, Ignore: []string{"x"}}, {Path: "/b", MaxDepth: 4, Ignore: []string{"x"}}}
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: abs("/a"), MaxDepth: 4, Ignore: []string{"x"}}, {Path: abs("/b"), MaxDepth: 4, Ignore: []string{"x"}}}
 	if err := s.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
 
 	// A hand-written file with repeats loads as it is.
-	writeFile(t, filepath.Join(home, "settings.yaml"), "workspace_roots:\n  - path: /ws\n    ignore: [a, a]\n  - path: /ws/\n")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "workspace_roots:\n  - path: "+abs("/ws")+"\n    ignore: [a, a]\n  - path: "+abs("/ws/")+"\n")
 	s.Reload()
 	if errs := s.Errors(); len(errs) != 0 {
 		t.Fatalf("errors = %+v", errs)
@@ -250,7 +293,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	}
 	// A new repeat is refused.
 	_, err = s.UpdateGeneral("", func(g *General) error {
-		g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: "/c", MaxDepth: 4}, WorkspaceRoot{Path: "/c", MaxDepth: 4})
+		g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: abs("/c"), MaxDepth: 4}, WorkspaceRoot{Path: abs("/c"), MaxDepth: 4})
 		return nil
 	})
 	if fieldOf(err) != "workspace_roots.3.path" {

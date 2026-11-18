@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -82,10 +83,13 @@ type pluginFeature struct {
 	// pending holds the newest info of every plugin whose state changed
 	// and that is not recorded yet, in the order they changed first;
 	// changed wakes the writer.
-	pendingMu sync.Mutex
-	pending   map[string]api.PluginInfo
-	order     []string
-	changed   chan struct{}
+	pendingMu         sync.Mutex
+	pending           map[string]api.PluginInfo
+	taskPending       map[string]bool
+	taskOutputPending map[string]bool
+	taskOutputAt      map[string]time.Time
+	order             []string
+	changed           chan struct{}
 
 	// The plugin list omo provides, as last fetched: the list or the
 	// failure and when. catMu is held during a fetch, so one fetch runs at a
@@ -130,6 +134,8 @@ func (s *Server) registerPlugins(mux *http.ServeMux) {
 		{"POST /api/plugins/{name}/update", s.updatePlugin, userOnly},
 		{"DELETE /api/plugins/{name}", s.deletePlugin, userOnly},
 		{"GET /api/plugins/{name}/log", s.pluginLog, userOnly},
+		{"GET /api/plugins/{name}/tasks", s.pluginTasks, userOnly},
+		{"POST /api/plugins/{name}/tasks/{task}/stop", s.stopPluginTask, userOnly},
 		{"POST /api/plugins/{name}/actions/{action}", s.runPluginAction, userOnly},
 	})
 }
@@ -139,28 +145,39 @@ func (s *Server) registerPlugins(mux *http.ServeMux) {
 // plugins of the settings; nothing is fetched or installed here: a
 // settings file without an installed tree shows as not installed until
 // the user installs it (the update route).
-func (s *Server) startPlugins(ctx context.Context) {
+func (s *Server) startPlugins(ctx context.Context) error {
 	f := &s.plugins
+	if err := s.clearStalePluginForwards(); err != nil {
+		return fmt.Errorf("clear stale plugin forwards: %w", err)
+	}
 	f.o = pluginmanager.Options{Root: s.opts.Layout.Plugins, Git: s.git}
 	f.reload = make(chan struct{}, 1)
 	f.changed = make(chan struct{}, 1)
 	f.busy = map[string]bool{}
 	f.pending = map[string]api.PluginInfo{}
 	f.m = plugins.New(plugins.Options{
-		Root:    s.opts.Layout.Plugins,
-		DB:      s.db,
-		Socket:  s.socketEndpoint,
-		Log:     s.log,
-		Changed: s.pluginChanged,
-		Agents:  pluginAgents{s},
+		Root:              s.opts.Layout.Plugins,
+		DB:                s.db,
+		Socket:            s.socketEndpoint,
+		Log:               s.log,
+		Changed:           s.pluginChanged,
+		Agents:            pluginAgents{s},
+		Forwards:          s,
+		Unloaded:          s.pluginUnloaded,
+		TaskExited:        s.pluginTaskExited,
+		TaskTicketLive:    s.pluginTaskTicketLive,
+		TasksChanged:      s.pluginTasksChanged,
+		TaskOutputChanged: s.pluginTaskOutputChanged,
 	})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)
 	f.cursor.Store(after)
 	s.background(f.m.Run)
 	s.background(s.writePluginEvents)
+	s.background(s.writePluginTaskEvents)
 	s.background(s.runPluginReloads)
 	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att) })
+	return nil
 }
 
 // pluginAgents is the plugins' view of the agents the engine runs
@@ -266,7 +283,8 @@ func (s *Server) runPluginReloads(ctx context.Context) {
 
 // reloadPlugins loads the runtime with the current plugin settings. Without
 // force it does nothing when no plugin's settings changed since the last
-// load: a load restarts every plugin and cancels its running hooks.
+// load. Manager.Load reconciles runtimes, preserving unchanged plugins and
+// retaining tasks/startup state across configuration refreshes.
 func (s *Server) reloadPlugins(force bool) {
 	f := &s.plugins
 	f.mu.Lock()
@@ -418,7 +436,7 @@ func (s *Server) pluginInfo(name string) api.PluginInfo {
 			return s.withCommit(info)
 		}
 	}
-	return api.PluginInfo{Name: name, State: plugins.StateNotInstalled, Hooks: []api.PluginHook{}}
+	return api.PluginInfo{Name: name, State: plugins.StateNotInstalled, Hooks: []api.PluginHook{}, Buttons: []api.PluginButton{}, ConfigFields: []api.PluginConfigField{}}
 }
 
 // withCommit fills the commit of an installed plugin from its install
@@ -894,7 +912,7 @@ func (s *Server) knownPlugin(name string) bool {
 // (read as the user; the hook gets the same ticket payload as events
 // carry). One action per plugin runs at a time (409); the run is bounded
 // by 5 minutes and goes on when the client leaves. The answer is the
-// hook's text as plain text, cleaned and cut by the runtime.
+// hook's message (cleaned and cut) and validated navigation, if supplied.
 func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 	var req api.PluginRun
 	if err := decodeSettings(w, r, &req); err != nil {
@@ -908,32 +926,49 @@ func (s *Server) runPluginAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, e)
 		return
 	}
-	var ticket map[string]any
+	var ticket, project map[string]any
+	var ticketProjects []api.TicketProject
 	if req.Ticket > 0 {
 		t, err := s.board.Get(r.Context(), board.User, int64(req.Ticket))
 		if err != nil {
 			writeError(w, r, err)
 			return
 		}
-		ticket = plugins.TicketPayload(t.TicketSummary, s.Address())
+		ticket = s.pluginTicketPayload(r.Context(), t.TicketSummary)
+		ticketProjects = t.Projects
+	}
+	if req.Project != "" {
+		var err error
+		project, err = s.pluginProjectContext(r.Context(), req.Ticket, req.Project, ticketProjects)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
 	}
 	type result struct {
-		msg string
-		err error
+		answer api.PluginRunResult
+		err    error
 	}
 	done := make(chan result, 1)
 	if !s.background(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, pluginActionBound)
 		defer cancel()
-		msg, err := s.plugins.m.Trigger(ctx, name, action, ticket)
-		done <- result{msg, err}
+		out, err := s.plugins.m.TriggerAction(ctx, name, action, ticket, project)
+		// Never let the board's current bearer credential leave in any part of a
+		// hook destination, even under an innocuous query key or encoded in a path.
+		decoded, _ := url.QueryUnescape(out.URL)
+		if err == nil && s.token != "" && (strings.Contains(out.URL, s.token) || strings.Contains(decoded, s.token)) {
+			out = api.PluginRunResult{}
+			err = errors.New("the action URL contains an omo login token")
+		}
+		done <- result{out, err}
 	}) {
 		writeError(w, r, api.Errorf(api.CodeUnavailable, "omo is stopping"))
 		return
 	}
 	select {
 	case res := <-done:
-		reply(w, r, http.StatusOK, api.PluginRunResult{Message: res.msg}, pluginActionError(name, action, res.err))
+		reply(w, r, http.StatusOK, res.answer, pluginActionError(name, action, res.err))
 	case <-r.Context().Done():
 	}
 }
@@ -1058,7 +1093,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string) {
 		if err != nil {
 			return nil
 		}
-		return plugins.TicketPayload(t.TicketSummary, s.Address())
+		return s.pluginTicketPayload(ctx, t.TicketSummary)
 	}
 	tick := time.NewTicker(pluginFollowInterval)
 	defer tick.Stop()
@@ -1089,6 +1124,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string) {
 				break
 			}
 			for _, e := range evs {
+				s.stopTasksForEvent(toAPIEvent(e))
 				for _, pe := range pluginEvents(toAPIEvent(e), att, ticket, s.Address()) {
 					s.plugins.m.Dispatch(pe)
 				}
@@ -1118,7 +1154,7 @@ func (s *Server) dispatchPluginEvents(ctx context.Context, att map[int]string) {
 //     seen; an empty text or a Done ticket forgets it)
 //
 // Payloads come from the plugins package's builders: no session id,
-// terminal id, folder or environment value; text written by people or
+// terminal id or inherited environment value; text written by people or
 // agents is only ever a value in them. ticket reads a ticket's payload by
 // number (nil when it cannot be read).
 func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]any, address string) []plugins.Event {
@@ -1130,6 +1166,41 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 	add := func(name string, data map[string]any) {
 		out = append(out, plugins.Event{Name: name, At: at, Data: data})
 	}
+	// Events preserve their historical metadata. Resolve current folders by ID
+	// and align to that snapshot, rather than copying a later project's order.
+	ticketPayload := func(t api.TicketSummary) map[string]any {
+		out := plugins.TicketPayload(t, address)
+		available := map[string]map[string]any{}
+		if current := ticket(t.Number); current != nil {
+			if folders, ok := current["folders"].([]any); ok {
+				for _, value := range folders {
+					if f, ok := value.(map[string]any); ok {
+						if id, ok := f["project"].(string); ok {
+							available[id] = f
+						}
+					}
+				}
+			}
+		}
+		folders := make([]any, 0, len(t.Projects))
+		for _, project := range t.Projects {
+			if f, ok := available[project.Project]; ok {
+				folders = append(folders, f)
+			} else {
+				folders = append(folders, map[string]any{"project": project.Project, "kind": "worktree", "path": "", "available": false, "reason": "folder_unavailable"})
+			}
+		}
+		if len(t.Projects) == 0 && t.Type == api.TypeTask {
+			if f, ok := available[""]; ok && f["kind"] == "working_directory" {
+				folders = append(folders, f)
+			} else {
+				folders = append(folders, map[string]any{"project": "", "kind": "working_directory", "path": "", "available": false, "reason": "folder_unavailable"})
+			}
+		}
+		out["folders"] = folders
+		return out
+	}
+
 	attention := func(t api.TicketSummary, payload map[string]any) {
 		n := t.Number
 		if t.Attention == "" || t.Column == api.ColumnDone {
@@ -1157,7 +1228,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		p := plugins.TicketPayload(d.Ticket, address)
+		p := ticketPayload(d.Ticket)
 		add(plugins.EventTicketCreated, map[string]any{"ticket": p})
 		attention(d.Ticket, p)
 	case api.KindTicketMoved:
@@ -1165,7 +1236,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		p := plugins.TicketPayload(d.Ticket, address)
+		p := ticketPayload(d.Ticket)
 		if d.From != d.To {
 			add(plugins.EventTicketMoved, map[string]any{"ticket": p, "from": string(d.From), "to": string(d.To), "action": d.Action})
 		}
@@ -1175,7 +1246,8 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
-		attention(d.Ticket, plugins.TicketPayload(d.Ticket, address))
+		p := ticketPayload(d.Ticket)
+		attention(d.Ticket, p)
 	case api.KindCommentCreated:
 		var d api.CommentCreatedData
 		if json.Unmarshal(ev.Data, &d) != nil {
@@ -1201,7 +1273,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		}
 		add(plugins.EventAgentExited, map[string]any{
 			"ticket": ticketOf(d.Agent.Ticket), "agent": plugins.AgentPayload(d.Agent),
-			"reason": plugins.ExitReason(d.Agent.EndReason),
+			"reason": plugins.ExitReason(d.Agent.EndKind),
 		})
 	case api.KindServerPaused:
 		var d api.ServerPausedData

@@ -72,6 +72,11 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 			err = b.withdraw(tx, p, a, t, req.Before)
 		case from == api.ColumnInProgress && (to == api.ColumnPlanning || to == api.ColumnReady):
 			err = b.stop(tx, a, t, to, req.Before)
+		case from == api.ColumnReview && to == api.ColumnDone && t.ReviewStage == api.ReviewStageAwaitingMerge:
+			if a.Role != api.RoleUser {
+				return api.Errorf(api.CodeForbidden, "only the user closes an export by hand")
+			}
+			err = b.markMerged(tx, a, t)
 		case from == api.ColumnReview && to == api.ColumnDone:
 			err = b.approveReview(tx, p, a, t, false, false)
 		case from == api.ColumnReview && to == api.ColumnInProgress:
@@ -407,7 +412,7 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 // step and the reason a start is blocked, which all belonged to the old
 // state, and ends omo's claim: the engine moves a claimed ticket itself, and
 // every other move is refused while the claim lasts. Back in In Progress the
-// pull requests of an earlier export attempt are forgotten: the work changes,
+// pull requests and watches of an earlier export attempt are forgotten: the work changes,
 // so the next export pushes every project again. What a project's export
 // left out or failed with is forgotten with any move except the one that
 // closes the ticket as exported. Done sets the resolution
@@ -426,12 +431,15 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 	}
 	if _, err := tx.Exec(`UPDATE tickets SET col = ?, rank = ?, resolution = ?, closed_at = ?,
 		review_stage = CASE WHEN ? = 'review' THEN review_stage ELSE '' END,
-		attention = '', failed_step = '', start_blocked = '', busy = 0,
+		attention = '', attention_owner = '', failed_step = '', start_blocked = '', busy = 0,
 		updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
 		return err
 	}
 	if col == api.ColumnInProgress {
-		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = '' WHERE ticket_id = ? AND export_url <> ''`, n); err != nil {
+		if _, err := tx.Exec(`UPDATE tickets SET export_url = '', export_merged = 0 WHERE id = ?`, n); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = '', export_remote = '', export_branch = '', export_base = '', export_commit = '', export_target_commit = '' WHERE ticket_id = ?`, n); err != nil {
 			return err
 		}
 	}
@@ -506,7 +514,8 @@ func (b *Board) setStage(tx *sql.Tx, n int64, stage api.ReviewStage, attention s
 		}
 	}
 	_, err := tx.Exec(`UPDATE tickets SET review_stage = ?,
-		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END, updated_at = ? WHERE id = ?`,
+		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END,
+		attention_owner = CASE WHEN failed_step = '' THEN '' ELSE attention_owner END, updated_at = ? WHERE id = ?`,
 		stage, attention, b.stamp(), n)
 	return err
 }

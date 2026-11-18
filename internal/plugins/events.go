@@ -3,6 +3,8 @@ package plugins
 import (
 	"encoding/json"
 	"net/url"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +26,13 @@ const (
 	EventResumed        = "omo_resumed"
 	EventTimer          = "timer"
 	EventManual         = "manual"
+	EventOmoStarted     = "omo_started"
 )
 
 // Events lists every event a hook can name.
 var Events = []string{
 	EventTicketCreated, EventTicketMoved, EventCommentWritten, EventQuestionAsked,
-	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual,
+	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual, EventOmoStarted,
 }
 
 // The reasons of agent_exited.
@@ -70,7 +73,7 @@ func (e Event) wire() map[string]any {
 	if data == nil {
 		data = map[string]any{}
 	}
-	return map[string]any{"event": e.Name, "at": e.At.UTC().Format(time.RFC3339), "data": data}
+	return map[string]any{"event": e.Name, "at": e.At.UTC().Format(time.RFC3339), "data": data, "host": HostPayload()}
 }
 
 // MarshalJSON writes the event as plugins see it.
@@ -143,30 +146,20 @@ func AgentPayload(a api.AgentSession) map[string]any {
 	}
 }
 
-// ExitReason maps the end reason the board keeps for a session to the fixed
-// reason of agent_exited: "omo stopped" when omo stopped or restarted,
-// "usage" for a stop at a usage limit, "crashed" for an agent that ended by
-// itself without finishing or could not start, "finished" for one that
-// finished its work, else "stopped". The board's text never reaches a
-// plugin.
-func ExitReason(endReason string) string {
-	r := strings.ToLower(strings.TrimSpace(endReason))
-	switch {
-	case strings.HasPrefix(r, "omo stopped"), strings.HasPrefix(r, "omo restarted"):
+// ExitReason maps the session's structured outcome to the fixed plugin reason.
+func ExitReason(kind api.SessionEndKind) string {
+	switch kind {
+	case api.SessionEndShutdown:
 		return ExitOmo
-	case strings.Contains(r, "usage"):
+	case api.SessionEndUsage:
 		return ExitUsage
-	case strings.HasPrefix(r, "exited unexpectedly"), strings.HasPrefix(r, "could not start"),
-		strings.HasPrefix(r, "did not run"), strings.Contains(r, "crash"):
+	case api.SessionEndCrashed:
 		return ExitCrashed
-	case r == "", r == "done", r == "finished", r == "merged", strings.HasPrefix(r, "handed in"),
-		strings.HasSuffix(r, " is done"), strings.HasSuffix(r, " was merged"), strings.HasSuffix(r, " was exported"),
-		strings.HasPrefix(r, "a new review round of "):
-		// The ticket's work is over, or a reviewer's round was followed by
-		// the next one: the agent finished.
+	case api.SessionEndFinished:
 		return ExitFinished
+	default:
+		return ExitStopped
 	}
-	return ExitStopped
 }
 
 // cutText cuts s to at most n bytes at a character boundary. Invalid UTF-8
@@ -183,4 +176,9 @@ func cutText(s string, n int) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// HostPayload exposes capabilities without inheriting process/session identity.
+func HostPayload() map[string]any {
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "path_separator": string(os.PathSeparator), "task_process_trees": true}
 }

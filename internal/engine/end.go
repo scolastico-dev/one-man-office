@@ -6,13 +6,18 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
+	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
 // end ends a session: when the engine holds its agent, the agent is marked
 // as ended on purpose with reason, killed (with every process it started),
 // and end waits until the watcher has ended the session; otherwise the
 // session is ended at once. It never takes longer than about endTimeout.
-func (e *Engine) end(ctx context.Context, id, reason string) {
+func (e *Engine) end(ctx context.Context, id, reason string, kinds ...api.SessionEndKind) {
+	kind := api.SessionEndStopped
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
 	// The agent is read under the same lock as ending is set: an agent
 	// whose start is still in flight is killed by that start once it sees
 	// ending, one already started is killed here.
@@ -21,13 +26,13 @@ func (e *Engine) end(ctx context.Context, id, reason string) {
 	var ag agents.Agent
 	if ok {
 		if en.ending == "" {
-			en.ending = reason
+			en.ending, en.endKind = reason, kind
 		}
 		ag = en.agent
 	}
 	e.mu.Unlock()
 	if !ok {
-		if err := e.b.EndSession(ctx, id, reason); err != nil {
+		if err := e.b.EndSession(ctx, id, reason, kind); err != nil {
 			e.log.Printf("engine: end a session: %s", scrub(err, id))
 		}
 		return
@@ -45,7 +50,7 @@ func (e *Engine) end(ctx context.Context, id, reason string) {
 		// The watcher still waits for the terminal; the session is over
 		// for the board either way.
 		e.log.Printf("engine: %s on #%d did not end in time", en.sess.Name, en.sess.Ticket)
-		if err := e.b.EndSession(ctx, id, reason); err != nil {
+		if err := e.b.EndSession(ctx, id, reason, kind); err != nil {
 			e.log.Printf("engine: end a session: %s", scrub(err, id))
 		}
 	}
@@ -70,9 +75,10 @@ func (e *Engine) watch(en *entry) {
 	timer.Stop()
 
 	e.mu.Lock()
-	reason, crash := en.ending, en.crash
+	reason, crash, kind := en.ending, en.crash, en.endKind
 	e.mu.Unlock()
 	if reason == "" {
+		kind = api.SessionEndCrashed
 		what := crash
 		reason = crash
 		if crash == "" {
@@ -82,7 +88,7 @@ func (e *Engine) watch(en *entry) {
 		}
 		e.recordFailure(ctx, en, what)
 	}
-	if err := e.b.EndSession(ctx, en.sess.ID, reason); err != nil {
+	if err := e.b.EndSession(ctx, en.sess.ID, reason, kind); err != nil {
 		e.log.Printf("engine: end the session of %s on #%d: %s", en.sess.Name, en.sess.Ticket, scrub(err, en.sess.ID))
 	}
 	e.mu.Lock()

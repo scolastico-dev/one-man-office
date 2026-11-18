@@ -381,7 +381,7 @@ func (s *seeder) record(ctx context.Context, tk api.Ticket) error {
 
 // finish walks a ticket in Review to Done the way its review settings ask.
 func (s *seeder) finish(ctx context.Context, n int64, projects []string) error {
-	for range 4 {
+	for range 5 {
 		tk, err := s.b.Get(ctx, board.User, n)
 		if err != nil {
 			return err
@@ -426,6 +426,11 @@ func (s *seeder) finish(ctx context.Context, n int64, projects []string) error {
 			}
 			if err := s.b.CompleteMerge(ctx, n); err != nil {
 				return fmt.Errorf("complete merge: %w", err)
+			}
+		case api.ReviewStageAwaitingMerge:
+			// A scenario asking for Done explicitly confirms the remote merge.
+			if _, err := s.b.MarkMerged(ctx, board.User, n); err != nil {
+				return fmt.Errorf("mark exported merge: %w", err)
 			}
 		default:
 			return fmt.Errorf("unexpected review stage %q", tk.ReviewStage)

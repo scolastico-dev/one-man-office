@@ -47,10 +47,11 @@ func Defaults() General {
 			SilentAfter:             Duration(15 * time.Minute),
 			QuestionUnansweredAfter: Duration(30 * time.Minute),
 		},
-		Images:         api.ImageSettings{KeepDaysAfterDone: DefaultImageKeepDays},
-		Stop:           api.StopSettings{HandoffTimeout: Duration(2 * time.Minute)},
-		WorkspaceRoots: []WorkspaceRoot{},
-		RescanInterval: Duration(10 * time.Minute),
+		Images:              api.ImageSettings{KeepDaysAfterDone: DefaultImageKeepDays},
+		Stop:                api.StopSettings{HandoffTimeout: Duration(2 * time.Minute)},
+		WorkspaceRoots:      []WorkspaceRoot{},
+		RescanInterval:      Duration(10 * time.Minute),
+		ExportCheckInterval: Duration(10 * time.Minute),
 		AgentEnv: map[string]string{
 			"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
 			"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
@@ -156,6 +157,9 @@ func (g General) Validate() error {
 		if v := time.Duration(d.v); v < d.min || v > d.max {
 			return fieldErr(d.key, "%s must be between %s and %s", d.key, durationText(d.min), durationText(d.max))
 		}
+	}
+	if v := time.Duration(g.ExportCheckInterval); v != 0 && v < time.Minute {
+		return fieldErr("export_check_interval", "export_check_interval must be 0 (disabled) or at least 1m")
 	}
 	if len(g.WorkspaceRoots) > maxWorkspaceRoots {
 		return fieldErr("workspace_roots", "workspace_roots may hold at most %d folders", maxWorkspaceRoots)

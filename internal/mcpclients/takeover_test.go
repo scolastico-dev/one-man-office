@@ -21,6 +21,25 @@ var fixtureSecrets = []string{
 	"codex-docs-secret-d0c5", "codex-legacy-secret-0046", "agy-boards-secret-b0a7", "agy-maps-secret-3c3c",
 }
 
+func TestProjectStayDoesNotDependOnReason(t *testing.T) {
+	if isProjectStay(api.MCPClientEntry{Reason: "it belongs to the project is just a diagnostic"}) {
+		t.Fatal("a global entry was treated as project-scoped because of its message")
+	}
+	f := newFakes(t)
+	targets := fixtureTargets(t, f)
+	for _, e := range f.clients.Inspect(targets[0]).Entries {
+		if !isProjectStay(e) {
+			continue
+		}
+		e.Reason = "Different words for the same project entry"
+		if !isProjectStay(e) {
+			t.Fatal("project scope changed with reason wording")
+		}
+		return
+	}
+	t.Fatal("fixture has no project entry")
+}
+
 // fixtureTargets puts every fixture in place: Claude's and Codex's default
 // files, agy's file and an old Codex file in an account folder.
 func fixtureTargets(t *testing.T, f *fakes) []Target {

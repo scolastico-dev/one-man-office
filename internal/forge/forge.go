@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -53,6 +55,14 @@ var (
 // maxHost is the longest host name.
 const maxHost = 253
 
+// localFolder reports whether raw is an absolute folder path in the
+// platform's own form where that is not a leading slash: on Windows a path
+// with a drive (C:\repos\app.git, C:/repos/app.git) or a share. Elsewhere
+// "c:/repos" is an scp-like address of the host c, as git reads it.
+func localFolder(raw string) bool {
+	return runtime.GOOS == "windows" && filepath.IsAbs(raw)
+}
+
 // Parse reads a remote address: https://, ssh:// or scp-like
 // [user@]host:path, with or without .git; an absolute local path gives the
 // zero Remote. Credentials are dropped. The host is GitHub for github.com,
@@ -61,11 +71,14 @@ const maxHost = 253
 // repository path that does not match ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$
 // or holds "." or ".." segments) is ErrNotARemote.
 func Parse(raw string) (Remote, error) {
-	if raw == "" || !utf8.ValidString(raw) || strings.ContainsFunc(raw, textsafe.IsHidden) || strings.ContainsAny(raw, " \\") {
+	if raw == "" || !utf8.ValidString(raw) || strings.ContainsFunc(raw, textsafe.IsHidden) || strings.Contains(raw, " ") {
 		return Remote{}, fmt.Errorf("%w: it is empty or holds spaces or hidden characters", ErrNotARemote)
 	}
-	if strings.HasPrefix(raw, "/") {
+	if strings.HasPrefix(raw, "/") || localFolder(raw) {
 		return Remote{}, nil
+	}
+	if strings.Contains(raw, "\\") {
+		return Remote{}, fmt.Errorf("%w: it is empty or holds spaces or hidden characters", ErrNotARemote)
 	}
 	var host, port, path string
 	if strings.Contains(raw, "://") {

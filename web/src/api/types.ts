@@ -10,7 +10,7 @@ export type Role = 'user' | 'ceo' | 'pm' | 'developer' | 'reviewer' | 'system'
 export type Review = 'skipped' | 'agent' | 'human' | 'agent_then_human'
 export type WhenApproved = 'merge' | 'export'
 export type TaskRelease = 'agents' | 'user'
-export type ReviewStage = '' | 'agent' | 'human' | 'merging' | 'exporting'
+export type ReviewStage = '' | 'agent' | 'human' | 'merging' | 'exporting' | 'awaiting_merge'
 export type SessionState = 'starting' | 'running' | 'waiting' | 'ended'
 export type WaitingReason = 'not_done' | 'export_not_merged' | 'cancelled'
 
@@ -37,9 +37,15 @@ export interface TicketProject {
   export_state: ExportState
   /** Why the export of this project failed; set with export_state "failed" only. */
   export_error: string
+  /** The remote address and branch identities captured at export; the address is redacted for display. */
+  export_remote: string
+  export_branch: string
+  export_base: string
+  export_commit: string
+  export_target_commit: string
   /**
-   * The commits the project's diff ran between when the ticket went from Review to Done (the merge base, the
-   * reviewed commit), full ids. Empty for a ticket that is not done, was cancelled or was done before omo recorded them.
+   * The merge base and reviewed commit recorded for the completed or exported diff, full ids.
+   * Exported tickets may have them while waiting in Review. Empty before recording or after cancellation.
    */
   start_commit?: string
   end_commit?: string
@@ -277,6 +283,7 @@ export interface AgentSession {
   state: SessionState
   workdir: string
   end_reason: string
+  end_kind: 'stopped' | 'finished' | 'crashed' | 'usage' | 'shutdown' | 'user' | ''
   purpose: Purpose
   review_round: number
   started_at: string
@@ -527,6 +534,7 @@ export interface General {
   stop: StopSettings
   workspace_roots: WorkspaceRoot[]
   rescan_interval: Duration
+  export_check_interval: Duration
   agent_env: Record<string, string>
   usage: UsageSettings
   ui: UISettings
@@ -1009,10 +1017,12 @@ export interface EventDataByKind {
   'usage.changed': UsageState
   'skillset.changed': SkillSetState
   'plugin.changed': PluginInfo
+  'plugin.tasks_changed': PluginTasksChangedData
   'image.added': ImageEventData
   'image.deleted': ImageEventData
   'image.expired': ImageEventData
   'proxy.forward_added': ProxyForward
+  'proxy.forward_updated': ProxyForward
   'proxy.forward_removed': ProxyForward
   'mcp.changed': MCPServerState
   /** No data: the tools omo offers over MCP changed. */
@@ -1219,8 +1229,34 @@ export interface PluginHook {
   description: string
   /** Manual hooks: `ticket` or `global`. */
   scope: string
+  /** Manual hooks: suppress automatic controls; explicit controls and invocation remain available. */
+  hidden?: boolean
   /** Timer hooks only. */
   interval: string
+}
+
+export interface PluginButton {
+  label: string
+  place: 'ticket' | 'sidebar' | 'project'
+  action: string
+  per_worktree?: boolean
+}
+
+export interface PluginFrontend {
+  script?: string
+  assets?: string
+}
+
+export interface PluginConfigChoice {
+  value: string
+  label: string
+}
+
+export interface PluginConfigField {
+  key: string
+  label: string
+  type: 'select' | 'boolean' | 'string' | 'number'
+  choices?: PluginConfigChoice[]
 }
 
 export type PluginState = 'ready' | 'running' | 'error' | 'disabled' | 'not_installed' | 'invalid'
@@ -1237,6 +1273,11 @@ export interface PluginInfo {
   last_event: string
   last_run_at: string | null
   hooks: PluginHook[]
+  buttons: PluginButton[]
+  frontend: PluginFrontend
+  config_fields: PluginConfigField[]
+  /** Manifest and public file SHA-256, recomputed on load. */
+  content_id: string
 }
 
 /** How far omo's maintainers vouch for a plugin of omo's list; a source the list does not name counts as `community`. */
@@ -1312,10 +1353,13 @@ export interface PluginLogLine {
 
 export interface PluginRun {
   ticket?: number
+  project?: string
 }
 
 export interface PluginRunResult {
   message: string
+  url?: string
+  forward_id?: string
 }
 
 /** How long uploaded images are kept once their ticket is done; 0 keeps them. */
@@ -1359,6 +1403,8 @@ export interface ImageEventData {
 
 /** A registered web UI. Null ticket means global; base_path is the app's required path-mode base. */
 export interface ProxyForward {
+  plugin?: string
+  task_id?: string
   id: string
   ticket: number | null
   host: string
@@ -1703,4 +1749,26 @@ export interface OAuthDecision {
 /** Answer of `POST /api/oauth/consent`. */
 export interface OAuthRedirect {
   redirect: string
+}
+
+/** One supervised plugin process. IDs identify runs; names can be reused. */
+export interface PluginTask {
+  id: string
+  name: string
+  ticket?: number
+  started_at: string
+  ended_at?: string
+  state: 'running' | 'exited'
+  reason?: string
+  error?: string
+  output: string[]
+}
+
+export interface PluginTasks {
+  tasks: PluginTask[]
+}
+
+/** Refetch a plugin's task snapshot on this event and after reconnect/resync. */
+export interface PluginTasksChangedData {
+  name: string
 }

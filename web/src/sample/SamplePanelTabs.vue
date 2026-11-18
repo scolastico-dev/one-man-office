@@ -173,7 +173,7 @@ const calmSince = minutesAgo(64)
                       <span><span class="sagent__role">developer</span> · calm-badger</span>
                       <span class="sagent__muted">parked · since <RelativeTime :at="calmSince" /></span>
                     </p>
-                    <SampleTerminal label="Terminal of developer calm-badger" title="claude · developer · #13" screen="agent" note="Typing here types into the agent." />
+                    <SampleTerminal label="Terminal of developer calm-badger" title="claude · developer · #13" screen="agent" note="Write to the agent in the box below the terminal." />
                   </div>
                   <div class="sagent sagent--ended">
                     <p class="sagent__head">

@@ -2,6 +2,7 @@ package homezip
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"io"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/boundedzip"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
@@ -46,13 +48,13 @@ type limitFunc func(rel string) (int64, bool)
 
 // readArchive checks the zip and reads its settings files. version is this
 // omo's version, for the manifest check.
-func readArchive(ra io.ReaderAt, size int64, version string, limit limitFunc) (*archive, error) {
-	zr, err := zip.NewReader(ra, size)
+func readArchive(ctx context.Context, ra io.ReaderAt, size int64, version string, limit limitFunc) (*archive, error) {
+	zr, err := boundedzip.NewReader(ctx, ra, size, boundedzip.Limits{ArchiveBytes: MaxArchive, Entries: MaxEntries})
 	if errors.Is(err, zip.ErrInsecurePath) {
 		return nil, problem("the zip holds a path that leaves its folder (an absolute path or ..); it is refused")
 	}
 	if err != nil {
-		return nil, problem("the file is not a zip archive omo can read")
+		return nil, problem("the file is not a zip archive omo can read or exceeds its entries/metadata limits")
 	}
 	if len(zr.File) > MaxEntries {
 		return nil, problem("the zip has %d entries; at most %d are accepted", len(zr.File), MaxEntries)

@@ -55,5 +55,18 @@ test('the hints say what the engine does: who is told to investigate, what is re
   expect(text).toContain('before the waiting agent is told to find out why nothing happens')
   expect(text).not.toContain('the product manager looks into it')
   expect(text).toContain('A question to an agent is reminded to it then and flagged on the ticket after twice this time.')
-  expect(text).toContain('the exported pull requests are checked for a merge')
+  expect(text).toContain('remote target branches are checked for exported work')
+})
+
+test('export checks have their own interval and can be switched off without changing folder scans', async () => {
+  const h = await mountPage()
+  const interval = w!.get<HTMLInputElement>('input[data-field="export_check_interval"]')
+  expect(interval.element.value).toBe('10m')
+  expect(w!.text()).toContain('0 disables automatic checks')
+  await interval.setValue('0')
+  await save().trigger('click')
+  await flushPromises()
+  const body = h.sent.find((s) => s.method === 'PATCH')!.body as Record<string, unknown>
+  expect(body.export_check_interval).toBe('0')
+  expect(body.rescan_interval).toBe('1h')
 })

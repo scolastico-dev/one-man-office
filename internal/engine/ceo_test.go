@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 // ceoSessions returns the live CEO sessions.
@@ -405,6 +406,28 @@ func TestStopCEOStaysStoppedUntilTheUserStartsIt(t *testing.T) {
 	}
 	if !strings.Contains(p, fmt.Sprintf("comment %d by %s mentions @ceo", mention, dev.Name)) {
 		t.Fatalf("the held mention is not in the CEO's ready answer:\n%s", p)
+	}
+}
+
+func TestCEOStoppedDoesNotDependOnDisplayReason(t *testing.T) {
+	h := newHarness(t)
+	ceo, err := h.e.StartCEO(h.ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.StopCEO(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	d, err := db.Open(h.layout.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Exec(`UPDATE agent_sessions SET end_reason = 'Different words for the same stop' WHERE id = ?`, ceo.ID); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := h.e.CEOStopped(h.ctx); err != nil || !stopped {
+		t.Fatalf("CEO stop state changed with display text: %v, %v", stopped, err)
 	}
 }
 

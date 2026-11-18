@@ -6,17 +6,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
-	"unsafe"
 
-	"github.com/UserExistsError/conpty"
-	"golang.org/x/sys/windows"
+	"github.com/scolastico-dev/one-man-office/internal/processtree"
 )
 
 type conptyProcess struct {
-	pty      *conpty.ConPty
-	job      windows.Handle
+	pty      *processtree.PTY
 	mu       sync.Mutex
 	closed   bool
 	closeErr error
@@ -25,44 +21,17 @@ type conptyProcess struct {
 }
 
 func startProcess(o Options) (terminalProcess, error) {
-	argv := append([]string{o.Cmd}, o.Args...)
-	for i := range argv {
-		argv[i] = windows.EscapeArg(argv[i])
-	}
-	job, err := windows.CreateJobObject(nil, nil)
+	p, err := processtree.StartPTY(o.Cmd, o.Args, o.Dir, processEnvironment(o.Env), int(o.Cols), int(o.Rows))
 	if err != nil {
 		return nil, err
 	}
-	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	p, err := conpty.Start(strings.Join(argv, " "),
-		conpty.ConPtyDimensions(int(o.Cols), int(o.Rows)),
-		conpty.ConPtyWorkDir(o.Dir),
-		conpty.ConPtyEnv(processEnvironment(o.Env)))
-	if err != nil {
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid()))
-	if err == nil {
-		err = windows.AssignProcessToJobObject(job, proc)
-		windows.CloseHandle(proc)
-	}
-	if err != nil {
-		p.Close()
-		windows.CloseHandle(job)
-		return nil, err
-	}
-	cp := &conptyProcess{pty: p, job: job, exited: make(chan struct{})}
+	cp := &conptyProcess{pty: p, exited: make(chan struct{})}
 	go cp.watch()
 	return cp, nil
 }
 
-// watch records the main process's exit. The job object keeps whatever it
+// watch records the main process's exit and ends the terminal's output once
+// the whole tree is gone. The job object keeps whatever the main process
 // left behind killable until Close.
 func (p *conptyProcess) watch() {
 	code, err := p.pty.Wait(context.Background())
@@ -71,6 +40,15 @@ func (p *conptyProcess) watch() {
 	}
 	p.exitErr = err
 	close(p.exited)
+	// Windows keeps the terminal's output open after its last program
+	// ended, where a Unix terminal reports its end. Close the console once
+	// nothing of the tree is left (a child left behind keeps it open, as on
+	// Unix, until it ends or is killed): the session then reads what is
+	// left and sees the end.
+	// Should the tree not be readable, the console is closed all the same:
+	// a session that never ends is worse than a child ended early.
+	_ = p.pty.WaitTree(context.Background())
+	p.pty.Hangup()
 }
 
 func (p *conptyProcess) Exited() <-chan struct{} { return p.exited }
@@ -92,7 +70,7 @@ func (p *conptyProcess) Kill() error {
 	if p.closed {
 		return nil
 	}
-	return windows.TerminateJobObject(p.job, 1)
+	return p.pty.Kill()
 }
 func (p *conptyProcess) Wait() error {
 	<-p.exited
@@ -104,7 +82,6 @@ func (p *conptyProcess) Close() error {
 	if !p.closed {
 		p.closed = true
 		// Job closure kills descendants before ConPTY closes its pipes.
-		_ = windows.CloseHandle(p.job)
 		p.closeErr = p.pty.Close()
 	}
 	return p.closeErr

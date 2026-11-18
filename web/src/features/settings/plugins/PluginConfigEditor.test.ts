@@ -21,11 +21,11 @@ const settings = (o: Partial<PluginSettings> = {}): PluginSettings => ({
   revision: 'rev1',
   ...o,
 })
-const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({ name: 'log', version: '1.0.0', description: '', state: 'ready', message: '', commit: 'abc', last_event: '', last_run_at: null, hooks: [], ...o })
+const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({ name: 'log', version: '1.0.0', description: '', state: 'ready', message: '', commit: 'abc', last_event: '', last_run_at: null, hooks: [], buttons: [], frontend: {}, config_fields: [], content_id: '', ...o })
 
-async function open(s: PluginSettings[]): Promise<{ w: VueWrapper; h: Harness; read: { value: PluginsResponse } }> {
+async function open(s: PluginSettings[], plugins: PluginInfo[] = []): Promise<{ w: VueWrapper; h: Harness; read: { value: PluginsResponse } }> {
   const h = await harness()
-  const read = { value: { plugins: [], settings: s, errors: [] } as PluginsResponse }
+  const read = { value: { plugins, settings: s, errors: [] } as PluginsResponse }
   const client = h.session.client
   const baseGet = client.get.bind(client)
   client.get = ((path: string, q?: never) => (path === '/api/plugins' ? Promise.resolve(ok(read.value)) : baseGet(path, q))) as typeof client.get
@@ -101,4 +101,53 @@ test('discard brings back the stored configuration, also after text that did not
   await flushPromises()
   expect((field(w).element as HTMLTextAreaElement).value).toBe('{\n  "mark": "one",\n  "lines": 5\n}')
   expect(w.text()).not.toContain(CONFIG_PARSE_MESSAGE)
+})
+
+const fields = info({ config_fields: [
+  { key: 'editor', label: 'Editor', type: 'select', choices: [{ value: 'code', label: 'Code server' }, { value: 'other', label: 'Unavailable on this platform — choose Code server' }] },
+  { key: 'accept', label: 'Accept licence', type: 'boolean' },
+  { key: 'idle', label: 'Idle minutes', type: 'number' },
+  { key: 'name', label: 'Display name', type: 'string' },
+] })
+
+test('declared primitive controls save with revision and preserve unknown JSON keys without checking absent booleans', async () => {
+  const { w, h } = await open([settings({ config: { editor: 'code', idle: 30, unknown: { keep: true } } })], [fields])
+  expect(w.get('[data-plugin-field="accept"]').attributes('aria-checked')).toBe('false')
+  expect(w.get('select').text()).toContain('Unavailable on this platform')
+  await w.get('select').setValue('other')
+  await w.get('[data-plugin-field="accept"]').trigger('click')
+  await w.get('[data-plugin-field="idle"]').setValue('15')
+  await w.get('[data-plugin-field="name"]').setValue('Mine')
+  await save(w)
+  expect(h.sent[0]?.ifMatch).toBe('rev1')
+  expect((h.sent[0]?.body as PluginSettings).config).toEqual({ editor: 'other', idle: 15, accept: true, name: 'Mine', unknown: { keep: true } })
+})
+
+test('typed edits use the existing revision-conflict flow and JSON fallback preserves invalid text', async () => {
+  const { w, h, read } = await open([settings({ config: { editor: 'code', accept: false } })], [fields])
+  await w.get('select').setValue('other')
+  h.respond.write = () => {
+    read.value.settings = [settings({ revision: 'rev-new', config: { editor: 'code', accept: false, remote: true } })]
+    return refuse('stale_settings', 'Changed elsewhere', undefined, 409)
+  }
+  await save(w)
+  expect(w.find('[data-use-theirs]').exists()).toBe(true)
+  expect((w.get('select').element as HTMLSelectElement).value).toBe('other')
+  await w.get('[data-use-theirs]').trigger('click')
+  await flushPromises()
+  expect((w.get('select').element as HTMLSelectElement).value).toBe('code')
+  await field(w).setValue('{ broken')
+  expect(w.get('select').attributes('disabled')).toBeDefined()
+  expect((field(w).element as HTMLTextAreaElement).value).toBe('{ broken')
+})
+
+test('non-finite numeric edits block save rather than serializing to null and a correction clears the error', async () => {
+  const { w, h } = await open([settings({ config: { idle: 30 } })], [fields])
+  await w.get('[data-plugin-field="idle"]').setValue('1e400')
+  await save(w)
+  expect(h.sent).toEqual([])
+  expect(w.text()).toContain('finite number')
+  await w.get('[data-plugin-field="idle"]').setValue('15')
+  await save(w)
+  expect((h.sent[0]?.body as PluginSettings).config).toEqual({ idle: 15 })
 })

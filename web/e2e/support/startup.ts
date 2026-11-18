@@ -4,7 +4,9 @@ export function isPortCollision(output: string, port: number): boolean {
 }
 
 /** The address omo printed on a complete line of `output` (its token is empty without login); a line still being written is not one yet. */
+// With public_url configured, the isolated loopback address is an "also"
+// line: match that exact host and port instead of assuming it is the primary URL.
 export function findAddress(output: string, port: number): { token: string } | undefined {
-  const m = new RegExp(`^omo: http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?[ \\t]*\\r?\\n`, 'm').exec(output)
+  const m = new RegExp(`^(?:omo|also): http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?[ \\t]*\\r?\\n`, 'm').exec(output)
   return m ? { token: m[1] ?? '' } : undefined
 }

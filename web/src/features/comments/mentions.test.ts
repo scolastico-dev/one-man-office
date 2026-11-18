@@ -34,7 +34,7 @@ test('mentionNames: the agent behind the session; supervisor follows the ticket'
   expect(names).toEqual({ pm: 'quiet', supervisor: 'quiet', user: '' })
 })
 
-const proj = (id: string) => ({ project: id, base_branch: 'main', branch: `omo/${id}`, worktree: '', export_url: '', export_state: '' as const, export_error: '' })
+const proj = (id: string) => ({ project: id, base_branch: 'main', branch: `omo/${id}`, worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' })
 
 test('mentionOptions: with several projects each reviewer can be mentioned on its own, after @reviewer', () => {
   const multi = ticket({ number: 9, type: 'story', projects: [proj('api'), proj('web')] })

@@ -252,12 +252,6 @@ func (g *Git) AddWorktreeForBranch(repo, dir, branch string) error {
 	return err
 }
 
-// registered reports whether dir is a worktree of repo.
-func (g *Git) registered(repo, dir string) (bool, error) {
-	_, ok, err := g.findWorktree(repo, dir)
-	return ok, err
-}
-
 // BranchAt returns the branch the worktree at dir of repo has checked out,
 // as git records it; found is false when repo records no worktree there or
 // it has no branch checked out (detached or bare).
@@ -270,20 +264,21 @@ func (g *Git) BranchAt(repo, dir string) (branch string, found bool, err error) 
 	return name, ok && name != "", nil
 }
 
-// findWorktree returns the registration of the worktree at dir.
+// findWorktree returns the registration of the worktree at dir. git names
+// the folder resolved, dir may name it through a link, on Windows by a
+// short name or in another case, and the folder may be gone: dir is compared
+// as given and in the form of realPath, both as the file system compares
+// names.
 func (g *Git) findWorktree(repo, dir string) (worktreeEntry, bool, error) {
 	list, err := g.listWorktrees(repo)
 	if err != nil {
 		return worktreeEntry{}, false, err
 	}
 	want := filepath.Clean(dir)
-	wantReal := want
-	if real, err := filepath.EvalSymlinks(want); err == nil {
-		wantReal = real
-	}
+	wantReal := realPath(dir)
 	for _, wt := range list {
 		p := filepath.Clean(wt.path)
-		if p == want || p == wantReal {
+		if samePathString(p, want) || samePathString(p, wantReal) {
 			return wt, true, nil
 		}
 	}
@@ -450,13 +445,16 @@ func removeConfig() []string {
 }
 
 // forgetMissing drops the registration of a worktree whose folder is gone,
-// leaving every other registration (also of missing folders) alone.
+// leaving every other registration (also of missing folders) alone. git is
+// given the folder as it records it: it cannot resolve a folder that is
+// gone, so another spelling of it (a link in a parent, on Windows a short
+// name) would name no worktree to it.
 func (g *Git) forgetMissing(repo, abs string) error {
-	ok, err := g.registered(repo, abs)
+	wt, ok, err := g.findWorktree(repo, abs)
 	if err != nil || !ok {
 		return err
 	}
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", "--force", "--end-of-options", abs)
+	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", "--force", "--end-of-options", wt.path)
 	return err
 }
 

@@ -96,7 +96,7 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { proposeDimensions() { ret
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 vi.mock('./terminalSocket', () => ({
   createTerminalConnection: (o: any) => {
-    const c = { o, send: vi.fn(), resize: vi.fn(), reconnect: vi.fn(), dispose: vi.fn() }
+    const c = { o, send: vi.fn(), sendMessage: vi.fn(async () => {}), resize: vi.fn(), reconnect: vi.fn(), dispose: vi.fn() }
     h.conns.push(c)
     return c
   },
@@ -104,6 +104,7 @@ vi.mock('./terminalSocket', () => ({
 
 import TerminalView from './TerminalView.vue'
 import { resetPopouts } from './popout'
+import { resetWritable } from './terminalWritable'
 
 const live: Array<{ unmount(): void }> = []
 function sessionWith(tokens = createTokenStore(() => window.localStorage)): Session {
@@ -127,6 +128,7 @@ beforeEach(() => {
   h.terms.length = 0
   h.conns.length = 0
   window.localStorage.clear()
+  resetWritable()
 })
 afterEach(() => {
   live.splice(0).forEach((w) => w.unmount())
@@ -713,10 +715,9 @@ describe('dropped and pasted images', () => {
     const upload = vi.spyOn(session.client, 'upload')
     const w = view({}, session)
     drop(term().textarea, [new File(['x'], 'notes.txt', { type: 'text/plain' })])
-    await nextTick()
+    await vi.waitFor(() => expect(w.find('[data-terminal-note]').text()).toBe('Only images can be dropped here.'))
     expect(upload).not.toHaveBeenCalled()
     expect(term().pasted).toEqual([])
-    expect(w.find('[data-terminal-note]').text()).toBe('Only images can be dropped here.')
   })
 
   test('a refusal of the server is shown; a read-only or ended terminal takes nothing', async () => {
@@ -737,5 +738,142 @@ describe('dropped and pasted images', () => {
     await nextTick()
     expect(upload).not.toHaveBeenCalled()
     expect(ended.find('[data-terminal-note]').exists()).toBe(false)
+  })
+})
+
+describe('agent terminals', () => {
+  const AGENT = '/api/agents/a1/terminal'
+  const agent = (props: Record<string, unknown> = {}, session: Session = sessionWith()) => view({ src: AGENT, ...props }, session)
+  const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' })
+  const keyEv = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init })
+
+  test('starts read-only: keys and text input do nothing, and it says so', async () => {
+    const w = agent()
+    const toggle = w.find('[data-terminal-mode]')
+    expect(toggle.text()).toBe('Read only')
+    expect(toggle.attributes('data-writable')).toBeUndefined()
+    expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(false)
+    expect(term().keyHandler!(keyEv({ key: 'Enter' }))).toBe(false)
+    expect(term().keyHandler!(keyEv({ key: 'Enter', shiftKey: true }))).toBe(false)
+    expect(conn().send).not.toHaveBeenCalled()
+    for (const name of ['keypress', 'input', 'beforeinput', 'compositionend']) {
+      const reached = vi.fn()
+      term().textarea.addEventListener(name, reached)
+      term().textarea.dispatchEvent(new Event(name, { bubbles: true, cancelable: true }))
+      expect(reached).not.toHaveBeenCalled()
+    }
+    expect(w.find('.tv__screen').attributes('data-readonly')).toBeDefined()
+  })
+
+  test('the mouse keeps working: reports the emulator makes for the mouse reach the program', () => {
+    agent()
+    term().dataHandler!('\x1b[<0;10;5M')
+    term().dataHandler!('\x1b[<64;10;5M')
+    expect(conn().send).toHaveBeenCalledWith('\x1b[<0;10;5M')
+    expect(conn().send).toHaveBeenCalledWith('\x1b[<64;10;5M')
+    expect(term().options.disableStdin).toBeFalsy()
+  })
+
+  test('copying and F6 still work while read-only', () => {
+    agent()
+    term().selection = 'abc'
+    const copy = keyEv({ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true })
+    expect(term().keyHandler!(copy)).toBe(false)
+    expect(copy.defaultPrevented).toBe(true)
+  })
+
+  test('a paste and dropped files are refused while read-only', async () => {
+    const session = sessionWith()
+    const upload = vi.spyOn(session.client, 'upload')
+    agent({}, session)
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', { value: { getData: () => 'hello' } })
+    term().textarea.dispatchEvent(paste)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [png()], types: ['Files'], getData: () => '' } })
+    term().textarea.dispatchEvent(drop)
+    await nextTick()
+    expect(term().pasted).toEqual([])
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  test('the toggle makes it writable, with the state in words, and back', async () => {
+    const w = agent()
+    await w.find('[data-terminal-mode]').trigger('click')
+    expect(w.find('[data-terminal-mode]').text()).toBe('Writable')
+    expect(w.find('[data-terminal-mode]').attributes('data-writable')).toBeDefined()
+    expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(true)
+    term().dataHandler!('a')
+    expect(conn().send).toHaveBeenCalledWith('a')
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', { value: { getData: () => 'hello' } })
+    term().textarea.dispatchEvent(paste)
+    expect(term().pasted).toEqual(['hello'])
+    await w.find('[data-terminal-mode]').trigger('click')
+    expect(w.find('[data-terminal-mode]').text()).toBe('Read only')
+    expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(false)
+  })
+
+  test('the choice is remembered for that terminal in the browser session; a new terminal starts read-only', async () => {
+    const first = agent()
+    await first.find('[data-terminal-mode]').trigger('click')
+    first.unmount()
+    const again = agent()
+    expect(again.find('[data-terminal-mode]').text()).toBe('Writable')
+    const other = agent({ src: '/api/agents/a2/terminal' })
+    expect(other.find('[data-terminal-mode]').text()).toBe('Read only')
+  })
+
+  test('a user shell has no toggle, no draft box, and stays writable', () => {
+    const w = view({ src: '/api/terminals/t/socket' })
+    expect(w.find('[data-terminal-mode]').exists()).toBe(false)
+    expect(w.find('[data-terminal-draft]').exists()).toBe(false)
+    expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(true)
+  })
+
+  test('the draft box sends whatever the toggle says, as one message, and empties on success', async () => {
+    const w = agent()
+    conn().o.onState('live')
+    await w.find('[data-draft-field]').setValue('first line\nsecond line')
+    await w.find('[data-draft-send]').trigger('click')
+    await vi.waitFor(() => expect(conn().sendMessage).toHaveBeenCalledWith('first line\nsecond line'))
+    await vi.waitFor(() => expect((w.find('[data-draft-field]').element as HTMLTextAreaElement).value).toBe(''))
+    expect(conn().send).not.toHaveBeenCalled()
+  })
+
+  test('a failed send keeps the draft and shows the reason', async () => {
+    const w = agent()
+    conn().sendMessage.mockRejectedValueOnce(new Error('Terminal disconnected.'))
+    await w.find('[data-draft-field]').setValue('keep me')
+    await w.find('[data-draft-send]').trigger('click')
+    await vi.waitFor(() => expect(w.find('[data-draft-error]').text()).toBe('Terminal disconnected.'))
+    expect((w.find('[data-draft-field]').element as HTMLTextAreaElement).value).toBe('keep me')
+  })
+
+  test('output arriving above does not touch the draft or its focus', async () => {
+    const w = agent()
+    const field = w.find('[data-draft-field]').element as HTMLTextAreaElement
+    field.focus()
+    await w.find('[data-draft-field]').setValue('half written')
+    conn().o.onReplayStart()
+    conn().o.onData(new TextEncoder().encode('output\r\n'), true)
+    conn().o.onData(new TextEncoder().encode('more output\r\n'), false)
+    conn().o.onState('live')
+    await nextTick()
+    expect(field.value).toBe('half written')
+    expect(document.activeElement).toBe(field)
+  })
+
+  test('the draft box is gone once the process has ended', async () => {
+    const w = agent()
+    expect(w.find('[data-draft-field]').exists()).toBe(true)
+    conn().o.onState('ended')
+    await nextTick()
+    expect(w.find('[data-draft-field]').exists()).toBe(false)
+    expect(w.find('[data-terminal-mode]').exists()).toBe(false)
+  })
+
+  test('an output-only terminal (the readonly prop) has no draft box', () => {
+    expect(agent({ readonly: true }).find('[data-draft-field]').exists()).toBe(false)
   })
 })

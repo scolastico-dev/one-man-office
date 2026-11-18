@@ -1,5 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import type { PluginHook, PluginInfo, PluginsResponse, TicketSummary } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -11,6 +11,7 @@ let mounted: VueWrapper | null = null
 afterEach(() => {
   mounted?.unmount()
   mounted = null
+  vi.restoreAllMocks()
   document.body.querySelectorAll('[data-plugin-answer-dialog]').forEach((d) => d.closest('div')?.remove())
 })
 
@@ -25,6 +26,7 @@ const info = (name: string, o: Partial<PluginInfo> = {}): PluginInfo => ({
   last_event: '',
   last_run_at: null,
   hooks: [manual('mark', 'Mark this ticket')],
+  buttons: [], frontend: {}, config_fields: [], content_id: '',
   ...o,
 })
 const response = (plugins: PluginInfo[]): PluginsResponse => ({
@@ -71,6 +73,11 @@ test('ticket actions come from enabled, loaded plugins with a ticket hook only',
     { plugin: 'e', action: 'mark', description: 'Mark this ticket' },
   ])
   expect(ticketActionsOf(null)).toEqual([])
+})
+
+test('a declared ticket button replaces its legacy hook button while unrelated hooks remain', () => {
+  const d = response([info('a', { hooks: [manual('mark', 'Old label'), manual('other', 'Other')], buttons: [{ label: 'Declared label', place: 'ticket', action: 'mark' }] })])
+  expect(ticketActionsOf(d)).toEqual([{ plugin: 'a', action: 'other', description: 'Other' }])
 })
 
 test('the panel shows "<plugin>: <description>" and running it shows the answer as text', async () => {
@@ -162,4 +169,31 @@ test('a plugin state from an event is kept over a read that started before it', 
   gate = Promise.resolve()
   await l.reload()
   expect(l.data.value?.plugins.map((p) => p.state)).toEqual(['ready'])
+})
+
+test('disabling a plugin while a legacy hook waits closes its reservation and never opens its stale result', async () => {
+  const tab = { opener: window, closed: false, location: { href: 'about:blank', replace: vi.fn() }, close: vi.fn() }
+  vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
+  const list = { value: response([info('log')]), reads: 0 }
+  const hn = await harness(list, ticket({ number: 5, column: 'in_progress' }))
+  const w = await open(hn, 5)
+  let finish!: () => void
+  hn.write.fn = () => new Promise((resolve) => { finish = () => resolve(ok({ message: 'Late', url: 'https://example.test/' })) })
+  await w.get('[data-action="plugin:log:mark"]').trigger('click')
+  hn.omo.emit('plugin.changed', info('log', { state: 'disabled' }))
+  await flushPromises()
+  finish()
+  await flushPromises()
+  expect(tab.location.replace).not.toHaveBeenCalled()
+  expect(tab.close).toHaveBeenCalledTimes(1)
+})
+
+// A hidden ticket hook must never create a legacy action, even without a frontend.
+test('hidden ticket hooks do not generate actions and absent or false hooks remain visible', () => {
+  const d = response([info('p', { hooks: [
+    manual('default', 'Default'),
+    { ...manual('visible', 'Visible'), hidden: false },
+    { ...manual('secret', 'Secret'), hidden: true },
+  ] })])
+  expect(ticketActionsOf(d).map((a) => a.action)).toEqual(['default', 'visible'])
 })

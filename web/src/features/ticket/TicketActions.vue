@@ -7,7 +7,7 @@
 // action belonged to; it goes with the next action or when the panel shows
 // another ticket. It is said once, by the announcer.
 import { computed, ref, shallowRef, useId, watch } from 'vue'
-import { approveTicket, cancelTicket } from '../../api/endpoints'
+import { approveTicket, cancelTicket, checkExport } from '../../api/endpoints'
 import { failureText, isLostAnswer } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import { dragTargets, type RuleContext } from '../../board/moveRules'
@@ -15,6 +15,7 @@ import { DialogOutlet, useDialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
+import PluginControls from '../plugins/PluginControls.vue'
 import { useBoard } from '../../store'
 import RejectDialog from '../board/dialogs/RejectDialog.vue'
 import { attentionOwner, captionFor } from '../../board/badges'
@@ -53,6 +54,8 @@ const dialogError = ref('')
 /** The action whose request is under way. */
 const running = ref<string | null>(null)
 const error = shallowRef<string | null>(null)
+const checkingExport = ref(false)
+const exportCheckStatus = ref('')
 
 // The actions' own dialogs: over the panel, gone when the panel closes or
 // shows another ticket; a refusal goes with the ticket too.
@@ -62,6 +65,7 @@ watch(
   () => {
     dialogs.closeAll()
     error.value = null
+    exportCheckStatus.value = ''
   },
 )
 
@@ -201,6 +205,21 @@ function confirmReject(comment: string) {
 function confirmCancel(deleteBranch: boolean) {
   void confirm(() => cancelTicket(session.client, props.ticket.number, deleteBranch), `#${props.ticket.number} cancelled.`)
 }
+
+async function requestExportCheck() {
+  if (checkingExport.value) return
+  checkingExport.value = true
+  exportCheckStatus.value = ''
+  const number = props.ticket.number
+  try {
+    await checkExport(session.client, number)
+    if (props.ticket.number === number) exportCheckStatus.value = 'Merge check requested. The ticket updates when the check finishes.'
+  } catch (e) {
+    if (props.ticket.number === number) exportCheckStatus.value = message(e, 'the merge check')
+  } finally {
+    checkingExport.value = false
+  }
+}
 </script>
 
 <template>
@@ -214,6 +233,12 @@ function confirmCancel(deleteBranch: boolean) {
       omo is working on this{{ caption ? `: ${caption}` : '.' }}
     </p>
     <p v-if="usageWait" class="actions__usage" data-usage-wait>{{ usageWait }}</p>
+    <div v-if="ticket.column === 'review' && ticket.review_stage === 'awaiting_merge'">
+      <UiButton size="sm" :disabled="checkingExport" data-action="check-export" @click="requestExportCheck">
+        {{ checkingExport ? 'Requesting check…' : 'Check now' }}
+      </UiButton>
+      <p v-if="exportCheckStatus" class="actions__line" role="status" data-export-check-status>{{ exportCheckStatus }}</p>
+    </div>
     <ul v-if="actions.length > 0" class="actions__list" aria-label="Actions">
       <li v-for="x in actions" :key="x.a.id" class="actions__item">
         <UiButton
@@ -232,6 +257,7 @@ function confirmCancel(deleteBranch: boolean) {
         <p v-if="x.why" class="actions__why" :data-action-why="x.a.id">{{ x.why }}</p>
       </li>
     </ul>
+    <PluginControls place="ticket" :ticket="ticket" />
     <p v-if="error" class="actions__error" data-action-error>{{ error }}</p>
     <ApproveDialog
       v-if="dialog === 'approve' || dialog === 'export'"

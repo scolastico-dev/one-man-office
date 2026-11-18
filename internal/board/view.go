@@ -34,6 +34,7 @@ type ticketRow struct {
 	ReviewStage        api.ReviewStage
 	ReviewRound        int
 	Attention          string
+	AttentionOwner     AttentionOwner
 	Busy               bool
 	FailedStep         api.FailedStep
 	StartBlocked       api.StartBlocked
@@ -58,7 +59,7 @@ func (r ticketRow) standalone() bool { return r.Type == api.TypeTask && r.StoryI
 const ticketSelect = `SELECT t.id, t.type, t.title, t.col, t.resolution, t.rank, COALESCE(t.story_id, 0),
 	t.supervisor, t.created_by_role, COALESCE(t.created_by_session, ''), COALESCE(cs.name, ''),
 	t.description_version, t.model, t.review, t.when_approved, t.task_release, t.max_parallel,
-	t.review_stage, t.review_round, t.attention, t.busy, t.failed_step, t.start_blocked,
+	t.review_stage, t.review_round, t.attention, t.attention_owner, t.busy, t.failed_step, t.start_blocked,
 	t.export_url, t.export_merged, t.workdir, t.created_at, t.updated_at, t.closed_at
 	FROM tickets t LEFT JOIN agent_sessions cs ON cs.id = t.created_by_session`
 
@@ -68,7 +69,7 @@ func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
 	err := rows.Scan(&r.ID, &r.Type, &r.Title, &r.Col, &r.Resolution, &r.Rank, &r.StoryID,
 		&r.Supervisor, &r.CreatedByRole, &r.CreatedBySession, &r.CreatedByName,
 		&r.DescriptionVersion, &r.Model, &r.Review, &r.WhenApproved, &r.TaskRelease, &maxParallel,
-		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.Busy, &r.FailedStep, &r.StartBlocked,
+		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.AttentionOwner, &r.Busy, &r.FailedStep, &r.StartBlocked,
 		&r.ExportURL, &r.ExportMerged, &r.Workdir,
 		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt)
 	if maxParallel.Valid {
@@ -229,17 +230,17 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 
 	// Projects in their stored order.
 	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, export_state, export_error,
-		start_commit, end_commit FROM ticket_projects
+		start_commit, end_commit, export_remote, export_branch, export_base, export_commit, export_target_commit FROM ticket_projects
 		WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var tp api.TicketProject
 		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL, &tp.ExportState, &tp.ExportError,
-			&tp.StartCommit, &tp.EndCommit); err != nil {
+			&tp.StartCommit, &tp.EndCommit, &tp.ExportRemote, &tp.ExportBranch, &tp.ExportBase, &tp.ExportCommit, &tp.ExportTargetCommit); err != nil {
 			return err
 		}
 		tp.ExportState = exportStateOf(byID[id], tp)
-		if s := byID[id]; s.Column != api.ColumnDone || s.Resolution == api.ResolutionCancelled {
-			// Recorded on the way to Done; before that, and for a
+		if s := byID[id]; (s.Column != api.ColumnDone && s.ReviewStage != api.ReviewStageAwaitingMerge) || s.Resolution == api.ResolutionCancelled {
+			// Recorded when merged or exported; before that, and for a
 			// cancelled ticket, they describe no diff of the ticket.
 			tp.StartCommit, tp.EndCommit = "", ""
 		}
@@ -250,18 +251,19 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	}
 
 	// Dependencies and what still blocks the ticket.
-	if err := each(q, `SELECT d.ticket_id, d.depends_on_id, o.resolution, o.export_merged
+	if err := each(q, `SELECT d.ticket_id, d.depends_on_id, o.resolution, o.export_merged, o.review_stage
 		FROM dependencies d JOIN tickets o ON o.id = d.depends_on_id
 		WHERE d.ticket_id`+idsIn+` ORDER BY d.ticket_id, d.depends_on_id`, idJSON, func(rows *sql.Rows) error {
 		var id, dep int64
 		var res api.Resolution
 		var merged bool
-		if err := rows.Scan(&id, &dep, &res, &merged); err != nil {
+		var stage api.ReviewStage
+		if err := rows.Scan(&id, &dep, &res, &merged, &stage); err != nil {
 			return err
 		}
 		s := byID[id]
 		s.DependsOn = append(s.DependsOn, int(dep))
-		if reason, waiting := waitingReason(res, merged); waiting {
+		if reason, waiting := waitingReason(res, merged, stage); waiting {
 			s.WaitingFor = append(s.WaitingFor, api.Waiting{Ticket: int(dep), Reason: reason})
 		}
 		return nil
@@ -341,7 +343,10 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 // waitingReason reports whether a dependency on a ticket with this
 // resolution still blocks, and why. A dependency is satisfied when its target
 // is completed, or exported with the export merged.
-func waitingReason(res api.Resolution, exportMerged bool) (api.WaitingReason, bool) {
+func waitingReason(res api.Resolution, exportMerged bool, stage api.ReviewStage) (api.WaitingReason, bool) {
+	if stage == api.ReviewStageAwaitingMerge {
+		return api.WaitingExportNotMerged, true
+	}
 	switch res {
 	case api.ResolutionCompleted:
 		return "", false

@@ -611,15 +611,24 @@ func sameWorktree(at, dir string) bool {
 	return filepath.Join(parent, filepath.Base(at)) == real
 }
 
-// samePath reports whether a and b name the same folder.
-func samePath(a, b string) bool {
-	clean := func(p string) string {
-		if real, err := filepath.EvalSymlinks(p); err == nil {
-			return real
-		}
-		return filepath.Clean(p)
+// samePath reports whether a and b name the same folder, whether or not it
+// exists.
+func samePath(a, b string) bool { return realPath(a) == realPath(b) }
+
+// realPath is p with its links resolved. Of a path that does not exist, the
+// part that exists is resolved: git names a worktree whose folder is gone
+// by its real path, while omo may know it through a link or, on Windows,
+// under a short name (RUNNER~1 for runneradmin).
+func realPath(p string) string {
+	p = filepath.Clean(p)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
 	}
-	return clean(a) == clean(b)
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(realPath(parent), filepath.Base(p))
 }
 
 // fail ends a start that cannot go on: a problem a person must solve
@@ -752,7 +761,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	e.mu.Lock()
 	if e.stopping {
 		e.mu.Unlock()
-		e.endSession(ctx, sess.ID, "omo stopped", name)
+		e.endSession(ctx, sess.ID, "omo stopped", name, api.SessionEndShutdown)
 		return sess, nil
 	}
 	e.entries[sess.ID] = en
@@ -804,7 +813,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	e.mu.Lock()
 	en.agent = ag
 	if en.ending == "" && e.stopping {
-		en.ending = "omo stopped"
+		en.ending, en.endKind = "omo stopped", api.SessionEndShutdown
 	}
 	ending := en.ending
 	e.watchers.Add(1)
@@ -841,7 +850,7 @@ func (e *Engine) startWarnings(ctx context.Context, ticket int64, name string, w
 // counts the failure. An environment command that timed out fails the start
 // for a person instead: every new attempt would hang the same way.
 func (e *Engine) startFailed(ctx context.Context, en *entry, err error) {
-	e.endSession(ctx, en.sess.ID, "could not start: "+err.Error(), en.sess.Name)
+	e.endSession(ctx, en.sess.ID, "could not start: "+err.Error(), en.sess.Name, api.SessionEndCrashed)
 	if en.sess.Ticket == 0 {
 		return
 	}
@@ -858,8 +867,8 @@ func (e *Engine) startFailed(ctx context.Context, en *entry, err error) {
 }
 
 // endSession ends a session on the board, logging a failure.
-func (e *Engine) endSession(ctx context.Context, id, reason, name string) {
-	if err := e.b.EndSession(ctx, id, reason); err != nil {
+func (e *Engine) endSession(ctx context.Context, id, reason, name string, kind api.SessionEndKind) {
+	if err := e.b.EndSession(ctx, id, reason, kind); err != nil {
 		e.log.Printf("engine: end the session of %s: %s", name, scrub(err, id))
 	}
 }

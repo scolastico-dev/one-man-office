@@ -97,6 +97,7 @@ func newWorld(t *testing.T, c config) *world {
 	if c.origin {
 		w.origin = filepath.Join(t.TempDir(), "origin.git")
 		gitIn(t, filepath.Dir(w.origin), "init", "-q", "--bare", w.origin)
+		gitIn(t, w.origin, "fetch", "-q", w.repo, "refs/heads/main:refs/heads/main")
 		gitIn(t, w.repo, "remote", "add", "origin", originAddress)
 	}
 	st := w.openSettings()
@@ -345,6 +346,23 @@ func (w *world) waitColumn(n int, col api.Column, stage api.ReviewStage) api.Tic
 		return tk.Column == col && (stage == "" || tk.ReviewStage == stage)
 	})
 	return tk
+}
+
+// mergeExport advances the isolated remote target and asks the normal API
+// to confirm it, after the test has checked the awaiting export's contents.
+func (w *world) mergeExport(tk api.Ticket) api.Ticket {
+	w.t.Helper()
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge || tk.Resolution != "" {
+		w.t.Fatalf("export is not waiting: %s/%s resolution %q", tk.Column, tk.ReviewStage, tk.Resolution)
+	}
+	p := tk.Projects[0]
+	gitIn(w.t, w.origin, "update-ref", "refs/heads/"+p.ExportBase, p.ExportCommit)
+	w.do("POST", "/api/tickets/"+itoa(tk.Number)+"/check-export", struct{}{}, nil)
+	done := w.waitColumn(tk.Number, api.ColumnDone, "")
+	if done.Resolution != api.ResolutionExported || !done.ExportMerged || done.ClosedAt == nil {
+		w.t.Fatalf("remote merge did not complete export: resolution %q, merged %v, closed %v", done.Resolution, done.ExportMerged, done.ClosedAt)
+	}
+	return done
 }
 
 // waitFailed waits until ticket n has the failed step.

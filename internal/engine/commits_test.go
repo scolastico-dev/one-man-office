@@ -138,7 +138,7 @@ func TestExportedTaskRecordsItsDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.steps(3)
-	if tk := h.ticket(n); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported {
+	if tk := h.ticket(n); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge {
 		t.Fatalf("ticket is %s/%s", tk.Column, tk.Resolution)
 	}
 	h.wantRecorded(n, h.project, h.repo, start, end, "b.txt")
@@ -186,8 +186,14 @@ func TestPartlyExportedStoryRecordsEveryProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.steps(3)
-	if tk := h.ticket(s); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCompleted {
+	if tk := h.ticket(s); tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageAwaitingMerge {
 		t.Fatalf("story is %s/%s (attention %q)", tk.Column, tk.Resolution, tk.Attention)
+	}
+	remote := h.origin(a)
+	gitRun(t, remote, "update-ref", "refs/heads/main", tips[a])
+	h.e.checkExportsMerged(h.ctx)
+	if tk := h.ticket(s); tk.Column != api.ColumnDone || !tk.ExportMerged {
+		t.Fatalf("mixed export did not finish after remote merge: %+v", tk.TicketSummary)
 	}
 	h.wantRecorded(s, a, h.repos[a], before[a], tips[a], "new.txt")
 	h.wantRecorded(s, b, h.repos[b], before[b], tips[b], "new.txt")
