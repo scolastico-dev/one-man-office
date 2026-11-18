@@ -246,6 +246,14 @@ describe('the helper must be the process that owns the servers', () => {
   })
 })
 
+/** A server the helper connects to: the kernel closes that connection when the helper's process is gone, so `gone` is the exact end of the process. */
+async function endWatch(): Promise<{ port: number; gone: Promise<void>; close(): void }> {
+  const server = createServer()
+  const gone = new Promise<void>((ok) => server.once('connection', (socket) => socket.once('close', () => ok())))
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
+  return { port: (server.address() as { port: number }).port, gone, close: () => { server.close() } }
+}
+
 describe('a kill that fails', () => {
   it('is reported by stop, and the build folder and the interrupt handlers are released all the same', async () => {
     const tmp = own()
@@ -283,14 +291,11 @@ describe('a kill that fails', () => {
 
   it('is reported by stop for a helper that has no folder of its own, and the handlers are released', async () => {
     const listeners = process.listenerCount('SIGINT')
+    const watch = await endWatch()
     let held = 0
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
-    const run = await startFixture({
-      command: process.execPath,
-      args: ['-e', `process.stdout.write('PROXY_BROWSER_FIXTURES []\\n'); process.stdin.resume()`],
-      end: { kill: denied },
-      onSpawn: (pid) => { held = pid },
-    })
+    const script = `require('node:net').connect(${watch.port}, '127.0.0.1'); process.stdout.write('PROXY_BROWSER_FIXTURES []\\n'); process.stdin.resume()`
+    const run = await startFixture({ command: process.execPath, args: ['-e', script], end: { kill: denied }, onSpawn: (pid) => { held = pid } })
     try {
       expect(process.listenerCount('SIGINT')).toBe(listeners + 1)
       await expect(run.stop()).rejects.toThrow(/not permitted/)
@@ -298,6 +303,8 @@ describe('a kill that fails', () => {
       expect(alive(held)).toBe(true)
     } finally {
       process.kill(held, 'SIGKILL')
+      await watch.gone
+      watch.close()
     }
   })
 })
@@ -324,16 +331,28 @@ describe('a build folder that cannot be removed', () => {
 
   it('is reported together with a kill that failed', async () => {
     const tmp = own()
+    const watch = await endWatch()
     let held = 0
     const denied = () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) }
     const stuck = () => { throw Object.assign(new Error('the folder is in use'), { code: 'EBUSY' }) }
-    const run = await startFixture({ cwd: goHelper(), build: { pkg: '.' }, args: HELPER_ARGS, tmp, end: { kill: denied }, remove: stuck, onSpawn: (pid) => { held = pid } })
+    const run = await startFixture({
+      cwd: goHelper(),
+      build: { pkg: '.' },
+      args: [...HELPER_ARGS, '--', `127.0.0.1:${watch.port}`],
+      tmp,
+      end: { kill: denied },
+      remove: stuck,
+      onSpawn: (pid) => { held = pid },
+    })
     try {
       const failure = await run.stop().then(() => new Error('stop did not reject'), (error: Error) => error)
       expect(failure.message).toMatch(/not permitted/)
       expect(failure.message).toMatch(/could not remove the build folder.*in use/s)
     } finally {
+      // The test returns, and its folder is removed, only after the process has really ended.
       process.kill(held, 'SIGKILL')
+      await watch.gone
+      watch.close()
     }
   }, 120_000)
 })
