@@ -519,6 +519,8 @@ func TestATimeoutBeforeTheRequestIsSentNeverReachesTheUpstream(t *testing.T) {
 	if res := f.call(id, "fake__hold", nil); !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
 		t.Fatalf("a call whose limit ran out before it was sent answered %q", resultText(res))
 	}
+	s.Timeouts.Call = 0
+	f.set(s)
 	c := startHeldCall(t, f, id)
 	c.waitForProgress()
 	c.cancel()
