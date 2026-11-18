@@ -53,6 +53,24 @@ keeps other people and other web pages out.
 The local socket that `omo ai` uses is reachable by processes of your user
 only, without a token.
 
+## Web UI forwards
+
+Registered web UIs run through omo's existing browser address under
+`/proxy/<id>/`. With token sign-in, open a forward through the board's Open API
+(`POST /api/proxy/forwards/<id>/open`): its one-use sign-in grant expires after
+60 seconds. The sign-in page clears it from the address before exchanging it
+for an HttpOnly cookie, then replaces the page with the forward's start path.
+The proxy session lasts 12 hours; restarting omo requires opening it again.
+Direct addresses without a valid session link back to the board. Basic sign-in
+checks the board credentials on each request; `auth: none` requires no sign-in.
+
+omo removes its own cookies and recognized credentials before sending requests
+to the app. Forwarded apps are trusted code: in path mode they share the board's
+origin and can access its browser storage. Only register apps you trust. The
+app controls its own response headers and cross-origin policy; the board keeps
+its own checks. Use an HTTPS reverse proxy with `public_url` set to its external
+HTTPS address so proxy cookies are Secure and Open uses the right host and port.
+
 ## Plugins, scripts and relayed servers
 
 All of these are code that runs as you:

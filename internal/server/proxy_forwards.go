@@ -10,6 +10,7 @@ import (
 
 func (s *Server) registerProxyForwards(mux *http.ServeMux) {
 	s.registerRoutes(mux, []apiRoute{
+		{"POST /api/proxy/forwards/{id}/open", s.openProxyForward, userOnly},
 		{"GET /api/proxy/forwards", s.listProxyForwards, agentRead},
 		{"POST /api/proxy/forwards", s.createProxyForward, agentWrite},
 		{"DELETE /api/proxy/forwards/{id}", s.deleteProxyForward, agentWrite},
@@ -65,5 +66,6 @@ func (s *Server) deleteProxyForward(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	s.proxyAuth.forgetForward(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
 }

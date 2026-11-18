@@ -214,7 +214,7 @@ globals survive. Closed tickets refuse new forwards. No target is probed or
 started. Shared `aicmd/proxy.go` supplies `omo ai proxy add|list|remove` and MCP
 tools; omitted CLI/MCP ticket uses the agent's own ticket (user add: global,
 user list: all). Add prints the address, required app base path and process
-reminder. This registry does not serve proxy traffic or implement Open/sign-in.
+reminder. Browser routing and Open/sign-in are implemented separately in `server/proxy_routes.go` and `proxy_auth.go`.
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
 
@@ -331,3 +331,65 @@ cookie isolation boundary. Other applicable cookie paths receive the prefix.
 
 Path-mode apps share the board's origin, including its localStorage; this
 transport provides credential filtering, not isolation from trusted app code.
+
+
+## Web UI browser routing and sign-in
+
+`BrowserHandler` validates Host, then classifies proxy traffic before the
+board's Origin/auth/JSON checks, CSP/cache headers and mux. Explicit paths
+`/proxy/<id>/...` select a live forward; `/proxy/<id>` redirects with 307 to
+its trailing slash, preserving the query. Open supplies the record's
+`start_path` and query. A same-origin Referer under `/proxy/<id>/` redirects
+root paths (including `/api` and `/assets`) under that forward with 307,
+retaining method, body and query. With no Referer, application WebSockets
+select `proxy.ForwardCookie`. The registered board sockets
+`GET /api/agents/{id}/terminal` and `GET /api/terminals/{id}/socket` always
+stay on the board, even with a proxy Referer; other `/api` WebSockets remain
+available to apps. Normal board HTTP/event streams keep their existing
+Origin/auth/security behavior. App Origin, CORS and WebSocket policy is the
+upstream's; proxy authentication always runs first.
+
+`POST /api/proxy/forwards/{id}/open` is a `userOnly` board API route with normal
+JSON/auth checks; optional body is an empty object. It returns `{url: string}`.
+Token mode returns `/_omo/proxy/bootstrap#<grant>` on the canonical public_url
+origin, or the accepted request origin when public_url is unset. The printed
+omo.localhost address is a local access hint and must not replace a remote
+browser's host. Its external, embedded `proxy_bootstrap.js` clears the fragment with
+`history.replaceState` before POSTing `{grant}` to `/_omo/proxy/exchange`, then
+uses `location.replace` on the returned server-owned start URL. These internal
+endpoints are reserved before fallbacks and use board Origin/security headers.
+The board bearer token is never used as a proxy cookie or put in these URLs.
+The grant binds its forward, start URL and exchange origin (case/default ports
+canonicalized), is 256 bits of crypto randomness, lasts **60 seconds**, and is
+consumed atomically once. Client-supplied return URLs are refused. Removed
+forwards cannot be exchanged or routed. Failed live checks revoke an unissued
+session. State expires on use and in a one-minute background sweep; the sweep
+also drops grants for vanished forwards. Each map is capped at **4096** entries.
+
+Proxy sessions last **12 hours** without sliding expiry and are shared across
+forwards; live-forward checks remain mandatory on every request. Restarting omo
+invalidates grants and sessions. `omo_proxy_session` and `omo_proxy_forward`
+are host-only, `Path=/`, `HttpOnly`, `SameSite=Lax`, `Max-Age=43200`; Secure is set
+for actual TLS or the matching HTTPS `public_url`. Do not infer deployment
+scheme or port from arbitrary X-Forwarded headers. Open/exchange and explicit
+document navigation update the last-forward cookie. Forged, expired or duplicate
+session cookies fail closed. Basic mode challenges/checks the board credentials
+on every proxy request; none adds no sign-in. Both support direct addresses and
+Open. Only positively identified omo Authorization is stripped; an omo token in
+WebSocket protocols must not cause application Authorization to be removed.
+
+Reusable server helpers for subdomain routing: `proxyOpenDestination` builds the
+server-owned `proxyDestination{ForwardID, Origin, URL}`; `authorizeProxy` is the
+common auth gate; `setProxyCookie` centralizes cookie flags/scope;
+`proxyOrigin`/`proxyBoardURL` supply accepted public context; `serveProxyForward`
+calls the shared transport **after** auth and a live lookup. The server owns one
+transport and closes idle connections at shutdown. Optional wildcard routing
+must extend origin/destination/cookie helpers and reuse this auth gate.
+
+Focused checks: `go test ./internal/server -run TestProxy -count=1` and
+`node --test web/scripts/proxy-bootstrap.test.mjs`. The latter needs web npm
+dependencies and Playwright Chromium; it uses a standalone Node HTTP server,
+never omo's CLI/socket/home, and checks actual fragment clearing, referrers and
+back/forward history under CSP. Streaming and WebSocket BrowserHandler tests use
+real local upstreams. Trusted path-mode apps share the board's origin and
+localStorage; filtering transport credentials does not isolate trusted app code.
