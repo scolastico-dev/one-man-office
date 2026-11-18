@@ -44,6 +44,15 @@ function project(state: 'ok' | 'missing' | 'disabled'): Project {
 
 const noContext: RuleContext = { project: () => project('ok'), storyHasLiveAgent: () => false }
 
+test('an exported review can be rejected or manually completed while it waits for the merge', () => {
+  const t = ticket({ column: 'review', review_stage: 'awaiting_merge' })
+  const targets = dragTargets(t, noContext)
+  expect(canReject(t)).toBe(true)
+  expect(targets.in_progress).toMatchObject({ allowed: true, action: 'reject', confirm: 'reject', resultColumn: 'in_progress' })
+  expect(targets.done).toMatchObject({ allowed: true, resultColumn: 'done' })
+  expect(targets.review).toMatchObject({ allowed: true, action: 'reorder', resultStage: 'awaiting_merge' })
+})
+
 /** Builds the summary and context a case describes, the way the store would hold them. */
 function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
   const g = c.ticket
@@ -56,7 +65,7 @@ function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
     review_stage: g.review_stage,
     resolution: g.resolution ?? '',
     effective_when_approved: g.when_approved,
-    projects: Array.from({ length: g.projects }, () => ({ project: 'api', base_branch: g.base_branch, branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })),
+    projects: Array.from({ length: g.projects }, () => ({ project: 'api', base_branch: g.base_branch, branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' })),
     // A live session on a story's task is not in the story's own list.
     agents: g.live_agent && !story ? [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] : [],
     ...(g.busy !== undefined ? { busy: g.busy } : {}),
@@ -84,7 +93,8 @@ describe('dragTargets', () => {
         if (!want.ok) continue
         expect({ label, action: target.action, column: target.resultColumn, stage: target.resultStage ?? '' }).toEqual({
           label,
-          action: want.action,
+          // A merged outcome is caused by the plain move transport for awaiting exports.
+          action: want.action === 'merged' ? 'move' : want.action,
           column: want.column,
           stage: want.stage ?? '',
         })
@@ -140,7 +150,7 @@ describe('dragTargets', () => {
   })
 
   test('approving out of Review shows the stage the ticket will be in', () => {
-    const inApi = [{ project: 'api', base_branch: 'main', branch: 'omo/7', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
+    const inApi = [{ project: 'api', base_branch: 'main', branch: 'omo/7', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }]
     const merge = dragTargets(ticket({ column: 'review', review_stage: 'human', projects: inApi }), noContext)
     expect(merge.done).toMatchObject({ action: 'approve', resultColumn: 'review', resultStage: 'merging' })
     const exp = dragTargets(ticket({ column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: inApi }), noContext)
@@ -156,9 +166,9 @@ describe('dragTargets', () => {
     expect(planning.in_progress.reason).toBe('A ticket enters In Progress when its agent starts or its review is rejected.')
     expect(planning.review.reason).toBe('A ticket enters Review when its agent hands it in.')
     expect(planning.done.reason).toBe('Only a review waiting for you can be dragged to Done. To close a ticket, cancel it.')
-    const proj = [{ project: 'api', base_branch: '', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
+    const proj = [{ project: 'api', base_branch: '', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }]
     expect(dragTargets(ticket({ projects: proj }), noContext).ready.reason).toBe("Set the Base branch in the ticket's details first.")
-    const withBranch = [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
+    const withBranch = [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }]
     const gone: RuleContext = { ...noContext, project: () => project('missing') }
     expect(dragTargets(ticket({ projects: withBranch }), gone).ready.reason).toBe('Project api is missing.')
     const off: RuleContext = { ...noContext, project: () => project('disabled') }
@@ -198,7 +208,7 @@ describe('dragTargets', () => {
     expect(busyHuman.in_progress.allowed).toBe(false)
     expect(busyHuman.review.allowed).toBe(true)
     // A project the client does not know is not approved.
-    const unknown = dragTargets(ticket({ projects: [{ project: 'x', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] }), { ...noContext, project: () => undefined })
+    const unknown = dragTargets(ticket({ projects: [{ project: 'x', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] }), { ...noContext, project: () => undefined })
     expect(unknown.ready.allowed).toBe(false)
   })
 })

@@ -301,7 +301,7 @@ func TestProcessRecoveryAfterCrashEndsOldAgentsAndResumes(t *testing.T) {
 	dead := h.e
 	dead.mu.Lock()
 	for _, en := range dead.entries {
-		en.ending = "the test's crash"
+		en.ending, en.endKind = "the test's crash", api.SessionEndShutdown
 	}
 	dead.mu.Unlock()
 	e := New(Options{

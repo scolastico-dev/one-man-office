@@ -79,8 +79,9 @@ type merger struct {
 // target that already contains the ticket's branch (from an earlier attempt
 // that was interrupted or blocked) is skipped, so running the merge again is
 // always safe. Every way it ends is recorded: CompleteMerge when all targets
-// contain the work (then the ticket's agents end and its worktrees are
-// cleaned up), MergeConflict when one conflicts, a failed merge step naming
+// contain the work (then Done ends agents and cleans up worktrees; projects
+// already exported keep the ticket awaiting their remote merge), MergeConflict
+// when one conflicts, a failed merge step naming
 // what a person has to do otherwise. The claim ends on every path.
 //
 // It returns the error of a merge that failed without a failed step, which
@@ -92,13 +93,13 @@ func (e *Engine) runMerge(ctx context.Context, t board.EngineTicket) error {
 	}
 	m := &merger{e: e, ctx: ctx, n: t.ID, claimed: true}
 	var err error
-	done := func() bool {
+	merged := func() bool {
 		defer m.finish()
-		var done bool
-		done, err = m.run()
-		return done
+		var merged bool
+		merged, err = m.run()
+		return merged
 	}()
-	if done {
+	if merged {
 		e.afterMerge(ctx, t.ID)
 	}
 	return err
@@ -115,8 +116,9 @@ func (m *merger) finish() {
 	m.claimed = false
 }
 
-// run carries out the merge and reports whether the ticket is now done, and
-// the error of a failure that left no failed step.
+// run carries out the local merge and reports whether it completed, and
+// the error of a failure that left no failed step. A successful local merge
+// can still leave exported projects waiting for their remote merge.
 func (m *merger) run() (bool, error) {
 	e := m.e
 	e.at("merge-claimed")
@@ -576,7 +578,7 @@ func failure(tg *mergeTarget, err error) error {
 // worktrees, in the merge's worker.
 func (e *Engine) afterMerge(ctx context.Context, n int64) {
 	t, snap, ok, err := e.read(ctx, n)
-	if err != nil || !ok {
+	if err != nil || !ok || t.Column != api.ColumnDone {
 		return
 	}
 	for _, s := range snap.Sessions {

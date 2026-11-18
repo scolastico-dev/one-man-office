@@ -37,6 +37,49 @@ func TestOpenWritesDefaultSettings(t *testing.T) {
 	}
 }
 
+func TestExportCheckIntervalDefaultsAndRoundTrip(t *testing.T) {
+	s, home, _ := openTest(t)
+	if got := time.Duration(s.General().ExportCheckInterval); got != 10*time.Minute {
+		t.Fatalf("export_check_interval = %s, want 10m", got)
+	}
+	for _, value := range []Duration{0, Duration(time.Minute), Duration(25 * time.Minute)} {
+		g := s.General()
+		g.ExportCheckInterval = value
+		if err := s.SetGeneralIf("", g); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := Open(home, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := reopened.General().ExportCheckInterval; got != value {
+			t.Fatalf("reopened interval = %v, want %v", got, value)
+		}
+		data, err := json.Marshal(api.General(reopened.General()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]json.RawMessage
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatal(err)
+		}
+		var got Duration
+		if err := json.Unmarshal(wire["export_check_interval"], &got); err != nil || got != value {
+			t.Fatalf("JSON interval = %s: %v, want %v", wire["export_check_interval"], err, value)
+		}
+	}
+}
+
+func TestExportCheckIntervalRejectsNegativeAndSubMinute(t *testing.T) {
+	for _, value := range []Duration{-1, Duration(59 * time.Second)} {
+		g := Defaults()
+		g.ExportCheckInterval = value
+		if err := g.Validate(); err == nil || !strings.Contains(err.Error(), "export_check_interval") {
+			t.Fatalf("interval %v: %v, want export_check_interval error", value, err)
+		}
+	}
+}
+
 func TestMalformedHandEditKeepsLastValidAndReportsError(t *testing.T) {
 	s, home, log := openTest(t)
 	g := s.General()

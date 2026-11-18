@@ -144,20 +144,20 @@ func TestCEOApprovalSettingLeavesOthersAlone(t *testing.T) {
 // CEO's tickets). A new column writer fails TestColumnWritersKnown until it
 // is listed here with its reason.
 var columnWriters = map[string]string{
-	"approve":        "Planning to Ready: the only way out of Planning; checkRelease decides who may",
-	"withdraw":       "Ready to Planning",
-	"stop":           "In Progress to Planning or Ready, the user only; tasks of a stopped story back to Ready",
-	"Cancel":         "to Done",
-	"relocate":       "helper of approve, withdraw and BeginWork",
-	"BeginWork":      "Ready to In Progress (the engine), only from Ready",
-	"CompleteMerge":  "Review to Done",
-	"MergeConflict":  "Review to In Progress",
-	"FinishExport":   "Review to Done",
-	"completeExport": "Review to Done",
-	"endRound":       "Review to In Progress on a rejecting review round",
-	"passReview":     "Review to Done, or In Progress to Review on hand-in",
-	"Reject":         "Review to In Progress, by the user",
-	"setColumn":      "the writer itself",
+	"approve":       "Planning to Ready: the only way out of Planning; checkRelease decides who may",
+	"withdraw":      "Ready to Planning",
+	"stop":          "In Progress to Planning or Ready, the user only; tasks of a stopped story back to Ready",
+	"Cancel":        "to Done",
+	"relocate":      "helper of approve, withdraw and BeginWork",
+	"BeginWork":     "Ready to In Progress (the engine), only from Ready",
+	"CompleteMerge": "Review to Done",
+	"MergeConflict": "Review to In Progress",
+	"FinishExport":  "Review to Done",
+	"markMerged":    "Review awaiting merge to Done, or legacy Done export confirmation",
+	"endRound":      "Review to In Progress on a rejecting review round",
+	"passReview":    "Review to Done, or In Progress to Review on hand-in",
+	"Reject":        "Review to In Progress, by the user",
+	"setColumn":     "the writer itself",
 }
 
 func TestColumnWritersKnown(t *testing.T) {

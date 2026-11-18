@@ -72,18 +72,18 @@ const exported = (t: TicketSummary) => t.projects.filter((p) => p.export_url)
 export function exportEffect(t: TicketSummary, nameOf: (id: string) => string): string {
   const done = exported(t)
   if (t.projects.length <= 1) {
-    return 'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket is done once the pull request exists.'
+    return 'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket waits in Review until the exported work is merged into the remote target branch.'
   }
   if (done.length > 0) {
     const rest = t.projects.filter((p) => !p.export_url).map((p) => nameOf(p.project))
     return (
       `omo exports only the projects without a pull request (${list(rest)}); ${list(done.map((p) => nameOf(p.project)))} ${done.length === 1 ? 'keeps its' : 'keep theirs'}. ` +
-      'A project with nothing to export is left out. The ticket is done once every other project has its pull request.'
+      'A project with nothing to export is left out. The ticket waits in Review until every exported project is merged into its remote target branch.'
     )
   }
   return (
     'omo exports each project on its own: it pushes the branch and opens a pull request for it, and leaves out a project with nothing to export. ' +
-    'A project that cannot be exported does not stop the others; the ticket then stays in Review naming it. The ticket is done once every other project has its pull request.'
+    'A project that cannot be exported does not stop the others; the ticket then stays in Review naming it. The ticket waits in Review until every exported project is merged into its remote target branch.'
   )
 }
 

@@ -104,6 +104,7 @@ export function captionFor(t: TicketSummary): string | undefined {
     if (t.review_stage === 'agent') return 'agent review'
     if (t.review_stage === 'merging') return 'merging…'
     if (t.review_stage === 'exporting') return 'exporting…'
+    if (t.review_stage === 'awaiting_merge') return 'Exported, waiting for the merge'
   }
   if (t.resolution === 'cancelled') return 'cancelled'
   if (t.resolution === 'exported') return 'exported'

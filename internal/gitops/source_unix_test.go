@@ -10,19 +10,6 @@ import (
 	"testing"
 )
 
-// gitWithGlobal returns a Git whose environment uses a global config file
-// with content: the user's own settings, which omo keeps.
-func gitWithGlobal(t *testing.T, content string, extra ...string) *Git {
-	t.Helper()
-	requireGit(t)
-	global := filepath.Join(t.TempDir(), "gitconfig")
-	write(t, global, content)
-	g := New()
-	env := append(isolatedEnv(t), "GIT_CONFIG_GLOBAL="+global)
-	g.SetEnvironment(append(env, extra...))
-	return g
-}
-
 func TestFetchSourceRunsNoHooks(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	hook := "#!/bin/sh\ntouch '" + marker + "'\n"

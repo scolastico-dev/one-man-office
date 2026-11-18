@@ -45,7 +45,8 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
         The pull request text is written per repository by the export agent.
       </p>
       <p v-if="!plain" class="approve__text approve__muted">
-        The card stays in Review, marked {{ exporting ? 'exporting…' : 'merging…' }}, until omo has finished.
+        <template v-if="exporting">The card stays in Review: first exporting…, then Exported, waiting for the merge, until the remote target branches contain the exported work.</template>
+        <template v-else>The card stays in Review, marked merging…, until omo has finished.</template>
       </p>
       <p v-if="error" class="approve__error" role="alert" data-action-error>{{ error }}</p>
     </div>

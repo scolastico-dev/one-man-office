@@ -124,7 +124,7 @@ test('composer: @ completion offers the roles with names; arrows and Enter choos
 })
 
 test('composer: on a ticket with several projects @reviewer:<project id> is offered for each, and chosen as typed', async () => {
-  const project = (id: string) => ({ project: id, base_branch: 'main', branch: `omo/${id}`, worktree: '', export_url: '', export_state: '' as const, export_error: '' })
+  const project = (id: string) => ({ project: id, base_branch: 'main', branch: `omo/${id}`, worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' })
   mountComposer({ t: ticket({ number: 9, type: 'story', projects: [project('api'), project('web')] }) })
   const options = () => w!.findAll('[role="option"]').map((o) => o.text())
   await type('Ask @rev')

@@ -157,7 +157,7 @@ func TestLegacyTruncatedExportAttentionCanBeCleared(t *testing.T) {
 			if !strings.HasSuffix(before, "; Export of ui fa…") {
 				t.Fatalf("not the legacy shortened case: %q", before)
 			}
-			// Remove the new metadata columns to reopen the actual version-8
+			// Remove the new metadata columns to reopen the actual version-9
 			// shape through the normal upgrade path.
 			var seq int
 			var name, path string
@@ -165,7 +165,7 @@ func TestLegacyTruncatedExportAttentionCanBeCleared(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := b.db.Exec(`ALTER TABLE tickets DROP COLUMN attention_owner;
-ALTER TABLE agent_sessions DROP COLUMN end_kind; PRAGMA user_version = 8`); err != nil {
+ALTER TABLE agent_sessions DROP COLUMN end_kind; PRAGMA user_version = 9`); err != nil {
 				t.Fatal(err)
 			}
 			b.db.Close()

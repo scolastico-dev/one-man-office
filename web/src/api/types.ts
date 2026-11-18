@@ -10,7 +10,7 @@ export type Role = 'user' | 'ceo' | 'pm' | 'developer' | 'reviewer' | 'system'
 export type Review = 'skipped' | 'agent' | 'human' | 'agent_then_human'
 export type WhenApproved = 'merge' | 'export'
 export type TaskRelease = 'agents' | 'user'
-export type ReviewStage = '' | 'agent' | 'human' | 'merging' | 'exporting'
+export type ReviewStage = '' | 'agent' | 'human' | 'merging' | 'exporting' | 'awaiting_merge'
 export type SessionState = 'starting' | 'running' | 'waiting' | 'ended'
 export type WaitingReason = 'not_done' | 'export_not_merged' | 'cancelled'
 
@@ -37,9 +37,15 @@ export interface TicketProject {
   export_state: ExportState
   /** Why the export of this project failed; set with export_state "failed" only. */
   export_error: string
+  /** The remote address and branch identities captured at export; the address is redacted for display. */
+  export_remote: string
+  export_branch: string
+  export_base: string
+  export_commit: string
+  export_target_commit: string
   /**
-   * The commits the project's diff ran between when the ticket went from Review to Done (the merge base, the
-   * reviewed commit), full ids. Empty for a ticket that is not done, was cancelled or was done before omo recorded them.
+   * The merge base and reviewed commit recorded for the completed or exported diff, full ids.
+   * Exported tickets may have them while waiting in Review. Empty before recording or after cancellation.
    */
   start_commit?: string
   end_commit?: string
@@ -528,6 +534,7 @@ export interface General {
   stop: StopSettings
   workspace_roots: WorkspaceRoot[]
   rescan_interval: Duration
+  export_check_interval: Duration
   agent_env: Record<string, string>
   usage: UsageSettings
   ui: UISettings
