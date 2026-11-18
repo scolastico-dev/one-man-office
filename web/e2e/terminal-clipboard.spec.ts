@@ -13,7 +13,7 @@ import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { observe, openBoard } from './support/board'
 import { png } from './support/images'
-import { expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
@@ -113,6 +113,8 @@ test.describe('images dropped onto an agent terminal', () => {
     await panel.locator(`[data-session="${session.id}"] [data-agent-row]`).click()
     const terminal = terminalIn(panel)
     await expectTerminalText(terminal, 'hello from fake')
+    // Dropped files go into an agent terminal only once it is writable (the draft box takes them before).
+    await makeWritable(panel)
     const folder = join(omo.home, 'omo', 'images', 'terminal')
     // The stored images. omo writes a file under a temporary name (`.omo-write-…`)
     // and renames it when it is complete; a file still being written is not one.

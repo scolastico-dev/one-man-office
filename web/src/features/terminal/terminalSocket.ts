@@ -50,6 +50,13 @@ export interface ConnectionOptions {
 export interface TerminalConnection {
   /** Sends typed or pasted text to the process. */
   send(text: string): void
+  /**
+   * Sends one message (its text is already a paste) and its Enter as a single
+   * unit that omo's own lines cannot get into. Resolves once the process took
+   * it; rejects, with the connection kept as it is, when it did not. Never
+   * waits for a connection: without an open one it rejects at once.
+   */
+  sendMessage(text: string): Promise<void>
   /** Tells the process the new size; remembered and sent again on every new connection. */
   resize(rows: number, cols: number): void
   /** Connects again right now while `disconnected`, with the back-off from its start. */
@@ -57,6 +64,10 @@ export interface TerminalConnection {
   /** Closes the socket and stops every timer. */
   dispose(): void
 }
+
+/** How long a message may wait for its acknowledgement (the Enter follows the text after a short pause). */
+export const MESSAGE_TIMEOUT_MS = 30_000
+const NOT_CONFIRMED = 'The terminal did not confirm the message; it may not have arrived.'
 
 export const RECONNECT_DELAYS: readonly number[] = [1000, 2000, 4000, 8000, 16000]
 
@@ -75,6 +86,16 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
   let timer: ReturnType<typeof setTimeout> | undefined
   let disposed = false
   let finished = false
+  let nextMessage = 1
+  const messages = new Map<number, { resolve(): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> }>()
+
+  function settleMessages(reason: string): void {
+    for (const [id, m] of messages) {
+      clearTimeout(m.timer)
+      m.reject(new Error(reason))
+      messages.delete(id)
+    }
+  }
 
   function state(s: ConnectionState, retryMs?: number): void {
     if (!disposed) o.onState(s, retryMs)
@@ -114,6 +135,16 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
           const type = (JSON.parse(ev.data) as { type?: unknown }).type
           if (type === 'input-ack') mine.acknowledge()
           else if (type === 'replay-end') replaying = false
+          else if (type === 'message-ack') {
+            const ack = JSON.parse(ev.data) as { id?: unknown; error?: unknown }
+            const m = typeof ack.id === 'number' ? messages.get(ack.id) : undefined
+            if (m && typeof ack.id === 'number') {
+              messages.delete(ack.id)
+              clearTimeout(m.timer)
+              if (typeof ack.error === 'string' && ack.error !== '') m.reject(new Error(ack.error))
+              else m.resolve()
+            }
+          }
         } catch {
           // Not a frame this client knows.
         }
@@ -123,6 +154,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
     }
     s.onclose = (ev: CloseEvent) => {
       mine.close()
+      if (socket === s) settleMessages(NOT_CONFIRMED)
       if (disposed || socket !== s) return
       socket = null
       if (ev.code === 1000) {
@@ -183,6 +215,25 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
       }
       input.send(text)
     },
+    sendMessage(text) {
+      if (disposed || !socket || socket.readyState !== 1 || finished) return Promise.reject(new Error(DISCONNECTED_TEXT))
+      const s = socket
+      const id = nextMessage++
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          messages.delete(id)
+          reject(new Error(NOT_CONFIRMED))
+        }, MESSAGE_TIMEOUT_MS)
+        messages.set(id, { resolve, reject, timer })
+        try {
+          s.send(JSON.stringify({ type: 'message', id, text, keys: '\r' }))
+        } catch {
+          clearTimeout(timer)
+          messages.delete(id)
+          reject(new Error(DISCONNECTED_TEXT))
+        }
+      })
+    },
     resize(rows, cols) {
       size = { rows, cols }
       if (socket) sendSize(socket, size)
@@ -194,6 +245,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
     },
     dispose() {
       disposed = true
+      settleMessages(NOT_CONFIRMED)
       clearTimeout(timer)
       input?.close()
       const s = socket

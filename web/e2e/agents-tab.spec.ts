@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from './support/omo'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { observe } from './support/board'
-import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
@@ -27,9 +27,10 @@ test.describe('a developer that waits for a line, answers it and exits', () => {
     await expect(row).toContainText('developer')
     await row.click()
 
-    await expect(panel(page).getByText('Typing here types into the agent.')).toBeVisible()
+    await expect(panel(page).getByText('Write to the agent in the box below the terminal.')).toBeVisible()
     const term = terminalIn(panel(page))
     await expectTerminalText(term, 'hello from fake')
+    await makeWritable(panel(page))
     await typeInTerminal(page, term, 'ping')
     await expectTerminalText(term, 'got it')
     await typeInTerminal(page, term, 'finish')
@@ -52,6 +53,7 @@ test.describe('a developer that waits for a line, answers it and exits', () => {
     await panel(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
     const term = terminalIn(panel(page))
     await expectTerminalText(term, 'hello from fake')
+    await makeWritable(panel(page))
     await typeInTerminal(page, term, 'ping')
     await typeInTerminal(page, term, 'finish')
 

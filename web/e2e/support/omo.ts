@@ -51,6 +51,8 @@ export interface OmoOptions {
    * wait for ended sessions does not apply (a test waits on the board itself).
    */
   agents?: Partial<Record<AgentRole, string>>
+  /** More environment for the fake agent (see `internal/fakeagent`, for example `OMO_FAKE_BRACKETED_PASTE: '1'`). */
+  agentEnv?: Record<string, string>
   /**
    * `PATH` of the server and of every omo command of the test, in place of
    * the runner's own: a folder of the test's own fake programs, so what omo
@@ -371,6 +373,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
       GIT_COMMITTER_NAME: 'omo',
       GIT_COMMITTER_EMAIL: 'omo@example.invalid',
     }
+    Object.assign(env, opts.agentEnv ?? {})
     for (const role of AGENT_ROLES) {
       const text = scripts[role]
       if (text !== undefined) env[`OMO_FAKE_SCRIPT_${role.toUpperCase()}`] = text

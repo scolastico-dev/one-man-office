@@ -244,4 +244,60 @@ describe('terminal socket', () => {
     })
     expect(states.at(-1)).toBe('disconnected')
   })
+
+  describe('messages', () => {
+    const frames = (sock: FakeSocket) => sock.sent.filter((d) => typeof d === 'string').map((d) => JSON.parse(d as string))
+
+    test('a message goes out as one frame with its text and Enter, and resolves on its acknowledgement', async () => {
+      const { c, sock } = make()
+      sock().open()
+      const done = c.sendMessage('hello\nworld')
+      const [frame] = frames(sock())
+      expect(frame).toMatchObject({ type: 'message', text: 'hello\nworld', keys: '\r' })
+      sock().message(JSON.stringify({ type: 'message-ack', id: frame.id }))
+      await expect(done).resolves.toBeUndefined()
+      c.dispose()
+    })
+
+    test('a refusal in the acknowledgement rejects with its text, and an acknowledgement of another message does not resolve it', async () => {
+      const { c, sock } = make()
+      sock().open()
+      const first = c.sendMessage('a')
+      const second = c.sendMessage('b')
+      const [f1, f2] = frames(sock())
+      expect(f1.id).not.toBe(f2.id)
+      sock().message(JSON.stringify({ type: 'message-ack', id: f2.id, error: 'the terminal input queue is full' }))
+      await expect(second).rejects.toThrow('the terminal input queue is full')
+      sock().message(JSON.stringify({ type: 'message-ack', id: f1.id }))
+      await expect(first).resolves.toBeUndefined()
+      c.dispose()
+    })
+
+    test('without an open connection the message is refused at once and never queued for a later one', async () => {
+      const { c, sock } = make()
+      await expect(c.sendMessage('early')).rejects.toThrow(/disconnected/i)
+      sock().open()
+      expect(frames(sock())).toEqual([])
+      c.dispose()
+    })
+
+    test('a message whose connection drops before its acknowledgement is rejected', async () => {
+      const { c, sock } = make()
+      sock().open()
+      const pending = c.sendMessage('lost')
+      sock().drop()
+      await expect(pending).rejects.toThrow(/did not confirm|disconnected/i)
+      c.dispose()
+    })
+
+    test('an acknowledgement that never comes rejects after a while', async () => {
+      const { c, sock } = make()
+      sock().open()
+      const pending = c.sendMessage('slow')
+      const seen = expect(pending).rejects.toThrow(/did not confirm/i)
+      await vi.advanceTimersByTimeAsync(60_000)
+      await seen
+      c.dispose()
+    })
+  })
 })

@@ -10,14 +10,14 @@ import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { logError } from '../../api/log'
-import { ApiError } from '../../api/client'
-import { uploadTerminalImage } from '../../api/endpoints'
-import { MAX_IMAGE_BYTES } from '../images/imageUploads'
 import { createLinkHandler, openLink } from './terminalLinks'
 import { cleanPaste, guardPaste } from './terminalPaste'
 import { clipboardKey, execCopy, parseOsc52, writeClipboard } from './terminalClipboard'
 import { lineBreakKey } from './terminalKeys'
-import { isImageFile, pastedPaths } from './terminalImages'
+import { pastedPaths } from './terminalImages'
+import { uploadImages } from './terminalUploads'
+import { isAgentSrc, isWritable, setWritable } from './terminalWritable'
+import TerminalDraft from './TerminalDraft.vue'
 import { usePopouts } from './popout'
 import { targetOfSrc, windowPathOf, type WindowSizeKind } from './terminalTarget'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
@@ -51,6 +51,32 @@ const props = withDefaults(
   }>(),
   { endedText: 'The process has ended.', readonly: false, fill: false, popout: true, windowKind: undefined, autofocus: false },
 )
+
+/**
+ * An agent's terminal is read-only until the user switches it: its keyboard,
+ * paste and dropped files do nothing (the mouse works as ever, and a program
+ * that asks for mouse events gets them), and the draft box below is where
+ * messages are written. The choice is kept per terminal for the browser session.
+ */
+const agentTerminal = computed(() => isAgentSrc(props.src))
+const writable = ref(isWritable(props.src))
+const locked = computed(() => props.readonly || (agentTerminal.value && !writable.value))
+const draftId = computed(() => targetOfSrc(props.src)?.id ?? props.src)
+/** The draft box is for a terminal that takes input and has not ended. */
+const showDraft = computed(() => agentTerminal.value && !props.readonly && state.value !== 'ended')
+
+function toggleWritable(): void {
+  writable.value = !writable.value
+  setWritable(props.src, writable.value)
+  announcer.polite(writable.value ? 'The terminal takes typing.' : 'The terminal is read-only.')
+  if (writable.value) term?.focus()
+}
+
+/** One message from the draft box, written by omo as a whole. */
+function sendDraft(paste: string): Promise<void> {
+  if (!connection) return Promise.reject(new Error('The terminal is not connected.'))
+  return connection.sendMessage(paste)
+}
 
 /** The terminal as its own window knows it; null when it cannot have one. */
 const target = computed(() => (props.popout ? targetOfSrc(props.src) : null))
@@ -201,37 +227,20 @@ function keyTurn(): void {
 
 /** Images dropped or pasted into the terminal: stored by omo, their paths pasted. */
 async function takeFiles(list: File[]): Promise<void> {
-  if (props.readonly || state.value === 'ended' || !term) return
-  const images = list.filter(isImageFile)
-  const problems: string[] = []
-  if (images.length < list.length) {
-    problems.push(list.length === 1 ? 'Only images can be dropped here.' : 'Only images can be dropped here; the other files were left out.')
-  }
-  const fitting = images.filter((f) => {
-    if (f.size <= MAX_IMAGE_BYTES) return true
-    problems.push(`${visibleText(f.name)}: an image has at most 10 MiB.`)
-    return false
-  })
-  if (fitting.length === 0) {
+  if (locked.value || state.value === 'ended' || !term) return
+  const { stored, problems } = await uploadImages(session.client, list, (n) =>
+    showNote(n === 1 ? 'Uploading the image…' : `Uploading ${n} images…`, false, true),
+  )
+  if (unmounted || !term) return
+  if (stored.length === 0 && problems.length > 0) {
     showNote(problems.join(' '), true)
     announcer.assertive(problems.join(' '))
     return
   }
-  showNote(fitting.length === 1 ? 'Uploading the image…' : `Uploading ${fitting.length} images…`, false, true)
-  const paths: string[] = []
-  for (const file of fitting) {
-    const name = file.name || 'pasted image.png'
-    try {
-      paths.push((await uploadTerminalImage(session.client, file, name)).data.path)
-    } catch (e) {
-      problems.push(`${visibleText(name)}: ${e instanceof ApiError ? e.message : 'omo did not take it.'}`)
-    }
-  }
-  if (unmounted || !term) return
-  if (paths.length > 0) {
-    const text = cleanPaste(pastedPaths(paths))
+  if (stored.length > 0) {
+    const text = cleanPaste(pastedPaths(stored.map((s) => s.path)))
     asUser(() => term?.paste(text))
-    term.focus()
+    if (!locked.value) term.focus()
   }
   if (problems.length > 0) {
     showNote(problems.join(' '), true)
@@ -242,7 +251,7 @@ async function takeFiles(list: File[]): Promise<void> {
 }
 
 function takesFiles(): boolean {
-  return !props.readonly && state.value !== 'ended'
+  return !locked.value && state.value !== 'ended'
 }
 
 function hasFiles(ev: DragEvent): boolean {
@@ -467,7 +476,9 @@ function start(el: HTMLElement): void {
   const box = screen.value ?? el
   stopPaste = guardPaste(
     box,
-    (text) => asUser(() => t.paste(text)),
+    (text) => {
+      if (!locked.value) asUser(() => t.paste(text))
+    },
     (list) => void takeFiles(list),
   )
   const onPointer = () => {
@@ -475,7 +486,20 @@ function start(el: HTMLElement): void {
     copyPendingNow()
   }
   box.addEventListener('pointerdown', onPointer, true)
-  stopPointer = () => box.removeEventListener('pointerdown', onPointer, true)
+  // Text that reaches the emulator without a key it handles (an input method,
+  // a mobile keyboard) is stopped while the terminal is read-only. Mouse events
+  // are not touched.
+  const textEvents = ['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend']
+  const blockText = (ev: Event) => {
+    if (!locked.value) return
+    ev.stopPropagation()
+    if (ev.cancelable) ev.preventDefault()
+  }
+  for (const name of textEvents) box.addEventListener(name, blockText, true)
+  stopPointer = () => {
+    box.removeEventListener('pointerdown', onPointer, true)
+    for (const name of textEvents) box.removeEventListener(name, blockText, true)
+  }
   const f = new FitAddon()
   t.loadAddon(f)
   term = t
@@ -508,6 +532,8 @@ function start(el: HTMLElement): void {
     }
     const clip = clipboardKeyPressed(t, ev)
     if (clip !== undefined) return clip
+    // Read-only: no key types into the terminal (copying and F6 above still work).
+    if (locked.value) return false
     const lineBreak = lineBreakKey(ev)
     if (lineBreak !== null) {
       // xterm would send a plain CR (a submit); the keypress that follows is
@@ -604,6 +630,17 @@ defineExpose({
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
       <span class="tv__tools">
+        <UiButton
+          v-if="agentTerminal && state !== 'ended'"
+          size="sm"
+          class="tv__mode"
+          :data-writable="writable ? '' : undefined"
+          :aria-pressed="writable ? 'true' : 'false'"
+          :title="writable ? 'Typing goes into the terminal. Switch back to read-only.' : 'Read-only. Switch on to type into the terminal, for single keys, arrow keys or Escape.'"
+          data-terminal-mode
+          @click="toggleWritable"
+          >{{ writable ? 'Writable' : 'Read only' }}</UiButton
+        >
         <IconButton v-if="target && state !== 'ended'" class="tv__popout" size="sm" variant="default" :label="popoutLabel" data-terminal-popout @click="popOut">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.3">
             <path d="M5 1.5H1.5v9h9V7" />
@@ -621,7 +658,7 @@ defineExpose({
     <div
       ref="screen"
       class="tv__screen"
-      :data-readonly="readonly ? '' : undefined"
+      :data-readonly="locked ? '' : undefined"
       :data-size="sentSize || undefined"
       :data-drop="dropping ? '' : undefined"
       @dragenter="onDragEnter"
@@ -643,6 +680,13 @@ defineExpose({
         >
       </div>
     </div>
+    <TerminalDraft
+      v-if="showDraft"
+      :draft-id="draftId"
+      :label="`Message to the ${label.charAt(0).toLowerCase()}${label.slice(1)}`"
+      :bracketed="() => term?.modes.bracketedPasteMode ?? true"
+      :send="sendDraft"
+    />
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
     <p v-if="inputError" class="tv__error" role="alert">{{ inputError }}</p>
     <UiDialog v-if="pendingLink" open title="Open this address?" eyebrow="Terminal link" @close="pendingLink = null">
@@ -656,7 +700,7 @@ defineExpose({
       </template>
     </UiDialog>
     <p :id="hintId" class="tv__hint">
-      <template v-if="readonly">Read only. </template><kbd>F6</kbd> leaves the terminal, <kbd>Shift+F6</kbd> goes to the element before it.
+      <template v-if="locked">Read only; use the message box below to write to the agent. </template><kbd>F6</kbd> leaves the terminal, <kbd>Shift+F6</kbd> goes to the element before it.
     </p>
   </div>
 </template>
@@ -723,6 +767,8 @@ defineExpose({
 }
 .tv--fill > .tv__screen {
   flex: 1 1 0;
+  /* The message box and the hint below share the column: the screen may give way. */
+  min-height: calc(var(--omo-space) * 30);
 }
 .tv--fill > .tv__screen > .tv__host {
   position: absolute;
