@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -379,22 +380,38 @@ func TestLeaveUncommittedFilesAndHandInTwice(t *testing.T) {
 	noSecret(t, res.out, id)
 }
 
+// hangContext observes the blocking context receive in hang. The print/hang
+// script does not otherwise call Done, so this marks entry into the wait.
+type hangContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *hangContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
 func TestNeverReadyAndHangMakeNoCalls(t *testing.T) {
 	w := startWorld(t)
 	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")
-	r := start(t, Options{Script: "print|alive\nhang"})
-	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(r.out.String(), "alive") {
-		if time.Now().After(deadline) {
-			t.Fatal("no output")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	hang := &hangContext{Context: ctx, entered: make(chan struct{})}
+	r := &running{t: t, out: &syncBuffer{}, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		r.code = Run(hang, Options{Script: "print|alive\nhang", Stdout: r.out})
+		close(r.done)
+	}()
+	t.Cleanup(func() { r.finish(true) })
 	select {
+	case <-hang.entered:
 	case <-r.done:
 		t.Fatalf("hang returned %d", r.code)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(20 * time.Second):
+		t.Fatal("hang did not reach its context wait")
 	}
+	contains(t, r.out.String(), "alive")
 	res := r.finish(true)
 	if res.code == 0 {
 		t.Fatal("interrupted agent reported success")
@@ -646,15 +663,14 @@ func TestRunsAsProcess(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	werr := make(chan error, 1)
+	waited := make(chan struct{})
+	go func() { defer close(waited); werr <- cmd.Wait() }()
 	t.Cleanup(func() {
-		if cmd.ProcessState == nil {
-			cmd.Process.Kill()
-			cmd.Wait()
-		}
+		_ = cmd.Process.Kill()
+		<-waited
 	})
 	io.WriteString(in, "Run omo ai ready to begin\n")
-	werr := make(chan error, 1)
-	go func() { werr <- cmd.Wait() }()
 	select {
 	case <-werr:
 	case <-time.After(30 * time.Second):
@@ -702,7 +718,7 @@ func agentComments(t *testing.T, w *world, n int) []api.Comment {
 func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 	var echo syncBuffer
 	in, feed := io.Pipe()
-	lines := composer(in, &echo, 1, time.Time{})
+	lines := composer(in, &echo, 1, time.Time{}, 0)
 	go func() {
 		feed.Write([]byte("\rhello"))
 		feed.Write([]byte("\r"))
@@ -718,12 +734,27 @@ func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 	}
 
 	in, feed = io.Pipe()
-	lines = composer(in, io.Discard, 0, time.Now().Add(time.Hour))
+	lines = composer(in, io.Discard, 0, time.Now().Add(time.Hour), 0)
 	go func() {
 		feed.Write([]byte("lost\r"))
 		feed.Close()
 	}()
 	if got, _ := io.ReadAll(lines); len(got) != 0 {
 		t.Fatalf("input during the deaf time came through: %q", got)
+	}
+}
+
+func TestComposerDropsWholePromptsWithoutEcho(t *testing.T) {
+	var echo syncBuffer
+	in, feed := io.Pipe()
+	lines := composer(in, &echo, 0, time.Time{}, 1)
+	go func() {
+		defer feed.Close()
+		_, _ = feed.Write([]byte("lost"))
+		_, _ = feed.Write([]byte(" prompt\rkept prompt\r"))
+	}()
+	got, err := io.ReadAll(lines)
+	if err != nil || string(got) != "kept prompt\n" || echo.String() != "kept prompt\r\n" {
+		t.Fatalf("lines %q, echo %q, error %v", got, echo.String(), err)
 	}
 }

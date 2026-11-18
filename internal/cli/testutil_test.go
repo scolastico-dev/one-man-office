@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
-	"net"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/service"
+	"github.com/scolastico-dev/one-man-office/internal/testport"
 )
 
 type syncBuffer struct {
@@ -43,16 +44,6 @@ func isolate(t *testing.T) string {
 	t.Setenv("OMO_HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	return home
-}
-
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
 }
 
 // execute runs one omo invocation to completion.
@@ -87,7 +78,24 @@ var fragment = regexp.MustCompile(`#([0-9a-f]{64})`)
 // waits until it answers its control endpoint.
 func startRoot(t *testing.T) *running {
 	t.Helper()
-	mustExecute(t, "config", "set", "port", strconv.Itoa(freePort(t)))
+	var r *running
+	_, err := testport.Acquire(func(port int) error {
+		var err error
+		r, err = startRootOnPort(t, port)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.shutdown(t) })
+	return r
+}
+
+func startRootOnPort(t *testing.T, port int) (*running, error) {
+	t.Helper()
+	if out, err := execute(context.Background(), "config", "set", "port", strconv.Itoa(port)); err != nil {
+		return nil, fmt.Errorf("configure fixture port: %w\n%s", err, out)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := Root("test")
 	r := &running{out: &syncBuffer{}, done: make(chan error, 1), stop: cancel}
@@ -95,21 +103,21 @@ func startRoot(t *testing.T) *running {
 	cmd.SetErr(r.out)
 	cmd.SetArgs(nil)
 	go func() { r.done <- cmd.ExecuteContext(ctx) }()
-	t.Cleanup(func() { r.shutdown(t) })
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-r.done:
-			t.Fatalf("server exited early: %v\n%s", err, r.out.String())
+			cancel() // ExecuteContext has returned and released its server.
+			return nil, fmt.Errorf("server exited early: %w\n%s", err, r.out.String())
 		default:
 		}
 		if _, ok, _ := service.Running(context.Background()); ok {
-			return r
+			return r, nil
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("server did not become ready\n%s", r.out.String())
-	return nil
+	r.shutdown(t)
+	return nil, fmt.Errorf("server did not become ready\n%s", r.out.String())
 }
 
 func (r *running) shutdown(t *testing.T) {

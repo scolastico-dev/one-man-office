@@ -289,6 +289,7 @@ func start(t *testing.T, o Options) *running {
 		select {
 		case <-r.done:
 		case <-time.After(10 * time.Second):
+			t.Error("fake agent still running after cancellation")
 		}
 	})
 	return r

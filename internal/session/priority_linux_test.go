@@ -27,6 +27,7 @@ func TestLowerPrioritySetsAgentNiceValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupSession(t, s)
 	if err := s.SendLine("report"); err != nil {
 		t.Fatal(err)
 	}

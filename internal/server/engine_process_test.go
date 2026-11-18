@@ -102,6 +102,25 @@ func startProcessWorld(t *testing.T, script string, handoff time.Duration) *proc
 		project: p.ID, done: make(chan error, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
+	// Failure before readiness must cancel Run and reap its children too.
+	t.Cleanup(func() {
+		if err := w.stop(time.Minute); err != nil {
+			t.Error(err)
+		}
+		for _, a := range w.runner.all() {
+			select {
+			case <-a.Done():
+			case <-time.After(15 * time.Second):
+				t.Errorf("an agent process is still running after the test")
+				_ = a.Kill()
+				select {
+				case <-a.Done():
+				case <-time.After(15 * time.Second):
+					t.Error("the agent process did not exit after Kill")
+				}
+			}
+		}
+	})
 	readyc := make(chan string, 1)
 	o := Options{Layout: l, Config: testConfig(), Version: "test", Runner: w.runner, Hurry: w.hurry}
 	go func() {
@@ -110,24 +129,12 @@ func startProcessWorld(t *testing.T, script string, handoff time.Duration) *proc
 	select {
 	case w.url = <-readyc:
 	case err := <-w.done:
-		cancel()
+		close(w.done)
 		t.Fatalf("Run ended before ready: %v", err)
 	case <-time.After(30 * time.Second):
-		cancel()
 		t.Fatal("Run not ready")
 	}
 	_, w.token, _ = strings.Cut(w.url, "#")
-	t.Cleanup(func() {
-		w.stop(time.Minute)
-		for _, a := range w.runner.all() {
-			select {
-			case <-a.Done():
-			case <-time.After(15 * time.Second):
-				t.Errorf("an agent process is still running after the test")
-				_ = a.Kill()
-			}
-		}
-	})
 	return w
 }
 
@@ -142,8 +149,7 @@ func (w *processWorld) stop(limit time.Duration) error {
 		}
 		return err
 	case <-time.After(limit):
-		w.t.Fatalf("Run did not return within %s", limit)
-		return nil
+		return fmt.Errorf("Run did not return within %s", limit)
 	}
 }
 

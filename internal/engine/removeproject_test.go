@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -396,14 +395,30 @@ func TestRemoveProjectKeepsItsClaimWhileARunStarts(t *testing.T) {
 		if point != "project-removal-claimed" {
 			return
 		}
+		// Check the exclusion itself while the removal is held. Waiting
+		// 100ms for the other goroutine to run could miss a broken hold.
+		if h.e.claims.TryLock() {
+			h.e.claims.Unlock()
+			t.Error("the removal did not exclude startup's claim release")
+		}
 		go func() {
 			h.e.startup(h.ctx)
 			close(startupDone)
 		}()
+		// A pending writer prevents new readers. Once this fails, startup
+		// has actually attempted its write lock while this removal still
+		// holds a read lock; an unscheduled goroutine cannot pass the test.
+		h.waitFor("startup to wait for the removal's claim", func() bool {
+			if h.e.claims.TryRLock() {
+				h.e.claims.RUnlock()
+				return false
+			}
+			return true
+		})
 		select {
 		case <-startupDone:
 			t.Error("the start released the claims during a removal")
-		case <-time.After(100 * time.Millisecond):
+		default:
 		}
 		if !h.ticket(s).Busy {
 			t.Error("the removal's claim was released")

@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
@@ -780,51 +782,61 @@ func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
 // ---- engine start and stop ----
 
 func TestRunStopsDuringStartInFlight(t *testing.T) {
-	h := newHarness(t)
-	release := make(chan struct{})
-	entered := make(chan agents.Spec, 1)
-	h.runner.block, h.runner.entered = release, entered
-	task := h.standalone("one")
-	h.approve(task)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		h.e.Run(ctx)
-		close(done)
-	}()
-	<-entered
-	cancel()
-	select {
-	case <-done:
-		t.Fatal("Run returned while a start was in flight")
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(release)
-	<-done
-	for _, a := range h.runner.all() {
-		if !a.isOver() {
-			t.Fatal("agent left running")
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		release := make(chan struct{})
+		releaseStart := sync.OnceFunc(func() { close(release) })
+		defer releaseStart()
+		entered := make(chan agents.Spec, 1)
+		h.runner.block, h.runner.entered = release, entered
+		task := h.standalone("one")
+		h.approve(task)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			h.e.Run(ctx)
+			close(done)
+		}()
+		<-entered
+		cancel()
+		// Advance virtual time beyond the bounded waits for an agent to
+		// end. Run must still join the start itself, however long it takes.
+		time.Sleep(2 * endTimeout)
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("Run returned while a start was in flight")
+		default:
 		}
-	}
-	if h.liveCount() != 0 {
-		t.Fatal("a session is still live after Run returned")
-	}
-	// Running again resumes the ticket; a second concurrent Run returns at once.
-	h.runner.block = nil
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	done2 := make(chan struct{})
-	go func() {
-		h.e.Run(ctx2)
-		close(done2)
-	}()
-	h.waitFor("a fresh developer", func() bool { _, ok := h.liveOK(api.RoleDeveloper, task); return ok })
-	h.e.Run(ctx2) // returns at once
-	cancel2()
-	<-done2
-	h.e.halt(context.Background(), "again") // idempotent
-	if h.liveCount() != 0 {
-		t.Fatal("a session is still live")
-	}
+		releaseStart()
+		<-done
+		for _, a := range h.runner.all() {
+			if !a.isOver() {
+				t.Fatal("agent left running")
+			}
+		}
+		if h.liveCount() != 0 {
+			t.Fatal("a session is still live after Run returned")
+		}
+		// Running again resumes the ticket; a second concurrent Run returns at once.
+		h.runner.block = nil
+		ctx2, cancel2 := context.WithCancel(context.Background())
+		defer cancel2()
+		done2 := make(chan struct{})
+		go func() {
+			h.e.Run(ctx2)
+			close(done2)
+		}()
+		h.waitFor("a fresh developer", func() bool { _, ok := h.liveOK(api.RoleDeveloper, task); return ok })
+		h.e.Run(ctx2) // returns at once
+		cancel2()
+		<-done2
+		h.e.halt(context.Background(), "again") // idempotent
+		if h.liveCount() != 0 {
+			t.Fatal("a session is still live")
+		}
+	})
 }
 
 func TestRunEndsSessionsAndClaimsOfEarlierRun(t *testing.T) {

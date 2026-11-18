@@ -284,20 +284,6 @@ func replaceIndex(t *testing.T, wt string, make func(path string) error) {
 	}
 }
 
-// returnsWithin runs fn and fails the test when it does not return within d.
-func returnsWithin(t *testing.T, d time.Duration, what string, fn func() error) error {
-	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- fn() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(d):
-		t.Fatalf("%s did not return within %s", what, d)
-		return nil
-	}
-}
-
 func TestWorktreeIndexMustBeARegularFile(t *testing.T) {
 	cases := map[string]func(path string) error{
 		"link to /dev/zero": func(p string) error { return os.Symlink("/dev/zero", p) },

@@ -49,6 +49,7 @@ func (p *pasteTerminal) Close() error                { p.once.Do(func() { close(
 func TestTerminalPasteAcknowledgesCompleteWritesAndKeepsConnection(t *testing.T) {
 	p := &pasteTerminal{gate: make(chan struct{}), started: make(chan struct{}, 1), closed: make(chan struct{})}
 	i := Own("paste", p, nil)
+	t.Cleanup(func() { _ = p.Close(); <-i.Done() })
 	server := serveTerminal(t, i)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -117,7 +118,7 @@ func TestTerminalPasteAcknowledgesCompleteWritesAndKeepsConnection(t *testing.T)
 }
 
 func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("tail", p, nil)
 	server := serveTerminal(t, i)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -142,7 +143,7 @@ func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
 }
 
 func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("reconnect", p, nil)
 	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h"))
 	server := serveTerminal(t, i)
@@ -176,7 +177,7 @@ func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T
 }
 
 func TestTerminalPlainShellDoesNotRepaintOnFirstResize(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("shell", p, nil)
 	server := serveTerminal(t, i)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -227,7 +228,7 @@ func serveTerminal(t *testing.T, term *Terminal) *httptest.Server {
 const replayEnd = `{"type":"replay-end"}`
 
 func TestTerminalAttachMarksEndOfReplay(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("replay", p, nil)
 	// A query the program wrote earlier: the browser's emulator answers it
 	// while replaying, and that answer must not reach the program again.
@@ -259,7 +260,7 @@ func TestTerminalAttachMarksEndOfReplay(t *testing.T) {
 	}
 
 	// An attach with nothing to replay is marked as well.
-	empty := Own("empty", terminalFixture(), nil)
+	empty := Own("empty", terminalFixture(t), nil)
 	server = serveTerminal(t, empty)
 	c = dial()
 	kind, data, err = c.Read(ctx)

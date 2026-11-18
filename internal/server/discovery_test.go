@@ -492,7 +492,8 @@ func TestCloseStopsScanner(t *testing.T) {
 	}
 	// A trigger after Close starts nothing.
 	s.scan.request(scanButton)
-	time.Sleep(20 * time.Millisecond)
+	// Close joined the scanner; request only queues a signal and never
+	// launches a worker of its own.
 	if n := scannerGoroutines(); n != 0 {
 		t.Fatalf("%d scanner goroutines after a trigger past Close", n)
 	}

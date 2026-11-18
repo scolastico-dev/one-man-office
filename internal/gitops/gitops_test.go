@@ -7,9 +7,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
+
+// returnsWithin runs fn and fails the test when it does not return within d.
+func returnsWithin(t *testing.T, d time.Duration, what string, fn func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		t.Fatalf("%s did not return within %s", what, d)
+		return nil
+	}
+}
 
 // git runs a git command in dir with fully isolated config (no user/global
 // config, no signing, deterministic identity).

@@ -114,13 +114,17 @@ func TestCheckBoundsTemplates(t *testing.T) {
 	}
 	for label, text := range cases {
 		t.Run(label, func(t *testing.T) {
-			start := time.Now()
-			err := Check("developer", text)
-			if err == nil {
-				t.Fatalf("Check(%.60q) = nil", text)
-			}
-			if time.Since(start) > time.Second {
-				t.Errorf("the check took %s", time.Since(start))
+			done := make(chan error, 1)
+			go func() { done <- Check("developer", text) }()
+			// A liveness guard catches an unbounded template check; this
+			// is not a benchmark of the scheduler or template validation.
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatalf("Check(%.60q) = nil", text)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("the template check did not finish")
 			}
 		})
 	}

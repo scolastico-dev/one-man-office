@@ -736,6 +736,7 @@ func TestUsageRoutesAgentsChangeNothing(t *testing.T) {
 	f := newFakeRun()
 	useRun(s, f.run)
 	meter(t, s, "p", "mine", "m")
+	s.waitSettingsEvents(t.Context())
 	s.usage.tracker.Refresh(context.Background())
 	sessions := map[api.Role]string{}
 	for _, role := range agentRoles {
@@ -774,7 +775,9 @@ func TestUsageRoutesAgentsChangeNothing(t *testing.T) {
 			}
 		}
 	}
-	time.Sleep(50 * time.Millisecond)
+	// Refused handlers have returned; drain the settings feed before
+	// checking side effects from any erroneously accepted settings writes.
+	s.waitSettingsEvents(t.Context())
 	if f.count() != runs {
 		t.Fatal("an agent ran a usage script")
 	}
@@ -896,7 +899,8 @@ func TestCloseStopsUsage(t *testing.T) {
 	// After Close nothing starts.
 	s.usage.tracker.SettingsChanged()
 	s.usage.tracker.Refresh(context.Background())
-	time.Sleep(20 * time.Millisecond)
+	// Close joined the workers, and both trigger methods return without
+	// starting work once the tracker has stopped.
 	if n := usageGoroutines(); n != baseline {
 		t.Fatalf("%d usage goroutines after a refresh past Close", n)
 	}

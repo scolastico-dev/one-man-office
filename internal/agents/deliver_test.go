@@ -11,6 +11,19 @@ import (
 	"unicode/utf8"
 )
 
+// completeWithin bounds a stalled operation; it is a watchdog, not a speed
+// assertion. Behavioral deadlines remain configured on the operation itself.
+func completeWithin(t *testing.T, guard time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	select {
+	case <-done:
+	case <-time.After(guard):
+		t.Fatalf("operation did not complete within %v", guard)
+	}
+}
+
 // fakeTerminal stands in for an agent PTY: it records what omo types.
 type fakeTerminal struct {
 	mu      sync.Mutex

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -20,17 +21,17 @@ const recordedAnswer = `{"query":"grill","searchType":"fuzzy","searchVersion":"a
 
 // fakeSkillsSh answers every search with status and body and records the
 // requests.
-func fakeSkillsSh(t *testing.T, status int, body string) (*httptest.Server, *[]*http.Request) {
+func fakeSkillsSh(t *testing.T, status int, body string) (*httptest.Server, <-chan *http.Request) {
 	t.Helper()
-	var reqs []*http.Request
+	reqs := make(chan *http.Request, 16)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqs = append(reqs, r.Clone(context.Background()))
+		reqs <- r.Clone(context.Background())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &reqs
+	return srv, reqs
 }
 
 func TestSearchReadsTheAnswer(t *testing.T) {
@@ -47,10 +48,10 @@ func TestSearchReadsTheAnswer(t *testing.T) {
 		g.Repository != "https://github.com/mattpocock/skills.git" || g.URL != "https://skills.sh/mattpocock/skills/grill-me" {
 		t.Errorf("first result = %+v", g)
 	}
-	if len(*reqs) != 1 {
-		t.Fatalf("%d requests, want 1", len(*reqs))
+	r := <-reqs
+	if len(reqs) != 0 {
+		t.Fatalf("%d extra requests, want none", len(reqs))
 	}
-	r := (*reqs)[0]
 	if r.URL.Path != "/api/search" || r.URL.RawQuery != "q=grill" {
 		t.Errorf("request %s?%s, want /api/search?q=grill (nothing but the text)", r.URL.Path, r.URL.RawQuery)
 	}
@@ -96,31 +97,33 @@ func TestSearchRefusesWhatItCannotRead(t *testing.T) {
 	}
 }
 
+// searchTransport exercises the request context without wall-clock network waits.
+type searchTransport func(*http.Request) (*http.Response, error)
+
+func (f searchTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestSearchTimesOut(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
+	synctest.Test(t, func(t *testing.T) {
+		client := &http.Client{Transport: searchTransport(func(r *http.Request) (*http.Response, error) {
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})}
+		start := time.Now()
+		_, err := NewSearcher(SearchOptions{Client: client, Timeout: 100 * time.Millisecond}).Search(t.Context(), "grill")
+		if !errors.Is(err, ErrSearch) || !strings.Contains(err.Error(), "no answer within 100ms") {
+			t.Fatalf("err = %v, want a timeout", err)
 		}
-	}))
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
-	start := time.Now()
-	_, err := NewSearcher(SearchOptions{Base: srv.URL, Timeout: 100 * time.Millisecond}).Search(context.Background(), "grill")
-	if !errors.Is(err, ErrSearch) || !strings.Contains(err.Error(), "no answer within 100ms") {
-		t.Fatalf("err = %v, want a timeout", err)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Errorf("the search took %s", time.Since(start))
-	}
+		if elapsed := time.Since(start); elapsed != 100*time.Millisecond {
+			t.Fatalf("timeout after %s of virtual time, want 100ms", elapsed)
+		}
+	})
 }
 
 func TestSearchUnreachable(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	base := srv.URL
-	srv.Close()
-	_, err := NewSearcher(SearchOptions{Base: base}).Search(context.Background(), "grill")
+	client := &http.Client{Transport: searchTransport(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
+	_, err := NewSearcher(SearchOptions{Client: client}).Search(context.Background(), "grill")
 	if !errors.Is(err, ErrSearch) || !strings.Contains(err.Error(), "connection failed") {
 		t.Fatalf("err = %v", err)
 	}

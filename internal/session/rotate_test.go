@@ -96,14 +96,26 @@ func TestSessionWritesReadableScreenLog(t *testing.T) {
 	path := filepath.Join(dir, "s.log")
 	s, err := Start(Options{
 		Cmd:     "sh",
-		Args:    []string{"-c", `printf '\033[Hhello'; sleep 0.3; printf '\033[2Hworld'`},
+		Args:    []string{"-c", `printf '\033[Hhello'; read reply; printf '\033[2Hworld'`},
 		LogPath: path, Rows: 10, Cols: 80,
 		LogMaxSizeKB: 1, LogKeep: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-s.Done()
+	cleanupSession(t, s)
+	waitFor(t, 5*time.Second, func() bool {
+		lines, err := s.TailLog(10)
+		return err == nil && strings.Contains(strings.Join(lines, "\n"), "hello")
+	})
+	if err := s.SendLine("continue"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("session did not end after releasing output")
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

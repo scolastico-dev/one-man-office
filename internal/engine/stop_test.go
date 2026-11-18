@@ -117,12 +117,12 @@ func TestShutdownKillsAfterHandoffTimeout(t *testing.T) {
 	h.typeAtOnce()
 	_, dev1 := h.readyDeveloper("one")
 	h.readyDeveloper("two")
-	ctx, cancel := context.WithTimeout(h.ctx, 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(h.ctx)
 	defer cancel()
-	h.awaitClosed("Shutdown", h.shutdown(ctx))
-	if !handoffAsked(h.agent(dev1.ID)) {
-		t.Fatal("no handoff request")
-	}
+	done := h.shutdown(ctx)
+	h.waitFor("the handoff request", func() bool { return handoffAsked(h.agent(dev1.ID)) })
+	cancel()
+	h.awaitClosed("Shutdown", done)
 	h.checkAllStopped("omo stopped")
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -204,13 +205,15 @@ func TestStopWaitsForHandoffTimeout(t *testing.T) {
 	oldRunning := serverRunning
 	serverRunning = func(context.Context) (string, bool, error) { return "http://omo.localhost:1/", true, nil }
 	t.Cleanup(func() { serverRunning = oldRunning })
-	start := time.Now()
-	out := mustExecute(t, "stop")
-	if left := deadline.Sub(start); left < 35*time.Second || left > 36*time.Second {
-		t.Fatalf("stop deadline is %v away, want about 35s", left)
-	}
-	contains(t, out, "asking agents for a handoff (up to 5s)...")
-	contains(t, out, "omo stopped.")
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		out := mustExecute(t, "stop")
+		if left := deadline.Sub(start); left != 35*time.Second {
+			t.Fatalf("stop deadline is %v away, want 35s", left)
+		}
+		contains(t, out, "asking agents for a handoff (up to 5s)...")
+		contains(t, out, "omo stopped.")
+	})
 }
 
 func aiOutIn(t *testing.T, stdin string, args ...string) (string, error) {
