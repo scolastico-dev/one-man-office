@@ -64,10 +64,16 @@ type pinData struct {
 type pushRecord struct {
 	Commit string `json:"commit"`
 	Branch string `json:"branch"`
+	Base   string `json:"base,omitempty"`
+	Target string `json:"target,omitempty"`
+	Round  int    `json:"round,omitempty"`
 	// Remote is the remote's name, Address its address without
 	// credentials (gitops.Remote.Address).
 	Remote  string `json:"remote"`
 	Address string `json:"address"`
+	// SSHUser preserves the SSH login identity when Address's display
+	// redaction removed URI userinfo. Passwords are never retained.
+	SSHUser string `json:"ssh_user,omitempty"`
 }
 
 func reviewKey(ticket int64, round int) string { return fmt.Sprintf("%d/%d", ticket, round) }

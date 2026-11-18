@@ -43,7 +43,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 var ErrNewerSchema = errors.New("the database was made by a newer omo")
 
 // SchemaVersion is the schema version a freshly opened database ends up at.
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 // Open opens (creating if needed) the omo database in WAL mode and applies
 // pending migrations, each in its own transaction. A single connection
@@ -124,6 +124,15 @@ func applyMigration(d *sql.DB, v int) error {
 		return fmt.Errorf("connect for schema version %d: %w", v+1, err)
 	}
 	defer conn.Close()
+	// Version 9 rebuilds tickets to widen its review-stage constraint. Foreign
+	// keys must be disabled outside the transaction so dependent rows survive
+	// the table replacement, then checked before committing the replacement.
+	if v == 8 {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("prepare tickets rebuild: %w", err)
+		}
+		defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	}
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return fmt.Errorf("lock database for schema version %d: %w", v+1, err)
 	}
@@ -145,6 +154,21 @@ func applyMigration(d *sql.DB, v int) error {
 	}
 	if _, err := conn.ExecContext(ctx, migrations[v]); err != nil {
 		return fmt.Errorf("migrate to schema version %d: %w", v+1, err)
+	}
+	if v == 8 {
+		rows, err := conn.QueryContext(ctx, `PRAGMA foreign_key_check`)
+		if err != nil {
+			return fmt.Errorf("check rebuilt tickets: %w", err)
+		}
+		invalid := rows.Next()
+		rowErr := rows.Err()
+		rows.Close()
+		if rowErr != nil {
+			return fmt.Errorf("check rebuilt tickets: %w", rowErr)
+		}
+		if invalid {
+			return fmt.Errorf("check rebuilt tickets: foreign key violation")
+		}
 	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, v+1)); err != nil {
 		return fmt.Errorf("set schema version %d: %w", v+1, err)

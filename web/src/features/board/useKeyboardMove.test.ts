@@ -11,7 +11,7 @@ import { harness, mountWith, ok, refuse, type Harness, type Sent } from '../crea
 import LiveBoard from './LiveBoard.vue'
 import { ticket } from './testing'
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' })
 
 let mounted: VueWrapper | null = null
 let h: Harness

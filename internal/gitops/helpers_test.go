@@ -66,6 +66,19 @@ func testGit(t *testing.T) *Git {
 	return g
 }
 
+// gitWithGlobal returns a Git whose environment uses a global config file
+// with content: the user's own settings, which omo keeps.
+func gitWithGlobal(t *testing.T, content string, extra ...string) *Git {
+	t.Helper()
+	requireGit(t)
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	write(t, global, content)
+	g := New()
+	env := append(isolatedEnv(t), "GIT_CONFIG_GLOBAL="+global)
+	g.SetEnvironment(append(env, extra...))
+	return g
+}
+
 // tg runs a git command for test setup in dir with the isolated
 // environment and returns its output.
 func tg(t *testing.T, dir string, args ...string) string {

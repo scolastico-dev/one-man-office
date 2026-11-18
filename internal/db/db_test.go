@@ -32,8 +32,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 9 || SchemaVersion != 9 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 9", v, SchemaVersion)
+	if v := userVersion(t, d); v != 10 || SchemaVersion != 10 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 10", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
@@ -482,5 +482,53 @@ func TestMigrationSevenUpgradesVersionSix(t *testing.T) {
 	}
 	if fresh := schemaOf(t, open(t)); fresh != schemaOf(t, d) {
 		t.Fatal("upgraded schema differs from fresh schema")
+	}
+}
+
+func TestMigrationNinePreservesTicketsAndAddsExportWatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	old, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for v := 0; v < 8; v++ {
+		if _, err := old.Exec(migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := old.Exec(`PRAGMA user_version=8;
+ INSERT INTO tickets (id,type,title,rank,supervisor,created_by_role,created_at,updated_at) VALUES (17,'task','preserved',1,'user','user','x','x');
+ INSERT INTO ticket_projects (ticket_id,project_id,position) VALUES (17,'api',0);
+ INSERT INTO tickets (id,type,title,rank,supervisor,created_by_role,created_at,updated_at,col,resolution,closed_at,export_url) VALUES (18,'task','old export',2,'user','user','x','x','done','exported','x','https://example.test/pr/1');
+ INSERT INTO dependencies (ticket_id,depends_on_id,created_at) VALUES (17,18,'x');`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, c := range []string{"export_remote", "export_branch", "export_base", "export_commit", "export_target_commit"} {
+		if !hasColumn(t, d, "ticket_projects", c) {
+			t.Errorf("missing %s", c)
+		}
+	}
+	if _, err := d.Exec(`UPDATE tickets SET col='review',review_stage='awaiting_merge' WHERE id=17`); err != nil {
+		t.Fatal(err)
+	}
+	var title, col, res, url string
+	if err := d.QueryRow(`SELECT title,col,resolution,export_url FROM tickets WHERE id=18`).Scan(&title, &col, &res, &url); err != nil || title != "old export" || col != "done" || res != "exported" || url != "https://example.test/pr/1" {
+		t.Fatalf("old ticket changed: %s %s %s %s %v", title, col, res, url, err)
+	}
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM dependencies WHERE ticket_id=17 AND depends_on_id=18`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("dependency lost: %d %v", n, err)
+	}
+	if _, err := d.Exec(`UPDATE tickets SET review_stage='invalid' WHERE id=17`); err == nil {
+		t.Fatal("invalid review stage accepted")
+	}
+	if _, err := d.Exec(`INSERT INTO ticket_projects(ticket_id,project_id,position) VALUES(999,'missing',0)`); err == nil {
+		t.Fatal("foreign keys disabled after migration")
 	}
 }
