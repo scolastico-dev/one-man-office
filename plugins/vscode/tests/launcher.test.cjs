@@ -156,6 +156,7 @@ test('Windows pipes preserve case-sensitive roots and change with each runtime l
   await first.stop();
   assert.equal(await(await fetch('http://127.0.0.1:'+secondPort)).text(),'fixture editor');
   assert.equal(second.child.exitCode,null);
+  assert.equal(second.child.signalCode,null);
   const restarted=run(t,{...upperState,runtime:next},'code-server',await port(),'a'.repeat(32),extra);
   await until(()=>restarted.output().includes('OMO_EDITOR_READY'));
   assert.notEqual(flag(JSON.parse(fs.readFileSync(restarted.capture)),'--session-socket'),flag(a,'--session-socket'));

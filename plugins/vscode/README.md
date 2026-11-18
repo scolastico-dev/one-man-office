@@ -144,6 +144,8 @@ including beyond 30 minutes. Only the last observed browser disconnect starts
 the idle interval. Reconnecting clears that interval. HTTP health/poll traffic
 does not extend it. A never-connected/abandoned startup also expires. Physical
 network loss is observed when the underlying connections close.
+An observed TCP EOF ends a WebSocket tunnel immediately, even if the editor
+keeps its side open; the no-browser interval starts when the final tunnel ends.
 
 Tasks are named `cs-t<TICKET>-<folder hash>-<run>`, `ovs-t<TICKET>-<folder hash>-<run>` or
 `cs-project-<folder hash>-<run>` / `ovs-project-<folder hash>-<run>`. Names are unique
@@ -212,6 +214,15 @@ secret-free `report.json` are retained at the printed path. Reports distinguish
 publisher builds from the stand-in and record routing mode, bootstrap/exchange,
 unauthenticated refusal, asset loads, the OpenVSCode client base and live
 WebSocket sent/received frame counts (without payloads or connection queries).
+Instances are pinned by canonical workspace and attached stable task/forward
+IDs. Waits and disconnect-to-exit measurements use a monotonic clock. The full
+mode requires each pinned task to exit with reason `idle`, including the second
+folder's reload/immediate-close case; `--smoke` remains an explicit-Stop check.
+`lifecycle.jsonl` records sanitized page/socket events and resource checkpoints.
+On Linux, the report also verifies that captured editor descendants are gone
+using PID/start-time identities; `shutdown.json` retains browser/server exit
+and remaining-child evidence on success or failure. Process inspection on other
+platforms remains unverified.
 The server and
 browser are stopped on success and failure. Delete those disposable files when
 you no longer need the evidence. These probes are not part of routine tests.

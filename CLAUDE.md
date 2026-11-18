@@ -304,6 +304,11 @@ cleanup. Never run the
 Microsoft mode or accept its terms in a probe. Linux amd64 publisher probes are
 proven; macOS/Windows/arm64 are fixture/metadata-only. Full details and runtime
 prerequisites: [plugin README](plugins/vscode/README.md).
+Publisher probes pin canonical workspaces and attached stable task/forward IDs,
+use monotonic waits, and retain sanitized `lifecycle.jsonl`, idle exit reasons,
+disconnect-to-exit durations and Linux PID/start-time descendant cleanup plus
+browser/server shutdown evidence. Reload/immediate-close remains part of the
+full idle assertion; explicit-Stop smoke is reported separately.
 
 Focused plugin integration: after `make build`, run
 `npm --prefix web run e2e -- e2e/plugin-editor.spec.ts e2e/plugin-lifecycle.spec.ts e2e/plugin-frontend.spec.ts --workers=2`.
@@ -455,7 +460,10 @@ ever_connected, no_client_since, revision}`. Only authenticated requests reach
 the tracker. Requests count through handler completion; WS count starts on
 successful downstream hijack after upstream acceptance and ends with the full
 ReverseProxy handler, including errors/cancellation/close. Both routing modes
-share it. No-client time starts at registration, clears on WS admission, resets
+share it. The generic transport ends WebSocket tunnels on the first TCP EOF
+or copy error, closing both ends rather than waiting for a half-closed peer's
+write side; other upgrade protocols retain ordinary half-close behavior.
+No-client time starts at registration, clears on WS admission, resets
 only on last disconnect; HTTP/SSE/health polls never reset it. Monotonic times
 and revision and live-registry checks guard precise idle timers against reconnect/removal; stop commits
 closing admission under that same lock before waiting for the task callback.

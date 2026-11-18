@@ -954,6 +954,10 @@ and subdomain modes. `active_requests` includes pending/upgraded/streaming
 requests until the reverse-proxy handler finishes. `active_websockets` counts
 only accepted upstream WebSocket upgrades with successful downstream hijacks,
 until that full handler ends (including disconnect, cancellation or failure).
+For WebSockets, the first observed TCP EOF or copy error ends the tunnel and
+closes both endpoints; an upstream retaining its write side cannot delay
+last-disconnect accounting. Other upgraded protocols keep their normal
+half-close behavior.
 Failed authentication and refused upgrades cannot extend the idle interval.
 HTTP/SSE/health/status requests are counted as requests but never reset that
 interval. This policy fits browser tools which maintain WebSockets; tools whose
