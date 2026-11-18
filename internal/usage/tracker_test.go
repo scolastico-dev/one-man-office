@@ -152,6 +152,9 @@ type fakeRunner struct {
 	mu       sync.Mutex
 	inflight map[string]int
 	total    int
+	// afterCancel, when set, holds a run that was cancelled until it is
+	// closed: the run function has not returned yet.
+	afterCancel chan struct{}
 }
 
 func newRunner(t *testing.T) *fakeRunner {
@@ -178,6 +181,9 @@ func (r *fakeRunner) run(ctx context.Context, j Job) (Result, error) {
 	case rp := <-c.reply:
 		return rp.res, rp.err
 	case <-ctx.Done():
+		if r.afterCancel != nil {
+			<-r.afterCancel
+		}
 		return Result{}, ctx.Err()
 	}
 }
@@ -785,53 +791,108 @@ func waitFor(t *testing.T, cond func() bool) {
 func TestTrackerUsesDefaultRunTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
+		start := time.Now() // the virtual time the run is launched at
 		h.start()
 		c := h.next()
 		deadline, ok := c.ctx.Deadline()
-		if want := time.Now().Add(RunTimeout); !ok || !deadline.Equal(want) {
+		if want := start.Add(RunTimeout); !ok || !deadline.Equal(want) {
 			t.Fatalf("run deadline %v (%v), want %v", deadline, ok, want)
 		}
 		h.stop()
 	})
 }
 
+// bubbleWaitFor waits, inside a synctest bubble, for a condition a goroutine of
+// the bubble reaches. Each round first lets every other goroutine run until it
+// is blocked; a round that does not find the condition lets virtual time pass,
+// so the wait ends at the condition and never after a guessed number of turns.
+func bubbleWaitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(guard) // virtual time inside the bubble
+	for {
+		synctest.Wait()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("condition not reached")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A Refresh whose run never answers ends with its own context, starts no
+// second run, and the stop ends the run. The test runs in a synctest bubble:
+// synctest.Wait returns only when every goroutine of the test is blocked, so
+// each observation is made at an exact point, and synctest.Test returns only
+// when every goroutine the tracker started has ended, which is the proof that
+// no run, worker or Refresh outlives the stop (a global goroutine count would
+// also see goroutines the test does not own).
 func TestTrackerRefreshThatHangs(t *testing.T) {
-	h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
-	before := runtime.NumGoroutine()
-	h.start()
-	c := h.next() // never answered
-	ctx, cancel := context.WithCancel(context.Background())
-	answer := make(chan api.UsageState, 1)
-	go func() { answer <- h.tr.Refresh(ctx) }()
-	waitFor(t, func() bool {
-		h.tr.mu.Lock()
-		defer h.tr.mu.Unlock()
-		return h.tr.accounts[AccountKey("s", h.src.profiles[0])].again
-	})
-	cancel()
-	select {
-	case st := <-answer:
-		if !st.Readings[0].Running {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
+		h.start()
+		c := h.next() // never answered
+		ctx, cancel := context.WithCancel(context.Background())
+		answer := make(chan api.UsageState, 1)
+		go func() { answer <- h.tr.Refresh(ctx) }()
+		// Refresh has registered when the account is marked to repeat. The
+		// poll reads that real condition; the virtual clock moves on only
+		// while every goroutine of the test is blocked.
+		bubbleWaitFor(t, func() bool {
+			h.tr.mu.Lock()
+			defer h.tr.mu.Unlock()
+			return h.tr.accounts[AccountKey("s", h.src.profiles[0])].again
+		})
+		synctest.Wait()
+		select {
+		case <-answer:
+			t.Fatal("Refresh answered while its run was under way")
+		default:
+		}
+		cancel()
+		if st := <-answer; !st.Readings[0].Running {
 			t.Errorf("reading %+v", st.Readings[0])
 		}
-	case <-time.After(guard):
-		t.Fatal("Refresh did not end with its context")
-	}
-	if len(h.runner.calls) != 0 {
-		t.Fatal("a second run of the same account started")
-	}
-	h.stop()
-	select {
-	case <-c.ctx.Done():
-	default:
-		t.Fatal("stopping did not end the run")
-	}
-	// Nothing runs after the stop; Refresh answers at once.
-	h.tr.Refresh(context.Background())
-	if len(h.runner.calls) != 0 {
-		t.Fatal("a run started after the stop")
-	}
-	waitFor(t, func() bool { return runtime.NumGoroutine() <= before })
+		if len(h.runner.calls) != 0 {
+			t.Fatal("a second run of the same account started")
+		}
+		h.stop()
+		select {
+		case <-c.ctx.Done():
+		default:
+			t.Fatal("stopping did not end the run")
+		}
+		// Nothing runs after the stop; Refresh answers at once.
+		h.tr.Refresh(context.Background())
+		if len(h.runner.calls) != 0 {
+			t.Fatal("a run started after the stop")
+		}
+	})
+}
+
+// Run returns only after the runs it started have returned: it joins them. A
+// run held after its cancellation keeps Run from returning, and Run returns
+// once the run is let go.
+func TestTrackerStopWaitsForTheRunsItOwns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
+		h.runner.afterCancel = make(chan struct{})
+		h.start()
+		c := h.next()
+		h.cancel()
+		<-c.ctx.Done()
+		synctest.Wait()
+		select {
+		case <-h.done:
+			close(h.runner.afterCancel)
+			t.Fatal("Run returned while a run it started was still under way")
+		default:
+		}
+		close(h.runner.afterCancel)
+		<-h.done
+		h.cancel = nil
+	})
 }
 
 func TestTrackerRunDeadline(t *testing.T) {
@@ -1068,33 +1129,56 @@ func TestTrackerProfileRemovedWhileRunning(t *testing.T) {
 	}
 }
 
+// OnChange is called after a run's reading is kept and after the settings
+// change. Each call records what the state held when it was made, so "a change
+// was announced after the reading" is read from the call itself and not from
+// whether a notification has arrived by the time a settle returned (the run
+// ends, and is announced, a little after the account stops running).
 func TestTrackerOnChange(t *testing.T) {
-	h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), nil)
-	h.start()
-	c := h.next()
-	drain := func() int {
-		n := 0
+	type seen struct{ fetched, running bool }
+	calls := make(chan seen, 64)
+	var tr *Tracker
+	h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), func(o *TrackerOptions) {
+		o.OnChange = func() {
+			var s seen
+			for _, r := range tr.State().Readings {
+				s.fetched = s.fetched || r.FetchedAt != nil
+				s.running = s.running || r.Running
+			}
+			calls <- s
+		}
+	})
+	tr = h.tr
+	await := func(what string, ok func(seen) bool) {
+		t.Helper()
 		for {
 			select {
-			case <-h.changes:
-				n++
-			default:
-				return n
+			case s := <-calls:
+				if ok(s) {
+					return
+				}
+			case <-time.After(guard):
+				t.Fatalf("no change announced: %s", what)
 			}
 		}
 	}
-	waitFor(t, func() bool { return len(h.changes) > 0 }) // the start of the run
-	drain()
+	h.start()
+	c := h.next()
+	await("the start of the run", func(s seen) bool { return s.running && !s.fetched })
 	c.ok(Window{Name: "w", UsedPercent: 1})
+	await("after a reading", func(s seen) bool { return s.fetched && !s.running })
 	h.settle()
-	if drain() == 0 {
-		t.Fatal("no change after a reading")
+	for len(calls) > 0 {
+		<-calls
 	}
 	h.tr.SettingsChanged()
-	h.settle()
-	if drain() == 0 {
+	// SettingsChanged announces before it returns, so the call is there.
+	select {
+	case <-calls:
+	default:
 		t.Fatal("no change after the settings changed")
 	}
+	h.settle()
 }
 
 // Refresh answers only after the readings of the runs it waited for are
@@ -1117,39 +1201,44 @@ func TestTrackerRefreshReturnsAfterTheReadingsAreKept(t *testing.T) {
 
 // Held at the boundary: while the state file is being written, Refresh has not
 // answered yet; it answers once the write is let go and the file is there.
+// Inside a synctest bubble, synctest.Wait returns only when every goroutine of
+// the test (the Refresh call, the run, the held save) is blocked and none can
+// go on, so "Refresh has not returned" is observed at that exact point and not
+// after a guessed number of scheduler turns: a Refresh that answered before
+// the save would already have closed done.
 func TestTrackerRefreshWaitsForAHeldSave(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "usage.json")
-	inSave, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
-		saving: func() {
-			once.Do(func() { close(inSave) })
-			<-release
-		},
-		Run: func(context.Context, Job) (Result, error) {
-			return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
-		}})
-	done := make(chan struct{})
-	go func() {
-		tr.Refresh(context.Background())
-		close(done)
-	}()
-	<-inSave
-	// The save is held. Refresh may return only when it is let go. Yielding
-	// lets a Refresh that wrongly returns early run; it can never fail a
-	// correct tracker, whatever the machine's speed.
-	for range 2000 {
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "usage.json")
+		inSave, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		tr := NewTracker(TrackerOptions{Source: newSource(profile("a", "s", "", map[string][]string{"m": nil})), StatePath: path,
+			saving: func() {
+				once.Do(func() { close(inSave) })
+				<-release
+			},
+			Run: func(context.Context, Job) (Result, error) {
+				return Result{Windows: []Window{{Name: "session", UsedPercent: 10}}}, nil
+			}})
+		done := make(chan struct{})
+		go func() {
+			tr.Refresh(context.Background())
+			close(done)
+		}()
+		<-inSave
+		synctest.Wait()
 		select {
 		case <-done:
 			close(release)
 			t.Fatal("Refresh answered while the readings were still being written")
 		default:
-			runtime.Gosched()
 		}
-	}
-	close(release)
-	<-done
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("after Refresh the state file is missing: %v", err)
-	}
+		if _, err := os.Stat(path); err == nil {
+			t.Fatal("the state file exists before the held save finished")
+		}
+		close(release)
+		<-done // blocks the bubble until Refresh answers; a hang is reported as a deadlock
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("after Refresh the state file is missing: %v", err)
+		}
+	})
 }
