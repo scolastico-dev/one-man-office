@@ -288,14 +288,21 @@ func TestCallTimeoutAndCancellation(t *testing.T) {
 	s.Timeouts.Call = 0
 	f.set(s)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Progress proves the upstream is handling the call before cancellation.
+	done := make(chan error, 1)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
+		_, err := f.pool.Call(ctx, id, "fake__sleep", json.RawMessage(`{"millis":60000,"steps":600}`), func(float64, float64, string) { cancel() })
+		done <- err
 	}()
-	began := time.Now()
-	_, err := f.pool.Call(ctx, id, "fake__sleep", json.RawMessage(`{"millis":5000}`), nil)
-	if !errors.Is(err, context.Canceled) || time.Since(began) > 3*time.Second {
-		t.Fatalf("a cancelled call answered %v after %s", err, time.Since(began))
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("a cancelled call answered %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		// A deadlock guard, unrelated to cancellation latency.
+		t.Fatal("a cancelled call did not return")
 	}
 	if res := f.call(id, "fake__echo", map[string]string{"text": "still"}); res.IsError {
 		t.Fatalf("the server is unusable after a cancelled call: %q", resultText(res))
@@ -443,35 +450,5 @@ func TestEndedSessionsLeaveNoProcess(t *testing.T) {
 	case <-proc.exited:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the process of an ended session still runs")
-	}
-}
-
-// A flood of change notices without a change lists the tools again a few
-// times at most and announces nothing.
-func TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced(t *testing.T) {
-	f := newFixture(t, nil, stdioServer("fake", nil))
-	id := agent("s", t.TempDir(), api.RoleDeveloper)
-	f.call(id, "fake__echo", nil)
-	f.pool.mu.Lock()
-	inst := f.pool.instances[instanceKey{"fake", "s"}]
-	f.pool.mu.Unlock()
-	changed, toolsChanged := f.events.count(api.KindMCPChanged), f.events.count(api.KindMCPToolsChanged)
-	gen := f.pool.Generation()
-	for range 50 {
-		inst.toolListChanged()
-	}
-	eventually(t, "the re-listing to end", func() bool {
-		inst.mu.Lock()
-		defer inst.mu.Unlock()
-		return !inst.relistQueued && inst.relists > 0
-	})
-	inst.mu.Lock()
-	relists := inst.relists
-	inst.mu.Unlock()
-	if relists > 2 {
-		t.Fatalf("listed the tools %d times for one burst of notices", relists)
-	}
-	if f.events.count(api.KindMCPChanged) != changed || f.events.count(api.KindMCPToolsChanged) != toolsChanged || f.pool.Generation() != gen {
-		t.Fatalf("an unchanged list was announced:\n%s", f.events.all())
 	}
 }

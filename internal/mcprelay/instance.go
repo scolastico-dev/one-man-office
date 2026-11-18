@@ -18,9 +18,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.org/x/oauth2"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
@@ -46,12 +46,14 @@ type instance struct {
 	startedAt       time.Time
 	offersResources bool
 	offersPrompts   bool
+	connCtx         context.Context
 	cancelConn      context.CancelFunc
 
 	// ts is the OAuth token source of a server with auth oauth.
-	ts oauth2.TokenSource
+	ts *persistedSource
 	// authFailed is set when the upstream refused omo's credentials.
-	authFailed atomic.Bool
+	authFailed  atomic.Bool
+	refusedAuth mcpauth.UpstreamAuth // guarded by mu
 
 	mu       sync.Mutex
 	tools    toolSet
@@ -60,23 +62,29 @@ type instance struct {
 	lastUsed time.Time
 	progress map[string]func(done, total float64, msg string)
 	nextTok  int
-	// relistQueued says a re-listing waits or is about to read the list;
-	// lastRelist is when the last one read it, relists how many did.
+	// One worker owns relisting through publication. Notices before a read
+	// coalesce; a notice during a read requests one follow-up.
+	// relistDone closes only after the worker and its publications end.
 	relistQueued bool
+	relistDirty  bool
+	relistDone   chan struct{}
 	lastRelist   time.Time
 	relists      int
 }
 
 func newInstance(p *Pool, cfg api.MCPServer, key, dir string, st *serverState) *instance {
+	connCtx, cancel := context.WithCancel(context.Background())
 	inst := &instance{
-		pool:     p,
-		cfg:      cfg,
-		key:      key,
-		dir:      dir,
-		st:       st,
-		ready:    make(chan struct{}),
-		lastUsed: time.Now(),
-		progress: map[string]func(float64, float64, string){},
+		pool:       p,
+		connCtx:    connCtx,
+		cancelConn: cancel,
+		cfg:        cfg,
+		key:        key,
+		dir:        dir,
+		st:         st,
+		ready:      make(chan struct{}),
+		lastUsed:   time.Now(),
+		progress:   map[string]func(float64, float64, string){},
 	}
 	learnSecrets(st.redact, cfg, p.o.Env())
 	return inst
@@ -147,9 +155,8 @@ func (i *instance) upstreamName(name string) (string, bool) {
 func (i *instance) start() {
 	p := i.pool
 	name := i.cfg.Name
-	connCtx, cancel := context.WithCancel(context.Background())
+	connCtx := i.connCtx
 	i.mu.Lock()
-	i.cancelConn = cancel
 	stopping := i.stopping
 	i.mu.Unlock()
 	err := errors.New("stopped")
@@ -161,18 +168,43 @@ func (i *instance) start() {
 		case <-connCtx.Done():
 		}
 	}
+	// Read the source outside pool.mu: Token holds its own mutex while
+	// persisting a refresh under pool.mu.
+	i.mu.Lock()
+	refused := cloneAuth(i.refusedAuth)
+	i.mu.Unlock()
+	if refused.Token == nil && i.authFailed.Load() && i.ts != nil {
+		refused = i.ts.snapshot()
+	}
 	p.mu.Lock()
 	i.mu.Lock()
 	stopping = i.stopping
 	i.mu.Unlock()
+	if !i.test && p.instances[instanceKey{i.cfg.Name, i.key}] != i {
+		stopping = true
+	}
+	if stopping && err == nil {
+		err = errors.New("stopped")
+	}
 	if err != nil {
 		i.err = err
 		auth := i.authFailed.Load()
+		authChanged := false
 		if !i.test && !stopping {
 			p.removeInstance(i)
 			if auth {
-				i.st.auth = api.MCPAuthState{State: api.MCPAuthStateNeedsLogin}
-				i.st.authLoaded = true
+				if p.invalidateSignIn(refused, "the server refused omo's sign-in") {
+					i.st.auth = api.MCPAuthState{State: api.MCPAuthStateNeedsLogin}
+					i.st.authLoaded = true
+					authChanged = true
+				} else {
+					// A newer sign-in may have been saved before its reset runs.
+					// Preserve that credential's cached state as well as its storage.
+					before := i.st.auth.State
+					i.st.authLoaded = false
+					p.loadAuth(i.cfg, i.st)
+					authChanged = before != i.st.auth.State
+				}
 			} else {
 				p.recordFailure(name, i.st, err)
 			}
@@ -182,13 +214,13 @@ func (i *instance) start() {
 			i.st.log.printf("start failed: %s", shortReason(i.st.redact, err))
 		}
 		i.closeConn()
-		close(i.ready)
-		if !i.test {
+		if !i.test && !stopping {
 			p.changed(name)
-			if auth {
+			if authChanged {
 				p.toolsChanged()
 			}
 		}
+		close(i.ready)
 		return
 	}
 	i.startedAt = time.Now()
@@ -201,12 +233,12 @@ func (i *instance) start() {
 		// Raised before anyone can list the new tools.
 		p.toolsChanged()
 	}
-	close(i.ready)
 	i.st.log.printf("started%s with %d tools", i.where(), len(i.tools.tools))
-	go i.watch()
 	if !i.test {
 		p.changed(name)
 	}
+	close(i.ready)
+	go i.watch()
 }
 
 // where describes the instance for the log, without the session id.
@@ -346,67 +378,112 @@ func (i *instance) list(ctx context.Context) (toolSet, error) {
 	return offerTools(i.cfg.Name, i.cfg.Tools, tools, limit), nil
 }
 
-// toolListChanged handles the upstream's notice of a changed tool list:
-// notices are coalesced into one re-listing at a time, at most one every
-// relistGap.
+// toolListChanged handles the upstream's notice of a changed tool list.
+// There is one worker per instance, including while a list RPC is in flight.
 func (i *instance) toolListChanged() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if i.stopping || i.test {
+		return
+	}
+	i.relistDirty = true
 	if i.relistQueued {
 		return
 	}
 	i.relistQueued = true
+	i.relistDone = make(chan struct{})
 	go i.relist()
 }
 
-// relist reads the tool list again after the upstream announced a change,
-// and announces it only when the offered tools changed.
+// relist coalesces notices before each read and retains notices arriving
+// during the read. Completion includes recording the generation and events.
 func (i *instance) relist() {
+	i.mu.Lock()
+	done := i.relistDone
+	i.mu.Unlock()
+	defer func() {
+		if done != nil {
+			i.mu.Lock()
+			i.relistQueued = false
+			close(done)
+			i.mu.Unlock()
+		}
+	}()
 	select {
 	case <-i.ready:
-	case <-time.After(startupTimeout(i.cfg)):
+	case <-i.connCtx.Done():
+		return
+	}
+	if i.err != nil {
+		return
+	}
+	for {
 		i.mu.Lock()
-		i.relistQueued = false
+		wait := time.Until(i.lastRelist.Add(i.pool.t.relistGap))
 		i.mu.Unlock()
-		return
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+			case <-i.connCtx.Done():
+				timer.Stop()
+				return
+			}
+		}
+		i.mu.Lock()
+		if i.stopping {
+			i.mu.Unlock()
+			return
+		}
+		i.relistDirty = false
+		i.lastRelist = time.Now()
+		i.mu.Unlock()
+		i.relistOnce()
+		i.mu.Lock()
+		i.relists++
+		if !i.relistDirty || i.stopping {
+			// Mark idle under the same lock used by toolListChanged, so a notice
+			// cannot get lost between the final check and worker completion.
+			i.relistQueued = false
+			close(done)
+			i.mu.Unlock()
+			// The deferred close is needed only for early returns.
+			done = nil
+			return
+		}
+		i.mu.Unlock()
 	}
-	i.mu.Lock()
-	wait := time.Until(i.lastRelist.Add(i.pool.t.relistGap))
-	i.mu.Unlock()
-	if wait > 0 {
-		time.Sleep(wait)
-	}
-	// Notices from now on need another listing.
-	i.mu.Lock()
-	i.relistQueued = false
-	i.lastRelist = time.Now()
-	i.relists++
-	i.mu.Unlock()
-	if i.err != nil || i.test {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout(i.cfg))
+}
+
+func (i *instance) relistOnce() {
+	ctx, cancel := context.WithTimeout(i.connCtx, startupTimeout(i.cfg))
 	defer cancel()
 	set, err := i.list(ctx)
 	if err != nil {
-		i.st.log.printf("listing the changed tools failed: %s", shortReason(i.st.redact, err))
-		return
-	}
-	i.mu.Lock()
-	same := sameTools(i.tools, set)
-	i.tools = set
-	i.mu.Unlock()
-	if same {
+		if i.connCtx.Err() == nil {
+			i.st.log.printf("listing the changed tools failed: %s", shortReason(i.st.redact, err))
+		}
 		return
 	}
 	p := i.pool
 	p.mu.Lock()
+	i.mu.Lock()
+	// A removed/replaced instance must not overwrite the server's new state.
+	if i.stopping || p.instances[instanceKey{i.cfg.Name, i.key}] != i || sameTools(i.tools, set) {
+		i.mu.Unlock()
+		p.mu.Unlock()
+		return
+	}
+	i.tools = set
+	// Raise the generation before the new list becomes visible to Tools.
+	p.gen.Add(1)
+	i.mu.Unlock()
 	i.publishTools()
 	p.mu.Unlock()
 	i.st.log.printf("the server changed its tools; now %d", len(set.tools))
 	p.changed(i.cfg.Name)
 	// The schema of a tool may have changed under the same name.
-	p.toolsChanged()
+	p.emit(api.KindMCPToolsChanged, nil)
 }
 
 // sameTools reports whether a and b offer the same tools with the same
@@ -442,12 +519,18 @@ func (i *instance) watch() {
 	}
 	p := i.pool
 	p.mu.Lock()
-	p.removeInstance(i)
-	p.recordFailure(i.cfg.Name, i.st, errors.New(reason))
+	current := p.instances[instanceKey{i.cfg.Name, i.key}] == i
+	if current {
+		p.removeInstance(i)
+		p.recordFailure(i.cfg.Name, i.st, errors.New(reason))
+	}
 	p.mu.Unlock()
 	i.st.log.printf("ended unexpectedly: %s", reason)
 	i.closeConn()
-	p.changed(i.cfg.Name)
+	i.waitRelist()
+	if current {
+		p.changed(i.cfg.Name)
+	}
 }
 
 // stop ends the instance.
@@ -457,11 +540,12 @@ func (i *instance) stop(why string) {
 	i.stopping = true
 	cancel := i.cancelConn
 	i.mu.Unlock()
-	if cancel != nil && !i.running() {
-		// A start in progress is abandoned.
+	if cancel != nil {
+		// Abandon startup, a pending relist gap, or an in-flight list RPC.
 		cancel()
 	}
 	<-i.ready
+	i.waitRelist()
 	if already && i.err != nil {
 		return
 	}
@@ -469,6 +553,17 @@ func (i *instance) stop(why string) {
 		i.st.log.printf("stopping%s: %s", i.where(), why)
 	}
 	i.closeConn()
+}
+
+// waitRelist waits for any worker and its publications after stopping
+// prevents further notices from starting work.
+func (i *instance) waitRelist() {
+	i.mu.Lock()
+	done := i.relistDone
+	i.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 }
 
 // closeConn closes the session and ends the process: its standard input

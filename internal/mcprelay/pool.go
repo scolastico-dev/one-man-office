@@ -723,7 +723,8 @@ func (p *Pool) Status() []api.MCPServerState {
 			if inst.cfg.Name != s.Name {
 				continue
 			}
-			if inst.running() {
+			// Startup publishes this status before releasing ready.
+			if !inst.startedAt.IsZero() {
 				state.Instances++
 				if at := inst.startedAt; state.StartedAt == nil || at.Before(*state.StartedAt) {
 					state.StartedAt = &at

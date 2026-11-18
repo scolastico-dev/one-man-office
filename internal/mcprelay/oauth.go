@@ -83,6 +83,8 @@ func (p *Pool) loadBound(ctx context.Context, s api.MCPServer) (mcpauth.Upstream
 // server was removed or its settings no longer match it, and revokes it
 // in the background.
 func (p *Pool) dropStaleSignIn(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	ctx := context.Background()
 	a, ok, err := p.store.Load(ctx, name)
 	if err != nil || !ok {
@@ -501,6 +503,11 @@ func (p *Pool) saveLogin(s api.MCPServer, l *login) error {
 		Scopes:       grantedScopes(l.token, l.conf.Scopes),
 	}
 	p.learnAuthSecrets(s.Name, a)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return errClosed
+	}
 	return p.store.Save(context.Background(), a)
 }
 
@@ -622,7 +629,8 @@ func (p *Pool) loadAuth(s api.MCPServer, st *serverState) {
 // tokenSource returns the refreshing token source of the stored sign-in of
 // s, when it was given for s's settings; every refreshed token is stored.
 // A test's source never marks the sign-in as lost.
-func (p *Pool) tokenSource(s api.MCPServer, st *serverState, test bool) (oauth2.TokenSource, error) {
+func (p *Pool) tokenSource(inst *instance) (*persistedSource, error) {
+	s, st, test := inst.cfg, inst.st, inst.test
 	a, ok, err := p.loadBound(context.Background(), s)
 	if err != nil {
 		return nil, fmt.Errorf("reading the sign-in: %w", err)
@@ -644,7 +652,7 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState, test bool) (oauth2.
 	}
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: oauthHTTPTimeout,
 		Transport: guardedTransport(s.URL), CheckRedirect: sameOriginRedirect})
-	return &persistedSource{p: p, auth: a, src: conf.TokenSource(ctx, a.Token), last: a.Token.AccessToken, test: test}, nil
+	return &persistedSource{p: p, inst: inst, auth: a, src: conf.TokenSource(ctx, a.Token), last: a.Token.AccessToken, test: test}, nil
 }
 
 // persistedSource stores every token its source refreshes (a rotated
@@ -652,6 +660,7 @@ func (p *Pool) tokenSource(s api.MCPServer, st *serverState, test bool) (oauth2.
 // into the needs_login state unless it serves a test.
 type persistedSource struct {
 	p    *Pool
+	inst *instance
 	mu   sync.Mutex
 	auth mcpauth.UpstreamAuth
 	src  oauth2.TokenSource
@@ -660,70 +669,116 @@ type persistedSource struct {
 }
 
 func (s *persistedSource) Token() (*oauth2.Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	tok, err := s.src.Token()
 	if err != nil {
 		var re *oauth2.RetrieveError
 		if !s.test && errors.As(err, &re) && (re.ErrorCode == "invalid_grant" || re.Response != nil && re.Response.StatusCode == http.StatusUnauthorized) {
-			go s.p.markNeedsLogin(s.auth.Server, "the authorization server refused to refresh the sign-in")
+			expected := cloneAuth(s.auth)
+			go s.p.loginLost(s.inst, expected)
 		}
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if tok.AccessToken != s.last {
-		s.last = tok.AccessToken
-		s.auth.Token = tok
-		s.auth.State = api.MCPAuthStateConnected
-		s.p.learnAuthSecrets(s.auth.Server, s.auth)
-		if err := s.p.store.Save(context.Background(), s.auth); err != nil {
-			s.p.mu.Lock()
-			st := s.p.state(s.auth.Server)
-			s.p.mu.Unlock()
-			st.log.printf("storing the refreshed sign-in failed: %s", shortReason(st.redact, err))
+		p := s.p
+		updated := cloneAuth(s.auth)
+		updated.Token = tok
+		updated.State = api.MCPAuthStateConnected
+		p.learnAuthSecrets(s.auth.Server, updated)
+		p.mu.Lock()
+		current, ok, err := p.store.Load(context.Background(), s.auth.Server)
+		if err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+		// A refresh of a retired sign-in must not replace a newer credential.
+		if !p.closed && ok && sameSignIn(current, s.auth) {
+			s.last = tok.AccessToken
+			s.auth = updated
+			err = p.store.Save(context.Background(), s.auth)
+		}
+		st := p.servers[s.auth.Server]
+		p.mu.Unlock()
+		if err != nil {
+			if st != nil {
+				st.log.printf("storing the refreshed sign-in failed: %s", shortReason(st.redact, err))
+			}
+			return nil, err
 		}
 	}
 	return tok, nil
 }
 
-// loginLost handles an upstream that refused omo's token.
-func (p *Pool) loginLost(inst *instance) {
-	select {
-	case <-inst.ready:
-	case <-time.After(startupTimeout(inst.cfg)):
-	}
-	p.markNeedsLogin(inst.cfg.Name, "the server refused omo's sign-in")
+func (s *persistedSource) snapshot() mcpauth.UpstreamAuth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneAuth(s.auth)
 }
 
-// markNeedsLogin stores that the sign-in at name must be done again, stops
-// the server's connection and announces it.
-func (p *Pool) markNeedsLogin(name, why string) {
-	ctx := context.Background()
-	a, ok, err := p.store.Load(ctx, name)
-	if err == nil && ok && a.State != api.MCPAuthStateNeedsLogin {
-		a.State = api.MCPAuthStateNeedsLogin
-		a.Error = why
-		a.Token = nil
-		_ = p.store.Save(ctx, a)
+// sameSignIn identifies the credential a background operation used, including
+// the binding to its server settings. Callers compare and write under pool.mu.
+func sameSignIn(a, b mcpauth.UpstreamAuth) bool {
+	return a.Token != nil && b.Token != nil && a.Token.AccessToken == b.Token.AccessToken &&
+		a.Token.RefreshToken == b.Token.RefreshToken && a.ClientID == b.ClientID &&
+		a.ClientSecret == b.ClientSecret && a.Issuer == b.Issuer && a.RedirectURI == b.RedirectURI &&
+		bytes.Equal(a.Registration, b.Registration)
+}
+
+// loginLost handles an upstream that refused omo's token. Retirement cancels
+// the wait; the instance and credential are checked again before invalidation.
+func (p *Pool) loginLost(inst *instance, expected mcpauth.UpstreamAuth) {
+	if inst.test || inst.ts == nil {
+		return
 	}
+	select {
+	case <-inst.ready:
+	case <-inst.connCtx.Done():
+		return
+	}
+	p.markNeedsLogin(expected, inst, "the server refused omo's sign-in")
+}
+
+// invalidateSignIn marks only the expected stored credential as lost. The
+// caller holds pool.mu, shared with every credential write in this package.
+func (p *Pool) invalidateSignIn(expected mcpauth.UpstreamAuth, why string) bool {
+	ctx := context.Background()
+	a, ok, err := p.store.Load(ctx, expected.Server)
+	if err != nil || !ok || !sameSignIn(a, expected) {
+		return false
+	}
+	a.State = api.MCPAuthStateNeedsLogin
+	a.Error = why
+	a.Token = nil
+	_ = p.store.Save(ctx, a)
+	return true
+}
+
+// markNeedsLogin stops and announces the server only if the failed operation
+// still refers to its current credential (and, for HTTP, its current instance).
+func (p *Pool) markNeedsLogin(expected mcpauth.UpstreamAuth, inst *instance, why string) {
+	name := expected.Server
 	p.mu.Lock()
+	if p.closed || inst != nil && p.instances[instanceKey{inst.cfg.Name, inst.key}] != inst || !p.invalidateSignIn(expected, why) {
+		p.mu.Unlock()
+		return
+	}
 	st := p.state(name)
-	was := st.auth.State
 	st.auth = api.MCPAuthState{State: api.MCPAuthStateNeedsLogin}
 	st.authLoaded = true
 	var stop []*instance
-	for _, inst := range p.instances {
-		if inst.cfg.Name == name {
-			stop = append(stop, inst)
-			p.removeInstance(inst)
+	for _, i := range p.instances {
+		if i.cfg.Name == name {
+			stop = append(stop, i)
+			p.removeInstance(i)
 		}
 	}
 	p.mu.Unlock()
-	if was == api.MCPAuthStateNeedsLogin && len(stop) == 0 {
-		return
-	}
 	st.log.printf("needs a new sign-in: %s", why)
 	p.stopAll(stop, "needs a new sign-in")
-	p.changed(name)
+	if len(stop) == 0 {
+		p.changed(name)
+	}
 	p.toolsChanged()
 }
 
@@ -743,7 +798,10 @@ func (p *Pool) Disconnect(ctx context.Context, name string) error {
 		p.mu.Unlock()
 		p.revoke(ctx, name, a, st.log.printf)
 	}
-	if err := p.store.Delete(ctx, name); err != nil {
+	p.mu.Lock()
+	err = p.store.Delete(ctx, name)
+	p.mu.Unlock()
+	if err != nil {
 		return fmt.Errorf("deleting the sign-in of server %s: %w", name, err)
 	}
 	p.reset(name)

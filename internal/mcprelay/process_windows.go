@@ -16,11 +16,11 @@ import (
 // or the command is cancelled. A program that could not be put into the
 // job is killed on its own.
 type processGroup struct {
-	job windows.Handle
-
 	mu       sync.Mutex
+	job      windows.Handle
 	process  *os.Process
 	assigned bool
+	stopped  bool
 }
 
 // newProcessGroup prepares cmd to run in its own job object. Call started
@@ -37,17 +37,19 @@ func newProcessGroup(cmd *exec.Cmd) (*processGroup, error) {
 		return nil, err
 	}
 	g := &processGroup{job: job}
-	cmd.Cancel = func() error {
-		g.killUnassigned()
-		return windows.TerminateJobObject(job, 1)
-	}
+	cmd.Cancel = g.kill
 	return g, nil
 }
 
 func (g *processGroup) started(cmd *exec.Cmd) error {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.process = cmd.Process
-	g.mu.Unlock()
+	if g.stopped {
+		// A cancel or close before registration must still end the child.
+		_ = g.process.Kill()
+		return nil
+	}
 	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
 		return err
@@ -56,26 +58,32 @@ func (g *processGroup) started(cmd *exec.Cmd) error {
 	if err := windows.AssignProcessToJobObject(g.job, process); err != nil {
 		return err
 	}
-	g.mu.Lock()
 	g.assigned = true
-	g.mu.Unlock()
 	return nil
 }
 
-// killUnassigned kills the program when it is not in the job, which would
-// not end it.
-func (g *processGroup) killUnassigned() {
+// kill remembers cancellation even before the program is registered.
+func (g *processGroup) kill() error {
 	g.mu.Lock()
-	process, assigned := g.process, g.assigned
-	g.mu.Unlock()
-	if process != nil && !assigned {
-		_ = process.Kill()
+	defer g.mu.Unlock()
+	g.stopped = true
+	if g.process != nil && !g.assigned {
+		_ = g.process.Kill()
 	}
+	if g.job != 0 {
+		return windows.TerminateJobObject(g.job, 1)
+	}
+	return nil
 }
 
 // close kills what is left of the job and releases it.
 func (g *processGroup) close() {
-	g.killUnassigned()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stopped = true
+	if g.process != nil && !g.assigned {
+		_ = g.process.Kill()
+	}
 	if g.job != 0 {
 		_ = windows.CloseHandle(g.job)
 		g.job = 0
