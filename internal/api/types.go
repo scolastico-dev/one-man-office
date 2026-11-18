@@ -414,21 +414,37 @@ type ExportText struct {
 	Problems  []string `json:"problems"`
 }
 
+// SessionEndKind is the machine-readable outcome of an agent session.
+// EndReason is only the explanation shown to people.
+type SessionEndKind string
+
+const (
+	// SessionEndUnknown means the session has no recorded outcome yet, or its historical kind was not stored.
+	SessionEndUnknown  SessionEndKind = ""
+	SessionEndStopped  SessionEndKind = "stopped"
+	SessionEndFinished SessionEndKind = "finished"
+	SessionEndCrashed  SessionEndKind = "crashed"
+	SessionEndUsage    SessionEndKind = "usage"
+	SessionEndShutdown SessionEndKind = "shutdown"
+	SessionEndUser     SessionEndKind = "user"
+)
+
 // AgentSession is one agent session.
 type AgentSession struct {
-	ID          string       `json:"id"`
-	Role        Role         `json:"role"`
-	Ticket      *int         `json:"ticket"`
-	Project     string       `json:"project"`
-	Name        string       `json:"name"`
-	Model       string       `json:"model"`
-	State       SessionState `json:"state"`
-	Workdir     string       `json:"workdir"`
-	EndReason   string       `json:"end_reason"`
-	Purpose     Purpose      `json:"purpose"`
-	ReviewRound int          `json:"review_round"`
-	StartedAt   time.Time    `json:"started_at"`
-	EndedAt     *time.Time   `json:"ended_at"`
+	ID          string         `json:"id"`
+	Role        Role           `json:"role"`
+	Ticket      *int           `json:"ticket"`
+	Project     string         `json:"project"`
+	Name        string         `json:"name"`
+	Model       string         `json:"model"`
+	State       SessionState   `json:"state"`
+	Workdir     string         `json:"workdir"`
+	EndReason   string         `json:"end_reason"`
+	EndKind     SessionEndKind `json:"end_kind"`
+	Purpose     Purpose        `json:"purpose"`
+	ReviewRound int            `json:"review_round"`
+	StartedAt   time.Time      `json:"started_at"`
+	EndedAt     *time.Time     `json:"ended_at"`
 	// TerminalID names the web terminal of the session's running agent
 	// (GET /api/agents/{terminal_id}/terminal). Only the user is shown it,
 	// and only while the agent runs; it is unrelated to the session id.

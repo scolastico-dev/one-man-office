@@ -3,12 +3,46 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
+
+func TestCreateErrorsNameFieldsWithoutParsingMessages(t *testing.T) {
+	b, _ := newTestBoard(t)
+	for _, tc := range []struct {
+		name, field string
+		change      func(*api.CreateTicket)
+	}{
+		{"title", "title", func(r *api.CreateTicket) { r.Title = "" }},
+		{"review", "review", func(r *api.CreateTicket) { r.Review = "unknown" }},
+		{"model", "model", func(r *api.CreateTicket) { r.Model = "unknown" }},
+		{"supervisor", "supervisor", func(r *api.CreateTicket) { r.Supervisor = "unknown" }},
+		{"when approved", "when_approved", func(r *api.CreateTicket) { r.WhenApproved = "unknown" }},
+		{"task release", "task_release", func(r *api.CreateTicket) { r.TaskRelease = "unknown" }},
+		{"parallel", "max_parallel", func(r *api.CreateTicket) { r.MaxParallel = intPtr(0) }},
+		{"unknown project", "projects", func(r *api.CreateTicket) { r.Projects = []string{"unknown"} }},
+		{"duplicate project", "projects", func(r *api.CreateTicket) { r.Projects = []string{"api", "api"} }},
+		{"missing story", "story", func(r *api.CreateTicket) { r.Type = api.TypeTask; r.Story = intPtr(99999) }},
+		{"dependency", "depends_on", func(r *api.CreateTicket) { r.DependsOn = []int{99999} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := api.CreateTicket{Type: api.TypeStory, Title: "Valid", Projects: []string{"api"}}
+			tc.change(&r)
+			_, err := b.Create(context.Background(), User, r)
+			var ae *api.Error
+			if !errors.As(err, &ae) {
+				t.Fatalf("expected field error, got %v", err)
+			}
+			if detail, ok := ae.Details.(api.FieldDetail); !ok || detail.Field != tc.field {
+				t.Fatalf("error details = %#v, want field %q", ae.Details, tc.field)
+			}
+		})
+	}
+}
 
 func TestUserStoryStartsInPlanningWithUserSupervisorAndTemplate(t *testing.T) {
 	b, _ := newTestBoard(t)

@@ -62,6 +62,8 @@ type EngineTicket struct {
 	// Workdir is the working folder of a task without a project ("" until
 	// work starts).
 	Workdir string
+	// AttentionOwner identifies who may replace or clear the current flag.
+	AttentionOwner AttentionOwner
 	// Verdicts maps a project to its reviewer's verdict in the current
 	// review round.
 	Verdicts map[string]string
@@ -265,29 +267,30 @@ func (b *Board) engineSnapshot(q db.Queryer) (EngineSnapshot, error) {
 // engineTicket converts a row; list fields are empty, never nil.
 func engineTicket(p Policy, r ticketRow) EngineTicket {
 	t := EngineTicket{
-		ID:           r.ID,
-		Type:         r.Type,
-		Title:        r.Title,
-		Column:       r.Col,
-		Resolution:   r.Resolution,
-		Rank:         r.Rank,
-		StoryID:      r.StoryID,
-		Model:        r.Model,
-		Supervisor:   effectiveSupervisor(p, r),
-		ReviewStage:  r.ReviewStage,
-		ReviewRound:  r.ReviewRound,
-		Review:       effectiveReview(p, r),
-		WhenApproved: effectiveWhenApproved(p, r),
-		Busy:         r.Busy,
-		FailedStep:   r.FailedStep,
-		Attention:    r.Attention,
-		DependsOn:    []int64{},
-		WaitingFor:   []api.Waiting{},
-		ExportMerged: r.ExportMerged,
-		StartBlocked: r.StartBlocked,
-		Projects:     []EngineProject{},
-		Workdir:      r.Workdir,
-		Verdicts:     map[string]string{},
+		ID:             r.ID,
+		Type:           r.Type,
+		Title:          r.Title,
+		Column:         r.Col,
+		Resolution:     r.Resolution,
+		Rank:           r.Rank,
+		StoryID:        r.StoryID,
+		Model:          r.Model,
+		Supervisor:     effectiveSupervisor(p, r),
+		ReviewStage:    r.ReviewStage,
+		ReviewRound:    r.ReviewRound,
+		Review:         effectiveReview(p, r),
+		WhenApproved:   effectiveWhenApproved(p, r),
+		Busy:           r.Busy,
+		FailedStep:     r.FailedStep,
+		Attention:      r.Attention,
+		AttentionOwner: r.AttentionOwner,
+		DependsOn:      []int64{},
+		WaitingFor:     []api.Waiting{},
+		ExportMerged:   r.ExportMerged,
+		StartBlocked:   r.StartBlocked,
+		Projects:       []EngineProject{},
+		Workdir:        r.Workdir,
+		Verdicts:       map[string]string{},
 	}
 	if r.MaxParallel != nil {
 		t.MaxParallel = *r.MaxParallel

@@ -927,6 +927,7 @@ func (w *sim) checkQuiet(in planInput, acts []action, blocked map[int64]api.Star
 		for _, a := range acts {
 			if a.ticket == t.ID {
 				t.Attention = a.reason // proposed in this pass
+				t.AttentionOwner = a.attentionOwner
 			}
 		}
 		if !w.explained(in, t, blocked) {
@@ -1002,6 +1003,7 @@ func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBloc
 			w.logf("engine %v", a)
 		case actAttention:
 			w.tickets[a.ticket].t.Attention = a.reason
+			w.tickets[a.ticket].t.AttentionOwner = a.attentionOwner
 			w.logf("engine %v", a)
 		case actUsageStop:
 			s := w.session(a.session)

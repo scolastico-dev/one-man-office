@@ -385,6 +385,46 @@ func TestQuestionFlagKeepsOtherAttention(t *testing.T) {
 	}
 }
 
+func TestQuestionFlagKeepsReplacementWithSameDisplay(t *testing.T) {
+	h := newHarness(t)
+	h.useBoardClock()
+	h.typeAtOnce()
+	h.setHealth(24*time.Hour, 30*time.Minute)
+	task, dev := h.readyDeveloper("one")
+	q := h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "which way?", Question: true})
+	h.check(time.Hour)
+	text := h.ticket(task).Attention
+	if text == "" {
+		t.Fatal("question was not flagged")
+	}
+	if err := h.b.SetAttention(h.ctx, task, text); err != nil {
+		t.Fatal(err)
+	}
+	h.comment(board.User, task, api.CommentRequest{Body: "this way", ReplyTo: &q})
+	h.check(time.Minute)
+	if got := h.ticket(task).Attention; got != text {
+		t.Fatalf("answer cleared the replacement flag: %q", got)
+	}
+}
+
+func TestStallFlagKeepsReplacementWithSameDisplay(t *testing.T) {
+	h := newHarness(t)
+	h.typeAtOnce()
+	h.setHealth(15*time.Minute, 24*time.Hour)
+	task, dev := h.readyDeveloper("one")
+	h.check(16 * time.Minute)
+	h.check(16 * time.Minute)
+	text := h.ticket(task).Attention
+	if err := h.b.SetFailed(h.ctx, task, api.FailedAgent, text); err != nil {
+		t.Fatal(err)
+	}
+	h.agent(dev.ID).setOutput(time.Now().Add(time.Hour))
+	h.check(time.Minute)
+	if got := h.ticket(task); got.FailedStep != api.FailedAgent || got.Attention != text {
+		t.Fatalf("resumption cleared the replacement failure: %s %q", got.FailedStep, got.Attention)
+	}
+}
+
 // ---- git environment ----
 
 // gitEnvRecorder replaces the steps of syncGitEnvironment: expansions of an

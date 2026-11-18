@@ -258,7 +258,7 @@ func (e *Engine) endAllButCEO(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.end(ctx, id, stopAllReason)
+			e.end(ctx, id, stopAllReason, api.SessionEndUser)
 		}()
 	}
 	wg.Wait()

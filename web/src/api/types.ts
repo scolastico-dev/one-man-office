@@ -277,6 +277,7 @@ export interface AgentSession {
   state: SessionState
   workdir: string
   end_reason: string
+  end_kind: 'stopped' | 'finished' | 'crashed' | 'usage' | 'shutdown' | 'user' | ''
   purpose: Purpose
   review_round: number
   started_at: string

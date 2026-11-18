@@ -581,7 +581,7 @@ func (e *Engine) afterMerge(ctx context.Context, n int64) {
 	}
 	for _, s := range snap.Sessions {
 		if s.Ticket == n {
-			e.end(ctx, s.ID, fmt.Sprintf("#%d was merged", n))
+			e.end(ctx, s.ID, fmt.Sprintf("#%d was merged", n), api.SessionEndFinished)
 		}
 	}
 	e.cleanup(ctx, t)

@@ -96,6 +96,8 @@ failed: <reason>"; the exported projects keep their pull request. Then either
 approve the export again (only projects without a pull request are tried),
 choose **Merge locally instead** (merges only those), or take the failing
 project off the ticket (**Remove from ticket**).
+Removing a failed project leaves Attention showing only the failures of the
+projects still on the ticket, even when the earlier message was shortened.
 
 A repository whose remote is a folder on this machine has no forge, so its
 export fails; give it a real remote (`git remote add origin <address>`).

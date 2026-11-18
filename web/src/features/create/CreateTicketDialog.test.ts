@@ -227,7 +227,7 @@ test('a validation error with details appears under its field and everything typ
   expect((w.get('dialog').element as HTMLDialogElement).open).toBe(true)
 })
 
-test('the server error code and message name the field when there are no details', async () => {
+test('server field details and error codes place errors without reading the message', async () => {
   const h = await harness(TWO)
   h.respond.write = () => refuse('project_unavailable', 'project "ui" is missing on disk')
   const w = await open(h)
@@ -235,7 +235,7 @@ test('the server error code and message name the field when there are no details
   await submit(w)
   expect(errorUnder(w, 'projects')).toBe('project "ui" is missing on disk')
 
-  h.respond.write = () => refuse('validation', 'model "x" does not exist')
+  h.respond.write = () => refuse('validation', 'model "x" does not exist', { field: 'model' })
   await submit(w)
   expect(errorUnder(w, 'model')).toBe('model "x" does not exist')
 

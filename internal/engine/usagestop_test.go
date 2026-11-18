@@ -117,7 +117,7 @@ func TestHardStopAsksHandoffThenEnds(t *testing.T) {
 	// It hands off: the session ends as a usage stop, not as a crash.
 	h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "Handoff: half done, committed"})
 	ended := h.waitEnded(dev.ID)
-	if ended.EndReason != usageStopReason {
+	if ended.EndReason != usageStopReason || ended.EndKind != api.SessionEndUsage {
 		t.Fatalf("end reason %q", ended.EndReason)
 	}
 	h.waitFor("the stop to finish", func() bool { return !h.e.usageAsked(dev.ID) })

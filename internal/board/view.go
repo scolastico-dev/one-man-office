@@ -34,6 +34,7 @@ type ticketRow struct {
 	ReviewStage        api.ReviewStage
 	ReviewRound        int
 	Attention          string
+	AttentionOwner     AttentionOwner
 	Busy               bool
 	FailedStep         api.FailedStep
 	StartBlocked       api.StartBlocked
@@ -58,7 +59,7 @@ func (r ticketRow) standalone() bool { return r.Type == api.TypeTask && r.StoryI
 const ticketSelect = `SELECT t.id, t.type, t.title, t.col, t.resolution, t.rank, COALESCE(t.story_id, 0),
 	t.supervisor, t.created_by_role, COALESCE(t.created_by_session, ''), COALESCE(cs.name, ''),
 	t.description_version, t.model, t.review, t.when_approved, t.task_release, t.max_parallel,
-	t.review_stage, t.review_round, t.attention, t.busy, t.failed_step, t.start_blocked,
+	t.review_stage, t.review_round, t.attention, t.attention_owner, t.busy, t.failed_step, t.start_blocked,
 	t.export_url, t.export_merged, t.workdir, t.created_at, t.updated_at, t.closed_at
 	FROM tickets t LEFT JOIN agent_sessions cs ON cs.id = t.created_by_session`
 
@@ -68,7 +69,7 @@ func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
 	err := rows.Scan(&r.ID, &r.Type, &r.Title, &r.Col, &r.Resolution, &r.Rank, &r.StoryID,
 		&r.Supervisor, &r.CreatedByRole, &r.CreatedBySession, &r.CreatedByName,
 		&r.DescriptionVersion, &r.Model, &r.Review, &r.WhenApproved, &r.TaskRelease, &maxParallel,
-		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.Busy, &r.FailedStep, &r.StartBlocked,
+		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.AttentionOwner, &r.Busy, &r.FailedStep, &r.StartBlocked,
 		&r.ExportURL, &r.ExportMerged, &r.Workdir,
 		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt)
 	if maxParallel.Valid {

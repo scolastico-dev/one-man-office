@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 // storyWithBranches creates a story by a on api, ui and web, records a
@@ -38,7 +39,7 @@ func TestRemoveProjectRecordsWhoRemovedWhat(t *testing.T) {
 	if _, err := b.db.Exec(`UPDATE ticket_projects SET export_state = 'failed', export_error = 'no remote' WHERE ticket_id = ? AND project_id IN ('ui', 'web')`, n); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.db.Exec(`UPDATE tickets SET attention = 'Export of ui failed: no remote; Export of web failed: no remote' WHERE id = ?`, n); err != nil {
+	if _, err := b.db.Exec(`UPDATE tickets SET attention_owner = 'export', attention = 'Export of ui failed: no remote; Export of web failed: no remote' WHERE id = ?`, n); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,6 +103,100 @@ func TestRemoveProjectRecordsWhoRemovedWhat(t *testing.T) {
 	wantCode(t, err, api.CodeValidation)
 	if err == nil || !strings.Contains(err.Error(), "only project") {
 		t.Fatalf("error %v", err)
+	}
+}
+
+func TestRemoveProjectWithTruncatedExportAttention(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "Export", Projects: []string{"api", "ui"}})
+	n := int64(s.Number)
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageExporting)
+	reason := strings.Repeat("a", 160)
+	for project, why := range map[string]string{"api": reason, "ui": "no remote"} {
+		if err := b.SetProjectExport(ctx, n, project, api.ExportFailedState, why); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.ExportFailed(ctx, n, "Export of api failed: "+reason+"; Export of ui failed: no remote"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ClaimProjectRemoval(ctx, User, n, "ui"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.RemoveProject(ctx, User, n, "ui", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Projects) != 1 || got.Projects[0].Project != "api" {
+		t.Fatalf("remaining projects: %+v", got.Projects)
+	}
+	if want := "Export of api failed: " + reason; got.Attention != want {
+		t.Fatalf("attention = %q, want %q", got.Attention, want)
+	}
+}
+
+func TestLegacyTruncatedExportAttentionCanBeCleared(t *testing.T) {
+	for _, action := range []string{"retry export", "reject to In Progress"} {
+		t.Run(action, func(t *testing.T) {
+			b, env := newTestBoard(t)
+			ctx := context.Background()
+			s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "Export", Projects: []string{"api", "ui"}})
+			n := int64(s.Number)
+			force(t, b, s.Number, api.ColumnReview, api.ReviewStageExporting)
+			reason := strings.Repeat("a", 160)
+			for project, why := range map[string]string{"api": reason, "ui": "no remote"} {
+				if err := b.SetProjectExport(ctx, n, project, api.ExportFailedState, why); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := b.ExportFailed(ctx, n, "Export of api failed: "+reason+"; Export of ui failed: no remote"); err != nil {
+				t.Fatal(err)
+			}
+			before := get(t, b, s.Number).Attention
+			if !strings.HasSuffix(before, "; Export of ui fa…") {
+				t.Fatalf("not the legacy shortened case: %q", before)
+			}
+			// Remove the new metadata columns to reopen the actual version-8
+			// shape through the normal upgrade path.
+			var seq int
+			var name, path string
+			if err := b.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.db.Exec(`ALTER TABLE tickets DROP COLUMN attention_owner;
+ALTER TABLE agent_sessions DROP COLUMN end_kind; PRAGMA user_version = 8`); err != nil {
+				t.Fatal(err)
+			}
+			b.db.Close()
+			d, err := db.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			b = New(d, env, Options{})
+			if _, err := b.ClaimProjectRemoval(ctx, User, n, "ui"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := b.RemoveProject(ctx, User, n, "ui", "")
+			if err != nil || got.Attention != before {
+				t.Fatalf("unknown legacy flag was reclassified: %q, %v", got.Attention, err)
+			}
+			if action == "retry export" {
+				got, err = b.Approve(ctx, User, n, api.ApproveRequest{Export: true})
+				if err != nil || got.ReviewStage != api.ReviewStageExporting {
+					t.Fatalf("retry: %+v %v", got, err)
+				}
+			} else {
+				got, err = b.Reject(ctx, User, n, api.RejectRequest{Comment: "Review the remaining project again"})
+				if err != nil || got.Column != api.ColumnInProgress {
+					t.Fatalf("move: %+v %v", got, err)
+				}
+			}
+			if got.Attention != "" {
+				t.Fatalf("legacy warning remains after %s: %q", action, got.Attention)
+			}
+		})
 	}
 }
 

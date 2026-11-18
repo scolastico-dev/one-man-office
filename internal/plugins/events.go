@@ -143,30 +143,20 @@ func AgentPayload(a api.AgentSession) map[string]any {
 	}
 }
 
-// ExitReason maps the end reason the board keeps for a session to the fixed
-// reason of agent_exited: "omo stopped" when omo stopped or restarted,
-// "usage" for a stop at a usage limit, "crashed" for an agent that ended by
-// itself without finishing or could not start, "finished" for one that
-// finished its work, else "stopped". The board's text never reaches a
-// plugin.
-func ExitReason(endReason string) string {
-	r := strings.ToLower(strings.TrimSpace(endReason))
-	switch {
-	case strings.HasPrefix(r, "omo stopped"), strings.HasPrefix(r, "omo restarted"):
+// ExitReason maps the session's structured outcome to the fixed plugin reason.
+func ExitReason(kind api.SessionEndKind) string {
+	switch kind {
+	case api.SessionEndShutdown:
 		return ExitOmo
-	case strings.Contains(r, "usage"):
+	case api.SessionEndUsage:
 		return ExitUsage
-	case strings.HasPrefix(r, "exited unexpectedly"), strings.HasPrefix(r, "could not start"),
-		strings.HasPrefix(r, "did not run"), strings.Contains(r, "crash"):
+	case api.SessionEndCrashed:
 		return ExitCrashed
-	case r == "", r == "done", r == "finished", r == "merged", strings.HasPrefix(r, "handed in"),
-		strings.HasSuffix(r, " is done"), strings.HasSuffix(r, " was merged"), strings.HasSuffix(r, " was exported"),
-		strings.HasPrefix(r, "a new review round of "):
-		// The ticket's work is over, or a reviewer's round was followed by
-		// the next one: the agent finished.
+	case api.SessionEndFinished:
 		return ExitFinished
+	default:
+		return ExitStopped
 	}
-	return ExitStopped
 }
 
 // cutText cuts s to at most n bytes at a character boundary. Invalid UTF-8

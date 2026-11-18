@@ -1187,7 +1187,7 @@ func pluginEvents(ev api.Event, att map[int]string, ticket func(int) map[string]
 		}
 		add(plugins.EventAgentExited, map[string]any{
 			"ticket": ticketOf(d.Agent.Ticket), "agent": plugins.AgentPayload(d.Agent),
-			"reason": plugins.ExitReason(d.Agent.EndReason),
+			"reason": plugins.ExitReason(d.Agent.EndKind),
 		})
 	case api.KindServerPaused:
 		var d api.ServerPausedData

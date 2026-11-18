@@ -243,6 +243,9 @@ func (b *Board) exportFailed(tx *sql.Tx, a Actor, t ticketRow, message string) e
 	if err := b.setStage(tx, t.ID, api.ReviewStageHuman, attentionLine(message)); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`UPDATE tickets SET attention_owner = ? WHERE id = ? AND failed_step = ''`, AttentionExport, t.ID); err != nil {
+		return err
+	}
 	if err := b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionExportFailed}}); err != nil {
 		return err
 	}
@@ -354,24 +357,41 @@ func attentionLine(reason string) string {
 	return line
 }
 
+// AttentionOwner identifies the producer of a flag. It is never derived from
+// its shortened display text; an empty owner denotes an unowned flag.
+type AttentionOwner string
+
+const (
+	AttentionPlanner AttentionOwner = "planner"
+	AttentionExport  AttentionOwner = "export"
+)
+
 // SetAttention flags a ticket as needing attention with reason, or clears
 // the flag when reason is empty. A new reason is also posted in full as a
 // comment for the ticket's supervisor; the flag holds it cut to one line
 // (see attentionLine). Done tickets cannot be flagged.
 func (b *Board) SetAttention(ctx context.Context, n int64, reason string) error {
+	return b.SetAttentionOwned(ctx, n, "", reason)
+}
+
+// SetAttentionOwned records a flag and its producer together.
+func (b *Board) SetAttentionOwned(ctx context.Context, n int64, owner AttentionOwner, reason string) error {
 	reason = strings.TrimSpace(reason)
 	line := attentionLine(reason)
+	if line == "" {
+		owner = ""
+	}
 	if reason != "" && line == "" {
 		return api.Errorf(api.CodeValidation, "an attention reason needs readable text")
 	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
-		if t.Attention == line {
+		if t.Attention == line && t.AttentionOwner == owner {
 			return nil
 		}
 		if reason != "" && t.Col == api.ColumnDone {
 			return api.Errorf(api.CodeInvalidTransition, "#%d is done and needs no attention", n)
 		}
-		if _, err := tx.Exec(`UPDATE tickets SET attention = ?, updated_at = ? WHERE id = ?`, line, b.stamp(), n); err != nil {
+		if _, err := tx.Exec(`UPDATE tickets SET attention = ?, attention_owner = ?, updated_at = ? WHERE id = ?`, line, owner, b.stamp(), n); err != nil {
 			return err
 		}
 		if err := b.emitUpdated(tx, System, n, "attention"); err != nil {
