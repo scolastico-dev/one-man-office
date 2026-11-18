@@ -43,9 +43,27 @@ jobs:
         if: ${{ !cancelled() }}
         run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
 
+  # The Go test suite on Windows, in four groups that run side by side: every
+  # program a test starts (git above all) is far slower to start there, and
+  # in one job the largest packages ran into their time limit. Each package
+  # is in exactly one group: the last group takes everything the others do
+  # not name, and internal/archtest checks that its exclusions match them.
   windows-test:
-    name: Test Windows process containment
+    name: Test on Windows (${{ matrix.name }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: engine
+            only: internal/(engine)
+          - name: server
+            only: internal/(server)
+          - name: git and board
+            only: internal/(gitops|board)
+          - name: everything else
+            except: internal/(engine|server|gitops|board)
+            vet: true
     env:
       CGO_ENABLED: '0'
     steps:
@@ -59,11 +77,24 @@ jobs:
           cache: true
 
       - name: Vet Windows code
+        if: ${{ matrix.vet }}
         run: go vet ./...
 
       - name: Test on Windows
         if: ${{ !cancelled() }}
-        run: go test ./... -timeout 900s
+        shell: pwsh
+        run: |
+          $all = go list ./...
+          if ($LASTEXITCODE -ne 0) { throw "go list failed" }
+          if ("${{ matrix.only }}") {
+            $packages = @($all | Where-Object { $_ -match '/${{ matrix.only }}(/|$)' })
+          } else {
+            $packages = @($all | Where-Object { $_ -notmatch '/${{ matrix.except }}(/|$)' })
+          }
+          if ($packages.Count -eq 0) { throw "this group matches no package" }
+          Write-Host "testing $($packages.Count) packages"
+          go test $packages -timeout 900s
+          exit $LASTEXITCODE
 
   container-build:
     name: Test container (${{ matrix.arch }})

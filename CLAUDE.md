@@ -533,7 +533,7 @@ Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` 
 
 ## CI and releases
 
-- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests; a `windows-latest` job runs `go vet ./...` and the Go test suite, including process-containment regressions.
+- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests; `windows-latest` jobs run `go vet ./...` and the whole Go test suite in four groups side by side (engine; server; gitops and board; everything else), because starting programs is far slower there; `archtest.TestWindowsTestGroupsCoverEveryPackageOnce` holds the groups complete.
 - `.github/workflows/browser-tests.yml`: browser end-to-end tests on pull requests and pushes to `main`.
 - `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
 - `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.
