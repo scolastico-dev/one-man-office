@@ -1,32 +1,18 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { test } from 'node:test'
 import { chromium } from '@playwright/test'
+import { fixtureEnv, startFixture } from './fixtureProcess.mjs'
 
 // Exercise real BrowserHandler/registry/grants/cookie flags with Chromium.
 // The opt-in Go fixture uses httptest only and never starts omo or a socket.
 test('subdomain Open, domain cookies, HTTPS and path mode coexist in Chromium', { timeout: 90000 }, async () => {
-  const fixture = spawn('go', ['test', './internal/server', '-run', '^TestProxySubdomainBrowserFixture$', '-count=1', '-v', '-timeout', '80s'], {
+  // The helper's environment is an allowlist that keeps the configured temporary roots (see fixtureProcess.mjs).
+  const run = await startFixture({
     cwd: new URL('../../', import.meta.url),
-    env: {
-      PATH: process.env.PATH, HOME: process.env.HOME,
-      USERPROFILE: process.env.USERPROFILE, LOCALAPPDATA: process.env.LOCALAPPDATA,
-      SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP,
-      CGO_ENABLED: '0', PROXY_BROWSER_FIXTURE: '1',
-    },
+    env: fixtureEnv(process.env, { PROXY_BROWSER_FIXTURE: '1' }),
   })
-  let output = ''
-  fixture.stderr.on('data', data => { output += data })
-  const fixtures = await new Promise((resolve, reject) => {
-    fixture.stdout.on('data', data => {
-      output += data
-      const line = output.split('\n').find(line => line.startsWith('PROXY_BROWSER_FIXTURES '))
-      if (line) resolve(JSON.parse(line.slice('PROXY_BROWSER_FIXTURES '.length)))
-    })
-    fixture.on('error', reject)
-    fixture.on('exit', code => reject(new Error(`fixture exited ${code}: ${output}`)))
-  })
-  const exited = new Promise(resolve => fixture.once('exit', resolve))
+  const { fixtures } = run
+  let exitCode
   let browser
   try {
     browser = await chromium.launch({ headless: true, args: ['--no-proxy-server'] })
@@ -77,8 +63,8 @@ test('subdomain Open, domain cookies, HTTPS and path mode coexist in Chromium', 
     }
   } finally {
     await browser?.close()
-    // This endpoint belongs to the httptest wrapper, never the omo API.
-    await fetch(fixtures[0].stop)
+    // The stop address belongs to the httptest wrapper, never the omo API. Whatever failed above, the helper ends here.
+    exitCode = await run.stop(fixtures[0]?.stop)
   }
-  assert.equal(await exited, 0, output)
+  assert.equal(exitCode, 0, run.output())
 })
