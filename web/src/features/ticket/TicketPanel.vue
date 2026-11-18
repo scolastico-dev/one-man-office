@@ -327,6 +327,8 @@ function onDialogClose() {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* A composited scroller: the compositor then finds it under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: scroll-position;
   padding: calc(var(--omo-space) * 5) calc(var(--omo-space) * 6) calc(var(--omo-space) * 6);
 }
 .tpanel__grid {

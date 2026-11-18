@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
+import { traceWheels, wheelTraceProblems } from './support/wheelTrace'
 import { expect, FAKE_AGENT_BINARY, test, type Omo } from './support/omo'
 
 // The mouse wheel scrolls the settings page from anywhere in the settings
@@ -34,12 +35,15 @@ async function toTop(page: Page) {
   await settle(page)
 }
 
-async function expectWheelScrollsPage(page: Page, x: number, y: number, where: string) {
+async function expectWheelScrollsPage(page: Page, x: number, y: number, where: string, options: { platformMainThread?: boolean } = {}) {
   await toTop(page)
   const before = await titleTop(page)
   await page.mouse.move(x, y)
-  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
-  await expect.poll(() => titleTop(page), { message: `the wheel at ${where} (${x}, ${y}) scrolls the page` }).toBeLessThan(before - 50)
+  const trace = await traceWheels(page, async () => {
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 400)
+    await expect.poll(() => titleTop(page), { message: `the wheel at ${where} (${x}, ${y}) scrolls the page` }).toBeLessThan(before - 50)
+  })
+  expect(wheelTraceProblems(trace, 5, options), `the wheels at ${where} are scrolled by the compositor alone`).toEqual([])
   expect(await page.evaluate(() => (document.scrollingElement ?? document.documentElement).scrollTop), 'the document never scrolls').toBe(0)
 }
 
@@ -74,6 +78,25 @@ for (const width of [1440, 2560]) {
   })
 }
 
+// Ten text fields make Chromium ask the main thread about every wheel on this page (no style changes that), so the wheel is
+// checked for what the user sees: the page scrolls, from the page's content and from beside it.
+test('on the Environment page, with its many text fields, the wheel still scrolls the page', async ({ page, omo }) => {
+  await page.setViewportSize({ width: 1440, height: 520 })
+  await openBoard(page, omo)
+  await page.goto(omo.url('/settings/environment'))
+  await expect(page.locator('[data-settings-page] h1')).toHaveText('Environment')
+  const m = await page.evaluate(() => {
+    const col = document.querySelector('[data-settings-page] > div')!.getBoundingClientRect()
+    const nav = document.querySelector('[data-settings-nav]')!.getBoundingClientRect()
+    return { col: { l: col.left, r: col.right }, nav: { l: nav.left }, w: innerWidth }
+  })
+  const scrollable = await page.locator('[data-settings]').evaluate((f) => f.scrollHeight - f.clientHeight)
+  expect(scrollable, 'the page is longer than the window').toBeGreaterThan(100)
+  await expectWheelScrollsPage(page, m.col.l + 200, 300, 'over the page', { platformMainThread: true })
+  await expectWheelScrollsPage(page, (m.col.r + m.w) / 2 + 1, 300, 'right of the page', { platformMainThread: true })
+  await expectWheelScrollsPage(page, m.nav.l + 100, 300, 'over the list', { platformMainThread: true })
+})
+
 test('a list taller than the window scrolls first, then hands the wheel to the page', async ({ page, omo }) => {
   await page.setViewportSize({ width: 1440, height: 420 })
   await openBoard(page, omo)
@@ -84,10 +107,16 @@ test('a list taller than the window scrolls first, then hands the wheel to the p
   expect(room, 'the list is taller than the window').toBeGreaterThan(50)
   const box = (await nav.boundingBox())!
   await page.mouse.move(box.x + 100, box.y + box.height / 2)
-  await page.mouse.wheel(0, 100)
-  await expect.poll(() => nav.evaluate((e) => e.scrollTop)).toBeGreaterThan(0)
+  const first = await traceWheels(page, async () => {
+    await page.mouse.wheel(0, 100)
+    await expect.poll(() => nav.evaluate((e) => e.scrollTop)).toBeGreaterThan(0)
+  })
+  expect(wheelTraceProblems(first, 1), 'the first wheel over the list is scrolled by the compositor alone').toEqual([])
   const pageTop = await titleTop(page)
-  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400)
-  await expect.poll(() => nav.evaluate((e, r) => Math.round(e.scrollTop) >= Math.floor(r) - 1, room)).toBe(true)
-  await expect.poll(() => titleTop(page), { message: 'after the list is at its end the wheel scrolls the page' }).toBeLessThan(pageTop - 20)
+  const rest = await traceWheels(page, async () => {
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400)
+    await expect.poll(() => nav.evaluate((e, r) => Math.round(e.scrollTop) >= Math.floor(r) - 1, room)).toBe(true)
+    await expect.poll(() => titleTop(page), { message: 'after the list is at its end the wheel scrolls the page' }).toBeLessThan(pageTop - 20)
+  })
+  expect(wheelTraceProblems(rest, 10), 'the wheels that follow are scrolled by the compositor alone').toEqual([])
 })

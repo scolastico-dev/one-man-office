@@ -45,6 +45,8 @@ async function copy() {
   margin: 0;
   padding: calc(var(--omo-space) * 2);
   overflow-x: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: transform;
   border: var(--omo-border) solid var(--omo-line);
   background: var(--omo-surface);
   font-family: inherit;

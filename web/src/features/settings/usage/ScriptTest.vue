@@ -205,6 +205,8 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
   margin: 0;
   padding: calc(var(--omo-space) * 3);
   overflow: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: transform;
   font-family: inherit;
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);

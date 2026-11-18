@@ -83,3 +83,78 @@ test('the settings frame is the one scroll box of the settings area: the wheel s
   }
   expect(rule('/src/features/settings/SettingsPage.vue', '.settings-page')).not.toMatch(/overflow/)
 })
+
+test('a scroll box a wheel can land on inside the board, the ticket panel, the image lightbox and the searched pickers is a composited scroller, so the compositor finds it without asking the main thread (which can drop the wheel)', () => {
+  for (const [file, selector] of [
+    ['/src/features/board/BoardColumn.vue', '.column__body'],
+    ['/src/features/ticket/TicketPanel.vue', '.tpanel__scroll'],
+    ['/src/features/images/ImageLightbox.vue', '.lightbox'],
+    ['/src/components/ui/SearchPicker.vue', '.pick__list'],
+  ] as const) {
+    expect(rule(file, selector), `${file} ${selector}`).toMatch(/will-change:\s*scroll-position/)
+  }
+})
+
+test('a code block of a description, which scrolls sideways, is a composited layer, so the compositor finds it under a wheel itself', () => {
+  expect(rule('/src/features/ticket/DescriptionView.vue', '.md :deep(pre)')).toMatch(/will-change:\s*transform/)
+})
+
+// Every rule that makes a scroll box (overflow auto or scroll) either composites it (`will-change`), or is named here with the audit that
+// found its wheel handled by the compositor alone: `wheel-states.spec.ts`, `wheel-popups.spec.ts` and the audit tests of `page-scroll.spec.ts`
+// (see e2e/support/wheelAudit.ts). A new scroll box fails this test until it is audited in a populated state, and then composited or listed.
+const AUDITED_CLEAN: Record<string, string> = {
+  '/src/components/ui/UiDialog.vue .dialog': 'page-scroll (lightbox, panel), wheel-popups (history, folder picker), wheel-states (import, batch removal)',
+  '/src/features/board/BoardView.vue .board': 'page-scroll (the board)',
+  '/src/features/board/BoardView.vue .board__empty': 'page-scroll (the board)',
+  '/src/features/diff/DiffBrowser.vue .dbrowse__main': 'page-scroll (diff)',
+  '/src/features/diff/DiffBrowser.vue .dbrowse__tree': 'page-scroll (diff)',
+  '/src/features/diff/DiffFileView.vue .dfile__body': 'page-scroll (diff, panel diff), board-wheel (long lines)',
+  '/src/features/notifications/NotificationList.vue .bell-list': 'wheel-popups (the bell list)',
+  '/src/features/settings/SettingsView.vue .settings-view': 'page-scroll (settings sections); the Environment page and pages with a focused text area ask the main thread because of their text fields, see settings-wheel',
+  '/src/features/settings/SettingsView.vue .settings-view__side': 'page-scroll (settings sections)',
+  '/src/features/settings/projects/FolderPickerDialog.vue .picker__list': 'wheel-popups (the folder picker)',
+  '/src/features/settings/projects/ProjectList.vue .projects__gone--scroll': 'wheel-states (the batch removal list, overflowing)',
+  '/src/features/sidebar/SidebarRoot.vue .side__tabs :deep([role=\'tabpanel\'])': 'wheel-popups (the sidebar tabs)',
+  '/src/features/ticket/DescriptionHistoryDialog.vue .hist__list': 'wheel-popups (the description history)',
+  '/src/features/ticket/DescriptionHistoryDialog.vue .hist__preview': 'wheel-popups (the description history)',
+  '/src/features/ticket/TicketPanel.vue .tpanel__head': 'page-scroll (the panel)',
+  '/src/features/ticket/page/TicketPage.vue .tpage': 'page-scroll (the ticket page)',
+  '/src/features/ticket/page/TicketPage.vue .tpage__body:has([data-tab-content=\'overview\'])': 'page-scroll (the ticket page), wheel-states (markdown)',
+  '/src/features/ticket/page/TicketPage.vue .tpage__side': 'page-scroll (the ticket page)',
+  '/src/features/ticket/tabs/TicketTabs.vue .ptabs--page :deep(.tabs__list)': 'page-scroll (the ticket page)',
+  '/src/features/ticket/tabs/TicketTabs.vue .ptabs--page :deep(.tabs__panel)': 'page-scroll (the ticket page)',
+  // The scroller of a text field is the browser's own (a text area's inner box): no style composites it.
+  '/src/features/settings/plugins/PluginConfigEditor.vue .plugin-config__code :deep(textarea)': 'a text area',
+  '/src/features/settings/usage/ScriptEditor.vue .script-editor__code :deep(textarea)': 'a text area',
+  '/src/features/ticket/DescriptionEditor.vue .editor__source': 'a text area',
+  // These three carry the class omo-logtext, which composites them (checked below).
+  '/src/features/settings/mcp/McpServerLog.vue .mcp-log__text': 'omo-logtext',
+  '/src/features/settings/plugins/PluginLog.vue .plugin-log__text': 'omo-logtext',
+  '/src/features/terminal/LogView.vue .log__text': 'omo-logtext',
+}
+
+test('every scroll box rule composites its box or is listed with the audit that cleared it', () => {
+  const unlisted: string[] = []
+  const seen = new Set<string>()
+  for (const [file, text] of Object.entries(sources)) {
+    if (file.startsWith('/src/sample/') || file === '/src/scroll.guard.test.ts') continue
+    const style = file.endsWith('.vue') ? (/<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? '') : text
+    for (const m of style.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const body = m[2]!
+      if (!/(^|[\s;])overflow(-[xy])?:\s*(auto|scroll)/.test(body)) continue
+      const key = `${file} ${m[1]!.trim().replace(/\s+/g, ' ')}`
+      seen.add(key)
+      if (!/will-change:\s*(scroll-position|transform)/.test(body) && AUDITED_CLEAN[key] === undefined) unlisted.push(key)
+    }
+  }
+  expect(unlisted).toEqual([])
+  // No entry outlives its rule.
+  expect(Object.keys(AUDITED_CLEAN).filter((k) => !seen.has(k))).toEqual([])
+})
+
+test('the log boxes that rely on the class omo-logtext use it, and it composites them', () => {
+  for (const file of ['/src/features/settings/mcp/McpServerLog.vue', '/src/features/settings/plugins/PluginLog.vue', '/src/features/terminal/LogView.vue']) {
+    expect(sources[file], file).toMatch(/class="omo-logtext /)
+  }
+  expect(sources['/src/styles/main.css']).toMatch(/\.omo-logtext\s*\{[^}]*will-change:\s*transform/)
+})

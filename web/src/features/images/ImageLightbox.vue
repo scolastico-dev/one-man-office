@@ -28,6 +28,8 @@ const title = computed(() => (props.image ? visibleText(props.image.alt) || 'Ima
 <style scoped>
 .lightbox {
   overflow: auto;
+  /* A composited scroller: the compositor then finds it under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: scroll-position;
   max-height: 75dvh;
 }
 .lightbox__img {
