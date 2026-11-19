@@ -176,7 +176,7 @@ test('at 390 px the tabs and the composer are usable without horizontal scrollin
   await expect(panel(page).locator('[data-comment]')).toHaveCount(1)
   expect(await sideways(page)).toBe(false)
   const tabs = panel(page).getByRole('tablist', { name: `Activity on #${n}` })
-  await expect(tabs.getByRole('tab')).toHaveCount(3)
+  await expect(tabs.getByRole('tab')).toHaveText(['Comments', 'Diff', 'Agents', 'Forwards'])
   await tabs.getByRole('tab', { name: 'Diff' }).click()
   await expect(page).toHaveURL(/tab=diff/)
   await tabs.getByRole('tab', { name: 'Comments' }).click()
