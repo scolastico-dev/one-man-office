@@ -336,7 +336,8 @@ WHERE col = 'review' AND review_stage = 'awaiting_merge' AND failed_step = ''
 	// waits for gates (the move, who asked for it, where it goes) and one
 	// row per gating plugin with its answer so far.
 	`CREATE TABLE IF NOT EXISTS ticket_gate_moves (
-  ticket_id     INTEGER PRIMARY KEY REFERENCES tickets(id),
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id     INTEGER NOT NULL UNIQUE REFERENCES tickets(id),
   move          TEXT NOT NULL CHECK (move IN ('release','start')),
   actor_role    TEXT NOT NULL,
   actor_name    TEXT NOT NULL DEFAULT '',
@@ -346,6 +347,7 @@ WHERE col = 'review' AND review_stage = 'awaiting_merge' AND failed_step = ''
 CREATE TABLE IF NOT EXISTS ticket_gates (
   ticket_id  INTEGER NOT NULL REFERENCES ticket_gate_moves(ticket_id) ON DELETE CASCADE,
   plugin     TEXT NOT NULL,
+  failure_hold INTEGER NOT NULL DEFAULT 0 CHECK (failure_hold IN (0,1)),
   state      TEXT NOT NULL CHECK (state IN ('pending','held','passed')),
   reason     TEXT NOT NULL DEFAULT '',
   choices    TEXT NOT NULL DEFAULT '[]',

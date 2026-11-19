@@ -332,6 +332,9 @@ func (s *Server) claimPlugin(name string) (func(), error) {
 			f.busyMu.Lock()
 			delete(f.busy, name)
 			f.busyMu.Unlock()
+			// Gates that waited for the operation (a removal deletes the
+			// plugin's log) are settled now.
+			s.gates.poke()
 		})
 	}, nil
 }

@@ -246,3 +246,15 @@ func TestLuaHelpersReleaseAndCancelAHeldMove(t *testing.T) {
 		t.Fatalf("calls = %v", desk.calls)
 	}
 }
+
+func TestGateCommandOutputWithDataAfterTheAnswerIsInvalid(t *testing.T) {
+	for _, out := range []string{`{"action":"go_ahead"} trailing garbage`, `{"action":"go_ahead"}{"action":"hold","reason":"wait"}`} {
+		e := newEnv(t)
+		e.plugin("c", manifestOf(map[string]any{"event": EventGate, "move": "start", "failure": "hold", "command": helperArgs(t, "print", out)}), nil)
+		e.load(enabled("c", nil))
+		got := runGate(t, e, "c", api.GateMoveStart)
+		if got.Failure == "" || !got.FailureHolds || got.Kind != "" {
+			t.Errorf("%q: %+v, want an invalid answer that follows the failure rule", out, got)
+		}
+	}
+}

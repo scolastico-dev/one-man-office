@@ -35,6 +35,9 @@ import (
 // board's database.
 type Gates interface {
 	GatePlugins(move api.GateMove) []string
+	// GateFailureHolds reports whether plugin's gate for move holds when it
+	// fails (or its plugin goes away) instead of going ahead.
+	GateFailureHolds(plugin string, move api.GateMove) bool
 }
 
 // GateKind is how a plugin's gate hook answered.
@@ -63,10 +66,15 @@ type GateAnswer struct {
 // OpenGate is one gate of a ticket that has not passed: the plugin's hook
 // is asked (pending) or the plugin holds the move (held).
 type OpenGate struct {
-	Ticket int64
-	Move   api.GateMove
-	Plugin string
-	State  api.GateState
+	// Request identifies the request the gate belongs to; an answer for
+	// an earlier request of the ticket is refused.
+	Request int64
+	// FailureHold is the plugin's failure policy when the request was made.
+	FailureHold bool
+	Ticket      int64
+	Move        api.GateMove
+	Plugin      string
+	State       api.GateState
 }
 
 // Bounds of what a plugin says about a hold.
@@ -96,6 +104,13 @@ func (b *Board) SetGates(g Gates) {
 	b.gatesMu.Unlock()
 }
 
+func (b *Board) gateFailureHolds(plugin string, move api.GateMove) bool {
+	b.gatesMu.RLock()
+	g := b.gates
+	b.gatesMu.RUnlock()
+	return g != nil && g.GateFailureHolds(plugin, move)
+}
+
 // gatePlugins are the plugins that gate move, sorted and without repeats.
 func (b *Board) gatePlugins(move api.GateMove) []string {
 	b.gatesMu.RLock()
@@ -118,6 +133,7 @@ func (b *Board) gatePlugins(move api.GateMove) []string {
 
 // gateMoveRow is the stored request of a ticket's gated move.
 type gateMoveRow struct {
+	id        int64
 	move      api.GateMove
 	actorRole api.Role
 	actorName string
@@ -127,8 +143,8 @@ type gateMoveRow struct {
 func loadGateMove(q db.Queryer, n int64) (gateMoveRow, bool, error) {
 	var r gateMoveRow
 	var before sql.NullInt64
-	err := q.QueryRow(`SELECT move, actor_role, actor_name, before_ticket FROM ticket_gate_moves WHERE ticket_id = ?`, n).
-		Scan(&r.move, &r.actorRole, &r.actorName, &before)
+	err := q.QueryRow(`SELECT id, move, actor_role, actor_name, before_ticket FROM ticket_gate_moves WHERE ticket_id = ?`, n).
+		Scan(&r.id, &r.move, &r.actorRole, &r.actorName, &before)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}
@@ -220,7 +236,8 @@ func (b *Board) requestGates(tx *sql.Tx, a Actor, t ticketRow, move api.GateMove
 		return err
 	}
 	for _, p := range plugins {
-		if _, err := tx.Exec(`INSERT INTO ticket_gates (ticket_id, plugin, state, updated_at) VALUES (?, ?, 'pending', ?)`, t.ID, p, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO ticket_gates (ticket_id, plugin, failure_hold, state, updated_at) VALUES (?, ?, ?, 'pending', ?)`,
+			t.ID, p, b.gateFailureHolds(p, move), now); err != nil {
 			return err
 		}
 	}
@@ -283,7 +300,7 @@ func (b *Board) RequestStartGates(ctx context.Context, n int64) (bool, error) {
 func (b *Board) OpenGates(ctx context.Context) ([]OpenGate, error) {
 	out := []OpenGate{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT g.ticket_id, m.move, g.plugin, g.state FROM ticket_gates g
+		rows, err := tx.Query(`SELECT m.id, g.failure_hold, g.ticket_id, m.move, g.plugin, g.state FROM ticket_gates g
 			JOIN ticket_gate_moves m ON m.ticket_id = g.ticket_id WHERE g.state <> 'passed' ORDER BY g.ticket_id, g.rowid`)
 		if err != nil {
 			return err
@@ -291,7 +308,7 @@ func (b *Board) OpenGates(ctx context.Context) ([]OpenGate, error) {
 		defer rows.Close()
 		for rows.Next() {
 			var g OpenGate
-			if err := rows.Scan(&g.Ticket, &g.Move, &g.Plugin, &g.State); err != nil {
+			if err := rows.Scan(&g.Request, &g.FailureHold, &g.Ticket, &g.Move, &g.Plugin, &g.State); err != nil {
 				return err
 			}
 			out = append(out, g)
@@ -367,11 +384,12 @@ func gateOf(rows []api.TicketGate, plugin string) *api.TicketGate {
 	return nil
 }
 
-// GateAnswer records plugin's answer to the gate of ticket n (see
+// GateAnswer records plugin's answer to the gate of request (the
+// OpenGate's Request) of ticket n (see
 // GateAnswer). It answers conflict when the ticket has no such gate any more
 // (the move was made, cancelled or overridden meanwhile), which the caller
 // takes as nothing to do.
-func (b *Board) GateAnswer(ctx context.Context, n int64, plugin string, ans GateAnswer) error {
+func (b *Board) GateAnswer(ctx context.Context, n, request int64, plugin string, ans GateAnswer) error {
 	reason := cutRunes(ans.Reason, maxGateReason)
 	note := cutRunes(ans.Note, maxGateNote)
 	choices, err := cleanChoices(ans.Choices)
@@ -395,7 +413,7 @@ func (b *Board) GateAnswer(ctx context.Context, n int64, plugin string, ans Gate
 			return err
 		}
 		g := gateOf(rows, plugin)
-		if g == nil || g.State == api.GatePassed {
+		if m.id != request || g == nil || g.State == api.GatePassed {
 			return api.Errorf(api.CodeConflict, "plugin %s has no open gate on #%d", plugin, n)
 		}
 		if note != "" {

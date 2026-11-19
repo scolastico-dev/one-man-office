@@ -433,3 +433,50 @@ func TestGatePendingGateIsAskedAgainAfterARestart(t *testing.T) {
 	g.reopen()
 	g.wait(n, "the hold after the restart", held("gate"))
 }
+
+func TestGateUnavailablePluginKeepsItsFailureHold(t *testing.T) {
+	for _, how := range []string{"disabled", "removed"} {
+		t.Run(how, func(t *testing.T) {
+			g := newGateServer(t, false)
+			g.install("gate", []string{"release"}, map[string]any{"failure": "hold"})
+			n := g.task("hold it")
+			g.ready(n)
+			g.wait(n, "the hold", held("gate"))
+			if how == "disabled" {
+				g.setEnabled("gate", false)
+			} else if resp := asUser(g.b, g.s, "DELETE", "/api/plugins/gate", nil); resp.StatusCode >= 300 {
+				t.Fatalf("remove: status %d", resp.StatusCode)
+			}
+			// Wait for the plugin change to have been seen by the runner.
+			waitFor(t, "the plugin to be gone", func() bool { return len(g.s.plugins.m.GatePlugins(api.GateMoveRelease)) == 0 })
+			g.s.gates.poke()
+			g.s.askOpenGates(context.Background())
+			if tk := g.get(n); tk.Column != api.ColumnPlanning || !held("gate")(tk) {
+				t.Fatalf("a failure that holds let the ticket go: column %s, gate %+v", tk.Column, tk.Gate)
+			}
+			if err := g.s.board.GateOverride(context.Background(), board.User, int64(n)); err != nil {
+				t.Fatal(err)
+			}
+			g.wait(n, "the override", inColumn(api.ColumnReady))
+		})
+	}
+}
+
+func TestGateRemovedPluginLeavesALogLine(t *testing.T) {
+	g := newGateServer(t, false)
+	g.install("gate", []string{"release"}, nil)
+	n := g.task("hold it")
+	g.ready(n)
+	g.wait(n, "the hold", held("gate"))
+	if resp := asUser(g.b, g.s, "DELETE", "/api/plugins/gate", nil); resp.StatusCode >= 300 {
+		t.Fatalf("remove: status %d", resp.StatusCode)
+	}
+	g.wait(n, "the move", inColumn(api.ColumnReady))
+	var log []string
+	for _, l := range g.s.plugins.m.LogLines("gate", 100) {
+		log = append(log, l.Message)
+	}
+	if !strings.Contains(strings.Join(log, "\n"), "the move goes ahead") {
+		t.Fatalf("no log line of the removed plugin: %v", log)
+	}
+}

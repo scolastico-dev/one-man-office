@@ -40,7 +40,7 @@ func SyncPluginRuntimes(d *sql.DB, runtimes []PluginRuntime) error {
 	defer tx.Rollback()
 
 	if len(runtimes) == 0 {
-		if _, err := tx.Exec(`DELETE FROM plugin_runtime`); err != nil {
+		if _, err := tx.Exec(`DELETE FROM plugin_runtime WHERE state <> 'removed'`); err != nil {
 			return err
 		}
 	} else {
@@ -50,7 +50,7 @@ func SyncPluginRuntimes(d *sql.DB, runtimes []PluginRuntime) error {
 			placeholders[i] = "?"
 			args[i] = runtime.Name
 		}
-		if _, err := tx.Exec(`DELETE FROM plugin_runtime WHERE name NOT IN (`+strings.Join(placeholders, ",")+`)`, args...); err != nil {
+		if _, err := tx.Exec(`DELETE FROM plugin_runtime WHERE state <> 'removed' AND name NOT IN (`+strings.Join(placeholders, ",")+`)`, args...); err != nil {
 			return err
 		}
 	}
@@ -318,6 +318,33 @@ func DeletePluginData(d *sql.DB, plugin string) error {
 		if _, err := tx.Exec(q, plugin); err != nil {
 			return err
 		}
+	}
+	return tx.Commit()
+}
+
+// AppendOrphanPluginLog adds one line to the log of a plugin that has no
+// runtime record (it was removed). A stub record in the state "removed" keeps
+// the line; syncs leave it alone and removing the plugin again or installing
+// it anew replaces it.
+func AppendOrphanPluginLog(d *sql.DB, name, message string, at time.Time, maxLines int) error {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	timestamp := at.UTC().Format(time.RFC3339Nano)
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// The log belongs to a runtime record; a stub keeps the line.
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO plugin_runtime(name, state) VALUES(?, 'removed')`, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO plugin_logs(plugin, message, created_at) VALUES(?,?,?)`, name, message, timestamp); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM plugin_logs WHERE plugin=? AND id NOT IN (SELECT id FROM plugin_logs WHERE plugin=? ORDER BY id DESC LIMIT ?)`, name, name, maxLines); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

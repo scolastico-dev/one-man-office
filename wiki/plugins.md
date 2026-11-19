@@ -474,7 +474,9 @@ invalid answer, or belongs to a plugin that is (or becomes) disabled or
 removed, or no longer gates the move, counts as a go-ahead. omo writes a note
 on the ticket and a line in the plugin's log, so nobody is held by accident. A
 hook whose manifest says `"failure": "hold"` holds instead, with the failure
-as the reason. A plugin that was stopped or reloaded during a run is asked again.
+as the reason; this includes a plugin that becomes disabled or removed (the
+policy is stored with the request), and only the user's override or cancel then
+ends the hold. Output with data after the answer is an invalid answer. A plugin that was stopped or reloaded during a run is asked again.
 
 **The user's override.** The user can always override every hold of a ticket
 (**continue anyway**: the plugins that have not passed count as having given

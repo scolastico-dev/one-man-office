@@ -1506,7 +1506,11 @@ func (m *Manager) logLine(name, line string) {
 	}
 	line = strings.ReplaceAll(cutRunes(line, maxLogLineRunes), "\n", " ")
 	if err := db.AppendPluginRuntimeLog(m.o.DB, name, line, m.now(), LogLines); err != nil {
-		m.logf("plugins: write the log of %s: %v", name, err)
+		// A plugin that was removed has no runtime record any more; its
+		// gates' last words still go to its log.
+		if err2 := db.AppendOrphanPluginLog(m.o.DB, name, line, m.now(), LogLines); err2 != nil {
+			m.logf("plugins: write the log of %s: %v", name, err)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	lua "github.com/yuin/gopher-lua"
@@ -97,6 +98,21 @@ func (m *Manager) GatePlugins(move api.GateMove) []string {
 		}
 	}
 	return out
+}
+
+// GateFailureHolds reports whether the loaded plugin's gate hook for move
+// holds when it fails.
+func (m *Manager) GateFailureHolds(name string, move api.GateMove) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.entries {
+		if e.settings.Name == name && e.p != nil && e.settings.Enabled {
+			if h := e.p.gateHook(move); h != nil {
+				return h.Failure == FailureHold
+			}
+		}
+	}
+	return false
 }
 
 // RunGate runs plugin's gate hook for move with data as the event's data
@@ -191,6 +207,9 @@ func parseGateAnswer(result any, red *luabox.Redactor, actions map[string]bool) 
 		dec.UseNumber()
 		if err := dec.Decode(&parsed); err != nil {
 			return parseGateAnswer(string(out), red, actions)
+		}
+		if _, err := dec.Token(); err != io.EOF {
+			return GateResult{}, errors.New("the gate's output has data after its answer")
 		}
 		if _, ok := parsed.([]byte); ok {
 			return GateResult{}, errGateAnswer

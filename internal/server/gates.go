@@ -30,9 +30,10 @@ type gateRunner struct {
 
 // gateKey is one gate of one ticket's move.
 type gateKey struct {
-	ticket int64
-	move   api.GateMove
-	plugin string
+	request int64
+	ticket  int64
+	move    api.GateMove
+	plugin  string
 }
 
 func newGateRunner() *gateRunner {
@@ -49,6 +50,10 @@ func (g *gateRunner) poke() {
 
 // gateSource is the board's view of the plugins that gate a move.
 type gateSource struct{ s *Server }
+
+func (g gateSource) GateFailureHolds(plugin string, move api.GateMove) bool {
+	return g.s.plugins.m != nil && g.s.plugins.m.GateFailureHolds(plugin, move)
+}
 
 func (g gateSource) GatePlugins(move api.GateMove) []string {
 	if g.s.plugins.m == nil {
@@ -171,9 +176,14 @@ func (s *Server) askOpenGates(ctx context.Context) {
 		return
 	}
 	for _, g := range open {
-		key := gateKey{g.Ticket, g.Move, g.Plugin}
+		key := gateKey{request: g.Request, ticket: g.Ticket, move: g.Move, plugin: g.Plugin}
+		if s.pluginBusy(g.Plugin) {
+			// An install, update, change or removal of the plugin is
+			// running; its end asks again.
+			continue
+		}
 		if !s.pluginGatesMove(g.Plugin, g.Move) {
-			s.givenUp(ctx, key)
+			s.givenUp(ctx, key, g)
 			continue
 		}
 		if g.State != api.GatePending {
@@ -192,7 +202,7 @@ func (s *Server) askOpenGates(ctx context.Context) {
 				delete(s.gates.inflight, key)
 				s.gates.mu.Unlock()
 			}()
-			s.askGate(ctx, key)
+			s.askGate(ctx, key, g.FailureHold)
 		}) {
 			s.gates.mu.Lock()
 			delete(s.gates.inflight, key)
@@ -212,10 +222,20 @@ func (s *Server) pluginGatesMove(plugin string, move api.GateMove) bool {
 	return false
 }
 
-// givenUp lets a move go ahead whose plugin can no longer answer it (it
-// was disabled, removed or no longer gates the move), with a note on the
-// ticket and a line in the plugin's log.
-func (s *Server) givenUp(ctx context.Context, key gateKey) {
+// givenUp settles a gate whose plugin can no longer answer it (it was
+// disabled, removed or no longer gates the move). The move goes ahead, with
+// a note on the ticket and a line in the plugin's log, unless the gate's
+// failure policy at the time of the request was to hold: then it holds
+// (once) with that reason, and only the user's override or cancel ends it.
+func (s *Server) givenUp(ctx context.Context, key gateKey, g board.OpenGate) {
+	if g.FailureHold {
+		if g.State == api.GatePending {
+			s.finishGate(ctx, key, board.GateAnswer{Kind: board.GateHold,
+				Reason: fmt.Sprintf("Plugin %s can no longer answer its gate (it is disabled, removed or no longer gates this move); its manifest says a failure holds.", key.plugin)},
+				"the gate of #%d was given up: the plugin is disabled, removed or no longer gates this move; its manifest says a failure holds", key.ticket)
+		}
+		return
+	}
 	s.finishGate(ctx, key, board.GateAnswer{Kind: board.GateGoAhead,
 		Note: fmt.Sprintf("Plugin %s can no longer answer its gate (it is disabled, removed or no longer gates this move): the move goes ahead.", key.plugin)},
 		"the gate of #%d was given up: the plugin is disabled, removed or no longer gates this move; the move goes ahead", key.ticket)
@@ -226,7 +246,7 @@ func (s *Server) finishGate(ctx context.Context, key gateKey, ans board.GateAnsw
 	if logFormat != "" {
 		s.plugins.m.LogLine(key.plugin, fmt.Sprintf(logFormat, logArgs...))
 	}
-	err := s.board.GateAnswer(ctx, key.ticket, key.plugin, ans)
+	err := s.board.GateAnswer(ctx, key.ticket, key.request, key.plugin, ans)
 	var ae *api.Error
 	if err != nil && ctx.Err() == nil && !(errors.As(err, &ae) && ae.Code == api.CodeConflict) {
 		s.log.Printf("gates: record the answer of %s on #%d: %v", key.plugin, key.ticket, err)
@@ -235,7 +255,7 @@ func (s *Server) finishGate(ctx context.Context, key gateKey, ans board.GateAnsw
 
 // askGate runs plugin's gate hook for one ticket's move and records what
 // it decided.
-func (s *Server) askGate(ctx context.Context, key gateKey) {
+func (s *Server) askGate(ctx context.Context, key gateKey, failureHold bool) {
 	data, err := s.gateEventData(ctx, key)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -246,7 +266,7 @@ func (s *Server) askGate(ctx context.Context, key gateKey) {
 	res, err := s.plugins.m.RunGate(ctx, key.plugin, key.move, data)
 	switch {
 	case errors.Is(err, plugins.ErrNoGate):
-		s.givenUp(ctx, key)
+		s.givenUp(ctx, key, board.OpenGate{FailureHold: failureHold, State: api.GatePending})
 		return
 	case err != nil:
 		// Stopped or reloaded during the run: the plugin changed, and its
@@ -321,4 +341,12 @@ func (s *Server) gateEventData(ctx context.Context, key gateKey) (map[string]any
 		"in_story": t.Story != nil,
 		"projects": projects,
 	}, nil
+}
+
+// pluginBusy reports whether an operation on the plugin runs.
+func (s *Server) pluginBusy(name string) bool {
+	f := &s.plugins
+	f.busyMu.Lock()
+	defer f.busyMu.Unlock()
+	return f.busy[name]
 }

@@ -17,6 +17,8 @@ type fakeGates struct {
 	plugins map[api.GateMove][]string
 }
 
+func (g *fakeGates) GateFailureHolds(plugin string, _ api.GateMove) bool { return plugin == "strict" }
+
 func (g *fakeGates) GatePlugins(move api.GateMove) []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -58,7 +60,7 @@ func gateKinds(t *testing.T, b *Board, last int64) []string {
 
 func answer(t *testing.T, b *Board, n int, plugin string, a GateAnswer) {
 	t.Helper()
-	if err := b.GateAnswer(context.Background(), int64(n), plugin, a); err != nil {
+	if err := b.GateAnswer(context.Background(), int64(n), currentRequest(t, b, n), plugin, a); err != nil {
 		t.Fatalf("answer of %s on #%d: %v", plugin, n, err)
 	}
 }
@@ -301,7 +303,7 @@ func TestGateOverrideOfTheStartLetsTheEngineGo(t *testing.T) {
 func TestGateAnswerForAMoveThatIsGoneIsRefused(t *testing.T) {
 	b := gatedBoard(t, api.GateMoveRelease, "pull")
 	n := newTask(t, b)
-	err := b.GateAnswer(context.Background(), int64(n), "pull", GateAnswer{Kind: GateGoAhead})
+	err := b.GateAnswer(context.Background(), int64(n), 1, "pull", GateAnswer{Kind: GateGoAhead})
 	wantCode(t, err, api.CodeConflict)
 }
 
@@ -314,9 +316,60 @@ func TestGatePendingListsWhatNeedsAnAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []OpenGate{{Ticket: int64(n), Move: api.GateMoveRelease, Plugin: "alpha", State: api.GateHeld}, {Ticket: int64(n), Move: api.GateMoveRelease, Plugin: "beta", State: api.GatePending}}
+	want := []OpenGate{{Request: 1, Ticket: int64(n), Move: api.GateMoveRelease, Plugin: "alpha", State: api.GateHeld}, {Request: 1, Ticket: int64(n), Move: api.GateMoveRelease, Plugin: "beta", State: api.GatePending}}
 	if !slices.Equal(got, want) {
 		raw, _ := json.Marshal(got)
 		t.Fatalf("open gates = %s", raw)
+	}
+}
+
+func currentRequest(t *testing.T, b *Board, n int) int64 {
+	t.Helper()
+	var id int64
+	if err := b.db.QueryRow(`SELECT id FROM ticket_gate_moves WHERE ticket_id = ?`, n).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestGateAnswerOfAnEarlierRequestIsIgnored(t *testing.T) {
+	b, _ := newTestBoard(t)
+	b.SetGates(&fakeGates{plugins: map[api.GateMove][]string{api.GateMoveRelease: {"pull"}, api.GateMoveStart: {"pull"}}})
+	ctx := context.Background()
+	n := newTask(t, b)
+	moveTo(t, b, n, api.ColumnReady)
+	old := currentRequest(t, b, n)
+	if err := b.GateOverride(ctx, User, int64(n)); err != nil {
+		t.Fatal(err)
+	}
+	if gated, err := b.RequestStartGates(ctx, int64(n)); err != nil || !gated {
+		t.Fatalf("RequestStartGates = %v, %v", gated, err)
+	}
+	wantCode(t, b.GateAnswer(ctx, int64(n), old, "pull", GateAnswer{Kind: GateGoAhead}), api.CodeConflict)
+	if g := gateOf(get(t, b, n).Gate.Gates, "pull"); g.State != api.GatePending {
+		t.Fatalf("the late answer of the release passed the start: %+v", g)
+	}
+
+	// A repeated release is another request too.
+	m := newTask(t, b)
+	moveTo(t, b, m, api.ColumnReady)
+	first := currentRequest(t, b, m)
+	if err := b.GateCancel(ctx, User, int64(m), ""); err != nil {
+		t.Fatal(err)
+	}
+	moveTo(t, b, m, api.ColumnReady)
+	wantCode(t, b.GateAnswer(ctx, int64(m), first, "pull", GateAnswer{Kind: GateGoAhead}), api.CodeConflict)
+}
+
+func TestOpenGatesCarryTheRequestAndTheFailurePolicy(t *testing.T) {
+	b := gatedBoard(t, api.GateMoveRelease, "pull", "strict")
+	n := newTask(t, b)
+	moveTo(t, b, n, api.ColumnReady)
+	open, err := b.OpenGates(context.Background())
+	if err != nil || len(open) != 2 {
+		t.Fatalf("open gates = %+v, %v", open, err)
+	}
+	if open[0].Request == 0 || open[0].Request != open[1].Request || open[0].FailureHold || !open[1].FailureHold {
+		t.Fatalf("open gates = %+v", open)
 	}
 }
