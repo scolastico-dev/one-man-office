@@ -212,3 +212,24 @@ describe('dragTargets', () => {
     expect(unknown.ready.allowed).toBe(false)
   })
 })
+
+describe('dragTargets with a plugin gate', () => {
+  const ctx: RuleContext = { project: () => undefined, storyHasLiveAgent: () => false }
+  const held = { move: 'release' as const, from: 'planning' as const, to: 'ready' as const, gates: [{ plugin: 'pull-base', state: 'held' as const, reason: 'behind', choices: [] }] }
+
+  test('the column a held move goes to refuses the card and names the hold', () => {
+    const t = dragTargets(ticket({ column: 'planning', gate: held }), ctx)
+    expect(t.ready.allowed).toBe(false)
+    expect(t.ready.reason).toContain('held by pull-base')
+    expect(t.ready.reason).toContain('Continue anyway')
+  })
+
+  test('a ticket without a gate is as before, and a gate does not refuse a change of order', () => {
+    expect(dragTargets(ticket({ column: 'planning' }), ctx).ready.allowed).toBe(true)
+    expect(dragTargets(ticket({ column: 'planning', gate: held }), ctx).planning.action).toBe('reorder')
+  })
+
+  test('a gate of a move that leaves another column does not apply', () => {
+    expect(dragTargets(ticket({ column: 'ready', gate: held }), ctx).ready.reason ?? '').not.toContain('held by')
+  })
+})

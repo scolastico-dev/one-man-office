@@ -22,10 +22,12 @@ import { ticketDrafts } from './drafts'
 import { registerExportAction } from './exportAction'
 import { usePluginActions } from './pluginActions'
 import { usePluginTicketContext } from '../plugins/usePluginExtensions'
+import { registerGateActions } from './gateActions'
 import { registerStartAnywayAction, useStartAnywayUsage } from './startAnywayAction'
 
 registerExportAction()
 registerStartAnywayAction()
+registerGateActions()
 
 /** Loading text appears only when loading takes longer than this. */
 export const LOADING_DELAY_MS = 400

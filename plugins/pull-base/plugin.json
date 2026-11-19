@@ -1,0 +1,30 @@
+{
+  "name": "pull-base",
+  "version": "1.0.0",
+  "description": "Pulls a ticket's base branch before work starts: finds out whether the branch checked out in a project's folder is behind its upstream and offers a fast-forward pull first (or does it by itself). It changes the checked-out branch of the project folder when it pulls.",
+  "default_config": {
+    "mode": "release",
+    "automatic": false,
+    "fetch_timeout_seconds": 30
+  },
+  "config_fields": [
+    {
+      "key": "mode",
+      "label": "Check when",
+      "type": "select",
+      "choices": [
+        { "value": "release", "label": "Moving from Planning to Ready For Dev" },
+        { "value": "start", "label": "Moving from Ready For Dev to In Progress (before the worktree is created)" }
+      ]
+    },
+    { "key": "automatic", "label": "Pull automatically instead of asking", "type": "boolean" },
+    { "key": "fetch_timeout_seconds", "label": "Fetch timeout (seconds, 1 to 240)", "type": "number" }
+  ],
+  "hooks": [
+    { "event": "gate", "move": "release", "lua": "plugin.lua", "timeout": "5m" },
+    { "event": "gate", "move": "start", "lua": "plugin.lua", "timeout": "5m" },
+    { "event": "manual", "name": "pull", "description": "Pull and continue", "scope": "ticket", "hidden": true, "lua": "plugin.lua", "timeout": "60s" },
+    { "event": "manual", "name": "continue", "description": "Continue without pulling", "scope": "ticket", "hidden": true, "lua": "plugin.lua", "timeout": "60s" },
+    { "event": "manual", "name": "cancel", "description": "Cancel the held move", "scope": "ticket", "hidden": true, "lua": "plugin.lua", "timeout": "60s" }
+  ]
+}

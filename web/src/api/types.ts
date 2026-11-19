@@ -16,7 +16,8 @@ export type WaitingReason = 'not_done' | 'export_not_merged' | 'cancelled'
 
 /** The step of a ticket's work that failed, and why the engine has not started a ticket. */
 export type FailedStep = '' | 'start' | 'agent' | 'merge'
-export type StartBlocked = '' | 'slot' | 'paused' | 'no_model' | 'usage'
+/** `gate` is never stored: the board shows it while a plugin gate of the start is pending or holding. */
+export type StartBlocked = '' | 'slot' | 'paused' | 'no_model' | 'usage' | 'gate'
 /** What an agent session was started for. */
 export type Purpose = 'work' | 'export'
 
@@ -113,6 +114,50 @@ export interface TicketSummary {
   busy: boolean
   failed_step: FailedStep
   start_blocked: StartBlocked
+  /** The move plugins hold or still have to answer for; null when no plugin gates the next move. */
+  gate: TicketGates | null
+}
+
+/** A move of a ticket that plugins can gate: `release` is Planning to Ready For Dev, `start` is Ready For Dev to In Progress. */
+export type GateMove = 'release' | 'start'
+export type GateState = 'pending' | 'held' | 'passed'
+
+/** A button a plugin offers on a ticket it holds; `action` names a manual hook of the same plugin. */
+export interface GateChoice {
+  label: string
+  action: string
+}
+
+export interface TicketGate {
+  plugin: string
+  state: GateState
+  reason: string
+  choices: GateChoice[]
+}
+
+export interface TicketGates {
+  move: GateMove
+  from: Column
+  to: Column
+  gates: TicketGate[]
+}
+
+export interface GateReleaseRequest {
+  plugin: string
+}
+
+export interface GateCancelRequest {
+  plugin?: string
+}
+
+/** The data of ticket.held, ticket.released, ticket.refused, ticket.overridden and ticket.hold_cancelled. */
+export interface TicketGateData {
+  ticket: TicketSummary
+  move: GateMove
+  /** Empty when no single plugin is meant. */
+  plugin: string
+  reason: string
+  choices: GateChoice[]
 }
 
 export interface Ticket extends TicketSummary {
@@ -1009,6 +1054,11 @@ export interface EventDataByKind {
   'server.paused': ServerPausedData
   'scheduler.changed': SchedulerChangedData
   'ticket.retried': TicketRetriedData
+  'ticket.held': TicketGateData
+  'ticket.released': TicketGateData
+  'ticket.refused': TicketGateData
+  'ticket.overridden': TicketGateData
+  'ticket.hold_cancelled': TicketGateData
   'terminal.opened': TerminalData
   'terminal.exited': TerminalData
   'terminal.closed': TerminalData
@@ -1233,6 +1283,10 @@ export interface PluginHook {
   hidden?: boolean
   /** Timer hooks only. */
   interval: string
+  /** Gate hooks: the move the hook gates, `release` or `start`. */
+  move?: string
+  /** Gate hooks: what a failing hook does, `go_ahead` or `hold`. */
+  failure?: string
 }
 
 export interface PluginButton {

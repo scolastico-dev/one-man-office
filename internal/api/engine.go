@@ -27,6 +27,9 @@ const (
 	StartBlockedPaused  StartBlocked = "paused"
 	StartBlockedNoModel StartBlocked = "no_model"
 	StartBlockedUsage   StartBlocked = "usage"
+	// StartBlockedGate is never stored: the board shows it while a plugin
+	// gate of the start is pending or holding.
+	StartBlockedGate StartBlocked = "gate"
 )
 
 // ReadyResponse is the answer of POST /api/ai/ready.

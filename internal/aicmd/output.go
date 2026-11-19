@@ -16,7 +16,58 @@ func ticketLine(t api.TicketSummary) string {
 	if t.ReviewStage == api.ReviewStageAwaitingMerge {
 		line += " [exported, waiting for the merge]"
 	}
-	return line
+	return line + gateMarks(t.Gate)
+}
+
+// gateMarks is what the one-line form says about a move that plugins hold or
+// have not answered yet: "[held by pull: reason]" for each holding plugin,
+// "[waiting for plugin pull]" for each that has not answered.
+func gateMarks(g *api.TicketGates) string {
+	if g == nil {
+		return ""
+	}
+	var out string
+	for _, x := range g.Gates {
+		switch x.State {
+		case api.GateHeld:
+			out += fmt.Sprintf(" [held by %s: %s]", OneLine(x.Plugin), OneLine(x.Reason))
+		case api.GatePending:
+			out += fmt.Sprintf(" [waiting for plugin %s]", OneLine(x.Plugin))
+		}
+	}
+	return out
+}
+
+// printGate prints the move plugins hold or have not answered yet: one line
+// of omo's own, then each plugin's state with its reason and choices
+// indented (they are the plugin's words).
+func printGate(w io.Writer, g *api.TicketGates) {
+	if g == nil {
+		return
+	}
+	fmt.Fprintf(w, "gate: %s (%s -> %s)\n", g.Move, columnName(g.From), columnName(g.To))
+	for _, x := range g.Gates {
+		fmt.Fprintf(w, "plugin %s: %s\n", OneLine(x.Plugin), x.State)
+		if x.Reason != "" {
+			printBody(w, x.Reason)
+		}
+		for _, c := range x.Choices {
+			fmt.Fprintf(w, "%schoice: %s (the plugin's action %s)\n", bodyIndent, OneLine(c.Label), OneLine(c.Action))
+		}
+	}
+	fmt.Fprintf(w, "continue anyway or cancel (user): omo ai ticket gate-override / gate-cancel\n")
+}
+
+func columnName(c api.Column) string {
+	switch c {
+	case api.ColumnPlanning:
+		return "Planning"
+	case api.ColumnReady:
+		return "Ready For Dev"
+	case api.ColumnInProgress:
+		return "In Progress"
+	}
+	return string(c)
 }
 
 func numbers(ns []int) string {
@@ -137,6 +188,7 @@ func showTicket(w io.Writer, t api.Ticket) {
 		fmt.Fprintln(w, "attention:")
 		fmt.Fprintln(w, bodyIndent+OneLine(t.Attention))
 	}
+	printGate(w, t.Gate)
 	if t.ExportURL != "" {
 		fmt.Fprintf(w, "export (merged: %t):\n", t.ExportMerged)
 		for _, u := range strings.Split(t.ExportURL, "\n") {

@@ -918,3 +918,30 @@ func TestPlanUsageStops(t *testing.T) {
 		}
 	}
 }
+
+func startGate(state board.StartGateState) func(*board.EngineTicket) {
+	return func(t *board.EngineTicket) { t.StartGate = state }
+}
+
+func TestPlanDoesNotStartATicketWhoseStartGateIsOpen(t *testing.T) {
+	w := newWorld(1)
+	w.ticket(1, api.TypeTask, api.ColumnReady, 1, startGate(board.StartGateOpen))
+	w.ticket(2, api.TypeTask, api.ColumnReady, 2)
+	acts, _, blocked := w.plan(t)
+	ss := starts(acts)
+	if len(ss) != 1 || ss[0].ticket != 2 {
+		t.Fatalf("starts = %v, want only #2: #1 waits for a plugin", ss)
+	}
+	if blocked[1] != api.StartBlockedNone {
+		t.Fatalf("start_blocked[1] = %q: the board derives the gate reason, the planner writes none", blocked[1])
+	}
+}
+
+func TestPlanStartsATicketWhoseStartGatesPassed(t *testing.T) {
+	w := newWorld(1)
+	w.ticket(1, api.TypeTask, api.ColumnReady, 1, startGate(board.StartGatePassed))
+	acts, _, _ := w.plan(t)
+	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 1 {
+		t.Fatalf("starts = %v, want #1", ss)
+	}
+}

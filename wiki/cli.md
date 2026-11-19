@@ -588,6 +588,9 @@ Examples:
 Available Commands:
   cancel         Cancel ticket N and print it as #N type column title
   create         Create a ticket and print it as #N type column title
+  gate-cancel    Cancel the move a plugin holds on ticket N (user, or a plugin's hook)
+  gate-override  Continue anyway: let the move plugins hold on ticket N go ahead (user only)
+  gate-release   Give the go-ahead of a plugin to the move it holds on ticket N (plugin hooks)
   list           List tickets, one per line: #N type column title
   move           Move ticket N to a column (planning, ready, in_progress, review, done)
   remove-project Take a project off ticket N, with the worktree and branch omo made for it
@@ -664,6 +667,72 @@ Flags:
       --story int                 the story a task belongs to
       --title string              ticket title (required)
       --type string               story or task (required)
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai ticket gate-cancel`
+
+```text
+Cancel the move that plugins hold on ticket N. A held move to Ready For Dev
+leaves the ticket in Planning; a held start puts the ticket back into Planning, so
+omo does not start it again by itself. Without --plugin (and without
+OMO_PLUGIN_NAME) it is the user's own cancel; a plugin's hook names itself.
+Prints the ticket as #N type column title.
+
+Usage:
+  omo ai ticket gate-cancel N [--plugin NAME] [flags]
+
+Examples:
+  omo ai ticket gate-cancel 12
+
+Flags:
+  -h, --help            help for gate-cancel
+      --plugin string   the plugin that acts (default: OMO_PLUGIN_NAME, set in a plugin's hooks)
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai ticket gate-override`
+
+```text
+The user can always let a held move go, whatever the plugins that hold it say:
+every gate of ticket N that has not given its go-ahead counts as having given it.
+Prints the ticket as #N type column title.
+
+Usage:
+  omo ai ticket gate-override N [flags]
+
+Examples:
+  omo ai ticket gate-override 12
+
+Flags:
+  -h, --help   help for gate-override
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai ticket gate-release`
+
+```text
+A plugin that holds a ticket's move (a gate that answered "hold") lets it go
+with this command, from a hook of its own: omo then carries the move out once
+every plugin that gates it has given its go-ahead. In a plugin's hooks the plugin
+is named by OMO_PLUGIN_NAME; the command acts as the user, like all programs of
+a plugin. Prints the ticket as #N type column title.
+
+Usage:
+  omo ai ticket gate-release N [--plugin NAME] [flags]
+
+Examples:
+  omo ai ticket gate-release 12 --plugin pull
+
+Flags:
+  -h, --help            help for gate-release
+      --plugin string   the plugin that acts (default: OMO_PLUGIN_NAME, set in a plugin's hooks)
 
 Global Flags:
       --json   print the server's JSON answer instead of text

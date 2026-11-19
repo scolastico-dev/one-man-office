@@ -32,13 +32,13 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 11 || SchemaVersion != 11 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 11", v, SchemaVersion)
+	if v := userVersion(t, d); v != 12 || SchemaVersion != 12 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 12", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
 		"comment_mentions", "review_verdicts", "agent_sessions", "events", "server_state",
-		"plugin_storage", "plugin_runtime", "plugin_logs", "images", "mcp_tokens", "mcp_upstream_auth", "proxy_forwards",
+		"plugin_storage", "plugin_runtime", "plugin_logs", "images", "mcp_tokens", "mcp_upstream_auth", "proxy_forwards", "ticket_gate_moves", "ticket_gates",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {

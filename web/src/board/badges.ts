@@ -1,6 +1,7 @@
 import type { StartBlocked, TicketSummary, WaitingReason } from '../api/types'
 import { visibleText } from '../components/ui/visibleText'
 import type { Badge } from '../features/board/model'
+import { holdSummary } from './gates'
 import type { SlotView } from './slots'
 
 const STEP_TEXT: Record<string, string> = {
@@ -13,6 +14,7 @@ const START_BLOCKED: Record<Exclude<StartBlocked, '' | 'slot'>, string> = {
   paused: 'paused',
   no_model: 'no usable model',
   usage: 'waiting for usage',
+  gate: 'waiting for a plugin',
 }
 
 const WAITING_SUFFIX: Record<WaitingReason, string> = {
@@ -83,6 +85,8 @@ export function badgeFor(t: TicketSummary, slots?: SlotView | null): Badge | nul
     return { tone: 'warn', text: 'question for you', title: `${n} open question${n === 1 ? '' : 's'} for you` }
   }
   if (t.column === 'review' && t.review_stage === 'human') return { tone: 'accent', text: 'your review' }
+  const hold = holdSummary(t.gate)
+  if (hold !== null) return { tone: hold.held ? 'warn' : 'muted', text: hold.text, title: hold.title }
   const w = t.waiting_for[0]
   if (w !== undefined) {
     const suffix = has(WAITING_SUFFIX, w.reason) ? WAITING_SUFFIX[w.reason] : ''

@@ -44,7 +44,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 var ErrNewerSchema = errors.New("the database was made by a newer omo")
 
 // SchemaVersion is the schema version a freshly opened database ends up at.
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 // Open opens (creating if needed) the omo database in WAL mode and applies
 // pending migrations, each in its own transaction. A single connection

@@ -137,6 +137,10 @@ type PluginHook struct {
 	// Hidden suppresses automatically generated controls for a manual hook.
 	// Explicit controls and direct invocation remain available.
 	Hidden bool `json:"hidden,omitempty"`
+	// Move and Failure are set for gate hooks only: the move the hook gates
+	// (release or start) and what a failing hook does (go_ahead or hold).
+	Move    string `json:"move,omitempty"`
+	Failure string `json:"failure,omitempty"`
 	// Interval is set for timer hooks only.
 	Interval string `json:"interval"`
 }

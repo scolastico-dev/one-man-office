@@ -284,6 +284,10 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 		return nil, err
 	}
 
+	if err := attachGates(q, byID, idJSON); err != nil {
+		return nil, err
+	}
+
 	// Live agent sessions.
 	if err := each(q, `SELECT ticket_id, id, role, name, state, project_id, purpose FROM agent_sessions
 		WHERE state <> 'ended' AND ticket_id`+idsIn+` ORDER BY started_at, id`, idJSON, func(rows *sql.Rows) error {

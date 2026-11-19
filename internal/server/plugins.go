@@ -163,12 +163,14 @@ func (s *Server) startPlugins(ctx context.Context) error {
 		Changed:           s.pluginChanged,
 		Agents:            pluginAgents{s},
 		Forwards:          s,
+		Gates:             pluginGates{s},
 		Unloaded:          s.pluginUnloaded,
 		TaskExited:        s.pluginTaskExited,
 		TaskTicketLive:    s.pluginTaskTicketLive,
 		TasksChanged:      s.pluginTasksChanged,
 		TaskOutputChanged: s.pluginTaskOutputChanged,
 	})
+	s.board.SetGates(gateSource{s})
 	s.reloadPlugins(true)
 	att, after := s.pluginStartPoint(ctx)
 	f.cursor.Store(after)
@@ -176,6 +178,7 @@ func (s *Server) startPlugins(ctx context.Context) error {
 	s.background(s.writePluginEvents)
 	s.background(s.writePluginTaskEvents)
 	s.background(s.runPluginReloads)
+	s.background(s.runGates)
 	s.background(func(ctx context.Context) { s.dispatchPluginEvents(ctx, att) })
 	return nil
 }
@@ -329,6 +332,9 @@ func (s *Server) claimPlugin(name string) (func(), error) {
 			f.busyMu.Lock()
 			delete(f.busy, name)
 			f.busyMu.Unlock()
+			// Gates that waited for the operation (a removal deletes the
+			// plugin's log) are settled now.
+			s.gates.poke()
 		})
 	}, nil
 }
@@ -1001,6 +1007,7 @@ func pluginActionError(name, action string, err error) error {
 // pluginChanged is the runtime's Changed callback: it keeps the newest info
 // of the plugin and wakes the writer. It never blocks.
 func (s *Server) pluginChanged(info api.PluginInfo) {
+	s.gates.poke()
 	f := &s.plugins
 	f.pendingMu.Lock()
 	if _, ok := f.pending[info.Name]; !ok {

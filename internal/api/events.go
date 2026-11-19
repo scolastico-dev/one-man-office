@@ -25,6 +25,11 @@ const (
 	KindServerPaused        = "server.paused"
 	KindSchedulerChanged    = "scheduler.changed"
 	KindTicketRetried       = "ticket.retried"
+	KindTicketHeld          = "ticket.held"           // data TicketGateData: a plugin holds the ticket's move
+	KindTicketReleased      = "ticket.released"       // data TicketGateData: every plugin gave its go-ahead
+	KindTicketRefused       = "ticket.refused"        // data TicketGateData: a plugin refused the move
+	KindTicketOverridden    = "ticket.overridden"     // data TicketGateData: the user continued anyway
+	KindTicketHoldCanceled  = "ticket.hold_cancelled" // data TicketGateData: the held move was cancelled
 	KindTerminalOpened      = "terminal.opened"
 	KindTerminalExited      = "terminal.exited"
 	KindTerminalClosed      = "terminal.closed"

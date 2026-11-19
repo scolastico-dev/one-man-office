@@ -79,6 +79,7 @@ it). The plugin's log keeps its last 500 lines, newest last.
 | [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
 | [vscode](../plugins/vscode/README.md) | Opens ticket worktrees, projectless task working directories and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
+| [pull-base](../plugins/pull-base/README.md) | Before a story or a task without a story starts, checks whether the branch checked out in each project folder is behind its upstream and asks to pull it first, or pulls it by itself. It gates the move to Ready For Dev or to In Progress (your choice), fast-forwards only, and **changes the checked-out branch of the project folder when it pulls**. Settings: mode, automatic pull, fetch timeout. |
 
 The VS Code plugin edits folders directly alongside agents, with no locking.
 It permits one running editor per canonical folder. Repeated clicks reuse it
@@ -192,6 +193,9 @@ Optional fields:
   must be a duration string or a number of seconds, also at least one minute;
   a missing/invalid value prevents the runtime from loading. These two fields
   cannot carry nonempty values on other events.
+- Gate hooks: `move` (`release` or `start`, required) and `failure` (`go_ahead`,
+  the default, or `hold`); at most one gate hook per move in a plugin; see
+  [Gates](#gates).
 - Manual hooks: `name` (the button's id), `description` (its text, at most 200
   characters) and `scope`: `global` (a button on the plugin's page; the
   default) or `ticket` (a button on every ticket). Names are unique and follow
@@ -346,6 +350,7 @@ the same as the global table `event`.
 | `omo_started` | `at` (readiness/enable time, RFC 3339 with optional nanoseconds) |
 | `timer` | `at` (RFC 3339 with optional nanoseconds) |
 | `manual` | `action`, `ticket` (null without a ticket), `project` (selected folder context below, otherwise null) |
+| `gate` | asked, never dispatched: `move`, `ticket`, `type`, `in_story`, `projects` (see [Gates](#gates)) |
 
 A `ticket` carries `number`, `type`, `title`, `column`, `story`, `projects`,
 `supervisor`, `attention`, `url` (without the login token) and `folders`.
@@ -409,6 +414,107 @@ plugin's hooks, and a full queue (256 events) drops events with a log line;
 this also keeps a hook that causes its own event (a `comment_written` hook that
 comments) from running for ever.
 
+### Gates
+
+A plugin can hold a ticket in its column until the plugin gives its go-ahead.
+A hook with event `gate` is a **gate** on one move of a ticket:
+
+| `move` | The move | When omo asks |
+|---|---|---|
+| `release` | Planning → Ready For Dev | when the move is asked for, by the user, the CEO or a product manager releasing a task, before omo carries it out |
+| `start` | Ready For Dev → In Progress | when omo is about to start the ticket (also by itself), before it creates the worktree and starts an agent |
+
+```json
+{ "event": "gate", "move": "start", "lua": "gate.lua", "timeout": "20s", "failure": "hold" }
+```
+
+`failure` says what a gate hook that fails does (see below): `go_ahead` (the
+default) or `hold`. A plugin has at most one gate hook for each move; a gate is
+never delivered with the board's events, omo asks it, one gate at a time per
+plugin, with the hook's time limit (30 s unless `timeout` says otherwise).
+
+**Event data.** `event.data` has `move`, `ticket` (the ticket payload of the
+other events, with `folders`), `type` (`task` or `story`), `in_story` (true for
+a task of a story) and `projects`: one entry per project,
+`{project, base_branch, folder}`. `folder` is the project's own folder,
+`{kind: "repository", path, available, reason}`, since the ticket has no
+worktree yet; `base_branch` is the branch its worktree would be based on (the
+ticket's base branch; for a task of a story, its story's branch).
+
+**Answers.** The hook answers with nothing (`return nil`, or no output), the
+text `go_ahead`, or an object (a Lua table; a JSON object on standard output
+for a command):
+
+| `action` | Other keys | What omo does |
+|---|---|---|
+| `go_ahead` | | the move goes ahead (when every other plugin that gates it also gave its go-ahead) |
+| `hold` | `reason` (required), `choices` (optional, at most 8 of `{label, action}`) | the ticket stays in its column; it is recorded as held by the plugin with the reason and the choices; omo does not progress it. Each choice's `action` is a manual hook of the same plugin |
+| `refuse` | `reason` (required) | the move is not made. The reason is a comment on the ticket and in the `ticket.refused` event. A refused start puts the ticket back into Planning, so omo does not ask again for ever |
+
+Anything else (an unknown key, a hold without a reason, a choice that names no
+manual hook of the plugin) is an invalid answer. Reasons and labels are cleaned
+like other plugin text (configuration values redacted, hidden characters shown).
+
+**Giving the go-ahead later.** A held move is released from any hook of the same
+plugin, typically the manual hook behind a choice: a Lua hook calls
+`omo.gate_release(ticket)` (a command hook runs
+`omo ai ticket gate-release N`, which names the plugin by `OMO_PLUGIN_NAME`).
+omo then carries out the move once every plugin that gates it gave its
+go-ahead: the release moves the ticket to Ready For Dev as whoever asked for it;
+for a start, the engine goes on starting the ticket. `omo.gate_cancel(ticket)`
+(`omo ai ticket gate-cancel N`) cancels the held move instead. A cancelled
+release leaves the ticket in Planning; a cancelled start puts the ticket back
+into Planning.
+
+**Several plugins** may gate the same move: it happens only when all gave their
+go-ahead. Each plugin's state (`pending`, `held` with reason and choices, or
+`passed`) is recorded and shown with its name.
+
+**Failures go ahead.** A gate hook that crashes, runs out of time, gives an
+invalid answer, or belongs to a plugin that is (or becomes) disabled or
+removed, or no longer gates the move, counts as a go-ahead. omo writes a note
+on the ticket and a line in the plugin's log, so nobody is held by accident. A
+hook whose manifest says `"failure": "hold"` holds instead, with the failure
+as the reason; this includes a plugin that becomes disabled or removed (the
+policy is stored with the request), and only the user's override or cancel then
+ends the hold. Output with data after the answer is an invalid answer. A plugin that was stopped or reloaded during a run is asked again.
+
+**The user's override.** The user can always override every hold of a ticket
+(**continue anyway**: the plugins that have not passed count as having given
+their go-ahead) or cancel the held move, with
+`omo ai ticket gate-override N` and `omo ai ticket gate-cancel N` or the
+routes below. Neither is available to agents.
+
+| Route (user only) | Does |
+|---|---|
+| `POST /api/tickets/{n}/gate/release` `{plugin}` | the go-ahead of a plugin (what a plugin's hook uses) |
+| `POST /api/tickets/{n}/gate/cancel` `{plugin?}` | cancels the held move; with `plugin`, as that plugin |
+| `POST /api/tickets/{n}/gate/override` `{}` | continue anyway |
+
+**Visibility.** A ticket with a move that waits for plugins has `gate` in its
+summary: `{move, from, to, gates: [{plugin, state, reason, choices}]}`, and a
+held start shows `start_blocked: "gate"`. `omo ai ticket show` prints the gate
+and `omo ai ticket list` marks held tickets (`[held by <plugin>: <reason>]`).
+The events `ticket.held`, `ticket.released` (every plugin gave its go-ahead),
+`ticket.refused`, `ticket.overridden` and `ticket.hold_cancelled` are committed
+with the board change. A hold is stored: it survives a restart of omo, and a
+gate that was still being asked is asked again.
+
+**In the board.** A held ticket's card shows the badge "held by `<plugin>`" (a gate
+that no plugin holds yet but some has not answered shows "waiting for a plugin"),
+and a move that a plugin holds or refuses says so on the card (the refusal with
+the plugin's reason) instead of looking like a failed move; the column a held
+move goes to refuses a drag with the same words. The ticket panel and page list
+every plugin's state with its reason and its choices (a choice runs the plugin's
+manual hook for the ticket, as you) and offer **Continue anyway** and **Cancel
+move** (each asks first; a cancelled release stays in Planning, a cancelled start
+goes back to Planning). A refusal is shown until the next gate event of the
+ticket; the comment on the ticket is the lasting record.
+
+Automatic progress respects a hold like a user's move: a product manager's or
+the CEO's release goes through the gate, and the engine does not start a ticket
+whose start gate is pending or held. While it waits, the ticket holds no slot.
+
 ### Command hooks
 
 A command gets omo's environment (without omo's own `OMO_*` variables) plus:
@@ -449,6 +555,7 @@ bytecode. `print` writes to the plugin's log. The globals:
 | `omo.task_start{ name, command, args, cwd, env, ticket, temp_dir }` | starts a named supervised process and returns its task record promptly, or `nil, error`; see Background tasks |
 | `omo.task_list()` | the current plugin’s retained task records, oldest first, or `nil, error` |
 | `omo.task_stop(name)` | stops the latest run under this plugin-local name and waits for cleanup; `true`, or `nil, error` |
+| `omo.gate_release(ticket)`, `omo.gate_cancel(ticket)` | the plugin's go-ahead for the move it holds on a ticket, or its cancel of that move; `true`, or `nil, error`; see [Gates](#gates) |
 | `omo.sleep(seconds)` | accepts exactly one number, greater than 0 and at most 10 (fractions allowed); returns `true`, or raises the run's stop reason on cancellation/deadline |
 | `omo.store_get(key)`, `omo.store_set(key, value)`, `omo.store_delete(key)`, `omo.store_keys()` | the plugin's own storage in omo's database: keys of 1 to 200 bytes, values up to 64 KiB as JSON, at most 1,000 keys |
 | `omo.data_dir()` | the plugin's absolute data folder, or `nil, error` |

@@ -599,6 +599,12 @@ func (p *planner) startable(t board.EngineTicket) bool {
 		t.Busy || p.inflight(t.ID) {
 		return false
 	}
+	if t.StartGate == board.StartGateOpen {
+		// A plugin has not given its go-ahead to the start. The board
+		// shows start_blocked "gate" by itself; the ticket takes no slot
+		// meanwhile.
+		return false
+	}
 	if t.Type == api.TypeTask && t.StoryID != 0 {
 		story, ok := p.byID[t.StoryID]
 		if !ok || story.Column != api.ColumnInProgress {

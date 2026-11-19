@@ -18,6 +18,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/gittest"
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
@@ -28,6 +29,7 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == "plugin-helper" {
 		os.Exit(helper(os.Args[2], os.Args[3:]))
 	}
+	gittest.Isolate()
 	os.Exit(childenvtest.Run(m))
 }
 

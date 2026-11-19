@@ -179,6 +179,11 @@ export function applyEvent(s: BoardState, ev: ApiEvent): boolean {
     case 'ticket.created':
     case 'ticket.updated':
     case 'ticket.moved':
+    case 'ticket.held':
+    case 'ticket.released':
+    case 'ticket.refused':
+    case 'ticket.overridden':
+    case 'ticket.hold_cancelled':
       if (isSummary(d.ticket)) upsert(s, d.ticket, ev.id)
       break
     case 'ticket.reordered': {

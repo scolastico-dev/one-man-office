@@ -28,6 +28,7 @@ import { COLUMN_TITLES } from './model'
 import { useBoardColumns } from './useBoardColumns'
 import { useDrag } from './useDrag'
 import { useKeyboardMove } from './useKeyboardMove'
+import { useGateNotes } from '../ticket/gateNotes'
 import { createMoves, provideMoves } from './useMoves'
 
 const store = useBoard()
@@ -35,6 +36,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const filterState = useFilters()
+useGateNotes()
 const moves = createMoves({ store })
 provideMoves(moves)
 const drag = useDrag({
