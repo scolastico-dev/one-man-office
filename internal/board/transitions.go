@@ -320,6 +320,9 @@ func (b *Board) approve(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int)
 				"#%d has no base branch for project %q (its folder was on a detached HEAD); the user sets one under Base branch in the ticket's details before approving", t.ID, pr.id)
 		}
 	}
+	if waits, err := b.gateRelease(tx, a, t, before); err != nil || waits {
+		return err
+	}
 	if err := b.relocate(tx, a, t, api.ColumnReady, before, ActionApprove); err != nil {
 		return err
 	}
@@ -439,6 +442,9 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 // setColumn is the only writer of a ticket's column (guard test).
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
 	now := b.stamp()
+	if err := clearGates(tx, n); err != nil {
+		return err
+	}
 	var closed any
 	if col == api.ColumnDone {
 		closed = now

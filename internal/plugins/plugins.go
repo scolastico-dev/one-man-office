@@ -214,6 +214,11 @@ type Hook struct {
 	// Hidden suppresses automatic manual-action controls; explicit buttons and
 	// direct invocation remain available. It is presentation, not authorization.
 	Hidden bool `json:"hidden,omitempty"`
+	// Move and Failure are for gate hooks only: Move is the move the hook
+	// gates (release or start); Failure says what a failing hook does, go
+	// ahead (the default) or hold.
+	Move    string `json:"move,omitempty"`
+	Failure string `json:"failure,omitempty"`
 }
 
 // removedFields are manifest fields the engine had once, with what to say
@@ -252,6 +257,7 @@ var manifestFields = map[string]bool{"name": true, "version": true, "description
 var hookFields = map[string]bool{
 	"event": true, "lua": true, "command": true, "timeout": true, "interval": true,
 	"interval_config": true, "name": true, "description": true, "scope": true, "hidden": true,
+	"move": true, "failure": true,
 }
 
 // quoted is text from a manifest as it may appear in an error: cut, quoted
@@ -356,10 +362,17 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("a plugin has at most %d hooks", maxHooks)
 	}
 	actions := map[string]bool{}
+	gates := map[string]bool{}
 	for i := range m.Hooks {
 		h := &m.Hooks[i]
 		if err := checkHook(h); err != nil {
 			return Manifest{}, fmt.Errorf("hook %d: %w", i+1, err)
+		}
+		if h.Event == EventGate {
+			if gates[h.Move] {
+				return Manifest{}, fmt.Errorf("hook %d: another gate hook already gates the move %s", i+1, h.Move)
+			}
+			gates[h.Move] = true
 		}
 		if h.Event == EventManual {
 			if actions[h.Name] {
@@ -448,6 +461,20 @@ func checkHook(h *Hook) error {
 	} else if h.Interval != "" || h.IntervalConfig != "" {
 		return errors.New("interval and interval_config are for timer hooks only")
 	}
+	if h.Event == EventGate {
+		switch h.Move {
+		case string(api.GateMoveRelease), string(api.GateMoveStart):
+		default:
+			return errors.New("a gate hook names its move: move is release or start")
+		}
+		switch h.Failure {
+		case "", FailureGoAhead, FailureHold:
+		default:
+			return errors.New("failure is go_ahead or hold")
+		}
+	} else if h.Move != "" || h.Failure != "" {
+		return errors.New("move and failure are for gate hooks only")
+	}
 	if h.Event == EventManual {
 		if !actionPattern.MatchString(h.Name) {
 			return errors.New("a manual hook's name is letters, digits, '.', '_' or '-', starting with a letter or digit, at most 64 characters")
@@ -502,6 +529,9 @@ type Options struct {
 	// both answer that omo runs no agents.
 	Agents   AgentDesk
 	Forwards ForwardDesk
+	// Gates is what omo.gate_release and omo.gate_cancel reach; nil makes
+	// both answer that gates are unavailable.
+	Gates GateDesk
 	// Unloaded releases plugin resources after hooks have been cancelled.
 	Unloaded func(plugin, reason string)
 	// TaskTicketLive checks that a ticket exists and is nonterminal; nil
@@ -577,7 +607,9 @@ type entry struct {
 // goroutines that deliver to it.
 type plugin struct {
 	// forwardMu joins resource operations with unload cleanup after cancellation.
-	forwardMu  sync.Mutex
+	forwardMu sync.Mutex
+	// gateMu serializes the gate runs of the plugin.
+	gateMu     sync.Mutex
 	name       string
 	dir        string
 	entry      *entry
@@ -1065,7 +1097,7 @@ func (m *Manager) start(p *plugin) {
 // log. timer and manual events are not dispatched. ev.Data must not be
 // changed after the call.
 func (m *Manager) Dispatch(ev Event) {
-	if ev.Name == EventTimer || ev.Name == EventManual || ev.Name == EventOmoStarted {
+	if ev.Name == EventTimer || ev.Name == EventManual || ev.Name == EventOmoStarted || ev.Name == EventGate {
 		return
 	}
 	if ev.At.IsZero() {
@@ -1392,7 +1424,7 @@ func (e *entry) infoLocked() api.PluginInfo {
 		info.LastRunAt = &at
 	}
 	for _, h := range e.manifest.Hooks {
-		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval, Hidden: h.Hidden}
+		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval, Hidden: h.Hidden, Move: h.Move, Failure: h.Failure}
 		if h.Event == EventTimer && h.Interval == "" && e.p != nil {
 			for _, lh := range e.p.hooks {
 				if lh.Event == EventTimer && lh.IntervalConfig == h.IntervalConfig {
@@ -1474,7 +1506,11 @@ func (m *Manager) logLine(name, line string) {
 	}
 	line = strings.ReplaceAll(cutRunes(line, maxLogLineRunes), "\n", " ")
 	if err := db.AppendPluginRuntimeLog(m.o.DB, name, line, m.now(), LogLines); err != nil {
-		m.logf("plugins: write the log of %s: %v", name, err)
+		// A plugin that was removed has no runtime record any more; its
+		// gates' last words still go to its log.
+		if err2 := db.AppendOrphanPluginLog(m.o.DB, name, line, m.now(), LogLines); err2 != nil {
+			m.logf("plugins: write the log of %s: %v", name, err)
+		}
 	}
 }
 
@@ -1483,3 +1519,7 @@ func (m *Manager) logf(format string, args ...any) {
 		m.o.Log.Printf(format, args...)
 	}
 }
+
+// LogLine adds one cleaned line to plugin's log: the server's account of
+// what happened to the plugin's gates that its own hooks cannot tell.
+func (m *Manager) LogLine(plugin, line string) { m.logLine(plugin, line) }

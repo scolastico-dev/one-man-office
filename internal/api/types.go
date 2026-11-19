@@ -212,8 +212,11 @@ type TicketSummary struct {
 	Busy                  bool            `json:"busy"`
 	FailedStep            FailedStep      `json:"failed_step"`
 	StartBlocked          StartBlocked    `json:"start_blocked"`
-	ExportURL             string          `json:"export_url"`
-	ExportMerged          bool            `json:"export_merged"`
+	// Gate is the move plugins hold or still have to answer for; null
+	// when no plugin gates the ticket's next move.
+	Gate         *TicketGates `json:"gate"`
+	ExportURL    string       `json:"export_url"`
+	ExportMerged bool         `json:"export_merged"`
 	// Workdir is the working folder of a task without a project: omo makes
 	// it when work starts and keeps it after the ticket is done, until the
 	// user removes it. "" before work started, after the removal, and for

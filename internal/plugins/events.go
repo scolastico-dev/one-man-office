@@ -27,12 +27,13 @@ const (
 	EventTimer          = "timer"
 	EventManual         = "manual"
 	EventOmoStarted     = "omo_started"
+	EventGate           = "gate"
 )
 
 // Events lists every event a hook can name.
 var Events = []string{
 	EventTicketCreated, EventTicketMoved, EventCommentWritten, EventQuestionAsked,
-	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual, EventOmoStarted,
+	EventNeedsAttention, EventAgentStarted, EventAgentExited, EventPaused, EventResumed, EventTimer, EventManual, EventOmoStarted, EventGate,
 }
 
 // The reasons of agent_exited.

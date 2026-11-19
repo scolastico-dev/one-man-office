@@ -57,6 +57,11 @@ type EngineTicket struct {
 	DeleteBranch       bool
 	DiscardUncommitted bool
 	StartBlocked       api.StartBlocked
+	// StartGate is where the plugins that gate the ticket's start stand:
+	// "" when none asked them, StartGateOpen while one has not given its
+	// go-ahead (the engine does not start the ticket), StartGatePassed
+	// when all did.
+	StartGate StartGateState
 	// Projects in their stored order; none for a task without a project.
 	Projects []EngineProject
 	// Workdir is the working folder of a task without a project ("" until
@@ -68,6 +73,15 @@ type EngineTicket struct {
 	// review round.
 	Verdicts map[string]string
 }
+
+// StartGateState is EngineTicket.StartGate.
+type StartGateState string
+
+const (
+	StartGateNone   StartGateState = ""
+	StartGateOpen   StartGateState = "open"
+	StartGatePassed StartGateState = "passed"
+)
 
 // ReviewKeys lists what one review round of t collects a verdict for: each
 // project of t, or, for a task without a project, the ticket itself under
@@ -201,6 +215,22 @@ func (b *Board) engineSnapshot(q db.Queryer) (EngineSnapshot, error) {
 			if reason, waiting := waitingReason(res, merged, stage); waiting {
 				t.WaitingFor = append(t.WaitingFor, api.Waiting{Ticket: int(dep), Reason: reason})
 				t.Waiting = true
+			}
+			return nil
+		}); err != nil {
+			return out, err
+		}
+		if err := each(q, `SELECT m.ticket_id, COALESCE(SUM(g.state <> 'passed'), 0) FROM ticket_gate_moves m
+			LEFT JOIN ticket_gates g ON g.ticket_id = m.ticket_id
+			WHERE m.move = 'start' AND m.ticket_id`+idsIn+` GROUP BY m.ticket_id`, raw, func(rows *sql.Rows) error {
+			var id int64
+			var open int
+			if err := rows.Scan(&id, &open); err != nil {
+				return err
+			}
+			byID[id].StartGate = StartGatePassed
+			if open > 0 {
+				byID[id].StartGate = StartGateOpen
 			}
 			return nil
 		}); err != nil {

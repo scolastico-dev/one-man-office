@@ -136,9 +136,11 @@ type Server struct {
 	setup setupState
 	// usage, skills and plugins are the extensions (usage.go, skillsets.go,
 	// plugins.go).
-	usage          usageFeature
-	skills         skillSetFeature
-	plugins        pluginFeature
+	usage   usageFeature
+	skills  skillSetFeature
+	plugins pluginFeature
+	// gates asks the plugins whose gate of a ticket's move has not answered.
+	gates          *gateRunner
 	proxyAuth      proxyAuthState
 	proxyTransport *proxy.Transport
 	pluginForwards pluginForwardRegistry
@@ -257,6 +259,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.branchSem = make(chan struct{}, branchWorkers)
 	s.diffSem = make(chan struct{}, diffSlots)
 	s.readBranches = s.branches
+	s.gates = newGateRunner()
 	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git, refs: &s.refs}, board.Options{Notify: s.boardChanged, RefsLock: &s.refs})
 	s.engineReady = make(chan struct{})
 	s.terminals = webterm.NewConnectionLimit(terminalConnections)

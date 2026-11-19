@@ -29,6 +29,7 @@ function summary(n: number, over: Partial<TicketSummary> = {}): TicketSummary {
     busy: false,
     failed_step: '',
     start_blocked: '',
+    gate: null,
     export_url: '',
     export_merged: false,
     workdir: '',

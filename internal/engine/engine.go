@@ -572,7 +572,13 @@ func (e *Engine) pass(ctx context.Context) {
 				e.log.Printf("engine: attention on #%d: %v", a.ticket, err)
 			}
 		case actMerge, actCleanup, actStart:
-			if stopping || !e.firstTry(ctx, a, snap.LastEventID) {
+			if stopping {
+				continue
+			}
+			if a.kind == actStart && a.gated && e.startWaitsForGates(ctx, a.ticket) {
+				continue
+			}
+			if !e.firstTry(ctx, a, snap.LastEventID) {
 				continue
 			}
 			e.launchAction(work, a, snap)
@@ -687,4 +693,18 @@ func (e *Engine) modelChoice(role api.Role, purpose api.Purpose, t board.EngineT
 		c.ticketModel, c.previous = t.Model, previous
 	}
 	return c
+}
+
+// startWaitsForGates asks the plugins that gate the start of ticket n (the
+// board records the request and shows start_blocked "gate"). It reports true
+// while a plugin has not given its go-ahead: the start waits for the board
+// change that answers it. Without gating plugins, and once they all passed,
+// it reports false and the start goes on.
+func (e *Engine) startWaitsForGates(ctx context.Context, n int64) bool {
+	waits, err := e.b.RequestStartGates(ctx, n)
+	if err != nil {
+		e.log.Printf("engine: ask the plugins that gate the start of #%d: %v", n, err)
+		return true
+	}
+	return waits
 }
