@@ -205,13 +205,13 @@ func TestRunEndsWithItsContext(t *testing.T) {
 			defer cancel()
 			entered := make(chan struct{})
 			opts := RunOptions{Home: t.TempDir(), HTTPClient: noNetwork(t)}
-			j := Job{Script: "t", Text: `function usage() omo.read_file("/ready"); while true do end end`, Profile: api.Profile{CLI: "custom"}}
+			j := Job{Script: "t", Text: `function usage() omo.read_file("~/ready"); while true do end end`, Profile: api.Profile{CLI: "custom"}}
 			opts.ReadFile = func(string, int64) ([]byte, error) {
 				close(entered)
 				return []byte("ready"), nil
 			}
 			if helper {
-				j.Text = `function usage() local ok, err = omo.codex_refresh("/x/auth.json"); error(err) end`
+				j.Text = `function usage() local ok, err = omo.codex_refresh("~/auth.json"); error(err) end`
 				j.Profile = api.Profile{CLI: "codex", Command: "codex"}
 				opts.RefreshCodex = func(ctx context.Context, _ string, _ []string, _ string) error {
 					close(entered)
@@ -221,7 +221,14 @@ func TestRunEndsWithItsContext(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() { _, err := Run(ctx, j, opts); result <- err }()
-			<-entered
+			// The paths are below the run's home, so they are absolute on
+			// every platform. A run that ends before it reaches the helper
+			// is reported, not waited for.
+			select {
+			case <-entered:
+			case err := <-result:
+				t.Fatalf("the run ended before the script reached the helper: %v", err)
+			}
 			cancel()
 			err := <-result
 			if err == nil || err.Error() != "run canceled" {

@@ -7,7 +7,9 @@ import (
 )
 
 // exec can invoke Cancel as soon as Start launches the process, before
-// runProgram has published the process to its group.
+// runProgram has published the process to its group. The program is started
+// through the group, as the product starts it: on Windows that is what puts
+// it into the job a cancellation ends.
 func TestProcessGroupRemembersCancellationBeforeStarted(t *testing.T) {
 	args := helperArgs(t, "sleep")
 	cmd := exec.CommandContext(t.Context(), args[0], args[1:]...)
@@ -17,7 +19,7 @@ func TestProcessGroupRemembersCancellationBeforeStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(group.close)
-	if err := cmd.Start(); err != nil {
+	if err := group.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)

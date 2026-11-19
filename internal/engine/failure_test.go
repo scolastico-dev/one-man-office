@@ -3,10 +3,33 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// summaryRunes is the length a reason's summary is cut to.
+const summaryRunes = 200
+
+// longTempRootLength is how long useLongTempRoot makes the temporary root.
+// On Windows a program cannot be started in a folder whose path is longer
+// than 258 characters, and git opens no file beyond 260. The deepest file
+// these tests make lies about 160 characters below the root, so the root
+// stays at 80 there; the reasons, which carry a path below the root, are
+// still longer than a summary (wantReasonSummary checks that).
+func longTempRootLength() int {
+	if runtime.GOOS == "windows" {
+		return 80
+	}
+	return 220
+}
+
+// longReasons is set while a test runs under useLongTempRoot: every reason
+// it checks must then be longer than a summary, or the test would no longer
+// exercise the cut it is there for. Tests of this package do not run in
+// parallel.
+var longReasons bool
 
 // useLongTempRoot makes path-bearing reasons exceed the card/project summary
 // budget, even on machines with a short default temporary directory.
@@ -22,10 +45,14 @@ func useLongTempRoot(t *testing.T) {
 		}
 	})
 	// Extend only as far as needed: an already long TMPDIR must not be
-	// doubled past SQLite's path limit. The reason still exceeds 200 runes.
+	// doubled past SQLite's path limit.
 	root := base
-	for len(root) < 220 {
-		root = filepath.Join(root, strings.Repeat("long-path-", 4))
+	for want := longTempRootLength(); len(root) < want-1; {
+		segment := strings.Repeat("long-path-", 4)
+		if room := want - len(root) - 1; room < len(segment) {
+			segment = segment[:room]
+		}
+		root = filepath.Join(root, segment)
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -33,6 +60,8 @@ func useLongTempRoot(t *testing.T) {
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 		t.Setenv(key, root)
 	}
+	longReasons = true
+	t.Cleanup(func() { longReasons = false })
 }
 
 // wantReasonSummary checks the summary contract separately from assertions on
@@ -41,8 +70,10 @@ func useLongTempRoot(t *testing.T) {
 func wantReasonSummary(t *testing.T, got, full string) {
 	t.Helper()
 	want := strings.Join(strings.Fields(full), " ")
-	if rs := []rune(want); len(rs) > 200 {
-		want = strings.TrimSpace(string(rs[:199])) + "…"
+	if rs := []rune(want); len(rs) > summaryRunes {
+		want = strings.TrimSpace(string(rs[:summaryRunes-1])) + "…"
+	} else if longReasons {
+		t.Fatalf("the reason has %d runes, no more than a summary holds (%d), although the test runs under a long temporary root: %q", len(rs), summaryRunes, full)
 	}
 	if got != want {
 		t.Fatalf("summary %q, want %q (full reason %q)", got, want, full)
