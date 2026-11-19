@@ -94,6 +94,8 @@ test('inline images can be deleted and are pasted between their surrounding text
   await pasteImage('keep me.png')
   await expect(box.locator('[data-draft-send]')).toBeEnabled()
   await expect(field).toHaveValue('before [image 2]after')
+  // Typing with the caret inside the marker keeps its image and snaps after it.
+  await field.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(11, 11))
   await field.pressSequentially(' between ')
   await pasteImage('keep this too.png')
   await expect(box.locator('[data-draft-send]')).toBeEnabled()

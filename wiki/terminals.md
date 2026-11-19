@@ -48,7 +48,8 @@ lines into the terminal above.
   a terminal ([Images](#images)). Each image appears at the cursor as a marker
   such as `[image 1]`, without showing its file path. Backspace at a marker
   removes the whole marker and its image; the image list also offers a remove
-  button. Send pastes the text and images in their draft order, each image using
+  button. Typing or pasting with the cursor inside a marker inserts after it
+  and keeps its image. Send pastes the text and images in their draft order, each image using
   the terminal's normal image paste, then presses Enter once. The terminal's
   input stays locked for the whole message, including against omo's own lines
   and input from other views. Pasted text is cleaned of control characters, as

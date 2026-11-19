@@ -93,3 +93,13 @@ describe('inline image markers', () => {
     expect(messageOf(d.text, d.attachments)).toEqual(['[image 1]a', '/a.png', 'b', '/b.png'])
   })
 })
+
+test('a collapsed insertion inside a marker snaps after it and preserves the attachment', () => {
+  const original = insertImage({ text: '', attachments: [] }, 0, 0, { path: '/one.png', name: 'one.png' })
+  const typed = editDraft(original, 4, 4, 'z')
+  expect(typed.text).toBe('[image 1]z')
+  expect(messageOf(typed.text, typed.attachments)).toEqual(['/one.png', 'z'])
+  const pasted = insertImage(original, 4, 4, { path: '/two.png', name: 'two.png' })
+  expect(pasted.text).toBe('[image 1][image 2]')
+  expect(messageOf(pasted.text, pasted.attachments)).toEqual(['/one.png', '/two.png'])
+})

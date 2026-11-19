@@ -93,10 +93,11 @@ export function clearDraft(id: string): void {
   saveDraft(id, { text: '', attachments: [] })
 }
 
-/** Expands a replacement to whole image markers, including a caret inside one. */
+/** Inserts after a marker when the caret is inside it; expands selected ranges to whole markers. */
 export function markerRange(draft: Draft, start: number, end: number): [number, number] {
   for (const a of draft.attachments) {
     const limit = a.at + a.marker.length
+    if (start === end && start > a.at && start < limit) return [limit, limit]
     if (start < limit && end > a.at) {
       start = Math.min(start, a.at)
       end = Math.max(end, limit)
