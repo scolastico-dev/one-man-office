@@ -15,6 +15,7 @@ import { DialogOutlet, useDialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
+import TicketGate from './TicketGate.vue'
 import PluginControls from '../plugins/PluginControls.vue'
 import { useBoard } from '../../store'
 import RejectDialog from '../board/dialogs/RejectDialog.vue'
@@ -229,6 +230,7 @@ async function requestExportCheck() {
       <p v-if="attention.step" class="actions__line">{{ attention.step }}</p>
       <p v-if="attention.reason" class="actions__line">{{ attention.reason }}</p>
     </div>
+    <TicketGate :ticket="ticket" :dialogs="dialogs" />
     <p v-if="busy" class="actions__busy" data-busy>
       omo is working on this{{ caption ? `: ${caption}` : '.' }}
     </p>
