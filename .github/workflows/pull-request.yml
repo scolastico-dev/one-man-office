@@ -1,16 +1,118 @@
 name: Pull Request
 
+# Tests run on pull requests only: main receives nothing but merged pull
+# requests, whose merge result these jobs already tested.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
+  pull-requests: read
+
+# A new push to a pull request ends the run of the push before it.
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-  test-and-build:
-    name: Test and build
+  # Sorts the changed files, so that the jobs below run only where a change
+  # can break them:
+  #   code: anything but the documentation no test reads.
+  #   go:   anything that reaches the Go suite on Windows, which is every
+  #         change outside web/ and every Go file inside it. A change to the
+  #         board alone cannot behave differently there, and the Linux job
+  #         still runs the whole Go suite for it.
+  # A file this list does not know counts as code and as go.
+  changes:
+    name: Find what changed
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.sort.outputs.code }}
+      go: ${{ steps.sort.outputs.go }}
+    steps:
+      - name: Sort the changed files
+        id: sort
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[] | .filename, (.previous_filename // empty)')
+          count=$(printf '%s\n' "$files" | grep -c . || true)
+          code=false
+          go=false
+          # GitHub lists at most 3000 files of a pull request: with a list
+          # that may be cut off, or an empty one, everything runs.
+          if [ "$count" -eq 0 ] || [ "$count" -ge 3000 ]; then
+            code=true
+            go=true
+          fi
+          while IFS= read -r file; do
+            case "$file" in
+              '') ;;
+              wiki/*|.github/assets/*|CLAUDE.md|AGENTS.md) ;;
+              web/*.go) code=true; go=true ;;
+              web/*) code=true ;;
+              *) code=true; go=true ;;
+            esac
+          done <<< "$files"
+          echo "$count changed files: code=$code go=$go"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+  go-checks:
+    name: Go checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install the shells the shell-isolation tests drive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bash zsh
+
+      - name: Test
+        run: make check
+
+      # Runs even when the step above failed, so that one run reports every
+      # problem. The job fails when any step failed.
+      - name: Check the stress harness
+        if: ${{ !cancelled() }}
+        run: make stress-check
+
+  board-checks:
+    name: Board checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the board's packages
+        run: npm --prefix web ci
+
+      - name: Test the board
+        run: make web-check
+
+  build:
+    name: Build all platforms
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -29,52 +131,105 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install the shells the shell-isolation tests drive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bash zsh
+      - name: Build the board
+        run: make web
+
+      - name: Build all platforms
+        run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
+
+  # The browser suite, split into parts that run side by side. Playwright
+  # deals every test to exactly one part (--shard), so the parts together
+  # are the whole suite.
+  browser-tests:
+    name: Browser tests (${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Build the board
         run: make web
 
-      - name: Test
-        run: make check
+      - name: Get the Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./web/node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      # The steps below run even when an earlier one failed, so that one run
-      # reports every problem. The job fails when any step failed.
-      - name: Check the stress harness
-        if: ${{ !cancelled() }}
-        run: make stress-check
+      - name: Cache the browser download
+        id: browser-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      - name: Test the board
-        if: ${{ !cancelled() }}
-        run: make web-check
+      - name: Install the browser
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: npx --prefix web playwright install --with-deps chromium
 
-      - name: Build all platforms
-        if: ${{ !cancelled() }}
-        run: make cross VERSION="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}-${{ github.sha }}"
+      - name: Install the browser's system libraries
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: npx --prefix web playwright install-deps chromium
 
-  # The Go test suite on Windows, in four groups that run side by side: every
+      - name: Run the browser tests
+        run: make e2e E2E_ARGS="--shard=${{ matrix.shard }}/4"
+
+      - name: Keep the reports of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-${{ matrix.shard }}
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The Go test suite on Windows, in groups that run side by side: every
   # program a test starts (git above all) is far slower to start there, and
-  # in one job the largest packages ran into their time limit. Each package
-  # is in exactly one group: the last group takes everything the others do
-  # not name, and internal/archtest checks that its exclusions match them.
-  windows-test:
+  # in one job the largest packages ran into their time limit.
+  #
+  # Each package is in exactly one group: the last group takes everything the
+  # others do not name. A group with shards is split further: part k of n runs
+  # every n-th test of each of its packages, counted in the order go test
+  # lists them, so the parts together run every test once.
+  # internal/archtest checks that the groups and their parts are complete.
+  windows-tests:
     name: Test on Windows (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: engine
-            only: internal/(engine)
-          - name: server
-            only: internal/(server)
-          - name: git and board
-            only: internal/(gitops|board)
-          - name: everything else
-            except: internal/(engine|server|gitops|board)
-            vet: true
+          - { name: engine 1/4, only: internal/(engine), shard: 1, shards: 4 }
+          - { name: engine 2/4, only: internal/(engine), shard: 2, shards: 4 }
+          - { name: engine 3/4, only: internal/(engine), shard: 3, shards: 4 }
+          - { name: engine 4/4, only: internal/(engine), shard: 4, shards: 4 }
+          - { name: server 1/2, only: internal/(server), shard: 1, shards: 2 }
+          - { name: server 2/2, only: internal/(server), shard: 2, shards: 2 }
+          - { name: git 1/2, only: internal/(gitops), shard: 1, shards: 2 }
+          - { name: git 2/2, only: internal/(gitops), shard: 2, shards: 2 }
+          - { name: board, only: internal/(board) }
+          - { name: everything else, except: internal/(engine|server|gitops|board), vet: true }
     env:
       CGO_ENABLED: '0'
     steps:
@@ -104,11 +259,29 @@ jobs:
           }
           if ($packages.Count -eq 0) { throw "this group matches no package" }
           Write-Host "testing $($packages.Count) packages"
-          go test $packages -timeout 900s
-          exit $LASTEXITCODE
+          if (-not "${{ matrix.shards }}") {
+            go test $packages -timeout 900s
+            exit $LASTEXITCODE
+          }
+          $shard = [int]"${{ matrix.shard }}"
+          $shards = [int]"${{ matrix.shards }}"
+          $failed = @()
+          foreach ($package in $packages) {
+            $listed = go test -list '^(Test|Fuzz|Example)' $package
+            if ($LASTEXITCODE -ne 0) { $listed | Write-Host; $failed += $package; continue }
+            $names = @($listed | Where-Object { $_ -match '^(Test|Fuzz|Example)\w*$' })
+            $mine = @(for ($i = 0; $i -lt $names.Count; $i++) { if ($i % $shards -eq $shard - 1) { $names[$i] } })
+            Write-Host "$package`: part $shard of $shards runs $($mine.Count) of $($names.Count) tests"
+            if ($mine.Count -eq 0) { continue }
+            go test $package -run ('^(' + ($mine -join '|') + ')$') -timeout 900s
+            if ($LASTEXITCODE -ne 0) { $failed += $package }
+          }
+          if ($failed.Count -gt 0) { Write-Host "failed: $failed"; exit 1 }
 
   container-build:
     name: Test container (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +298,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build container image
-        run: docker build --platform "${{ matrix.platform }}" --build-arg VERSION="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}-${{ github.sha }}" --tag omo:pr .
+        run: docker build --platform "${{ matrix.platform }}" --build-arg VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}" --tag omo:pr .
 
       - name: Test container entrypoint
         run: ./docker/entrypoint_test.sh omo:pr

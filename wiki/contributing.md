@@ -28,8 +28,11 @@ export OMO_HOME=$(mktemp -d)
 PATH="$PWD/bin:$PATH" ./bin/omo
 ```
 
-Pull-request CI also runs `go vet ./...` and the whole Go test suite on
-`windows-latest`, in four groups of packages side by side. The Windows process-containment tests exercise immediate
+CI runs the tests on pull requests only, in jobs side by side; a pull request
+that changes only the wiki runs none, and one that changes only the board skips
+the Windows jobs. Pull-request CI also runs `go vet ./...` and the whole Go test suite on
+`windows-latest`, in groups of packages side by side, the largest packages split
+into parts. The Windows process-containment tests exercise immediate
 descendants, suspended startup, cancellation and ConPTY cleanup. Cross-building
 a Windows test binary does not execute these tests.
 
@@ -147,8 +150,9 @@ A later success cannot erase a failure. Source changes during a campaign also
 invalidate it. SIGINT/SIGTERM and command watchdogs terminate/reap owned process
 trees, including adopted detached children; diagnostic files remain.
 
-The **Constrained stress** workflow runs both full suites nightly, with three Go
-and two browser attempts, and accepts custom counts through `workflow_dispatch`.
+The **Constrained stress** workflow is started by hand (`workflow_dispatch`); it
+runs both full suites with three Go and two browser attempts unless other counts
+are given.
 It uses `scripts/stress/ci.sh`, publishes the failure-frequency summary and keeps
 all artifacts for 14 days, including on failure. The 3/2 guard is smaller than the
 20/10 acceptance campaign: use `make stress` or dispatch counts 20/10 for that

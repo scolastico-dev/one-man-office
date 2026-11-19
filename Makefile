@@ -31,9 +31,9 @@ web-check:
 	done; \
 	if [ -n "$$failed" ]; then echo "web-check: failed:$$failed"; exit 1; fi
 
-## e2e: build omo and run the browser end-to-end tests
+## e2e: build omo and run the browser end-to-end tests (E2E_ARGS passes options to Playwright, such as --shard=1/4)
 e2e: build
-	npm --prefix web run e2e
+	npm --prefix web run e2e$(if $(E2E_ARGS), -- $(E2E_ARGS))
 
 ## stress: Linux two-CPU race/throttled-browser campaign (20 Go + 10 browser attempts; STRESS_ARGS for calibration)
 stress:

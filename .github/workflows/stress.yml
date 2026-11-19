@@ -1,8 +1,7 @@
 name: Constrained stress
 
+# Run by hand only: tests run on pull requests, nothing tests main on a schedule.
 on:
-  schedule:
-    - cron: '37 3 * * *'
   workflow_dispatch:
     inputs:
       go_runs:
