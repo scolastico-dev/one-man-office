@@ -23,9 +23,9 @@ function fakeStore() {
       set.add(fn)
       return () => set.delete(fn)
     },
-    emit(kind: string, data: Partial<TicketGateData> & { n?: number }) {
+    emit(kind: string, data: Partial<TicketGateData> & { n?: number; to?: string }) {
       const n = data.n ?? 5
-      const d: TicketGateData = { ticket: ticket({ number: n }), move: 'start' as GateMove, plugin: 'p', reason: '', choices: [], ...data }
+      const d = { ticket: ticket({ number: n }), move: 'start' as GateMove, plugin: 'p', reason: '', choices: [], ...data }
       const ev: ApiEvent = { id: 1, kind, ticket: n, actor: { role: 'system' }, at: '', data: d }
       for (const fn of handlers.get(kind) ?? []) fn(ev)
     },
@@ -63,7 +63,17 @@ describe('gate notes', () => {
     const s = fakeStore()
     const notes = createGateNotes(s)
     s.emit('ticket.refused', { reason: 'no' })
-    s.emit('ticket.moved', {})
+    s.emit('ticket.moved', { to: 'ready' })
+    expect(notes.refusal(5)).toBeUndefined()
+  })
+
+  test('the move that carries a refused start back to Planning does not end the note, a later move out of Planning does', () => {
+    const s = fakeStore()
+    const notes = createGateNotes(s)
+    s.emit('ticket.refused', { move: 'start', plugin: 'lint', reason: 'dirty' })
+    s.emit('ticket.moved', { to: 'planning' })
+    expect(notes.refusal(5)).toEqual({ plugin: 'lint', move: 'start', reason: 'dirty' })
+    s.emit('ticket.moved', { to: 'ready' })
     expect(notes.refusal(5)).toBeUndefined()
   })
 

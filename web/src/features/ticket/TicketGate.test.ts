@@ -168,6 +168,19 @@ test('a refusal is shown only while the ticket is in Planning, where a refused m
   expect(w.find('[data-gate-refusal]').exists()).toBe(false)
 })
 
+test('a refused start shows its refusal although the ticket then moves back to Planning', async () => {
+  const hn = await panelHarness(seeded(gated({ column: 'ready', gate: null })))
+  const w = await open(hn)
+  // The server's order: the refusal, then the move that puts the ticket back.
+  hn.omo.emit('ticket.refused', { ticket: gated({ column: 'ready', gate: null }), move: 'start', plugin: 'lint', reason: 'branch dirty', choices: [] }, 4)
+  hn.omo.emit('ticket.moved', { ticket: gated({ gate: null }), from: 'ready', to: 'planning', action: 'gate_refuse' }, 4)
+  await flushPromises()
+  expect(w.get('[data-gate-refusal-reason]').text()).toBe('branch dirty')
+  hn.omo.emit('ticket.moved', { ticket: gated({ gate: null, column: 'ready' }), from: 'planning', to: 'ready', action: 'move' }, 4)
+  await flushPromises()
+  expect(w.find('[data-gate-refusal]').exists()).toBe(false)
+})
+
 test('a refusal does not outlive a column change that no event of its own announced', async () => {
   const hn = await panelHarness(seeded(gated({ gate: null })))
   const w = await open(hn)
