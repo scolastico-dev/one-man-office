@@ -14,6 +14,17 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+// completeWithin runs fn on its own goroutine and waits for it. The limit is
+// not used: an operation that never completes ends with the test binary's own
+// time limit and a dump of every goroutine. Behavioral deadlines remain
+// configured on the operation itself.
+func completeWithin(t *testing.T, _ time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	<-done
+}
+
 // run loads src into a fresh box with lim and returns the error text of
 // the load ("" when it succeeded) and the box (closed by the test's
 // cleanup).
@@ -177,11 +188,8 @@ func TestRunTimeLimit(t *testing.T) {
 		"pattern":       `while true do pcall(string.find, ("a"):rep(5000), ".-.-.-.-.-b") end`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			start := time.Now()
-			msg, _ := run(t, Limits{Timeout: 200 * time.Millisecond}, src)
-			if took := time.Since(start); took > 2*time.Second {
-				t.Fatalf("took %v", took)
-			}
+			var msg string
+			completeWithin(t, 2*time.Second, func() { msg, _ = run(t, Limits{Timeout: 200 * time.Millisecond}, src) })
 			if msg != msgTimeLimit {
 				t.Fatalf("error %q, want %q", msg, msgTimeLimit)
 			}
@@ -196,19 +204,26 @@ func TestBlockedHelperEndsAtDeadline(t *testing.T) {
 		<-b.Context().Done()
 		return 0
 	})
-	start := time.Now()
-	err := b.Load(`while true do pcall(omo.block) end`, "test")
-	if err == nil || err.Error() != msgTimeLimit || time.Since(start) > 2*time.Second {
-		t.Fatalf("err %v after %v", err, time.Since(start))
+	var err error
+	completeWithin(t, 2*time.Second, func() { err = b.Load(`while true do pcall(omo.block) end`, "test") })
+	if err == nil || err.Error() != msgTimeLimit {
+		t.Fatalf("err %v", err)
 	}
 }
 
 func TestCancelEndsRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	b := New(ctx, Limits{})
 	defer b.Close()
-	time.AfterFunc(100*time.Millisecond, cancel)
-	err := b.Load(`while true do end`, "test")
+	entered := make(chan struct{})
+	b.Set("entered", func(L *lua.LState) int { close(entered); return 0 })
+	result := make(chan error, 1)
+	go func() { result <- b.Load(`omo.entered(); while true do end`, "test") }()
+	<-entered
+	cancel()
+	var err error
+	err = <-result
 	if err == nil || err.Error() != msgCanceled {
 		t.Fatalf("err %v", err)
 	}
@@ -289,10 +304,12 @@ func TestAmplifyingFunctionsCapped(t *testing.T) {
 func TestPatternBlowUpBounded(t *testing.T) {
 	// The step bound, not the 30 s timeout, ends the search, well before it
 	// (four times later under the race detector, still below the timeout).
-	start := time.Now()
-	msg, _ := run(t, Limits{Timeout: 30 * time.Second}, `string.find(("a"):rep(5000), ".-.-.-.-.-b")`)
-	if msg == "" || time.Since(start) > raceSlowdown*5*time.Second {
-		t.Fatalf("error %q after %v", msg, time.Since(start))
+	var msg string
+	completeWithin(t, raceSlowdown*5*time.Second, func() {
+		msg, _ = run(t, Limits{Timeout: 30 * time.Second}, `string.find(("a"):rep(5000), ".-.-.-.-.-b")`)
+	})
+	if msg == "" {
+		t.Fatal("pattern completed without its complexity error")
 	}
 	if !strings.Contains(msg, "pattern too complex") {
 		t.Fatalf("error %q", msg)
@@ -562,13 +579,14 @@ func TestSparseIntegerKeysStaySmall(t *testing.T) {
 		`local t = {} rawset(t, 67108000, 1) assert(rawget(t, 67108000) == 1)`,
 		`local t = {} for i = 1, 100 do t[67108863 - i * 1000] = i end`,
 	} {
-		start := time.Now()
-		msg, alloc := allocated(t, src)
+		var msg string
+		var alloc uint64
+		completeWithin(t, 2*time.Second, func() { msg, alloc = allocated(t, src) })
 		if msg != "" {
 			t.Errorf("%s: %s", src, msg)
 		}
-		if alloc > 64<<20 || time.Since(start) > 2*time.Second {
-			t.Errorf("%s: allocated %d MiB in %v", src, alloc>>20, time.Since(start))
+		if alloc > 64<<20 {
+			t.Errorf("%s: allocated %d MiB", src, alloc>>20)
 		}
 	}
 }

@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
+import { markedProcesses, recordedProcesses, unionOf } from './support/process'
 import { expectCardIn, nudgeReconnect, observe, openBoard } from './support/board'
-import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
+import { expectNoTokenInUrls, expectTerminalText, makeWritable, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page, WebSocketRoute } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { makeWorkspace, type Workspace } from './support/workspace'
@@ -25,26 +26,15 @@ async function closeAll(omo: Omo): Promise<void> {
 }
 
 /**
- * Ids of the user shells of this test that are still alive: they carry the
- * test's home and omo's socket but no agent id. Linux only; elsewhere none.
+ * Ids of the user shells of this test that are still alive. Each shell's startup file (below) appends the shell's own
+ * process id to a file of the test's home, and the operating system is asked about every one.
  */
 function shellProcesses(omo: Omo): number[] {
-  if (process.platform !== 'linux') return []
   const home = `HOME=${omo.home}\0`
-  const left: number[] = []
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name)) continue
-    try {
-      const env = readFileSync(`/proc/${name}/environ`, 'latin1')
-      if (!env.includes(home) || !env.includes('\0OMO_SOCKET=') || env.includes('OMO_AGENT_ID=')) continue
-      const stat = readFileSync(`/proc/${name}/stat`, 'latin1')
-      if (stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) === 'Z') continue
-      left.push(Number(name))
-    } catch {
-      // gone, or not ours to read
-    }
-  }
-  return left
+  return unionOf(
+    recordedProcesses(join(omo.home, 'shell-pids')),
+    markedProcesses((env) => env.includes(home) && env.includes('\0OMO_SOCKET=') && !env.includes('OMO_AGENT_ID=')),
+  )
 }
 
 async function expectNoShellsLeft(omo: Omo): Promise<void> {
@@ -57,7 +47,11 @@ async function expectNoShellsLeft(omo: Omo): Promise<void> {
  * what a test types. An empty startup file stops it; other shells ignore it.
  */
 test.beforeEach(({ omo }) => {
-  writeFileSync(join(omo.home, '.zshrc'), '')
+  // The startup file also records the shell's process id: shellProcesses() asks the system about it.
+  const record = 'echo $$ >> "$HOME/shell-pids"\n'
+  writeFileSync(join(omo.home, 'shell-pids'), '')
+  writeFileSync(join(omo.home, '.zshrc'), record)
+  writeFileSync(join(omo.home, '.bashrc'), record)
 })
 
 const sidebar = (page: Page) => page.locator('[data-sidebar]')
@@ -100,7 +94,7 @@ test('a shell opened in the project runs commands and survives a reload with its
     await expectTerminalText(terminal, 'agent=none')
 
     // The process check sees a running shell, so an empty result later means something.
-    if (process.platform === 'linux') expect(shellProcesses(omo).length).toBeGreaterThan(0)
+    expect(shellProcesses(omo).length).toBeGreaterThan(0)
 
     // A reload keeps the shell running: its list entry opens it again with the output so far.
     await page.reload()
@@ -171,7 +165,7 @@ async function occurrences(terminal: Locator, text: string): Promise<number> {
   return shown.split(text).length - 1
 }
 
-test('the first keys typed into a terminal that just opened are not lost while its history is still being drawn', async ({ page, omo }) => {
+test('the first keys typed into a terminal that just opened are not lost while its history is still being drawn', async ({ page, omo, cpuThrottleRate }) => {
   // The socket goes through the test like in the tests below, and the page is
   // slowed down: the keys then arrive while the terminal still parses its replay.
   await page.routeWebSocket(/\/api\/terminals\/[^/]+\/socket$/, (ws) => {
@@ -182,12 +176,12 @@ test('the first keys typed into a terminal that just opened are not lost while i
     await openBoard(page, omo)
     await openTerminalsTab(page)
     const cdp = await page.context().newCDPSession(page)
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 })
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Math.max(6, cpuThrottleRate) })
     await newTerminal(sidebar(page))
     const terminal = terminalIn(sidebar(page))
     await typeInTerminal(page, terminal, 'echo first=$((40 + 2))')
     await expectTerminalText(terminal, 'first=42')
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottleRate })
   } finally {
     await closeAll(omo)
   }
@@ -373,7 +367,7 @@ test.describe('with a running fake developer', () => {
 
 test.describe('a ticket that finishes while a shell is open', () => {
   test.use({
-    omoOptions: { agents: { developer: script('ready', 'sleep|8s', 'write|held.txt|held', 'commit|feat: held', 'done|held', 'hang') } },
+    omoOptions: { agents: { developer: script('ready', 'print|waiting for shell', 'await-line|shell-open|10m', 'write|held.txt|held', 'commit|feat: held', 'done|held', 'hang') } },
   })
 
   test('the worktree stays while a shell is open in it and goes when it closes', async ({ page, omo }) => {
@@ -382,7 +376,7 @@ test.describe('a ticket that finishes while a shell is open', () => {
       const n = await omo.createTicket({ title: 'Finish under a shell' })
       await omo.api('PATCH', `/api/tickets/${n}`, { review: 'skipped' })
       await omo.moveTicket(n, 'ready')
-      await waitForSession(omo, n, 'developer')
+      const session = await waitForSession(omo, n, 'developer')
       const worktree = (await omo.api<{ projects: { worktree: string }[] }>('GET', `/api/tickets/${n}`)).projects[0]!.worktree
       expect(existsSync(worktree)).toBe(true)
 
@@ -391,10 +385,23 @@ test.describe('a ticket that finishes while a shell is open', () => {
       await page.getByRole('dialog', { name: /Finish under a shell/ }).getByRole('button', { name: 'Open terminal' }).click()
       await expect(terminalIn(sidebar(page))).toBeVisible()
 
+      // The developer cannot finish until the shell really holds this worktree.
+      expect((await shells(omo)).map((s) => s.dir)).toContain(worktree)
+      const shell = (await shells(omo)).find((s) => s.dir === worktree)!
+      await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
+      await sidebar(page).locator(`[data-session="${session.id}"]`).click()
+      const developer = terminalIn(sidebar(page))
+      await expectTerminalText(developer, 'waiting for shell')
+      // An agent terminal starts read-only.
+      await makeWritable(sidebar(page))
+      await typeInTerminal(page, developer, 'shell-open')
+
       // The ticket is merged and done; the folder stays for the shell.
       await expectCardIn(page, n, 'Done')
       await waitForNoLiveSession(omo, n)
       expect(existsSync(worktree), 'the worktree went while a shell was open in it').toBe(true)
+      await openTerminalsTab(page)
+      await sidebar(page).locator(`[data-terminal="${shell.id}"][data-terminal-row]`).click()
       await typeInTerminal(page, terminalIn(sidebar(page)), 'echo still=$(ls | wc -l)')
       await expectTerminalText(terminalIn(sidebar(page)), /still=\d/)
 

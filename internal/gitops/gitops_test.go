@@ -8,8 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
+
+// returns runs fn on its own goroutine and waits for it to return. A call that
+// never returns ends with the test binary's own time limit and a dump of every
+// goroutine, naming the call (what shows in the dump through this function's
+// caller); no fixed limit decides it.
+func returns(t *testing.T, what string, fn func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	return <-done
+}
 
 // git runs a git command in dir with fully isolated config (no user/global
 // config, no signing, deterministic identity).
@@ -46,7 +58,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("GIT_AUTHOR_EMAIL", "omo@test")
 	os.Setenv("GIT_COMMITTER_NAME", "omo-test")
 	os.Setenv("GIT_COMMITTER_EMAIL", "omo@test")
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 func TestWorktreeAddRemove(t *testing.T) {

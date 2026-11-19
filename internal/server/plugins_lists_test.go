@@ -1,13 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
@@ -172,12 +172,37 @@ func TestPluginCatalogWithAdditionalLists(t *testing.T) {
 
 func TestPluginCatalogSlowListDoesNotHoldTheOthers(t *testing.T) {
 	s, b, _, _ := listServer(t)
-	host := newListHost(t, map[string]string{"/good.yaml": "plugins: []\n"})
-	setLists(t, s, host.url("/slow.yaml"), host.url("/good.yaml"))
-	old := listFetchBound
-	listFetchBound = 300 * time.Millisecond
-	t.Cleanup(func() { listFetchBound = old })
-	got := readCatalogRoute(t, s, b, "")
+	slowStarted, goodServed := make(chan struct{}), make(chan struct{})
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow.yaml" {
+			close(slowStarted)
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte("plugins: []\n"))
+		close(goodServed)
+	}))
+	t.Cleanup(host.Close)
+	slow := host.URL + "/slow.yaml"
+	setLists(t, s, slow, host.URL+"/good.yaml")
+	cutSlow := make(chan context.CancelFunc, 1)
+	s.plugins.listContext = func(parent context.Context, address string) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		if address == slow {
+			cutSlow <- cancel
+		}
+		return ctx, cancel
+	}
+	answered := make(chan api.PluginCatalog, 1)
+	go func() { answered <- readCatalogRoute(t, s, b, "") }()
+	cancel := receive(t, cutSlow, "the slow list's deadline")
+	defer cancel()
+	receive(t, slowStarted, "the slow HTTP fetch")
+	// The good list must answer while the first is still held. Expire the
+	// held fetch only after this barrier, without a deadline on good work.
+	receive(t, goodServed, "the good list while the slow list is held")
+	cancel()
+	got := receive(t, answered, "the catalog after the slow list expires")
 	if !got.Available || len(got.Lists) != 2 || got.Lists[0].Available || !strings.Contains(got.Lists[0].Message, "took too long") || !got.Lists[1].Available {
 		t.Fatalf("catalog %+v", got)
 	}

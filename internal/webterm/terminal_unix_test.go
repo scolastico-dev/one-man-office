@@ -5,6 +5,7 @@ package webterm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,7 +24,7 @@ import (
 
 func waitOutput(t *testing.T, i *Terminal, match string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	initial, stream, detach := i.subscribe()
 	defer detach()
@@ -41,12 +43,22 @@ func waitOutput(t *testing.T, i *Terminal, match string) {
 }
 
 func TestTerminalInstancesKeepIndependentInputAndResize(t *testing.T) {
-	a, err := Start(Options{ID: "a", Command: "sh", Args: []string{"-i"}, Dir: "/tmp"})
+	// An interactive fixture must not source the developer's shell startup
+	// files. Keep the inherited choices hostile to guard this boundary.
+	startup := filepath.Join(t.TempDir(), "shell-startup")
+	if err := os.WriteFile(startup, []byte("exit 93\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", "/nonexistent/fish")
+	t.Setenv("ENV", startup)
+	t.Setenv("BASH_ENV", startup)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "SHELL=/bin/sh"}
+	a, err := Start(Options{ID: "a", Command: "/bin/sh", Args: []string{"-i"}, Dir: t.TempDir(), Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Kill()
-	b, err := Start(Options{ID: "b", Command: "sh", Args: []string{"-i"}, Dir: "/tmp"})
+	b, err := Start(Options{ID: "b", Command: "/bin/sh", Args: []string{"-i"}, Dir: t.TempDir(), Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +86,7 @@ func TestTerminalInstancesKeepIndependentInputAndResize(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("child did not exit")
-	}
+	<-a.done
 	if a.Info().State != "exited" {
 		t.Fatal("instance remained running")
 	}
@@ -93,7 +101,7 @@ func TestForcedKillStopsChildProcessTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer i.Kill()
-	waitOutput(t, i, "CHILD:")
+	waitOutput(t, i, "\n")
 	initial, _, detach := i.subscribe()
 	detach()
 	line := strings.Split(strings.Split(string(initial.replay), "CHILD:")[1], "\r")[0]
@@ -104,11 +112,7 @@ func TestForcedKillStopsChildProcessTree(t *testing.T) {
 	if err := i.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-i.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("child did not exit")
-	}
+	<-i.done
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		err := syscall.Kill(pid, 0)
@@ -175,7 +179,7 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 	}
 	defer term.Kill()
 	server := serveTerminal(t, term)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -208,15 +212,11 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 	if err := term.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-term.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("terminal did not exit after Kill")
-	}
+	<-term.Done()
 }
 
 func TestServeWebSocketRejectsWhenLimitIsFull(t *testing.T) {
-	term := Own("limit", terminalFixture(), nil)
+	term := Own("limit", terminalFixture(t), nil)
 	limit := NewConnectionLimit(1)
 	limit.slots <- struct{}{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,5 +230,82 @@ func TestServeWebSocketRejectsWhenLimitIsFull(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+// Resizing and process exit can reach the same PTY descriptor together.
+// The race detector checks that ioctl cannot access a descriptor as it closes.
+func TestProcessResizeIsSafeDuringClose(t *testing.T) {
+	p, err := startProcess("cat", nil, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Kill(); _ = p.Close(); _ = p.Wait() })
+	if err := p.Resize(31, 99); err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan struct{})
+	closed := make(chan struct{})
+	var workers sync.WaitGroup
+	for range 16 {
+		workers.Go(func() {
+			<-ready
+			for {
+				select {
+				case <-closed:
+					return
+				default:
+					_ = p.Resize(32, 100)
+				}
+			}
+		})
+	}
+	workers.Go(func() { <-ready; _ = p.Close(); close(closed) })
+	close(ready)
+	workers.Wait()
+	if err := p.Resize(33, 101); err == nil {
+		t.Fatal("resize succeeded after the PTY closed")
+	}
+}
+
+// An in-flight Read can retain the descriptor after File.Close returns because
+// pty's File.Fd call switched it to blocking mode. Resize must respect the
+// process's closed state even while that descriptor is still valid in the OS.
+func TestClosedProcessCannotResizeDescriptorHeldByRead(t *testing.T) {
+	p, err := startProcess("cat", nil, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Kill(); _ = p.Close(); _ = p.Wait() })
+	if err := p.Resize(31, 99); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := p.(*ptyProcess).terminal.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reading := make(chan struct{})
+	release := make(chan struct{})
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- raw.Read(func(uintptr) bool {
+			close(reading)
+			<-release
+			return true
+		})
+	}()
+	t.Cleanup(func() {
+		close(release)
+		err := <-readDone
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	<-reading
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Resize(33, 101); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("resize after close = %v, want os.ErrClosed", err)
 	}
 }

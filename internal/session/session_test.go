@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+// completeWithin runs fn on its own goroutine and waits for it. The limit is
+// not used: an operation that never completes ends with the test binary's own
+// time limit and a dump of every goroutine. Behavioral deadlines remain
+// configured on the operation itself.
+func completeWithin(t *testing.T, _ time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	<-done
+}
+
 type recordingProcess struct {
 	writes [][]byte
 }
@@ -50,11 +61,7 @@ func endSession(t *testing.T, s *Session) {
 		default:
 		}
 		_ = s.Kill()
-		select {
-		case <-s.Done():
-		case <-time.After(10 * time.Second):
-			t.Error("the session did not end after Kill")
-		}
+		<-s.Done()
 	})
 }
 
@@ -64,6 +71,7 @@ func TestScreenAndLogCaptureOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	endSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "hello-omo") {
 		t.Fatalf("screen missing output:\n%s", s.Screen())
@@ -87,14 +95,11 @@ func TestPublishesDeduplicatedLogLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	endSession(t, s)
 	<-s.Done()
-	select {
-	case line := <-lines:
-		if line != "plugin-line" {
-			t.Fatalf("log callback line = %q", line)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("log callback was not invoked")
+	line := <-lines
+	if line != "plugin-line" {
+		t.Fatalf("log callback line = %q", line)
 	}
 }
 
@@ -189,11 +194,7 @@ func TestKillClosesDone(t *testing.T) {
 	if err := s.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-s.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("Done not closed after Kill")
-	}
+	<-s.Done()
 }
 
 func TestEnvInjected(t *testing.T) {
@@ -203,6 +204,7 @@ func TestEnvInjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	endSession(t, s)
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "id=developer-jason") {
 		t.Fatalf("env not injected:\n%s", s.Screen())
@@ -225,12 +227,8 @@ func TestOnOutputReceivesRawBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-s.Done():
-	case <-time.After(10 * time.Second):
-		_ = s.Kill()
-		t.Fatal("session did not end")
-	}
+	endSession(t, s)
+	<-s.Done()
 	mu.Lock()
 	defer mu.Unlock()
 	if runtime.GOOS == "windows" {

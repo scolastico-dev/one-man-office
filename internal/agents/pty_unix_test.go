@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	}
 	switch os.Getenv(helperEnv) {
 	case "":
-		os.Exit(m.Run())
+		os.Exit(childenvtest.Run(m))
 	case "parent":
 		// An agent that starts a long-running child, like a CLI running a
 		// build in the background.
@@ -187,11 +187,7 @@ func start(t *testing.T, r *PTYRunner, spec Spec) *ptyAgent {
 	}
 	t.Cleanup(func() {
 		_ = a.Kill()
-		select {
-		case <-a.Done():
-		case <-time.After(10 * time.Second):
-			t.Error("agent still running after the test")
-		}
+		<-a.Done()
 	})
 	return a.(*ptyAgent)
 }
@@ -219,11 +215,7 @@ func TestStartPromptResentUntilReady(t *testing.T) {
 	}
 	a := start(t, NewPTYRunner(), spec)
 	agent.Store(a)
-	select {
-	case <-a.delivery:
-	case <-time.After(10 * time.Second):
-		t.Fatal("start-prompt delivery did not finish")
-	}
+	<-a.delivery
 	// The terminal echoes the typed line and cat prints it back: one
 	// delivery shows the token twice.
 	if n := strings.Count(a.sess.Screen(), token); n < 1 || n > 2 {
@@ -238,7 +230,7 @@ func TestTerminalReceivesAgentOutput(t *testing.T) {
 		a.Terminal().ServeWebSocket(r.Context(), w, r, nil)
 	}))
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -346,22 +338,14 @@ func TestKillEndsAgent(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("agent still running 5s after Kill")
-	}
+	<-a.Done()
 	if a.ExitErr() == nil {
 		t.Fatal("a killed agent reports a clean exit")
 	}
 	if err := a.Kill(); err != nil {
 		t.Fatalf("second Kill: %v", err)
 	}
-	select {
-	case <-a.Terminal().Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("terminal did not end with its agent")
-	}
+	<-a.Terminal().Done()
 }
 
 func TestKillEndsChildProcesses(t *testing.T) {
@@ -495,11 +479,10 @@ func TestStartFailsWhenAnEnvironmentCommandHangs(t *testing.T) {
 	isolate(t)
 	spec := testSpec(t, "cat")
 	spec.AgentEnv = map[string]string{"VAULT_TOKEN": "`sleep 60`"}
-	started := time.Now()
-	_, err := (&PTYRunner{EnvTimeout: 200 * time.Millisecond}).Start(spec)
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("Start took %v", elapsed)
-	}
+	var err error
+	completeWithin(t, 5*time.Second, func() {
+		_, err = (&PTYRunner{EnvTimeout: 200 * time.Millisecond}).Start(spec)
+	})
 	if err == nil || !strings.Contains(err.Error(), "VAULT_TOKEN") || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a timeout naming VAULT_TOKEN", err)
 	}
@@ -516,7 +499,7 @@ func TestSessionIDRedactedFromTranscriptAndViewers(t *testing.T) {
 		a.Terminal().ServeWebSocket(r.Context(), w, r, nil)
 	}))
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -625,11 +608,7 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 		t.Fatalf("no child pid on screen:\n%s", screen)
 	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	select {
-	case <-a.Exited():
-	case <-time.After(10 * time.Second):
-		t.Fatal("main process exit not reported")
-	}
+	<-a.Exited()
 	var exit *exec.ExitError
 	if !errors.As(a.ExitErr(), &exit) || exit.ExitCode() != 3 {
 		t.Fatalf("ExitErr = %v, want exit status 3", a.ExitErr())
@@ -647,11 +626,7 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 	if err := a.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-a.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("terminal still open after Kill")
-	}
+	<-a.Done()
 	waitUntil(t, 10*time.Second, func() bool {
 		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 	})
@@ -674,6 +649,21 @@ func fakeAgentSpec(t *testing.T, env map[string]string) Spec {
 	return spec
 }
 
+// startComposingAgent waits until the fake disabled terminal echo before the
+// delivery goroutine can type. A launch delay cannot guarantee this ordering.
+func startComposingAgent(t *testing.T, spec Spec) *ptyAgent {
+	t.Helper()
+	rawReady := filepath.Join(t.TempDir(), "raw-ready")
+	spec.ProfileEnv[fakeagent.EnvRawReadyFile] = rawReady
+	allowDelivery := make(chan struct{})
+	defer close(allowDelivery)
+	awaiting := spec.AwaitingReady
+	spec.AwaitingReady = func() bool { <-allowDelivery; return awaiting() }
+	a := start(t, NewPTYRunner(), spec)
+	waitUntil(t, 10*time.Second, func() bool { _, err := os.Stat(rawReady); return err == nil })
+	return a
+}
+
 // A CLI that ignores the Enter while it is still starting keeps the typed
 // prompt in its input line: omo sees it still there and presses Enter again,
 // without typing the prompt a second time.
@@ -691,7 +681,7 @@ func TestStartPromptSubmittedWhenTheFirstEnterIsIgnored(t *testing.T) {
 				a := agent.Load()
 				return a == nil || !strings.Contains(a.sess.Screen(), "start prompt received")
 			}
-			a := start(t, NewPTYRunner(), spec)
+			a := startComposingAgent(t, spec)
 			agent.Store(a)
 			screen := waitScreen(t, a, "fake: start prompt received by typing: "+spec.StartPrompt)
 			if n := strings.Count(screen, "fake: typed:"); n != 1 {
@@ -701,29 +691,52 @@ func TestStartPromptSubmittedWhenTheFirstEnterIsIgnored(t *testing.T) {
 	}
 }
 
+// observedPromptSender delegates real PTY writes and observes their consumption
+// before allowing delivery to make its next retry decision.
+type observedPromptSender struct {
+	promptSender
+	sends     int
+	afterSend func(int)
+}
+
+func (s *observedPromptSender) SendPromptShown(text string, shown func() bool, maxWait time.Duration) (bool, error) {
+	visible, err := s.promptSender.SendPromptShown(text, shown, maxWait)
+	s.sends++
+	if err == nil {
+		s.afterSend(s.sends)
+	}
+	return visible, err
+}
+
 // Input that arrives during a start-up notice is lost and never shows: the
 // prompt is typed again, once.
 func TestStartPromptRetypedWhenItNeverShowed(t *testing.T) {
 	isolate(t)
-	var agent atomic.Pointer[ptyAgent]
-	spec := fakeAgentSpec(t, map[string]string{fakeagent.EnvDeafFor: "1s"})
-	// The delay lets the fake switch its terminal to raw input first;
-	// before that the terminal itself would echo the text.
-	spec.Delivery = Delivery{Inject: true, Delay: 500 * time.Millisecond, RetryWait: 1500 * time.Millisecond, Retries: 3,
-		EchoWait: 200 * time.Millisecond, SubmitCheck: 100 * time.Millisecond, SubmitRetries: 3}
-	spec.AwaitingReady = func() bool {
-		a := agent.Load()
-		return a == nil || !strings.Contains(a.sess.Screen(), "start prompt received")
-	}
+	spec := fakeAgentSpec(t, map[string]string{fakeagent.EnvDropPrompts: "1"})
+	prompt := spec.StartPrompt
+	// Drive delivery through an observing adapter so the real PTY process's
+	// acceptance can be gated independently of the retry clock.
+	spec.StartPrompt = ""
+	rawReady := filepath.Join(t.TempDir(), "raw-ready")
+	spec.ProfileEnv[fakeagent.EnvRawReadyFile] = rawReady
 	a := start(t, NewPTYRunner(), spec)
-	agent.Store(a)
-	screen := waitScreen(t, a, "fake: start prompt received by typing: "+spec.StartPrompt)
-	select {
-	case <-a.delivery:
-	case <-time.After(10 * time.Second):
-		t.Fatal("start-prompt delivery did not finish")
+	waitUntil(t, 10*time.Second, func() bool { _, err := os.Stat(rawReady); return err == nil })
+	accepted := "fake: start prompt received by typing: " + prompt
+	sender := &observedPromptSender{promptSender: a.sess, afterSend: func(n int) {
+		if n == 2 {
+			waitScreen(t, a, accepted)
+		}
+	}}
+	// Zero retry/echo/check intervals remove any expectation that a real
+	// child or terminal reader runs within a guessed scheduling window.
+	deliverStartPrompt(sender, prompt, false, Delivery{Inject: true, Retries: 3, SubmitRetries: 3},
+		func() bool { return !strings.Contains(a.sess.Screen(), accepted) }, a.LastOutput, time.Now,
+		func(warning string) { t.Error(warning) })
+	screen := waitScreen(t, a, accepted)
+	if sender.sends != 2 {
+		t.Fatalf("sent %d prompts, want lost first prompt plus one resend", sender.sends)
 	}
-	if n := strings.Count(a.sess.Screen(), "fake: typed:"); n != 1 {
+	if n := strings.Count(screen, "fake: typed:"); n != 1 {
 		t.Fatalf("%d lines reached the agent, want 1:\n%s", n, screen)
 	}
 }

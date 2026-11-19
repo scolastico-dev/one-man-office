@@ -72,6 +72,9 @@ func roleCases() map[string]struct {
 		"standalone developer": {"developer", with(func(d *Data) {
 			d.Role, d.Type, d.Supervisor, d.CEOEnabled = "developer", "task", "user", true
 		})},
+		"standalone developer agent review": {"developer", with(func(d *Data) {
+			d.Role, d.Type, d.Supervisor, d.AgentReview = "developer", "task", "user", true
+		})},
 		"pm agents release": {"pm", with(func(d *Data) { d.Role, d.Type, d.Supervisor, d.AgentReview = "pm", "story", "CEO", true })},
 		"pm user release": {"pm", with(func(d *Data) {
 			d.Role, d.Type, d.Supervisor, d.TaskRelease = "pm", "story", "user", "user"
@@ -293,16 +296,29 @@ func TestRolePromptsReserveSupervisorNotificationsForQuestions(t *testing.T) {
 
 func TestVerificationTexts(t *testing.T) {
 	checks := []struct{ label, want string }{
-		{"developer in story", "Do not run the project's full end-to-end suite"},
-		{"standalone developer", "The task's review verifies the whole task"},
+		// No developer runs the full end-to-end suite, whatever the ticket.
+		{"developer in story", "Never run the project's full end-to-end suite, not before you hand in and not after a rejected review"},
+		{"standalone developer", "Never run the project's full end-to-end suite, not before you hand in and not after a rejected review"},
+		{"standalone developer agent review", "Never run the project's full end-to-end suite, not before you hand in and not after a rejected review"},
 		{"developer in story", "the story's review runs it once"},
+		{"standalone developer agent review", "the task's reviewer runs it once, before it approves"},
+		{"standalone developer", "no agent runs it"},
+		{"developer in story", "with the checks that cover what you changed"},
+		{"standalone developer", "Say in your hand-in which checks you ran"},
 		{"reviewer targeted task", "the story's review runs it once"},
 		{"developer in story", "the project's own instructions"},
 		{"reviewer targeted task", "Targeted review"},
 		{"reviewer full story multi-project", "on the integration branch"},
 		{"reviewer full story multi-project", "Each project has its own reviewer"},
-		{"reviewer full standalone", "complete test suite including the end-to-end tests"},
-		{"pm agents release", "You do not run the full test suite"},
+		// A reviewer that verifies in full runs the complete suite once, on
+		// the commit it is ready to approve, and never has it run for it.
+		{"reviewer full standalone", "Run the complete test suite including the end-to-end tests exactly once per verdict: on the commit you are ready to approve"},
+		{"reviewer full story multi-project", "Run the complete test suite including the end-to-end tests exactly once per verdict: on the commit you are ready to approve"},
+		{"reviewer full standalone", "Never ask the developer to run the complete suite: you run it"},
+		{"reviewer full story multi-project", "Never ask the product manager or a developer to run the complete suite: you run it"},
+		{"reviewer targeted task", "Never ask the developer to run the complete suite: the story's review runs it"},
+		{"reviewer full standalone", "with the tests that cover the fix"},
+		{"pm agents release", "You do not run the full test suite, and neither do your developers or the reviewers of single tasks"},
 		{"pm user release", "no agent runs the full suite"},
 	}
 	for _, c := range checks {
@@ -315,11 +331,63 @@ func TestVerificationTexts(t *testing.T) {
 	}
 }
 
+// Every role does what its ticket says and no more, and asks the user when
+// it thinks more is needed; a reviewer does not reject to get more work.
+func TestNobodyAddsWorkWithoutAskingTheUser(t *testing.T) {
+	checks := []struct{ label, want string }{
+		{"developer in story", "Do what your ticket's description says, and nothing more"},
+		{"standalone developer", "Do what your ticket's description says, and nothing more"},
+		{"developer in story", "`omo ai ask 7 --to user \"what you want to add and why\"` (or a comment that mentions @user)"},
+		{"developer in story", "do the extra work only after the user said yes"},
+		{"reviewer targeted task", "You reject for these reasons only"},
+		{"reviewer full standalone", "You reject for these reasons only"},
+		{"reviewer full story multi-project", "You reject for these reasons only"},
+		{"reviewer full standalone", "You do not reject to get more tests, proofs, scans, audits or any work the description does not ask for"},
+		{"reviewer full standalone", "`omo ai ask 7 --to user \"what you want added and why\"` (or a comment that mentions @user)"},
+		{"reviewer full standalone", "Do not hold the ticket back for it"},
+		{"pm agents release", "A task says what your story's description asks for, and nothing more"},
+		{"pm user release", "A task says what your story's description asks for, and nothing more"},
+		{"pm agents release", "`omo ai ask 7 --to user \"what you want to add and why\"` (or a comment that mentions @user)"},
+		{"ceo may approve", "A ticket says what the user asked for, and nothing more"},
+		{"ceo may not approve", "ask the user in this terminal first"},
+	}
+	for _, c := range checks {
+		if out := renderCase(t, c.label); !strings.Contains(out, c.want) {
+			t.Errorf("%s lacks %q:\n%s", c.label, c.want, out)
+		}
+	}
+	// Not adding work is never a licence to cut it.
+	for _, label := range []string{"developer in story", "pm agents release", "ceo may approve"} {
+		if out := renderCase(t, label); !strings.Contains(out, "This limits what you add, never what must hold") {
+			t.Errorf("%s may read the rule as permission to drop tests", label)
+		}
+	}
+}
+
+// A supervisor stops a ticket whose work cannot go on, and keeps no waiting
+// agent busy.
+func TestSupervisorsStopWorkThatCannotGoOn(t *testing.T) {
+	checks := []struct{ label, want string }{
+		{"pm agents release", "Do not release a task whose work cannot be done yet"},
+		{"pm agents release", "then stop it with `omo ai ticket move <task> ready`"},
+		{"pm user release", "then stop it with `omo ai ticket move <task> ready`"},
+		{"pm agents release", "Never keep a waiting developer busy: no holds, permissions to go on, interim audits or status exchanges"},
+		{"ceo may approve", "`omo ai ticket move N planning` stops its agents and keeps its branch and its work"},
+		{"ceo may not approve", "`omo ai ticket move N planning` stops its agents and keeps its branch and its work"},
+	}
+	for _, c := range checks {
+		if out := renderCase(t, c.label); !strings.Contains(out, c.want) {
+			t.Errorf("%s lacks %q:\n%s", c.label, c.want, out)
+		}
+	}
+}
+
 func TestReleaseAndApprovalTexts(t *testing.T) {
 	if out := renderCase(t, "pm agents release"); !strings.Contains(out, "omo ai ticket move <task> ready") {
 		t.Error("pm with agent release is not told how to release")
 	}
-	if out := renderCase(t, "pm user release"); strings.Contains(out, "ticket move") || !strings.Contains(out, "the user releases them") {
+	// Stopping a task (a move back to ready) is not releasing one.
+	if out := renderCase(t, "pm user release"); strings.Contains(out, "Release each") || strings.Count(out, "ticket move") != 2 || !strings.Contains(out, "the user releases them") {
 		t.Error("pm with user release is told to release tasks itself")
 	}
 	if out := renderCase(t, "pm user release"); !strings.Contains(out, "ask the user in a comment on the story (mention @user) to decide whether to release them") {
@@ -328,7 +396,8 @@ func TestReleaseAndApprovalTexts(t *testing.T) {
 	if out := renderCase(t, "ceo may approve"); !strings.Contains(out, "only after the user has agreed") {
 		t.Error("CEO approval is not tied to the user's agreement")
 	}
-	if out := renderCase(t, "ceo may not approve"); strings.Contains(out, "ticket move") || !strings.Contains(out, "You do not approve stories") {
+	// Stopping a ticket (a move back to planning) is not approving one.
+	if out := renderCase(t, "ceo may not approve"); strings.Contains(out, "ticket move N ready") || strings.Count(out, "ticket move") != 1 || !strings.Contains(out, "You do not approve stories") {
 		t.Error("CEO without approval right is told to move tickets")
 	}
 	if out := renderCase(t, "ceo may approve"); !strings.Contains(out, "default branch") {

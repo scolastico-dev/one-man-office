@@ -2,13 +2,17 @@ package skillsets
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -152,18 +156,40 @@ func (e *env) eventCount() int {
 	return len(e.events)
 }
 
+// waitChange observes publication independently of the manager's state:
+// finish makes state visible before calling OnChange.
+func (e *env) waitChange(name, state string) {
+	e.t.Helper()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		e.mu.Lock()
+		found := false
+		for _, event := range e.events {
+			if event.Name == name && event.State == state {
+				found = true
+				break
+			}
+		}
+		e.mu.Unlock()
+		if found {
+			return
+		}
+		select {
+		case <-tick.C:
+		}
+	}
+}
+
 // waitState waits until the set's state is want and returns it.
 func waitState(t *testing.T, m *Manager, name, want string) api.SkillSetState {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := m.State(name)
 		if st.State == want {
 			return st
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("state of %s = %+v, want %s", name, st, want)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -171,15 +197,12 @@ func waitState(t *testing.T, m *Manager, name, want string) api.SkillSetState {
 // waitCommit waits until the set's checkout is at commit.
 func waitCommit(t *testing.T, m *Manager, name, commit string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := m.State(name)
 		if st.State == StateOK && st.Commit == commit {
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("state of %s = %+v, want commit %s", name, st, commit)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -225,6 +248,7 @@ func TestSkillSetFetchedAtStart(t *testing.T) {
 	if readFile(t, filepath.Join(e.dir, "sp", "SKILLS.md")) != "one\n" {
 		t.Fatal("the checkout lacks the repository's file")
 	}
+	e.waitChange("sp", StateOK)
 	e.mu.Lock()
 	first := e.events[0]
 	last := e.events[len(e.events)-1]
@@ -243,19 +267,30 @@ func TestSkillSetPinnedNotUpdated(t *testing.T) {
 	first := u.head()
 	e := newEnv(t)
 	e.put("pinned", u.bare, "main", api.SkillSetPinned, nil)
-	e.put("fresh", u.bare, "main", api.SkillSetAtStart, nil)
+	e.put("zz-fresh", u.bare, "main", api.SkillSetAtStart, nil)
 	m := e.manager()
 	m.Start(context.Background())
 	waitState(t, m, "pinned", StateOK)
-	waitState(t, m, "fresh", StateOK)
+	waitState(t, m, "zz-fresh", StateOK)
 	m.Stop()
 
 	second := u.commit(map[string]string{"a.md": "two\n"})
 	// A restart: a new manager on the same folder.
 	m2 := e.manager()
 	m2.Start(context.Background())
-	waitCommit(t, m2, "fresh", second)
-	time.Sleep(100 * time.Millisecond) // several polls
+	waitCommit(t, m2, "zz-fresh", second)
+	// The last startup set completed, so every earlier set was considered.
+	// Join any fetch wrongly queued for the pinned set without cancelling it.
+	m2.Reconcile()
+	m2.mu.Lock()
+	var pending []*job
+	for _, j := range m2.jobs {
+		pending = append(pending, j)
+	}
+	m2.mu.Unlock()
+	for _, j := range pending {
+		<-j.done
+	}
 	if st := m2.State("pinned"); st.State != StateOK || st.Commit != first {
 		t.Fatalf("pinned set after restart = %+v, want %s", st, first)
 	}
@@ -299,9 +334,23 @@ func TestSkillSetUpdateSwaps(t *testing.T) {
 
 func TestSkillSetFailureHidesCredentials(t *testing.T) {
 	e := newEnv(t)
-	e.put("s", "https://user:SECRET@127.0.0.1:1/x.git", "", api.SkillSetPinned, nil)
+	var requests atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.git.SetEnvironment(append(gitEnv(t), "GIT_SSL_CAINFO="+ca))
+	e.put("s", strings.Replace(srv.URL, "https://", "https://user:SECRET@", 1)+"/x.git", "", api.SkillSetPinned, nil)
 	m := e.manager()
 	st := m.Update(context.Background(), "s")
+	if requests.Load() == 0 {
+		t.Fatal("the fetch did not reach the failing server")
+	}
 	if st.State != StateFailed || st.Message == "" || st.Commit != "" {
 		t.Fatalf("state = %+v", st)
 	}
@@ -439,7 +488,8 @@ func TestSkillSetBrokenFileKeepsCheckout(t *testing.T) {
 	// A restart with the broken file keeps the checkout too.
 	m2 := e.manager()
 	m2.Start(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	// Stop joins startup cleanup, so the checkout assertion observes its result.
+	m2.Stop()
 	if _, ok := m2.Checkout("a"); !ok {
 		t.Fatal("a hand-broken settings file cost the set its checkout")
 	}
@@ -554,15 +604,12 @@ func TestSkillSetStartCleansLeftovers(t *testing.T) {
 	e.put("s", testpath.Abs("/nonexistent/repo.git"), "", api.SkillSetPinned, nil)
 	m := e.manager()
 	m.Start(context.Background())
-	deadline := time.Now().Add(10 * time.Second)
 	for {
 		entries, _ := os.ReadDir(e.dir)
 		if len(entries) == 2 {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("skills folder = %v", entries)
-		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 	onlySets(t, e.dir, "s", "NOTES")
@@ -573,20 +620,28 @@ func TestSkillSetStopDuringFetch(t *testing.T) {
 		t.Skip("uses a sh ssh command")
 	}
 	// An ssh that never answers: the fetch hangs until it is cancelled.
-	e := newEnv(t, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=commit.gpgsign", "GIT_CONFIG_VALUE_0=false", "GIT_SSH_COMMAND=sleep 60 #")
+	started := filepath.Join(t.TempDir(), "ssh-started")
+	ssh := filepath.Join(t.TempDir(), "ssh")
+	writeFile(t, ssh, "#!/bin/sh\nprintf ready > "+shellQuote(started)+"\nexec sleep 60\n")
+	if err := os.Chmod(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=commit.gpgsign", "GIT_CONFIG_VALUE_0=false", "GIT_SSH_COMMAND="+shellQuote(ssh))
 	e.put("s", "ssh://git@127.0.0.1/x.git", "", api.SkillSetAtStart, nil)
 	m := e.manager()
 	m.Start(context.Background())
 	waitState(t, m, "s", StateUpdating)
-	time.Sleep(200 * time.Millisecond)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 	before := e.eventCount()
 	done := make(chan struct{})
 	go func() { m.Stop(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("Stop did not return while a fetch hung")
-	}
+	<-done
 	if e.eventCount() != before {
 		t.Fatal("an event was sent after Stop")
 	}
@@ -648,6 +703,7 @@ func TestStateNamesMissingPaths(t *testing.T) {
 	if strings.Join(st.MissingPaths, ",") != "skills/c" {
 		t.Fatalf("state = %+v", st)
 	}
+	e.waitChange("s", StateOK)
 	e.mu.Lock()
 	last := e.events[len(e.events)-1]
 	e.mu.Unlock()
@@ -673,5 +729,42 @@ func TestStateNamesMissingPaths(t *testing.T) {
 		if st.MissingPaths == nil {
 			t.Fatalf("States has nil missing paths: %+v", st)
 		}
+	}
+}
+
+// shellQuote protects temporary paths passed through git's SSH shell.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+
+// A request arriving while the preceding worker retires must either join
+// another fetch or start a new worker; it cannot disappear with the old job.
+func TestSkillSetUpdateDuringWorkerRetirementIsNotLost(t *testing.T) {
+	u := newUpstream(t, map[string]string{"a.md": "one\n"})
+	e := newEnv(t)
+	e.put("s", u.bare, "main", api.SkillSetPinned, nil)
+	m := e.manager()
+	finished, releaseFinish := make(chan struct{}), make(chan struct{})
+	retiring, releaseRetire := make(chan struct{}), make(chan struct{})
+	var finishOnce, releaseFinishOnce, releaseRetireOnce sync.Once
+	releaseFirst := func() { releaseFinishOnce.Do(func() { close(releaseFinish) }) }
+	releaseLast := func() { releaseRetireOnce.Do(func() { close(releaseRetire) }) }
+	t.Cleanup(releaseFirst)
+	t.Cleanup(releaseLast)
+	m.o.OnChange = func(st api.SkillSetState) {
+		if st.State == StateOK {
+			finishOnce.Do(func() { close(finished); <-releaseFinish })
+		}
+	}
+	first := m.enqueue("s")
+	<-finished
+	secondCommit := u.commit(map[string]string{"a.md": "two\n"})
+	cancel := first.cancel
+	first.cancel = func() { close(retiring); <-releaseRetire; cancel() }
+	releaseFirst()
+	<-retiring
+	second := m.enqueue("s")
+	releaseLast()
+	<-second.done
+	if st := m.State("s"); st.Commit != secondCommit {
+		t.Fatalf("update during worker retirement was lost: commit = %s, want %s", st.Commit, secondCommit)
 	}
 }

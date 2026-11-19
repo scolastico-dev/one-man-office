@@ -225,7 +225,11 @@ keep their columns; work stays in the worktrees. When you switch the pause off,
 started work gets fresh agents.
 
 To stop one ticket, drag it from In Progress back to Ready For Dev or Planning
-(**Stop and move**): its agents end, branch and worktree stay.
+(**Stop and move**): its agents end, branch and worktree stay. A ticket's
+supervisor can do the same with `omo ai ticket move`: a product manager stops
+the tasks of its story, the CEO the tickets it supervises. They use it for work
+that cannot go on yet, instead of keeping its agent busy. No other agent stops
+a ticket.
 
 ## Restarts
 

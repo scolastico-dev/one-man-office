@@ -1,6 +1,7 @@
 // A story with two projects has one reviewer per project. The comment box
 // offers `@reviewer:<project id>` for each besides `@reviewer`, and a mention
 // of one project's reviewer reaches that reviewer only.
+import { withoutShellConfig } from './support/env'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { devNull } from 'node:os'
@@ -42,7 +43,7 @@ test('on a story with two projects the composer offers each project\'s reviewer 
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
       cwd: second,
-      env: { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
+      env: { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
     })
   git('add', 'keep.txt')
   git('commit', '-q', '-m', 'add keep.txt')

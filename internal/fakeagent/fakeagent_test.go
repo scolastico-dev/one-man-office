@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
@@ -21,7 +23,7 @@ func TestMain(m *testing.M) {
 		os.Exit(Main())
 	}
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 func contains(t *testing.T, got, want string) {
@@ -218,14 +220,11 @@ func TestWaitLoopWorksAgainWhenRejected(t *testing.T) {
 	}
 	w.waits <- "omo: ticket was rejected"
 	// The second hand-in is the sign the loop worked again.
-	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if tk := w.ticket(task); tk.Column == api.ColumnReview && tk.ReviewRound == 2 {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("not handed in again:\n%s", r.out.String())
-		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 	res := r.finish(true)
@@ -242,11 +241,7 @@ func TestWaitLoopAnswersMentionsAndReviewerNeverJudgesAgain(t *testing.T) {
 	w.session(api.RoleReviewer, task, "rev1")
 	r := start(t, Options{Script: "wait-loop|1m|Yes, all tests ran"})
 	w.waits <- "omo: #" + itoa(task) + " comment 5 by user mentions @reviewer: omo ai comments " + itoa(task) + " --since 4"
-	deadline := time.Now().Add(20 * time.Second)
 	for len(agentComments(t, w, task)) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("no answer:\n%s", r.out.String())
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	w.waits <- "timeout: nothing arrived in 1m."
@@ -379,22 +374,37 @@ func TestLeaveUncommittedFilesAndHandInTwice(t *testing.T) {
 	noSecret(t, res.out, id)
 }
 
+// hangContext observes the blocking context receive in hang. The print/hang
+// script does not otherwise call Done, so this marks entry into the wait.
+type hangContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *hangContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
 func TestNeverReadyAndHangMakeNoCalls(t *testing.T) {
 	w := startWorld(t)
 	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")
-	r := start(t, Options{Script: "print|alive\nhang"})
-	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(r.out.String(), "alive") {
-		if time.Now().After(deadline) {
-			t.Fatal("no output")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	hang := &hangContext{Context: ctx, entered: make(chan struct{})}
+	r := &running{t: t, out: &syncBuffer{}, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		r.code = Run(hang, Options{Script: "print|alive\nhang", Stdout: r.out})
+		close(r.done)
+	}()
+	t.Cleanup(func() { r.finish(true) })
 	select {
+	case <-hang.entered:
 	case <-r.done:
 		t.Fatalf("hang returned %d", r.code)
-	case <-time.After(50 * time.Millisecond):
+
 	}
+	contains(t, r.out.String(), "alive")
 	res := r.finish(true)
 	if res.code == 0 {
 		t.Fatal("interrupted agent reported success")
@@ -412,11 +422,7 @@ func TestFloodPrintsLines(t *testing.T) {
 		t.Fatalf("%d lines", n)
 	}
 	r := start(t, Options{Script: "flood"})
-	deadline := time.Now().Add(20 * time.Second)
 	for strings.Count(r.out.String(), "\n") < 1000 {
-		if time.Now().After(deadline) {
-			t.Fatal("endless flood stopped")
-		}
 		time.Sleep(time.Millisecond)
 	}
 	if res := r.finish(true); res.code == 0 {
@@ -646,20 +652,15 @@ func TestRunsAsProcess(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	werr := make(chan error, 1)
+	waited := make(chan struct{})
+	go func() { defer close(waited); werr <- cmd.Wait() }()
 	t.Cleanup(func() {
-		if cmd.ProcessState == nil {
-			cmd.Process.Kill()
-			cmd.Wait()
-		}
+		_ = cmd.Process.Kill()
+		<-waited
 	})
 	io.WriteString(in, "Run omo ai ready to begin\n")
-	werr := make(chan error, 1)
-	go func() { werr <- cmd.Wait() }()
-	select {
-	case <-werr:
-	case <-time.After(30 * time.Second):
-		t.Fatalf("process did not exit:\n%s", out.String())
-	}
+	<-werr
 	if code := cmd.ProcessState.ExitCode(); code != 4 {
 		t.Fatalf("exit code %d\n%s", code, out.String())
 	}
@@ -702,7 +703,7 @@ func agentComments(t *testing.T, w *world, n int) []api.Comment {
 func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 	var echo syncBuffer
 	in, feed := io.Pipe()
-	lines := composer(in, &echo, 1, time.Time{})
+	lines := composer(in, &echo, 1, time.Time{}, 0)
 	go func() {
 		feed.Write([]byte("\rhello"))
 		feed.Write([]byte("\r"))
@@ -718,7 +719,7 @@ func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 	}
 
 	in, feed = io.Pipe()
-	lines = composer(in, io.Discard, 0, time.Now().Add(time.Hour))
+	lines = composer(in, io.Discard, 0, time.Now().Add(time.Hour), 0)
 	go func() {
 		feed.Write([]byte("lost\r"))
 		feed.Close()
@@ -728,10 +729,25 @@ func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
 	}
 }
 
+func TestComposerDropsWholePromptsWithoutEcho(t *testing.T) {
+	var echo syncBuffer
+	in, feed := io.Pipe()
+	lines := composer(in, &echo, 0, time.Time{}, 1)
+	go func() {
+		defer feed.Close()
+		_, _ = feed.Write([]byte("lost"))
+		_, _ = feed.Write([]byte(" prompt\rkept prompt\r"))
+	}()
+	got, err := io.ReadAll(lines)
+	if err != nil || string(got) != "kept prompt\n" || echo.String() != "kept prompt\r\n" {
+		t.Fatalf("lines %q, echo %q, error %v", got, echo.String(), err)
+	}
+}
+
 func TestComposerTakesAPasteAsOneLine(t *testing.T) {
 	var echo syncBuffer
 	in, feed := io.Pipe()
-	lines := pasteComposer(in, &echo, 0, time.Time{}, true)
+	lines := pasteComposer(in, &echo, 0, time.Time{}, 0, true)
 	go func() {
 		// The markers may be split across reads; the line breaks inside the
 		// paste do not submit, the Enter after it does.
@@ -752,12 +768,47 @@ func TestComposerTakesAPasteAsOneLine(t *testing.T) {
 
 func TestComposerWithoutBracketedPasteSubmitsEveryLine(t *testing.T) {
 	in, feed := io.Pipe()
-	lines := composer(in, io.Discard, 0, time.Time{})
+	lines := composer(in, io.Discard, 0, time.Time{}, 0)
 	go func() {
 		feed.Write([]byte("alpha\rbeta\r"))
 		feed.Close()
 	}()
 	if got, _ := io.ReadAll(lines); string(got) != "alpha\nbeta\n" {
 		t.Fatalf("lines %q", got)
+	}
+}
+
+// save-prompt never shows a file that is not complete: a test that waits for
+// the file to exist and then reads it gets the whole prompt.
+func TestSavePromptNeverShowsAPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "prompt.txt")
+	held := 0
+	beforeRename = func(final string) {
+		held++
+		if final != target {
+			t.Errorf("renaming to %s, want %s", final, target)
+		}
+		// The temporary file is complete, and the name is still free.
+		if _, err := os.Stat(final); !os.IsNotExist(err) {
+			t.Errorf("the final name existed before the content was complete: %v", err)
+		}
+	}
+	t.Cleanup(func() { beforeRename = nil })
+	w := startWorld(t)
+	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")
+	res := runFake(t, Options{Dir: dir, Script: "ready\nsave-prompt|" + target})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	if held != 1 {
+		t.Fatalf("held %d times", held)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("saved prompt %q: %v", got, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".prompt.txt.tmp-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
 	}
 }

@@ -19,6 +19,11 @@ const (
 	// EnvDeafFor is a duration: input arriving that long after the start
 	// is dropped without showing, as during a start-up notice.
 	EnvDeafFor = "OMO_FAKE_DEAF_FOR"
+	// EnvDropPrompts drops this many complete submitted prompts without echo.
+	// It models a startup notice without tying the test to process startup time.
+	EnvDropPrompts = "OMO_FAKE_DROP_PROMPTS"
+	// EnvRawReadyFile is created once the terminal has raw input without echo.
+	EnvRawReadyFile = "OMO_FAKE_RAW_READY_FILE"
 	// EnvBracketedPaste, set to 1, makes the fake ask for bracketed paste
 	// like the agent CLIs do: text between the paste markers is one input
 	// whose line breaks do not submit (they show as "⏎" in the line), and
@@ -40,6 +45,7 @@ func composerSettings() (swallow int, deaf time.Duration, paste, ok bool) {
 		deaf, _ = time.ParseDuration(v)
 		ok = true
 	}
+	ok = ok || os.Getenv(EnvDropPrompts) != "" || os.Getenv(EnvRawReadyFile) != ""
 	return max(swallow, 0), max(deaf, 0), paste, ok
 }
 
@@ -47,10 +53,10 @@ func composerSettings() (swallow int, deaf time.Duration, paste, ok bool) {
 // full-screen CLI does: typed characters are echoed into an input line that
 // stays put, Enter submits it (a new line follows), Backspace deletes. The
 // first swallow Enter presses with text in the line do nothing, and input
-// arriving before deafUntil is dropped. Submitted lines come out of the
+// arriving before deafUntil or in the first drop submitted prompts is dropped. Submitted lines come out of the
 // returned reader, one per line.
-func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time) io.Reader {
-	return pasteComposer(in, echo, swallow, deafUntil, false)
+func composer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time, drop int) io.Reader {
+	return pasteComposer(in, echo, swallow, deafUntil, drop, false)
 }
 
 // lineBreakMark stands for a line break inside a pasted message.
@@ -58,7 +64,7 @@ const lineBreakMark = "⏎"
 
 // pasteComposer is composer that, with paste set, asks for bracketed paste and
 // takes what comes between the markers as part of the line.
-func pasteComposer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time, paste bool) io.Reader {
+func pasteComposer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Time, drop int, paste bool) io.Reader {
 	pr, pw := io.Pipe()
 	if paste {
 		_, _ = echo.Write([]byte("\x1b[?2004h"))
@@ -74,6 +80,12 @@ func pasteComposer(in io.Reader, echo io.Writer, swallow int, deafUntil time.Tim
 				n = 0
 			}
 			for _, b := range buf[:n] {
+				if drop > 0 {
+					if b == '\r' || b == '\n' {
+						drop--
+					}
+					continue
+				}
 				if len(esc) > 0 {
 					esc = append(esc, b)
 					switch string(esc) {

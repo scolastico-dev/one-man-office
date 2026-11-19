@@ -257,18 +257,19 @@ func TestPushCommitHidesCredentials(t *testing.T) {
 	g := testGit(t)
 	repo := newTestRepo(t)
 	commit := rev(t, repo, "HEAD")
-	r := Remote{Name: "origin", URL: "https://user:SECRET@127.0.0.1:1/x.git"}
+	url, address := failedHTTPRemote(t)
+	r := Remote{Name: "origin", URL: url}
 	if a := r.Address(); strings.Contains(a, "SECRET") || strings.Contains(a, "user") {
 		t.Errorf("Address() = %q", a)
 	}
 	err := g.PushCommit(context.Background(), repo, r, commit, "omo/1-x", "")
 	if err == nil {
-		t.Fatal("pushing to a closed port succeeded")
+		t.Fatal("pushing to a failing server succeeded")
 	}
 	if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "user:") {
 		t.Fatalf("the error repeats the credentials: %v", err)
 	}
-	if !strings.Contains(err.Error(), "https://127.0.0.1:1/x.git") {
+	if !strings.Contains(err.Error(), address) {
 		t.Errorf("the error does not name the address: %v", err)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
@@ -60,7 +59,8 @@ var portableReplacements = []replacement{
 	},
 }
 
-// within fails when f does not return within five seconds.
+// within runs f on its own goroutine and waits for it; one that never returns
+// ends with the test binary's own time limit and a dump of every goroutine.
 func within(t *testing.T, what string, f func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -68,11 +68,7 @@ func within(t *testing.T, what string, f func()) {
 		defer close(done)
 		f()
 	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s blocked", what)
-	}
+	<-done
 }
 
 // errorOf is the message the store reports for path.

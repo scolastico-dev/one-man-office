@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { devNull, tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { initRepo } from './git'
+import { withoutShellConfig } from './env'
+import { isBelow } from './within'
 
 /**
  * What a path below a workspace folder is: a git repository, a plain folder,
@@ -29,11 +31,11 @@ export interface Workspace {
 export function makeWorkspace(layout: Record<string, WorkspaceEntry>, under: string): Workspace {
   const tmp = realpathSync(tmpdir())
   const base = realpathSync(under)
-  if (!base.startsWith(tmp + '/')) throw new Error(`${base} is not below the temporary folder ${tmp}`)
+  if (!isBelow(tmp, base)) throw new Error(`${base} is not below the temporary folder ${tmp}`)
   const root = mkdtempSync(join(base, 'workspace-'))
   const at = (rel: string) => {
     const p = resolve(root, rel)
-    if (!p.startsWith(root + '/')) throw new Error(`${rel} leaves the workspace folder`)
+    if (!isBelow(root, p)) throw new Error(`${rel} leaves the workspace folder`)
     return p
   }
   const entries = Object.entries(layout)
@@ -41,7 +43,7 @@ export function makeWorkspace(layout: Record<string, WorkspaceEntry>, under: str
     if (kind === 'repo') initRepo(at(rel))
     else if (kind === 'dir') mkdirSync(at(rel), { recursive: true })
   }
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   let worktrees = 0
   for (const [rel, kind] of entries) {
     if (typeof kind !== 'object' || !('worktree' in kind)) continue

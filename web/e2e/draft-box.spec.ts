@@ -40,8 +40,10 @@ test('keys and paste do nothing in a read-only agent terminal; the draft box is 
   await term.locator('.xterm-helper-textarea').focus()
   await page.keyboard.type('zzz')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(500)
-  await expect(term.locator('.xterm-rows')).not.toContainText('typed: zzz')
+  // Nothing to wait for here: that the keys reached nobody is read below, once
+  // a later line of the same terminal (omo's own) has been echoed. The program
+  // echoes every line in the order it got them, so a line typed above would
+  // already be on the screen before that one.
 
   // A draft of two lines, and omo types a line into the terminal meanwhile.
   const field = box.locator('[data-draft-field]')
@@ -52,6 +54,7 @@ test('keys and paste do nothing in a read-only agent terminal; the draft box is 
   await expect(field).toHaveValue('alpha\nbeta')
   await omo.api('POST', `/api/tickets/${n}/comments`, { body: '@developer a note while you draft' })
   await expectTerminalText(term, /typed: omo:/)
+  await expect(term.locator('.xterm-rows')).not.toContainText('typed: zzz')
   // The line did not touch the draft or its focus.
   await expect(field).toHaveValue('alpha\nbeta')
   await expect(field).toBeFocused()

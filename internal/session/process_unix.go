@@ -19,6 +19,11 @@ type ptyProcess struct {
 	cmd    *exec.Cmd
 	ptmx   *os.File
 	marker string
+	// terminalMu keeps ioctl's descriptor access inside the file's lifetime.
+	// creack/pty.Setsize calls File.Fd, which cannot race with File.Close.
+	// closed also forbids descriptor access while in-flight I/O finishes closing it.
+	terminalMu sync.Mutex
+	closed     bool
 
 	exited  chan struct{}
 	exitErr error
@@ -85,6 +90,11 @@ func (p *ptyProcess) Pid() int                { return p.cmd.Process.Pid }
 func (p *ptyProcess) Read(b []byte) (int, error)  { return p.ptmx.Read(b) }
 func (p *ptyProcess) Write(b []byte) (int, error) { return p.ptmx.Write(b) }
 func (p *ptyProcess) Resize(rows, cols uint16) error {
+	p.terminalMu.Lock()
+	defer p.terminalMu.Unlock()
+	if p.closed {
+		return os.ErrClosed
+	}
 	return pty.Setsize(p.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
@@ -108,6 +118,9 @@ func (p *ptyProcess) Close() error {
 	// Also sweep after a natural agent exit. A detached child may have closed
 	// the PTY and been reparented before the session pump observes EOF.
 	_ = p.Kill()
+	p.terminalMu.Lock()
+	defer p.terminalMu.Unlock()
+	p.closed = true
 	return p.ptmx.Close()
 }
 

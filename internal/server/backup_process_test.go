@@ -42,7 +42,7 @@ func TestUsedHomeIsClassified(t *testing.T) {
 	if !res.DatabasePending || res.Backup == "" {
 		t.Fatalf("result %+v", res)
 	}
-	if err := w.stop(time.Minute); err != nil {
+	if err := w.stop(); err != nil {
 		t.Fatal(err)
 	}
 	// The next start swaps the database.

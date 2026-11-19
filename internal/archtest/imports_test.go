@@ -20,7 +20,7 @@ const module = "github.com/scolastico-dev/one-man-office/"
 // tests' helper programs below web/e2e import them, the product never does.
 var testSupport = []string{
 	"internal/fakeagent", "internal/mcprelay/fakemcp", "internal/gittest",
-	"internal/testpath", "internal/childenv/childenvtest",
+	"internal/testpath", "internal/testport", "internal/childenv/childenvtest",
 }
 
 // importedOnlyBy names, for packages at the top of the layering, the only
@@ -28,7 +28,7 @@ var testSupport = []string{
 // server on the engine; nothing below them reaches up. oldhome (the upgrade
 // from the earlier omo) belongs to the command line.
 var importedOnlyBy = map[string][]string{
-	"internal/cli":     {"cmd/omo"},
+	"internal/cli":     {"cmd/omo", "web/e2e/omoca"},
 	"internal/server":  {"internal/cli"},
 	"internal/engine":  {"internal/server"},
 	"internal/oldhome": {"internal/cli"},
@@ -150,7 +150,7 @@ func TestBoundaryViolationsAreFound(t *testing.T) {
 		"internal/engine imports internal/oldhome, which only internal/cli may import",
 		"internal/mcprelay imports internal/mcprelay/fakemcp, which is for tests only",
 		"internal/server imports internal/fakeagent, which is for tests only",
-		"internal/settings imports internal/cli, which only cmd/omo may import",
+		"internal/settings imports internal/cli, which only cmd/omo, web/e2e/omoca may import",
 		"internal/settings imports internal/gittest, which is for tests only",
 	}
 	if !slices.Equal(got, want) {

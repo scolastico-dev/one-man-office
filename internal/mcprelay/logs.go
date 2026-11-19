@@ -104,6 +104,16 @@ type serverLog struct {
 	mu     sync.Mutex
 	f      *os.File
 	size   int64
+	// beforeWrite is called with a line before it is written, outside mu.
+	// Tests only.
+	beforeWrite func(msg string)
+}
+
+// setBeforeWrite installs the hook that runs before each line. Tests only.
+func (l *serverLog) setBeforeWrite(fn func(msg string)) {
+	l.mu.Lock()
+	l.beforeWrite = fn
+	l.mu.Unlock()
 }
 
 func newServerLog(dir, name string, r *redactor) *serverLog {
@@ -126,6 +136,12 @@ func (l *serverLog) line(msg string) {
 	}
 	msg = cleanLine(l.redact.redact(msg))
 	entry := time.Now().UTC().Format(time.RFC3339Nano) + " " + msg + "\n"
+	l.mu.Lock()
+	hook := l.beforeWrite
+	l.mu.Unlock()
+	if hook != nil {
+		hook(msg)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f == nil {

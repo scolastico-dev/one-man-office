@@ -433,9 +433,16 @@ func TestDiffRouteSemaphore(t *testing.T) {
 	task := newTask(t, e.u, e.project, "work")
 	e.cut(e.repo, e.project, task.Number, "omo/1-work", "main")
 	g := newSlotGate(e.s)
+	release := sync.OnceFunc(func() { close(g.release) })
+	defer release()
 	path := tp(task.Number) + "/diff"
 
-	b := newBrowser(t, e.s)
+	finished := make(chan struct{}, 5)
+	handler := e.s.BrowserHandler()
+	b := serveBrowser(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { finished <- struct{}{} }()
+		handler.ServeHTTP(w, r)
+	}))
 	var wg sync.WaitGroup
 	results := make(chan int, 8)
 	send := func(ctx context.Context) {
@@ -458,20 +465,13 @@ func TestDiffRouteSemaphore(t *testing.T) {
 		send(context.Background())
 	}
 	for range 4 {
-		select {
-		case <-g.seen:
-		case <-time.After(10 * time.Second):
-			t.Fatal("four requests did not start")
-		}
+		<-g.seen
 	}
 	fifthCtx, leave := context.WithCancel(context.Background())
+	defer leave()
 	send(fifthCtx)
 	for range 5 {
-		select {
-		case <-g.queued:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the fifth request did not reach the slots")
-		}
+		<-g.queued
 	}
 	if n := g.entered.Load(); n != 4 {
 		t.Fatalf("%d diffs run at once, want 4", n)
@@ -480,17 +480,21 @@ func TestDiffRouteSemaphore(t *testing.T) {
 	if got := <-results; got != -1 {
 		t.Fatalf("fifth result %d", got)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// The client returning does not mean its handler has observed cancellation.
+	<-finished
 	if n := g.entered.Load(); n != 4 {
 		t.Fatalf("the fifth ran after its client left: %d", n)
 	}
-	close(g.release)
+	release()
 	for range 4 {
 		if got := <-results; got != 200 {
 			t.Fatalf("status %d", got)
 		}
 	}
 	wg.Wait()
+	for range 4 {
+		<-finished
+	}
 	// Every slot is free again.
 	for range 6 {
 		okJSON[api.TicketDiff](t, e.u, 200, "GET", path, nil)
@@ -504,6 +508,7 @@ func TestDiffRouteClientLeavingStopsTheWork(t *testing.T) {
 	g := newSlotGate(e.s)
 	b := newBrowser(t, e.s)
 	ctx, leave := context.WithCancel(context.Background())
+	defer leave()
 	go func() {
 		req := newRequest(t, "GET", b.srv.URL+tp(task.Number)+"/diff", nil).WithContext(ctx)
 		req.Host = hostOmoLocalhost + ":" + b.port
@@ -512,17 +517,9 @@ func TestDiffRouteClientLeavingStopsTheWork(t *testing.T) {
 			resp.Body.Close()
 		}
 	}()
-	select {
-	case <-g.seen:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the diff did not start")
-	}
+	<-g.seen
 	leave()
-	deadline := time.Now().Add(10 * time.Second)
 	for g.ctxEnd.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the work did not see the client leave")
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }

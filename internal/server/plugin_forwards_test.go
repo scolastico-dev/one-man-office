@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -205,11 +204,7 @@ func TestPluginForwardCreateExitRace(t *testing.T) {
 		done := make(chan struct{})
 		go func() { _ = s.plugins.m.StopTaskID("one", task.ID, "exited"); close(done) }()
 		_, _ = s.AddForward(t.Context(), "one", plugins.ForwardAdd{CreateProxyForward: api.CreateProxyForward{Port: 3456, Name: "race"}, TaskID: task.ID})
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			t.Fatal("exit blocked")
-		}
+		<-done
 		fs, _ := s.board.PluginForwards(t.Context(), board.System, "one")
 		if len(fs) != 0 {
 			t.Fatal("exit/create orphan")

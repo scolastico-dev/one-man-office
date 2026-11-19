@@ -5,6 +5,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,18 +17,15 @@ import (
 )
 
 func TestExpandEnvironmentTimesOutAndKillsTheCommand(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	// The command starts a background sleeper (a grandchild in the same
-	// group) and then waits: both must be gone after the timeout.
-	command := "sleep 60 & echo $! > " + pidFile + "; echo printed-secret; wait"
-	started := time.Now()
-	_, err := ExpandEnvironment(300*time.Millisecond, map[string]string{
-		"FAST":           "plain",
-		"PASSWORD_VALUE": "`" + command + "`",
+	// Test the configured deadline independently of process startup speed.
+	command := "echo printed-secret; sleep 60"
+	var err error
+	completeWithin(t, 5*time.Second, func() {
+		_, err = ExpandEnvironment(300*time.Millisecond, map[string]string{
+			"FAST":           "plain",
+			"PASSWORD_VALUE": "`" + command + "`",
+		})
 	})
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("expansion took %v", elapsed)
-	}
 	var timeout *CommandTimeoutError
 	if !errors.As(err, &timeout) || timeout.Variable != "PASSWORD_VALUE" {
 		t.Fatalf("err = %v, want a timeout naming PASSWORD_VALUE", err)
@@ -38,22 +36,29 @@ func TestExpandEnvironmentTimesOutAndKillsTheCommand(t *testing.T) {
 	if strings.Contains(err.Error(), "printed-secret") || strings.Contains(err.Error(), "sleep") {
 		t.Fatalf("error repeats the command or its output: %q", err)
 	}
-	raw, readErr := os.ReadFile(pidFile)
-	if readErr != nil {
-		t.Fatal(readErr)
+
+}
+
+func TestExpandEnvironmentCancellationKillsTheCommandTree(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := ExpandEnvironmentContext(ctx, time.Hour, map[string]string{
+			"VALUE": "`sleep 60 & echo $! > " + pidFile + "; wait`",
+		})
+		result <- err
+	}()
+	pid := waitForPIDFile(t, pidFile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	cancel()
+	var err error
+	completeWithin(t, 5*time.Second, func() { err = <-result })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want cancellation", err)
 	}
-	pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if convErr != nil {
-		t.Fatal(convErr)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for !processGone(pid) {
-		if time.Now().After(deadline) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-			t.Fatalf("background process %d survived the timeout", pid)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, 10*time.Second, func() bool { return processGone(pid) })
 }
 
 // processGone reports whether pid no longer runs (a zombie counts as gone).

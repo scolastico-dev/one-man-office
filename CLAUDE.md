@@ -19,6 +19,8 @@ make test          # tests only
 make cross         # all supported OS/architecture binaries
 make web-check     # type-check and unit-test the board app
 make e2e           # build omo and run the browser tests
+make stress-check  # Linux stress harness checks (Python 3, Go, Node/npm)
+make stress        # Linux: full 20 Go race + 10 throttled browser attempts (Python 3)
 make notices       # bin/THIRD_PARTY_NOTICES: licences of the Go modules and the bundled npm packages
 ```
 
@@ -85,7 +87,7 @@ Package map (`internal/`):
 | `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure; `Check` refuses a bad name, source, subpath or ref before anything is fetched); `catalog.go` reads omo's plugin list (`FetchCatalog`, `ParseCatalog`, `TagOf`, `Acknowledged`, `CatalogFromEnv`) |
 | `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
 | `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`, `vscode`); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
-| `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
+| `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `testport`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
 | `mcpserver` | omo's MCP endpoint (`/mcp`): the `omo ai` commands as board tools for agent sessions and the tools of the relayed servers, for the identity bound to each request |
 | `mcprelay` | the relayed upstream MCP servers: stdio processes (per agent session or shared), HTTP and SSE connections, sign-in (headers, a header command, OAuth), tools under omo's names (`<server>__<tool>`), calls with timeouts, cancellation and progress, a result over 4 MiB refused; logs in `logs/mcp/` through `homefile.Append`; `fakemcp` is the scripted server of the tests |
 | `mcpauth` | clients of `/mcp` that are not agent sessions: personal access tokens and omo's OAuth 2.1 server (metadata, registration, consent through the web app, PKCE, rotating refresh tokens); omo's own sign-ins at upstream servers; inbound secrets stored as SHA-256 hashes |
@@ -130,11 +132,14 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 - On a 401 the app shows the lock screen over the board, which stays mounted (hidden and inert), so unsaved settings edits survive an unlock. Terminals unmount while it is locked.
 - Text from agents and other people (comments, diffs, file and branch names, terminal output) is shown through Vue interpolation and `visibleText`; only `features/ticket/markdown.ts` produces HTML.
 - Images (`features/images/`): `markdown.ts` lets `omo-image:<uuid>` through as an image target only and renders what its `images` lookup says (a `blob:` object URL, or the alt text with a note). `inlineImages.ts` (`useInlineImages(text)`) reads each referenced image's record, then its bytes with the API client (`getBlob`; the token stays in the header), makes the object URL and revokes it when the text drops the image, on `image.deleted`/`image.expired` and with the view; `DescriptionView` and `CommentItem` use it, and a click opens `ImageLightbox` (`UiDialog`). `imageUploads.ts` and `ImageAttach.vue` ("Add image…", paste, drop) upload through `ApiClient.upload` into the comment composer and the description editor. The page's CSP allows `img-src 'self' blob:`. `visibleText` and `internal/textsafe` use the same set of hidden characters.
+- Browser tests make nothing while a spec file loads. Fake agent programs for a test's PATH are `omoOptions.programs` (`{files, git, inheritPath}`, made in `<home>/programs`, `omo.programs`), more repositories go next to the `repo` fixture (`dirname(repo)`), other files in `omo.home`; `fixtureLifetime.guard.test.ts` fails on a module-load allocation (direct, through a helper or in a `describe`), on `tmpdir()`/`process.pid` in a spec, and when `playwright test --list` leaves files behind.
 - Browser tests can run real agents: `test.use({ omoOptions: { agents: { developer: script('ready', 'print|hi', 'hang') } } })` gives each role a script for the fake agent, built by the e2e global setup into `web/e2e/.bin/fakeagent`. `web/e2e/support/agents.ts` and `terminal.ts` have the helpers; end such a test with `expectNoAgentProcesses(omo)`.
+- The editor and lifecycle plugin specs run on every platform with no conditional. The editor archive's bundled Node is the native `web/e2e/nodeshim` (it runs the test run's Node, named by the `node-target` file next to it; no POSIX shell), the throw-away certificate comes from `web/e2e/testcert` (no openssl), and a test that sets `omoOptions.tlsCA` starts omo from `web/e2e/omoca`: `cli.Explain(cli.Root(version).Execute())` as `cmd/omo`, with only that CA in Go's fallback roots and `x509usefallbackroots=1` (Go reads `SSL_CERT_FILE` on Linux only; certificate checks stay on, `omoca`'s test proves another CA is refused). Only `cmd/omo` and `web/e2e/omoca` may import `internal/cli`. Native Windows and macOS runs of these specs have not been made. Test code never compares paths as text with a hard-coded `/` (`isBelow` in `web/e2e/support/within.ts`; `pathContainment.guard.test.ts`), and never answers "none left" on a platform it cannot inspect (`platformGates.guard.test.ts`): fake agents, fake MCP servers and user shells record their own process ids (`OMO_FAKE_PID_DIR`, `FAKEMCP_PID_DIR`, the shell's startup file) and `recordedProcesses` (`support/process.ts`) asks the operating system about each. Go tests observe a wait as an event (synctest, a pause hook such as `repo-lock-wait`), never as the end of a short interval: `internal/testguard/quietwindow_test.go` fails on a short `time.After`/`time.NewTimer` and on a short `time.Sleep` that does not end a polling loop.
 - Browser tests can relay a real MCP server: the scripted fake MCP server (`internal/mcprelay/fakemcp`) is built by the e2e global setup into `web/e2e/.bin/fakemcp` (`FAKE_MCP_BINARY`); it runs only with `FAKEMCP_SERVER=1` in the server's `env`. `web/e2e/mcp-relay.spec.ts` shows how to store one and call `/mcp` with a personal token.
 - Every modal dialog is opened and closed through `components/ui/modalLayer.ts` (`showModal`, `closeDialog`; `modalLayer.test.ts` fails on a dialog opened or closed another way), which knows the topmost one: the `Toaster` renders inside it while one is open, because a modal dialog makes everything outside it inert, so a toast's action stays reachable.
 - Dialogs that a ticket action opens (Start anyway, a plugin's answer, Open terminal) go through `components/ui/mountDialog.ts` and the `DialogOutlet` in `TicketActions`, so they close with the ticket panel and step aside under the lock screen; `dialogs.guard.test.ts` fails on a separate `createApp`. Usage state comes from `features/usage/usageVerdict.ts`, which mirrors the server's `Evaluate` for one window.
 - Controls that share a row are equally tall: `tokens.css` has `--omo-control-h` (40 px: `.omo-btn`, icon buttons, `input.omo-input`, `select.omo-input`, `Toggle`) and `--omo-control-h-sm` (32 px: `.omo-btn--sm`, `.omo-input--sm`, `Toggle` with `size`), and `.omo-compact` (top bar, sidebar head) puts every control inside on the small height. Take a row's or heading's minimum height from these tokens, never from a spacing multiple. `controlHeights.guard.test.ts` fails on a control rule that sets its own height, and `e2e/control-heights.spec.ts` (with `support/rows.ts`) walks the views, their editors, dialogs, image rows and lightbox at 1440 and 390 px and fails on two controls of one row that differ by more than 1 px; a place where it is meant takes `data-height-free="<why>"`.
+- Wheels. Chromium's compositor scrolls the box under a trusted wheel itself; when it cannot pick that box on its own it asks the main thread for the target (`FindScrollTargetOnMainThread`), and the wheel's scroll update can then be dropped (nothing scrolls, nothing to wait for; a few percent of wheels under load, also at CPU rate 1). Which boxes need the main thread is not derivable from their style (the same `pre` is fine on a bare page and needs it in the app), so it is found by trace, per box, in a populated state. `web/e2e/support/wheelTrace.ts` (`traceWheels`, `wheelTraceProblems`; unit tests in `src/testing/wheelTrace.test.ts`) records Chromium's `input` trace around a wheel and fails when a wheel hit a main-thread hit test, or the trace is empty, cut short (a span that began and never ended), or lacks the wheel's acknowledgement, the gesture begin, the compositor's updates or the end; it adds no page listener (a wheel listener hides the race). `web/e2e/support/wheelAudit.ts` (`auditWheels`, `scrollBoxesTakingWheelsBadly`; `e2e/wheel-audit.spec.ts` proves the helper on a nested fixture) turns one traced wheel over every scroll box of a scope, off text fields: before each wheel every scroll offset is back where it was, the point is worked out again and checked, and a box below the fold is scrolled into view. Where it runs: `page-scroll.spec.ts` (the walk through the board, ticket page, panel, diff, settings sections, two audit tests per size next to the one that keeps the document still), `wheel-popups.spec.ts` (bell list, project searches, folder picker, description history) and `wheel-states.spec.ts` (populated states: rendered Markdown with a code block and a wide table, a prompt's preview and default text, a script's default text and test log, the MCP copy blocks, a plugin's log, an ended agent's log, the batch removal list). A new scroll box is added to one of them; `scroll.guard.test.ts` fails until a rule that makes a scroll box either has `will-change: scroll-position` or `transform` (what fixed each of the boxes that failed: the board's column body, the ticket panel's scroll box, the image lightbox, the searched pickers' list, the code block of a description, a prompt's preview and default text, a script's default text and test log, the copy blocks, the plan and import file lists, and `.omo-logtext`) or is listed with the audit that cleared it. The wheel specs (`board-wheel`, `ticket-wheel`, `settings-wheel`, `page-scroll`) trace every trusted wheel. Left out, for what the platform does: a text field's own inner scroller always needs the main thread (no style changes that), and many text fields on a page (the Environment settings page, a focused prompt editor) make Chromium ask the main thread about the whole page, so `settings-wheel.spec.ts` checks the wheel there for the page scrolling (`platformMainThread`); a terminal's wheel is xterm.js's own listener. Main-thread stalls of 3, 30 and 300 ms change the outcome of neither the old nor the fixed page, so no delay is injected at the race; the trace of the old page shows the main-thread hit test on every wheel over a column, which is the deterministic proof.
 - Only `web/src/api/log.ts` may call `console`; tests fail on literal colours, text below 12 px and border radii outside the tokens.
 
 ## Settings
@@ -531,10 +536,24 @@ Test helper processes that run the test binary again (such as the helpers in `in
 
 Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. Before starting the omo binary, invoking its CLI or calling `server.Run`, a test environment drops **every** inherited `OMO_` variable (case-insensitively) before adding its own; an inherited socket override bypasses an isolated home. `childenvtest.SetOmo` and `CheckOmo` guard the smoke, CLI and helper environments; the browser harness uses the same samples. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
+Stress testing: `scripts/stress/run.py` (Linux/Python 3) pins descendants to two
+allowed CPUs, oversubscribes workers, removes inherited `OMO_` values before
+children start, and isolates HOME/XDG/git state. `make stress` defaults to full
+20 Go race/shuffle and 10 throttled browser attempts. It builds browser sources,
+records commit/tree/content provenance and every result in unique `bin/stress/`
+folders, preserves failure artifacts, and fails on any failed/incomplete attempt.
+`make stress-check` checks accounting, isolation and descendant cleanup. The Go
+AST guard in `internal/testguard` rejects short real elapsed upper ceilings;
+`web/src/timing.guard.test.ts` rejects fixed Playwright waits without matching
+comments/examples. See [contributor guidance](wiki/contributing.md#tests-that-stay-deterministic-under-load)
+and [calibration evidence](wiki/stress-calibration.md). Subsets are diagnostic,
+never acceptance counts. Chromium throttling gates new pages and popup external
+resources; initial inline popup scripts cannot be guaranteed throttled.
+
 ## CI and releases
 
-- `.github/workflows/pull-request.yml`: `make check`, `make cross`, container build and entrypoint test on pull requests; `windows-latest` jobs run `go vet ./...` and the whole Go test suite in four groups side by side (engine; server; gitops and board; everything else), because starting programs is far slower there; `archtest.TestWindowsTestGroupsCoverEveryPackageOnce` holds the groups complete.
-- `.github/workflows/browser-tests.yml`: browser end-to-end tests on pull requests and pushes to `main`.
+- `.github/workflows/pull-request.yml`: every test CI runs, on pull requests only (nothing runs on a push to `main`; a new push to a pull request cancels the run of the push before it). The job `changes` sorts the changed files: a pull request that changes only documentation no test reads (`wiki/`, `.github/assets/`, `CLAUDE.md`, `AGENTS.md`) runs no test job, and one that changes nothing outside `web/` and no Go file skips the Windows jobs; a file the list does not know runs everything. Jobs side by side: `Go checks` (`make check`, stress harness checks), `Board checks` (`make web-check`), `Build all platforms` (`make cross`), the browser suite in four parts (`make e2e E2E_ARGS=--shard=k/4`), the container build and entrypoint test, and on `windows-latest` `go vet ./...` plus the whole Go test suite in groups (engine in four parts, server and gitops in two, board, everything else), because starting programs is far slower there. Part k of n of a group runs every n-th test of each package in the order `go test -list` prints them. `archtest.TestWindowsTestGroupsCoverEveryPackageOnce` holds the groups and their parts complete.
+- `.github/workflows/stress.yml`: manual (`workflow_dispatch`) full-suite constrained stress, three Go race/shuffle and two Chromium rate-4 attempts by default, configurable counts; `scripts/stress/ci.sh` calls the same runner as `make stress`. Fresh per-attempt raw/JSON/artifact folders, job failure frequencies, no retries or publishing. Full acceptance is 20/10 consecutive successes.
 - `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
 - `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.
 - `.github/workflows/publish-container.yml`: container image publishing.
@@ -722,6 +741,45 @@ and `node --test web/scripts/proxy-subdomain.test.mjs`. The standalone browser
 fixture uses httptest handlers only, never an omo process, CLI/socket or engine;
 it checks actual Chromium domain/Secure cookie acceptance, two forward hosts,
 HTTP/HTTPS, unrelated-board path mode, target redirects/cookies and Host refusal.
+The driver starts that helper only through `web/scripts/fixtureProcess.mjs`
+(`fixtureEnv`, `startFixture`): an allowlisted environment that keeps every
+configured temporary root (`TMPDIR`, `TMP`, `TEMP`, `GOTMPDIR`; Windows names in
+any case) so the Go build and the helper's folders stay below the root the
+runner owns, activation (`PROXY_BROWSER_FIXTURE=1`) given by the driver alone,
+and every start failure (no program, early exit, unreadable fixtures line) or
+test failure ends the helper's process group before it is reported.
+`web/src/testing/fixtureProcess.test.ts` (in `make web-check`) pins this and
+fails on a driver that starts a child process itself. The helper is not run
+through `go test`: `startFixture` builds the server package's test binary once
+(`go test -c`, awaited, into a folder of its own under the configured temporary
+root) and starts that binary directly, so the child it holds is the process that
+owns the servers and ending it ends them on every platform; on Windows only that
+awaited build, which starts compilers itself, is ended with `taskkill /T /F`.
+Stop, every start failure (build, spawn, bad or split fixtures line, early exit)
+and an interrupt of the driver (SIGINT/SIGTERM, handled asynchronously) wait for
+the process to be closed, then remove the folder, and report a failed kill
+(also from `stop`, which still removes the folder and releases the handlers)
+instead of treating it as "already gone". The synchronous `exit` hook is only a
+best effort: Node cannot wait there, so on Windows, where a running `.exe`
+cannot be deleted, a crash of the driver can leave the folder behind (reported
+on stderr). `startFixture` refuses a launcher (`go`, `npm`, `npx`, a shell) as
+its `command`.
+The tests of its cleanup inject through `end.kill(child, {tree})`, which replaces the whole
+platform step and so runs the same branch on every platform; `killGroup`/`killTree`
+replace one platform's step, and `endProcess`/`startFixture` throw when one is given without an
+explicit `platform`. The interrupt sequence runs
+on every platform through an emitted `SIGINT` in the driver; only the delivery of a real
+signal is skipped on Windows, which has none to deliver. `fixtureProcess.test.ts` scans every web test file (unit tests, browser specs, driver tests) and
+fails on any skip (`skipIf`, `runIf`, `skip`, `fixme`, `todo`), whatever its condition, that is not in its inventory with a reason.
+`web/src/processOwnership.guard.test.ts` lists every tooling launcher under
+`web/` with its lifecycle and fails on a new one; it also checks the specs and
+unit tests (only the guard itself and the two tests of the helper and runner
+are exempt, each with a reason): they may start programs only synchronously
+(`execFileSync`, `spawnSync`). It fails on a launcher of a launcher started as a
+long-lived child and on a shell option. The e2e
+`run` (`web/e2e/support/run.ts`) rejects a program past its limit only once the
+process is closed. omo's own agent containment on Windows is product work, not
+covered here.
 
 ## Web UI workflow verification
 

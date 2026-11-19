@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -262,6 +263,7 @@ func TestStoryWithTaskWithoutProjectMerges(t *testing.T) {
 // A folder where the working folder would go that omo did not record is
 // never taken over: the start fails for a person.
 func TestForeignFolderInPlaceOfTheWorkingFolderFailsTheStart(t *testing.T) {
+	useLongTempRoot(t)
 	h := newHarness(t)
 	n := h.noProject(api.CreateTicket{Title: "Taken"})
 	if err := os.MkdirAll(h.workdir(n), 0o700); err != nil {
@@ -270,9 +272,10 @@ func TestForeignFolderInPlaceOfTheWorkingFolderFailsTheStart(t *testing.T) {
 	h.approve(n)
 	h.step()
 	tk := h.ticket(n)
-	if tk.FailedStep != api.FailedStart || !h.flagged(n, "already exists") || tk.Workdir != "" {
+	if tk.FailedStep != api.FailedStart || tk.Workdir != "" {
 		t.Fatalf("failed %q, attention %q, workdir %q", tk.FailedStep, tk.Attention, tk.Workdir)
 	}
+	h.wantAttentionReason(n, fmt.Sprintf("the folder %s already exists and is not a working folder omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", h.workdir(n), n))
 }
 
 // The working folder is recorded before it is made: a start interrupted

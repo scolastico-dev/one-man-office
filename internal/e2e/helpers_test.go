@@ -276,16 +276,12 @@ func (r *recordingRunner) transcript() string {
 
 // ---- waiting for the board ----
 
-// waitFor polls cond until it holds; after a deadline of two minutes the
-// test fails with what and the agents' transcripts. It is a condition wait:
-// nothing depends on how long anything takes.
+// waitFor polls cond until it holds. It is a condition wait: nothing depends
+// on how long anything takes, and a condition that never holds ends with the
+// test binary's own time limit and a dump of every goroutine.
 func (w *world) waitFor(what string, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(2 * time.Minute)
 	for !cond() {
-		if time.Now().After(deadline) {
-			w.t.Fatalf("timed out waiting for %s\nagents:\n%s", what, w.runner.transcript())
-		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
@@ -464,9 +460,12 @@ func (w *world) settled(keep ...string) {
 		entries, err := os.ReadDir(filepath.Join(w.layout.Worktrees, w.project))
 		return (err != nil && errors.Is(err, os.ErrNotExist)) || (err == nil && len(entries) == 0)
 	})
-	if list := w.git("worktree", "list", "--porcelain"); strings.Count(list, "worktree ") != 1 {
-		w.t.Errorf("worktrees left registered:\n%s", list)
-	}
+	// git deletes a worktree's folder first and its registration after, inside
+	// one `git worktree remove`: the folder being gone does not yet mean the
+	// registration is. Wait for the registration itself.
+	w.waitFor("the worktrees to be unregistered", func() bool {
+		return strings.Count(w.git("worktree", "list", "--porcelain"), "worktree ") == 1
+	})
 	// Branches are deleted after their worktree is removed.
 	// Every branch but main is one omo made, whatever the branch template.
 	var branches []string

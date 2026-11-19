@@ -15,7 +15,7 @@ export CGO_ENABLED := 0
 
 # NO_WEB=1 builds the Go binary without the browser app (no Node.js needed).
 WEB_DEPS := $(if $(NO_WEB),,web)
-.PHONY: build notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
+.PHONY: build notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e stress stress-check readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
 
 ## web: build the browser app into web/dist (needs Node.js 24 and npm)
 web:
@@ -31,9 +31,18 @@ web-check:
 	done; \
 	if [ -n "$$failed" ]; then echo "web-check: failed:$$failed"; exit 1; fi
 
-## e2e: build omo and run the browser end-to-end tests
+## e2e: build omo and run the browser end-to-end tests (E2E_ARGS passes options to Playwright, such as --shard=1/4)
 e2e: build
-	npm --prefix web run e2e
+	npm --prefix web run e2e$(if $(E2E_ARGS), -- $(E2E_ARGS))
+
+## stress: Linux two-CPU race/throttled-browser campaign (20 Go + 10 browser attempts; STRESS_ARGS for calibration)
+stress:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/stress/run.py $(STRESS_ARGS)
+
+## stress-check: check the Linux runner's accounting, isolation and process cleanup
+stress-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/stress -p 'test_*.py'
+	go test ./internal/testguard -count=1
 
 ## readme-art: render the README graphics in .github/assets/src to SVG (needs Playwright's Chromium and pdftocairo)
 readme-art:

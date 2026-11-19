@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/mcpauth"
 )
 
 // headersCommandTimeout bounds the header command; maxHeadersOutput its
@@ -35,7 +36,7 @@ func (i *instance) httpTransport() (mcp.Transport, error) {
 		return nil, errors.New("the server's address is not an http or https URL")
 	}
 	if i.usesOAuth() {
-		ts, err := i.pool.tokenSource(i.cfg, i.st, i.test)
+		ts, err := i.pool.tokenSource(i)
 		if err != nil {
 			i.authFailed.Store(true)
 			return nil, err
@@ -74,7 +75,7 @@ func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if !sameOrigin(t.origin, req.URL) {
 		return nil, errOtherOrigin
 	}
-	resp, err := t.send(req)
+	resp, used, err := t.send(req)
 	if err != nil {
 		return nil, err
 	}
@@ -89,17 +90,20 @@ func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error)
 				return nil, err
 			}
 		}
-		if resp, err = t.send(retry); err != nil {
+		if resp, used, err = t.send(retry); err != nil {
 			return nil, err
 		}
 	}
 	if i.usesOAuth() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden && insufficientScope(resp)) {
 		drain(resp)
+		i.mu.Lock()
+		i.refusedAuth = used
+		i.mu.Unlock()
 		i.authFailed.Store(true)
 		if !i.test {
 			// A Test only reports the refusal; the saved server keeps its
 			// sign-in.
-			go i.pool.loginLost(i)
+			go i.pool.loginLost(i, used)
 		}
 		return nil, errNeedsLogin
 	}
@@ -109,14 +113,15 @@ func (t *upstreamTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return resp, nil
 }
 
-func (t *upstreamTransport) send(req *http.Request) (*http.Response, error) {
+func (t *upstreamTransport) send(req *http.Request) (*http.Response, mcpauth.UpstreamAuth, error) {
 	i := t.inst
+	var used mcpauth.UpstreamAuth
 	out := req.Clone(req.Context())
 	out.Header.Del("Authorization")
 	out.Header.Del("Cookie")
 	headers, err := i.pool.headers(req.Context(), i.cfg, i.st)
 	if err != nil {
-		return nil, err
+		return nil, used, err
 	}
 	for k, v := range headers {
 		out.Header.Set(k, v)
@@ -125,11 +130,17 @@ func (t *upstreamTransport) send(req *http.Request) (*http.Response, error) {
 		tok, err := i.ts.Token()
 		if err != nil {
 			i.authFailed.Store(true)
-			return nil, errNeedsLogin
+			return nil, used, errNeedsLogin
 		}
+		used = i.ts.snapshot()
+		// Bind a refusal to the token this request actually sent, even when a
+		// concurrent request has already refreshed the source.
+		copyToken := *tok
+		used.Token = &copyToken
 		tok.SetAuthHeader(out)
 	}
-	return t.base.RoundTrip(out)
+	resp, err := t.base.RoundTrip(out)
+	return resp, used, err
 }
 
 func insufficientScope(resp *http.Response) bool {

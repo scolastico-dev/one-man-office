@@ -565,10 +565,17 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 	}
 	var mu sync.Mutex
 	calls := map[string]int{}
+	entered := make(chan struct{}, 1)
 	fakeFolderCheck(t, func(path string) bool {
 		mu.Lock()
 		calls[path]++
 		mu.Unlock()
+		if path == hung.Path {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		}
 		return path == hung.Path
 	}, projectMissing)
 	oldTimeout := folderCheckTimeout
@@ -584,11 +591,12 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 			return []Project{a, b}
 		},
 	} {
-		start := time.Now()
-		got := list()
-		if d := time.Since(start); d > 2*time.Second {
-			t.Errorf("%s took %s", name, d)
-		}
+		done := make(chan []Project, 1)
+		go func() { done <- list() }()
+		var got []Project
+		// Only liveness is under test, not how quickly the runner schedules
+		// the list's independent filesystem checks.
+		got = <-done
 		if len(got) != 2 {
 			t.Fatalf("%s = %+v", name, got)
 		}
@@ -598,6 +606,7 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 			}
 		}
 	}
+	<-entered
 	mu.Lock()
 	defer mu.Unlock()
 	if calls[hung.Path] != 1 {

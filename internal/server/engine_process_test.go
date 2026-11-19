@@ -102,6 +102,21 @@ func startProcessWorld(t *testing.T, script string, handoff time.Duration) *proc
 		project: p.ID, done: make(chan error, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
+	// Failure before readiness must cancel Run and reap its children too.
+	t.Cleanup(func() {
+		if err := w.stop(); err != nil {
+			t.Error(err)
+		}
+		for _, a := range w.runner.all() {
+			select {
+			case <-a.Done():
+			case <-time.After(15 * time.Second):
+				t.Errorf("an agent process is still running after the test")
+				_ = a.Kill()
+				<-a.Done()
+			}
+		}
+	})
 	readyc := make(chan string, 1)
 	o := Options{Layout: l, Config: testConfig(), Version: "test", Runner: w.runner, Hurry: w.hurry}
 	go func() {
@@ -110,41 +125,23 @@ func startProcessWorld(t *testing.T, script string, handoff time.Duration) *proc
 	select {
 	case w.url = <-readyc:
 	case err := <-w.done:
-		cancel()
+		close(w.done)
 		t.Fatalf("Run ended before ready: %v", err)
-	case <-time.After(30 * time.Second):
-		cancel()
-		t.Fatal("Run not ready")
+
 	}
 	_, w.token, _ = strings.Cut(w.url, "#")
-	t.Cleanup(func() {
-		w.stop(time.Minute)
-		for _, a := range w.runner.all() {
-			select {
-			case <-a.Done():
-			case <-time.After(15 * time.Second):
-				t.Errorf("an agent process is still running after the test")
-				_ = a.Kill()
-			}
-		}
-	})
 	return w
 }
 
-// stop ends Run and waits at most limit for it to return.
-func (w *processWorld) stop(limit time.Duration) error {
+// stop ends Run and waits for it to return.
+func (w *processWorld) stop() error {
 	w.t.Helper()
 	w.cancel()
-	select {
-	case err, ok := <-w.done:
-		if ok {
-			close(w.done)
-		}
-		return err
-	case <-time.After(limit):
-		w.t.Fatalf("Run did not return within %s", limit)
-		return nil
+	err, ok := <-w.done
+	if ok {
+		close(w.done)
 	}
+	return err
 }
 
 // call sends a request as the user through the socket and decodes the
@@ -209,7 +206,7 @@ func (w *processWorld) terminal(termID string) *websocket.Conn {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+u.Port()+"/api/agents/"+termID+"/terminal", &websocket.DialOptions{
 		Host: u.Host, Subprotocols: []string{"omo", webSocketTokenPrefix + w.token},
@@ -287,10 +284,10 @@ func TestFakeAgentReadyWaitAndTerminalThroughRun(t *testing.T) {
 
 	// The terminal is still open; the server stops anyway, the agent with
 	// it, and the connection ends.
-	if err := w.stop(time.Minute); err != nil {
+	if err := w.stop(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
 		if _, _, err := c.Read(ctx); err != nil {
@@ -314,7 +311,7 @@ func TestRunHandsOffBeforeClosingSocket(t *testing.T) {
 	w := startProcessWorld(t, "ready\nawait-line|omo is stopping|10m\ncomment|$TICKET|Handoff: fake state\nwait|10m", 2*time.Minute)
 	n := w.approveTask()
 	w.developer(n, api.SessionRunning)
-	if err := w.stop(time.Minute); err != nil {
+	if err := w.stop(); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -351,12 +348,8 @@ func TestSecondStopSkipsHandoffWait(t *testing.T) {
 	default:
 	}
 	close(w.hurry)
-	if err := w.stop(time.Minute); err != nil {
+	if err := w.stop(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-agent.Done():
-	case <-time.After(15 * time.Second):
-		t.Fatal("the agent outlived Run")
-	}
+	<-agent.Done()
 }

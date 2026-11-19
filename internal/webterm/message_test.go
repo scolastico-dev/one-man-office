@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/coder/websocket"
 )
@@ -70,12 +69,12 @@ func readAck(t *testing.T, ctx context.Context, c *websocket.Conn) (id int64, er
 }
 
 func TestTerminalMessageIsOneWholeWriteWithItsKeys(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message", p, nil)
 	// The program asked for bracketed paste: omo wraps the message itself, at the
 	// moment it writes it, from what the program has asked for by then.
 	i.publish([]byte("\x1b[?2004h"))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 7, "text": "line one\nline two", "keys": "\r"})
@@ -92,9 +91,9 @@ func TestTerminalMessageIsOneWholeWriteWithItsKeys(t *testing.T) {
 }
 
 func TestTerminalMessageFailureIsAnsweredAndKeepsTheConnection(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture(), err: context.DeadlineExceeded}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t), err: context.DeadlineExceeded}
 	i := Own("message-fail", p, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 3, "text": "hello", "keys": "\r"})
@@ -113,9 +112,9 @@ func TestTerminalMessageFailureIsAnsweredAndKeepsTheConnection(t *testing.T) {
 }
 
 func TestTerminalMessageTooLargeIsRefusedInTheAck(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message-big", p, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "text": strings.Repeat("a", terminalInputLimit+1), "keys": "\r"})
@@ -145,9 +144,9 @@ func (r *recordingTerminal) Write(b []byte) (int, error) {
 }
 
 func TestTerminalMessageOnAProcessWithoutMessagesWritesTextThenKeys(t *testing.T) {
-	p := &recordingTerminal{controlledTerminal: terminalFixture()}
+	p := &recordingTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message-plain", p, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 2, "text": "hi", "keys": "\r"})
@@ -165,9 +164,9 @@ func TestTerminalMessageOnAProcessWithoutMessagesWritesTextThenKeys(t *testing.T
 }
 
 func TestTerminalMessageWithoutBracketedPasteIsPlainTextWithEnterPresses(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message-nobracket", p, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "text": "one\r\ntwo\nthree", "keys": "\r"})
@@ -181,10 +180,10 @@ func TestTerminalMessageWithoutBracketedPasteIsPlainTextWithEnterPresses(t *test
 }
 
 func TestTerminalMessageNeverCarriesControlCharactersOrItsOwnPasteEnd(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message-clean", p, nil)
 	i.publish([]byte("\x1b[?2004h"))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "text": "a\x1b[201~rm -rf\x03b\ttab\u009b", "keys": "\r"})
@@ -198,9 +197,9 @@ func TestTerminalMessageNeverCarriesControlCharactersOrItsOwnPasteEnd(t *testing
 }
 
 func TestTerminalMessageNeedsAPositiveIDAndIsOtherwiseIgnored(t *testing.T) {
-	p := &messageTerminal{controlledTerminal: terminalFixture()}
+	p := &messageTerminal{controlledTerminal: terminalFixture(t)}
 	i := Own("message-id", p, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := dialTerminal(t, ctx, i)
 	for _, id := range []int{0, -4} {

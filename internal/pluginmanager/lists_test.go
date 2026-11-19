@@ -7,17 +7,18 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
 // serveList serves body at every path; the handler records the User-Agent.
-func serveList(t *testing.T, body string) (*httptest.Server, *string) {
+func serveList(t *testing.T, body string) (*httptest.Server, <-chan string) {
 	t.Helper()
-	agent := new(string)
+	agent := make(chan string, 16)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*agent = r.UserAgent()
+		agent <- r.UserAgent()
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(body))
 	}))
@@ -61,8 +62,8 @@ func TestFetchListReadsEntriesAsCommunity(t *testing.T) {
 	if !reflect.DeepEqual(l.Plugins, want) {
 		t.Fatalf("plugins %+v\nwant %+v", l.Plugins, want)
 	}
-	if *agent != listUserAgent || strings.Contains(*agent, "Go-http-client") {
-		t.Fatalf("user agent %q", *agent)
+	if got := <-agent; got != listUserAgent || strings.Contains(got, "Go-http-client") {
+		t.Fatalf("user agent %q", got)
 	}
 }
 
@@ -209,24 +210,37 @@ func TestFetchListFollowsAFewRedirects(t *testing.T) {
 }
 
 func TestFetchListIsBoundedInTime(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-	}))
-	defer srv.Close()
-	defer close(release)
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err := FetchList(ctx, srv.URL+"/slow.yaml")
-	if err == nil || !strings.Contains(err.Error(), "took too long") {
-		t.Fatalf("err = %v", err)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Fatalf("waited %s", time.Since(start))
+	for _, tc := range []struct {
+		name                string
+		callerTimeout, want time.Duration
+	}{
+		{"own deadline", 0, 15 * time.Second},
+		{"earlier caller deadline", 200 * time.Millisecond, 200 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				previous := listClient
+				listClient = &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+					<-r.Context().Done()
+					return nil, r.Context().Err()
+				})}
+				t.Cleanup(func() { listClient = previous })
+				ctx := t.Context()
+				if tc.callerTimeout != 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tc.callerTimeout)
+					defer cancel()
+				}
+				start := time.Now()
+				_, err := FetchList(ctx, "https://example.invalid/slow.yaml")
+				if err == nil || !strings.Contains(err.Error(), "took too long") {
+					t.Fatalf("err = %v", err)
+				}
+				if elapsed := time.Since(start); elapsed != tc.want {
+					t.Fatalf("deadline after %s of virtual time, want %s", elapsed, tc.want)
+				}
+			})
+		})
 	}
 }
 

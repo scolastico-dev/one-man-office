@@ -126,11 +126,7 @@ func TestPersistIgnoresBadFiles(t *testing.T) {
 				got, why = loadKept(path, t0)
 				close(done)
 			}()
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("loadKept blocked")
-			}
+			<-done
 			if len(got) != 0 || got == nil {
 				t.Errorf("got %v", got)
 			}

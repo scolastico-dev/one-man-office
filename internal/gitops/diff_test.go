@@ -552,13 +552,14 @@ func TestRunCappedCutsAndStops(t *testing.T) {
 	write(t, filepath.Join(repo, "big.txt"), strings.Repeat("0123456789\n", 100000))
 	tg(t, repo, "add", "big.txt")
 	tg(t, repo, "commit", "-q", "-m", "big")
-	start := time.Now()
-	out, cut, err := g.runCapped(context.Background(), repo, 100, "cat-file", "-p", "HEAD:big.txt")
+	var out []byte
+	var cut bool
+	err := returns(t, "capped diff", func() (err error) {
+		out, cut, err = g.runCapped(context.Background(), repo, 100, "cat-file", "-p", "HEAD:big.txt")
+		return err
+	})
 	if err != nil || !cut || len(out) != 100 {
 		t.Fatalf("out %d bytes cut=%v err=%v", len(out), cut, err)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Errorf("took %s", time.Since(start))
 	}
 	out, cut, err = g.runCapped(context.Background(), repo, 1<<24, "cat-file", "-p", "HEAD:big.txt")
 	if err != nil || cut || len(out) != 1100000 {

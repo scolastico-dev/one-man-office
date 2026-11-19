@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -373,13 +372,9 @@ func TestRelayedTools(t *testing.T) {
 		t.Fatalf("relayed call: %v %+v", err, res)
 	}
 	// The notification is handled apart from the answer.
-	select {
-	case msg := <-progress:
-		if msg != "half" {
-			t.Errorf("progress %q", msg)
-		}
-	case <-time.After(5 * time.Second):
-		t.Error("no progress notification")
+	// A missing notification ends only with the test binary's own time limit.
+	if msg := <-progress; msg != "half" {
+		t.Errorf("progress %q", msg)
 	}
 
 	// A relayed tool not listed for the identity is unknown and never

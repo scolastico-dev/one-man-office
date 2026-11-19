@@ -151,6 +151,14 @@ function markOf(c: CardModel): 'before' | 'after' | null {
    */
   overscroll-behavior-x: auto;
   overscroll-behavior-y: contain;
+  /*
+   * Its own composited scroller. Without it Chromium cannot pick the box under
+   * a wheel on the compositor thread and asks the main thread, and while it
+   * waits a wheel (often the sideways one, which the board must receive) can
+   * be dropped: nothing scrolls. Keep this on every scroll box nested in the
+   * board's own scrolling.
+   */
+  will-change: scroll-position;
   /* Room for the focus ring of the cards inside the scrolling area. */
   padding: calc(var(--omo-space) * 5) calc(var(--omo-space) * 2) calc(var(--omo-space) * 2);
 }

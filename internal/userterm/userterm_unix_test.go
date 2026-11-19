@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func script(s string) func() (string, []string) {
@@ -79,7 +81,9 @@ func TestShellRunsWithEnvironmentWithoutIdentity(t *testing.T) {
 	m := New(Options{
 		Shell: script(fmt.Sprintf("env > %q", out)),
 		Env: func() []string {
-			return append(ShellEnv([]string{"PATH=/usr/bin:/bin", "OMO_AGENT_ID=zzz"}, "/s.sock"), "OMO_AGENT_ID=zzz")
+			env := childenvtest.ShellEnv([]string{"PATH=/usr/bin:/bin"}, t.TempDir())
+			env = append(env, "OMO_AGENT_ID=zzz")
+			return append(ShellEnv(env, "/s.sock"), "OMO_AGENT_ID=zzz")
 		},
 	})
 	defer m.CloseAll(time.Second)
@@ -157,9 +161,10 @@ func TestStartFailureReleasesHold(t *testing.T) {
 
 func TestVerifyRefusesStartAndReleasesHold(t *testing.T) {
 	var held, released, verified counter
-	marker := filepath.Join(t.TempDir(), "started")
+	// An invalid executable makes a start attempted before verification fail
+	// synchronously, rather than relying on a shell creating a marker in time.
 	m := New(Options{
-		Shell: script("touch " + marker),
+		Shell: func() (string, []string) { return "/nonexistent/shell", nil },
 		Hold:  func(string) func() { held.inc(); return released.inc },
 	})
 	refused := errors.New("the folder changed")
@@ -169,10 +174,6 @@ func TestVerifyRefusesStartAndReleasesHold(t *testing.T) {
 	}
 	if verified.get() != 1 || held.get() != 1 || released.get() != 1 || len(m.List()) != 0 {
 		t.Fatalf("verified %d held %d released %d list %v", verified.get(), held.get(), released.get(), m.List())
-	}
-	time.Sleep(100 * time.Millisecond)
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("the shell started")
 	}
 }
 
@@ -227,6 +228,7 @@ func TestCloseAllReleasesEveryHoldAndRefusesOpen(t *testing.T) {
 		Shell: script("sleep 300"),
 		Hold:  func(string) func() { held.inc(); return released.inc },
 	})
+	defer m.CloseAll(time.Second)
 	var ids []string
 	for range 3 {
 		info, err := m.Open(Spec{Dir: t.TempDir(), Hold: true})
@@ -363,6 +365,7 @@ func TestChangesInOrder(t *testing.T) {
 
 func TestConcurrentOpenCloseList(t *testing.T) {
 	m := New(Options{MaxRunning: 4, Shell: script("sleep 300"), Hold: func(string) func() { return func() {} }})
+	defer m.CloseAll(time.Second)
 	dir := t.TempDir()
 	var wg sync.WaitGroup
 	for range 8 {

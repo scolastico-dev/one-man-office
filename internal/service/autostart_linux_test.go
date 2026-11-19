@@ -114,14 +114,10 @@ func TestDesktopLaunchPassesLiteralPathsThroughNativeParser(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native desktop parser: %s %v; entry: %s", output, err, data)
 	}
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-deadline.C:
-			t.Fatal("desktop helper did not write its argv")
 		case <-ticker.C:
 			data, err := os.ReadFile(output)
 			if err != nil {

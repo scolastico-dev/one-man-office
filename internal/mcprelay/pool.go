@@ -107,6 +107,9 @@ type tunables struct {
 	// relistGap is the least time between two re-listings of an
 	// instance's tools after change notices.
 	relistGap time.Duration
+	// callContext bounds one call to an upstream server by its time limit
+	// (context.WithTimeout); a test replaces it to end the limit by an event.
+	callContext func(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc)
 }
 
 func defaultTunables() tunables {
@@ -126,6 +129,7 @@ func defaultTunables() tunables {
 		loginWait:     10 * time.Minute,
 		stopWait:      2 * time.Second,
 		relistGap:     2 * time.Second,
+		callContext:   context.WithTimeout,
 	}
 }
 
@@ -723,7 +727,8 @@ func (p *Pool) Status() []api.MCPServerState {
 			if inst.cfg.Name != s.Name {
 				continue
 			}
-			if inst.running() {
+			// Startup publishes this status before releasing ready.
+			if !inst.startedAt.IsZero() {
 				state.Instances++
 				if at := inst.startedAt; state.StartedAt == nil || at.Before(*state.StartedAt) {
 					state.StartedAt = &at

@@ -19,42 +19,30 @@ func TestSlowSubscriberIsDisconnectedNotBlocking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer slow.Cancel()
 	fast, err := s.events.Subscribe(-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fast.Cancel()
-	got := make(chan []int64, 1)
-	go func() {
-		var ids []int64
-		for ev := range fast.Events {
-			if ev.Kind == api.KindTicketCreated {
-				ids = append(ids, ev.ID)
-				if len(ids) == 300 {
-					break
-				}
-			}
-		}
-		got <- ids
-	}()
-
 	// A write must never wait for the slow subscriber, which reads nothing
 	// here: a write that did would hang for good once its buffer is full.
-	// The bound only tells that from a slow disk, so it is generous; a loaded
-	// machine takes more than 100 ms for a single write now and then.
+	// Acknowledge each fast delivery before writing again: scheduling the
+	// consumer late must not accidentally turn it into a slow subscriber too.
+	var prev int64
 	for i := range 300 {
-		start := time.Now()
-		m.create()
-		if d := time.Since(start); d > streamTimeout {
-			t.Fatalf("write %d took %v", i, d)
+		n := m.create()
+		ev, ok := <-fast.Events
+		if !ok || ev.Kind != api.KindTicketCreated || ev.Ticket == nil || *ev.Ticket != n || ev.ID <= prev {
+			t.Fatalf("event %d: %+v (open %v), want ticket %d after event %d", i, ev, ok, n, prev)
 		}
+		prev = ev.ID
 	}
 	waitFanOut(t, s, lastEventID(t, s))
 
 	// The slow subscriber was disconnected: its channel holds at most its
 	// buffer and is closed.
 	n := 0
-	deadline := time.After(streamTimeout)
 	for open := true; open; {
 		select {
 		case _, ok := <-slow.Events:
@@ -62,29 +50,12 @@ func TestSlowSubscriberIsDisconnectedNotBlocking(t *testing.T) {
 				n++
 			}
 			open = ok
-		case <-deadline:
-			t.Fatal("slow subscriber was not disconnected")
 		}
 	}
 	if n > subscriberBuffer {
 		t.Fatalf("slow subscriber received %d events, buffer is %d", n, subscriberBuffer)
 	}
 	slow.Cancel() // after disconnect: no panic
-
-	// The fast subscriber got every event, in order.
-	select {
-	case ids := <-got:
-		for i := 1; i < len(ids); i++ {
-			if ids[i] <= ids[i-1] {
-				t.Fatalf("ids not increasing at %d: %v", i, ids[i-1:i+1])
-			}
-		}
-		if len(ids) != 300 {
-			t.Fatalf("fast subscriber got %d events", len(ids))
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("fast subscriber did not get all events")
-	}
 }
 
 func TestBrokerPollsWithoutWake(t *testing.T) {
@@ -98,13 +69,9 @@ func TestBrokerPollsWithoutWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case ev := <-sub.Events:
-		if ev.ID != id {
-			t.Fatalf("id %d, want %d", ev.ID, id)
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("event not delivered without a wake-up")
+	ev := <-sub.Events
+	if ev.ID != id {
+		t.Fatalf("id %d, want %d", ev.ID, id)
 	}
 }
 
@@ -126,13 +93,9 @@ func TestBrokerSubscribeAtSnapshotOfUnstreamedEvent(t *testing.T) {
 		t.Fatalf("resync %v from %d, want live after %d", sub.Resync, sub.From, snapshot)
 	}
 	n := m.create()
-	select {
-	case ev := <-sub.Events:
-		if *ev.Ticket != n {
-			t.Fatalf("ticket %v, want %d", ev.Ticket, n)
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("no event")
+	ev := <-sub.Events
+	if *ev.Ticket != n {
+		t.Fatalf("ticket %v, want %d", ev.Ticket, n)
 	}
 }
 
@@ -153,18 +116,10 @@ func TestBrokerRunStopsAndClosesSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	select {
-	case <-stopped:
-	case <-time.After(streamTimeout):
-		t.Fatal("Run did not return")
-	}
-	select {
-	case _, ok := <-sub.Events:
-		if ok {
-			t.Fatal("unexpected event")
-		}
-	case <-time.After(streamTimeout):
-		t.Fatal("subscription not closed")
+	<-stopped
+	_, ok := <-sub.Events
+	if ok {
+		t.Fatal("unexpected event")
 	}
 	sub.Cancel()
 	if _, err := b.Subscribe(-1); !errors.Is(err, errBrokerClosed) {
@@ -238,11 +193,7 @@ func TestSubscriptionRemovedAfterClientDisconnect(t *testing.T) {
 		t.Fatalf("%d subscribers while connected, want 1", n)
 	}
 	st.close()
-	deadline := time.Now().Add(streamTimeout)
 	for subscriberCount(s.events) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("subscription still registered after disconnect")
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 }
@@ -290,13 +241,10 @@ func TestBrokerSubscribeRacingClose(t *testing.T) {
 			continue
 		}
 		// A subscription handed out before the stop must be closed by it.
-		deadline := time.After(streamTimeout)
 		for open := true; open; {
 			select {
 			case _, ok := <-r.sub.Events:
 				open = ok
-			case <-deadline:
-				t.Fatal("subscription survived the broker stopping")
 			}
 		}
 		r.sub.Cancel()

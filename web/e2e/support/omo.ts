@@ -1,11 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
-import { cleanEnv, holdsAgentProgram } from './env'
+import { cleanEnv, findGit, holdsAgentProgram, installGit, pathWithoutAgentPrograms } from './env'
+import { cpuThrottleRate, installCPUThrottle } from './throttle'
+import { findAddress, isPortCollision } from './startup'
+import { run, type CliResult } from './run'
+import { isBelow } from './within'
 export { pathWithoutAgentPrograms, pluginListPath } from './env'
 
 /** The port a developer's own omo uses; tests must never come near it. */
@@ -20,6 +24,15 @@ export const SEED_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'wi
 export const FAKE_AGENT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakeagent.exe' : 'fakeagent')
 /** The scripted MCP server (stdio) a test lets omo relay; it runs only with FAKEMCP_SERVER=1 in its environment. */
 export const FAKE_MCP_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakemcp.exe' : 'fakemcp')
+/**
+ * omo's own command line (internal/cli, as cmd/omo) that trusts one fixture certificate authority, named by
+ * E2E_FIXTURE_CA_FILE, through Go's fallback roots on every platform. Used only for tests that set omoOptions.tlsCA.
+ */
+export const CA_OMO_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'omoca.exe' : 'omoca')
+/** Native stand-in for the Node an editor artifact bundles (built by the e2e global setup). */
+export const NODE_SHIM_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'nodeshim.exe' : 'nodeshim')
+/** Writes a throw-away loopback certificate for the local HTTPS fixtures, so no openssl is needed. */
+export const TEST_CERT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'testcert.exe' : 'testcert')
 
 /** The roles an agent script can be given. */
 export type AgentRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'
@@ -60,24 +73,33 @@ export interface OmoOptions {
    */
   path?: string
   /**
+   * Fake programs the test's server finds first on its PATH, made in the
+   * test's own home before the server starts and removed with it, so they
+   * exist exactly as long as the server that looks for them (never at module
+   * load, where a repeated or later group of the same file would find them
+   * removed). `files` maps a program's name to its content (written
+   * executable); `git` links the runner's git in (omo needs it to start);
+   * `inheritPath` appends the runner's PATH without any real agent program.
+   * `omo.programs` is the folder. Sets the PATH, so `path` is not given too.
+   */
+  programs?: { files: Readonly<Record<string, string>>; git?: boolean; inheritPath?: boolean }
+  /**
    * A true first start: no settings file is written before the server
    * starts, so omo looks for agent programs on its PATH and writes profiles
    * for those it finds. Needs `path` (the test's own fake programs).
    */
   firstStart?: boolean
-  /** Additional trusted CA for a local HTTPS artifact fixture, passed only to this test's server/CLI. */
+  /** The one CA (a PEM file) that this test's omo, started from CA_OMO_BINARY, trusts for its local HTTPS artifact fixture. */
   tlsCA?: string
 }
 
-export interface CliResult {
-  code: number
-  stdout: string
-  stderr: string
-}
+export type { CliResult }
 
 export interface Omo {
   /** Temporary directory used as OMO_HOME (and HOME, XDG_*). Removed after the test. */
   readonly home: string
+  /** The folder of `omoOptions.programs` in the home, or "" when the test has none. */
+  readonly programs: string
   readonly port: number
   /** `http://127.0.0.1:<port>`, for direct API calls. */
   readonly base: string
@@ -127,38 +149,6 @@ async function freePort(): Promise<number> {
   }
 }
 
-function run(bin: string, args: string[], env: NodeJS.ProcessEnv, stdin?: string, timeoutMs = 60_000): Promise<CliResult> {
-  return new Promise((res, rej) => {
-    const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      rej(new Error(`${args.join(' ')} did not finish within ${timeoutMs} ms\n${stdout}${stderr}`))
-    }, timeoutMs)
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
-    child.once('error', (e) => {
-      clearTimeout(timer)
-      rej(e)
-    })
-    child.once('close', (code) => {
-      clearTimeout(timer)
-      res({ code: code ?? -1, stdout, stderr })
-    })
-    // A command that finishes without reading its input closes the pipe
-    // while the write is still on its way (more often on a busy machine);
-    // that is not a failure of the command.
-    child.stdin.on('error', (e: NodeJS.ErrnoException) => {
-      if (e.code !== 'EPIPE') {
-        clearTimeout(timer)
-        rej(e)
-      }
-    })
-    child.stdin.end(stdin ?? '')
-  })
-}
-
 export class ServerError extends Error {
   constructor(
     readonly status: number,
@@ -169,17 +159,43 @@ export class ServerError extends Error {
   }
 }
 
-/** Creates a fresh isolated omo. Not started yet. */
-async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
-  if (!existsSync(BINARY)) {
-    throw new Error(`the omo binary ${BINARY} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
+/**
+ * Creates a fresh isolated omo. Not started yet. The options are checked before
+ * anything is made, and the home is removed again when anything before the
+ * handle is returned throws, so a failed creation leaves nothing behind.
+ */
+export async function createOmo(opts: OmoOptions, repo: string, binary = opts.tlsCA === undefined ? BINARY : CA_OMO_BINARY): Promise<{ omo: Omo; dispose(): Promise<void> }> {
+  if (!existsSync(binary)) {
+    throw new Error(`the omo binary ${binary} does not exist; run "make build" first (or set OMO_E2E_BIN)`)
   }
+  if (opts.programs !== undefined && opts.path !== undefined) throw new Error('give omoOptions.programs or omoOptions.path, not both')
+  if (opts.programs?.git) findGit()
   const root = realpathSync(tmpdir())
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
-  if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+  try {
+    if (!isBelow(root, home)) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
+    return await createOmoIn(home, opts, repo, binary)
+  } catch (e) {
+    rmSync(home, { recursive: true, force: true })
+    throw e
+  }
+}
+
+async function createOmoIn(home: string, opts: OmoOptions, repo: string, binary: string): Promise<{ omo: Omo; dispose(): Promise<void> }> {
   mkdirSync(join(home, 'omo'), { recursive: true })
-  const env = cleanEnv(home, opts.path)
-  if (opts.tlsCA !== undefined) env.SSL_CERT_FILE = opts.tlsCA
+  mkdirSync(join(home, 'agent-pids'), { recursive: true }) // fake agents record their process ids here
+  const programs = opts.programs === undefined ? '' : join(home, 'programs')
+  if (opts.programs !== undefined) {
+    mkdirSync(programs)
+    for (const [name, content] of Object.entries(opts.programs.files)) {
+      writeFileSync(join(programs, name), content)
+      chmodSync(join(programs, name), 0o755)
+    }
+    if (opts.programs.git) installGit(programs, findGit())
+  }
+  const ownPath = opts.programs === undefined ? opts.path : opts.programs.inheritPath ? [programs, pathWithoutAgentPrograms()].join(delimiter) : programs
+  const env = cleanEnv(home, ownPath)
+  if (opts.tlsCA !== undefined) env.E2E_FIXTURE_CA_FILE = opts.tlsCA
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
@@ -191,14 +207,14 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
 
   const assertIsolated = () => {
     const path = (process.platform === 'win32' ? env.Path : env.PATH) ?? ''
-    if (opts.path === undefined && path.split(delimiter).some((dir) => holdsAgentProgram(dir))) {
+    if (ownPath === undefined && path.split(delimiter).some((dir) => holdsAgentProgram(dir))) {
       throw new Error('the test server can reach a real agent program through its PATH')
     }
     if (port === DEFAULT_PORT) throw new Error(`the test server must not use port ${DEFAULT_PORT}`)
-    if (env.OMO_HOME === undefined || !env.OMO_HOME.startsWith(home)) throw new Error('OMO_HOME is outside the temporary home')
+    if (env.OMO_HOME === undefined || !isBelow(home, env.OMO_HOME)) throw new Error('OMO_HOME is outside the temporary home')
   }
 
-  const cli = (args: string[]) => run(BINARY, args, env)
+  const cli = (args: string[]) => run(binary, args, env)
   const mustCli = async (args: string[]) => {
     const r = await cli(args)
     if (r.code !== 0) throw new Error(`omo ${args.join(' ')} failed (${r.code}): ${r.stdout}${r.stderr}`)
@@ -207,6 +223,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
 
   const omo: Omo = {
     home,
+    programs,
     get port() {
       return port
     },
@@ -279,7 +296,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
         const failure = await spawnServer()
         if (failure === undefined) break
         // Another process may take the probed port before the first start; a restart keeps its port.
-        const taken = /address already in use|only one usage/i.test(failure)
+        const taken = isPortCollision(failure, port)
         if (!taken || !first || attempt >= 2) throw new Error(`omo did not start:\n${failure}`)
         port = await freePort()
         await mustCli(['config', 'set', 'port', String(port)])
@@ -307,7 +324,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   /** Starts the child and waits for the printed address; returns its output when it exited instead. */
   async function spawnServer(): Promise<string | undefined> {
     log += `\n--- start on port ${port} ---\n`
-    const c = spawn(BINARY, [], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const c = spawn(binary, [], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     child = c
     let buffer = ''
     const onData = (d: Buffer) => {
@@ -317,14 +334,11 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     c.once('error', (e) => (buffer += `spawn failed: ${e.message}\n`))
     c.stdout?.on('data', onData)
     c.stderr?.on('data', onData)
-    // With public_url configured, the isolated loopback address is an "also"
-    // line. Match that exact host/port instead of assuming it is the primary URL.
-    const re = new RegExp(`^(?:omo|also): http://omo\\.localhost:${port}/(?:#([0-9a-f]{64}))?\\s*$`, 'm')
     const deadline = Date.now() + READY_TIMEOUT_MS
     while (Date.now() < deadline) {
-      const m = re.exec(buffer)
-      if (m) {
-        omo.token = m[1] ?? ''
+      const found = findAddress(buffer, port)
+      if (found) {
+        omo.token = found.token
         omo.accessUrl = omo.token === '' ? omo.url('/') : `http://omo.localhost:${port}/#${omo.token}`
         return undefined
       }
@@ -373,6 +387,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     const env: Record<string, string> = {
       OMO_FAKEAGENT: '1',
       [AGENT_MARK]: home,
+      OMO_FAKE_PID_DIR: join(home, 'agent-pids'),
       GIT_AUTHOR_NAME: 'Agent',
       GIT_AUTHOR_EMAIL: 'agent@example.invalid',
       GIT_COMMITTER_NAME: 'omo',
@@ -436,7 +451,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     // never shows up in a test. (Written after the first command, which
     // creates the home; a file in an empty home before that is refused.)
     const settingsFile = join(home, 'omo', 'settings.yaml')
-    if (opts.firstStart && opts.path === undefined) throw new Error('a first start needs a PATH of the test\'s own fake programs')
+    if (opts.firstStart && ownPath === undefined) throw new Error('a first start needs a PATH of the test\'s own fake programs')
     if (!opts.firstStart && !existsSync(settingsFile)) writeFileSync(settingsFile, '# e2e: no agent detection at the first start\n')
     if (auth === 'basic') {
       await mustCli(['config', 'set', 'basic_auth', `${BASIC.username}:${BASIC.password}`])
@@ -454,6 +469,8 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
 
 export interface E2EFixtures {
   omoOptions: OmoOptions
+  /** Chromium CPU slowdown; normal runs use 1. */
+  cpuThrottleRate: number
   /** A git repository (branch main, one commit) in the test's temporary folder. */
   repo: string
   /** A fresh omo on its own home and port, started and, unless asked otherwise, paused. */
@@ -462,6 +479,16 @@ export interface E2EFixtures {
 
 export const test = base.extend<E2EFixtures>({
   omoOptions: [{}, { option: true }],
+  cpuThrottleRate: [cpuThrottleRate(process.env.E2E_CPU_THROTTLE_RATE), { option: true }],
+  context: async ({ context, browserName, cpuThrottleRate: rate }, use) => {
+    if (rate !== 1 && browserName !== 'chromium') throw new Error('E2E_CPU_THROTTLE_RATE requires Chromium')
+    const dispose = await installCPUThrottle(context, rate)
+    try {
+      await use(context)
+    } finally {
+      await dispose()
+    }
+  },
   repo: async ({}, use) => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-repo-'))
     const dir = join(root, 'demo')

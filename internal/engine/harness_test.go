@@ -18,6 +18,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
@@ -35,7 +36,7 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeagent.Main())
 	}
 	gittest.Isolate()
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 // ---- fake runner and agent ----
@@ -675,14 +676,11 @@ func (h *harness) flagged(n int64, want string) bool {
 	return false
 }
 
-// waitFor polls cond until it holds or the deadline passes.
+// waitFor polls cond until it holds; a condition that never holds ends with
+// the test binary's own time limit and a dump of every goroutine.
 func (h *harness) waitFor(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
 	for !cond() {
-		if time.Now().After(deadline) {
-			h.t.Fatalf("timed out waiting for %s", what)
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 }

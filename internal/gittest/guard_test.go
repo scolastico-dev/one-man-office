@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 // usesGit matches Go code that runs git or uses omo's git client.
@@ -161,6 +163,7 @@ func TestIsolateHidesTheDevelopersConfiguration(t *testing.T) {
 	Isolate()
 	for _, key := range []string{"commit.gpgsign", "user.signingkey"} {
 		cmd := exec.Command("git", "config", "--get", key)
+		cmd.Env = childenvtest.WithoutOmo(os.Environ())
 		cmd.Dir = t.TempDir()
 		if out, err := cmd.Output(); err == nil {
 			t.Errorf("git still sees %s = %s", key, strings.TrimSpace(string(out)))

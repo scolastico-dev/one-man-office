@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentsetup"
@@ -174,14 +175,21 @@ func TestAgyUsageHelper(t *testing.T) {
 	}
 	j.Profile.CLI = api.CLIAgy
 	j.Text = `function usage() local a, e = omo.agy_usage() error(tostring(e), 0) end`
-	o.AgyUsage = func(ctx context.Context, _ string, _ []string) ([]byte, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	o.Timeout = 200 * time.Millisecond
-	if _, err := Run(context.Background(), j, o); err == nil || !strings.Contains(err.Error(), "time") {
-		t.Fatalf("timeout: err = %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		entered := false
+		o.AgyUsage = func(ctx context.Context, _ string, _ []string) ([]byte, error) {
+			entered = true
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		o.Timeout = 200 * time.Millisecond
+		if _, err := Run(context.Background(), j, o); err == nil || !strings.Contains(err.Error(), "time") {
+			t.Fatalf("timeout: err = %v", err)
+		}
+		if !entered {
+			t.Fatal("run expired before entering the agy helper")
+		}
+	})
 	o.Timeout = 0
 	o.AgyUsage = func(context.Context, string, []string) ([]byte, error) { return nil, errAgyTooLarge }
 	if _, err := Run(context.Background(), j, o); err == nil || err.Error() != "the agy usage command printed too much" {

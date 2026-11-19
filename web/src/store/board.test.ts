@@ -144,8 +144,18 @@ class FakeClient implements ApiClient {
   }
 }
 
-async function flush(): Promise<void> {
-  for (let i = 0; i < 30; i++) await Promise.resolve()
+// The real macrotask scheduler, taken before any test installs fake timers.
+const realSetImmediate = globalThis.setImmediate
+
+/**
+ * Lets every pending promise reaction run, however long the chain: the microtask
+ * queue always drains completely before the next macrotask, so one real macrotask
+ * is the exact point after which no promise work is left. A fixed number of
+ * microtask turns would miss a longer chain, and a negative assertion after it
+ * would pass without proving anything.
+ */
+function flush(): Promise<void> {
+  return new Promise<void>((resolve) => realSetImmediate(resolve))
 }
 
 interface Fixture {

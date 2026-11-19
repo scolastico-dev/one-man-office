@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestFetchTargetUsesRecordedURLAndPreservesCheckout(t *testing.T) {
@@ -220,10 +219,14 @@ func TestFetchTargetSerializesRepositoryFetches(t *testing.T) {
 	remote := bareRemote(t)
 	tg(t, repo, "push", remote, "main")
 	entered := make(chan struct{}, 2)
+	queued := make(chan struct{}, 2)
 	release := make(chan struct{})
 	var calls atomic.Int32
 	g.pause = func(point string) {
-		if point == "fetch-target" {
+		switch point {
+		case "repo-lock-wait":
+			queued <- struct{}{}
+		case "fetch-target":
 			entered <- struct{}{}
 			if calls.Add(1) == 1 {
 				<-release
@@ -236,17 +239,15 @@ func TestFetchTargetSerializesRepositoryFetches(t *testing.T) {
 		errs <- err
 	}
 	go fetch()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		close(release)
-		t.Fatal("first fetch did not start")
-	}
+	<-entered // the first fetch holds the repository's lock inside git
 	go fetch()
+	// The second fetch either reports that it waits behind the lock, or, when
+	// the lock does not serialize it, enters git itself. Both are events the
+	// code produces; no interval is waited out.
 	select {
+	case <-queued:
 	case <-entered:
 		t.Error("a second fetch entered while the repository's first fetch was running")
-	case <-time.After(30 * time.Millisecond):
 	}
 	close(release)
 	for i := 0; i < 2; i++ {

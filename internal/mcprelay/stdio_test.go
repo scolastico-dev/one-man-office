@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,8 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
+	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
 
 func TestStdioToolsAreOfferedUnderTheServersName(t *testing.T) {
@@ -189,6 +193,38 @@ func TestACrashedProcessRestartsOnTheNextCall(t *testing.T) {
 	}
 }
 
+// The crash is announced (the instance leaves the pool) only after the line
+// about it is in the log: whoever sees the instance gone finds the line.
+func TestACrashIsNotAnnouncedBeforeItsLogLine(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	f.call(id, "fake__whoami", nil)
+	reached, release := make(chan struct{}), make(chan struct{})
+	f.pool.mu.Lock()
+	lg := f.pool.servers["fake"].log
+	f.pool.mu.Unlock()
+	var once sync.Once
+	lg.setBeforeWrite(func(msg string) {
+		if strings.Contains(msg, "ended unexpectedly") {
+			once.Do(func() { close(reached) })
+			<-release
+		}
+	})
+	f.call(id, "fake__crash", nil)
+	<-reached
+	// The line is about to be written and is held: the crash must not be
+	// published yet.
+	instances := f.state("fake").Instances
+	close(release)
+	if instances == 0 {
+		t.Fatal("the crash was announced before its log line was written")
+	}
+	eventually(t, "the crash to be noticed", func() bool { return f.state("fake").Instances == 0 })
+	if !strings.Contains(f.logText("fake"), "ended unexpectedly") {
+		t.Fatalf("the log does not mention the crash:\n%s", f.logText("fake"))
+	}
+}
+
 func TestAServerThatKeepsFailingIsStoppedUntilRestarted(t *testing.T) {
 	f := newFixture(t, func(t *tunables) { t.maxFailures = 3 }, stdioServer("fake", map[string]string{fakemcp.EnvMode: string(fakemcp.ModeExit)}))
 	id := agent("s", t.TempDir(), api.RoleDeveloper)
@@ -287,49 +323,243 @@ func TestCallTimeoutAndCancellation(t *testing.T) {
 	}
 	s.Timeouts.Call = 0
 	f.set(s)
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-	began := time.Now()
-	_, err := f.pool.Call(ctx, id, "fake__sleep", json.RawMessage(`{"millis":5000}`), nil)
-	if !errors.Is(err, context.Canceled) || time.Since(began) > 3*time.Second {
-		t.Fatalf("a cancelled call answered %v after %s", err, time.Since(began))
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
 	}
 	if res := f.call(id, "fake__echo", map[string]string{"text": "still"}); res.IsError {
 		t.Fatalf("the server is unusable after a cancelled call: %q", resultText(res))
 	}
 }
 
+// heldCall is a call of the fake server's "hold" tool: the server sends one
+// progress notification and then waits for the cancellation of the call. Its
+// phases are separate functions, so a test binary that ends in its own time
+// limit shows in its goroutine dump which phase never completed: the progress
+// that triggers the cancellation never reached the caller, the cancellation
+// was requested but the call did not return, or the upstream never learned of
+// it. No clock decides which.
+type heldCall struct {
+	t        *testing.T
+	cancel   context.CancelFunc
+	progress chan struct{}
+	done     chan error
+}
+
+// startHeldCall starts the call; onProgress runs for every progress
+// notification of it, after the first has been announced to waitForProgress.
+func startHeldCall(t *testing.T, f *fixture, id mcpserver.Identity, onProgress ...func(*heldCall)) *heldCall {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := &heldCall{t: t, cancel: cancel, progress: make(chan struct{}), done: make(chan error, 1)}
+	var once sync.Once
+	go func() {
+		_, err := f.pool.Call(ctx, id, "fake__hold", nil, func(float64, float64, string) {
+			once.Do(func() { close(c.progress) })
+			for _, fn := range onProgress {
+				fn(c)
+			}
+		})
+		c.done <- err
+	}()
+	return c
+}
+
+func (c *heldCall) waitForProgress() { <-c.progress }
+
+func (c *heldCall) waitForReturn() error { return <-c.done }
+
+// waitForUpstreamCancellations returns once the fake server has seen n calls
+// end by cancellation: it asks the server itself, which answers when it has.
+func waitForUpstreamCancellations(t *testing.T, f *fixture, id mcpserver.Identity, n int) {
+	t.Helper()
+	res := f.call(id, "fake__cancelled", map[string]int{"count": n})
+	if res.IsError || resultText(res) != fmt.Sprintf("cancelled %d", n) {
+		t.Fatalf("upstream cancellations: %q", resultText(res))
+	}
+}
+
+func TestACancelledCallIsCancelledUpstream(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// The notification that triggers the cancellation is still being handled while
+// the call must end: its handler is held until the call has returned.
+func TestACancelledCallEndsWhileItsProgressHandlerIsStillRunning(t *testing.T) {
+	f := newFixture(t, nil, stdioServer("fake", nil))
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	free := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(free)
+	c := startHeldCall(t, f, id, func(c *heldCall) {
+		c.cancel()
+		<-release
+	})
+	c.waitForProgress()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	free()
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// expiry is a call's time limit that a test ends itself: the limit runs out
+// when expire is called, not after some time, and then reads as the deadline
+// of the call (context.DeadlineExceeded), as the real limit does.
+type expiry struct {
+	mu      sync.Mutex
+	expired bool
+	cancel  context.CancelFunc
+	used    bool
+	ready   chan struct{} // closed when the limit exists, i.e. the call is about to be sent
+}
+
+type expiringContext struct {
+	context.Context
+	e *expiry
+}
+
+func (c expiringContext) Err() error {
+	c.e.mu.Lock()
+	defer c.e.mu.Unlock()
+	if c.e.expired {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
+
+func newExpiry() *expiry { return &expiry{ready: make(chan struct{})} }
+
+// callContext gives the first call a limit of this kind and every later call
+// the real one.
+func (e *expiry) callContext(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	e.mu.Lock()
+	if e.used {
+		e.mu.Unlock()
+		return context.WithTimeout(ctx, d)
+	}
+	e.used = true
+	inner, cancel := context.WithCancel(ctx)
+	e.cancel = cancel
+	e.mu.Unlock()
+	close(e.ready)
+	return expiringContext{inner, e}, cancel
+}
+
+func (e *expiry) expire() {
+	<-e.ready
+	e.mu.Lock()
+	e.expired = true
+	cancel := e.cancel
+	e.mu.Unlock()
+	cancel()
+}
+
+// The limit of a call that the upstream is already handling ends: the upstream
+// is told, as for any cancelled call, and the next call is not disturbed. The
+// limit runs out only after the upstream's handler reported progress.
+func TestATimedOutCallAndACancelledCallAreBothCancelledUpstream(t *testing.T) {
+	s := stdioServer("fake", nil)
+	s.Timeouts.Call = api.Duration(100 * time.Millisecond)
+	ex := newExpiry()
+	f := newFixture(t, func(tn *tunables) { tn.callContext = ex.callContext }, s)
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	first := make(chan *mcp.CallToolResult, 1)
+	progress := make(chan struct{})
+	var once sync.Once
+	go func() {
+		res, _ := f.pool.Call(context.Background(), id, "fake__hold", nil, func(float64, float64, string) { once.Do(func() { close(progress) }) })
+		first <- res
+	}()
+	<-progress
+	ex.expire()
+	if res := <-first; !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
+		t.Fatalf("a held call answered %q", resultText(res))
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
+	s.Timeouts.Call = 0
+	f.set(s)
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
+// The other legal order: the limit runs out before the request is written.
+// The SDK then refuses the write, the upstream never handles the call, so there
+// is nothing to cancel there; the caller still gets the timeout result and the
+// next call is cancelled upstream on its own.
+func TestATimeoutBeforeTheRequestIsSentNeverReachesTheUpstream(t *testing.T) {
+	s := stdioServer("fake", nil)
+	s.Timeouts.Call = api.Duration(100 * time.Millisecond)
+	ex := newExpiry()
+	f := newFixture(t, func(tn *tunables) {
+		tn.callContext = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+			cctx, cancel := ex.callContext(ctx, d)
+			ex.expire()
+			return cctx, cancel
+		}
+	}, s)
+	id := agent("s", t.TempDir(), api.RoleDeveloper)
+	if res := f.call(id, "fake__hold", nil); !res.IsError || resultText(res) != "server fake did not answer within 100ms" {
+		t.Fatalf("a call whose limit ran out before it was sent answered %q", resultText(res))
+	}
+	s.Timeouts.Call = 0
+	f.set(s)
+	c := startHeldCall(t, f, id)
+	c.waitForProgress()
+	c.cancel()
+	if err := c.waitForReturn(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled call answered %v", err)
+	}
+	waitForUpstreamCancellations(t, f, id, 1)
+}
+
 func TestProgressIsHandedToTheCaller(t *testing.T) {
 	f := newFixture(t, nil, stdioServer("fake", nil))
+	// The SDK hands notifications over concurrently with the answer and with
+	// each other: one that is handled after the call ended finds nobody waiting
+	// (omo drops it), and two may arrive in either order. So the call is kept
+	// running until the caller has seen the first two steps (it ends the call
+	// itself, by cancelling, once both arrived), and the steps are compared as a
+	// set. Nothing here depends on how fast a notification is handled.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var mu sync.Mutex
-	var steps []float64
-	// The fake reports each step after its sleep, the last one right before
-	// its result. The SDK hands notifications over concurrently, so that
-	// last one may arrive after the call has ended, when nobody waits for
-	// it any more; the steps reported while the call runs must arrive.
-	_, err := f.pool.Call(context.Background(), agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":300,"steps":3}`), func(done, total float64, msg string) {
-		mu.Lock()
-		steps = append(steps, done)
-		mu.Unlock()
-		if total != 3 || msg != "step" {
+	seen := map[float64]bool{}
+	_, err := f.pool.Call(ctx, agent("s", t.TempDir(), api.RoleDeveloper), "fake__sleep", json.RawMessage(`{"millis":60000,"steps":600}`), func(done, total float64, msg string) {
+		if total != 600 || msg != "step" {
 			t.Errorf("progress %v of %v: %q", done, total, msg)
 		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "the progress notifications of the running call", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(steps) >= 2
+		seen[done] = true
+		if seen[1] && seen[2] {
+			cancel()
+		}
 	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the call ended with %v, want the cancellation the caller made after steps 1 and 2", err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if steps[0] != 1 || steps[1] != 2 {
-		t.Fatalf("progress %v", steps)
+	if !seen[1] || !seen[2] {
+		t.Fatalf("progress steps seen: %v", seen)
 	}
 }
 
@@ -439,11 +669,7 @@ func TestEndedSessionsLeaveNoProcess(t *testing.T) {
 	}
 	f.pool.mu.Unlock()
 	f.pool.EndInstance("s")
-	select {
-	case <-proc.exited:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the process of an ended session still runs")
-	}
+	<-proc.exited
 }
 
 // A flood of change notices without a change lists the tools again a few

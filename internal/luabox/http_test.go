@@ -137,10 +137,7 @@ func TestHTTPBounds(t *testing.T) {
 		case "/max":
 			_, _ = w.Write([]byte(strings.Repeat("x", MaxHTTPBody)))
 		case "/slow":
-			select {
-			case <-r.Context().Done():
-			case <-time.After(10 * time.Second):
-			}
+			<-r.Context().Done()
 		default:
 			_, _ = w.Write([]byte("ok"))
 		}
@@ -174,16 +171,18 @@ func TestHTTPBounds(t *testing.T) {
 		t.Fatalf("big request: %v", v)
 	}
 
-	start := time.Now()
-	v, _, _ = httpCall(t, &HTTP{}, Limits{}, `function f() local r, e = omo.http({url = "`+secretURL+`/slow", timeout = 0.2}) return e end`)
-	if v != phraseHTTPTimeout || time.Since(start) > 3*time.Second {
-		t.Fatalf("timeout: %v after %v", v, time.Since(start))
+	completeWithin(t, 3*time.Second, func() {
+		v, _, _ = httpCall(t, &HTTP{}, Limits{}, `function f() local r, e = omo.http({url = "`+secretURL+`/slow", timeout = 0.2}) return e end`)
+	})
+	if v != phraseHTTPTimeout {
+		t.Fatalf("timeout: %v", v)
 	}
 	// The run's deadline ends a request whose own timeout is longer.
-	start = time.Now()
-	_, _, err = httpCall(t, &HTTP{}, Limits{Timeout: 300 * time.Millisecond}, `function f() local r, e = omo.http({url = "`+srv.URL+`/slow", timeout = 30}) return e end`)
-	if err == nil || err.Error() != msgTimeLimit || time.Since(start) > 3*time.Second {
-		t.Fatalf("deadline: %v after %v", err, time.Since(start))
+	completeWithin(t, 3*time.Second, func() {
+		_, _, err = httpCall(t, &HTTP{}, Limits{Timeout: 300 * time.Millisecond}, `function f() local r, e = omo.http({url = "`+srv.URL+`/slow", timeout = 30}) return e end`)
+	})
+	if err == nil || err.Error() != msgTimeLimit {
+		t.Fatalf("deadline: %v", err)
 	}
 
 	// Parsing refusals are fixed phrases and never hold the URL.
@@ -205,10 +204,12 @@ func TestHTTPBounds(t *testing.T) {
 		}
 	}
 	// A failed connection names no address.
-	ln, _ := net.Listen("tcp", "127.0.0.1:0")
-	addr := ln.Addr().String()
-	ln.Close()
-	v, _, _ = httpCall(t, &HTTP{}, Limits{}, get("http://"+addr+"/secret-path"))
+	// Inject a failed dial without releasing a port another process could bind.
+	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused: secret address")
+	}}
+	defer transport.CloseIdleConnections()
+	v, _, _ = httpCall(t, &HTTP{Client: &http.Client{Transport: transport}}, Limits{}, get("http://127.0.0.1/secret-path"))
 	if v.(map[string]any)["err"] != phraseHTTPFailed {
 		t.Fatalf("refused connection: %v", v)
 	}
@@ -233,6 +234,45 @@ func TestHTTPSendsBodies(t *testing.T) {
 	if err != nil || v != `POST application/json {"k":"v"}|POST application/x-www-form-urlencoded k=v+w` {
 		t.Fatalf("%v %v", v, err)
 	}
+}
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestHTTPCancellationEndsActiveRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := New(ctx, Limits{})
+	defer b.Close()
+	entered := make(chan struct{})
+	requestDone := make(chan struct{})
+	abort := make(chan struct{})
+	finished := make(chan struct{})
+	defer func() { close(abort); cancel(); <-finished }()
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		close(entered)
+		defer close(requestDone)
+		select {
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-abort:
+			return nil, errors.New("test transport stopped")
+		}
+	})}
+	b.Set("http", (&HTTP{Client: client}).Func(b))
+	result := make(chan error, 1)
+	go func() {
+		defer close(finished)
+		result <- b.Load(`omo.http({url = "https://example.invalid/", timeout = 30})`, "http")
+	}()
+	<-entered
+	cancel()
+	err := <-result
+	if err == nil || err.Error() != msgCanceled {
+		t.Fatalf("canceled HTTP run: %v", err)
+	}
+	<-requestDone
 }
 
 func TestHTTPGoroutinesEndAfterTimeout(t *testing.T) {

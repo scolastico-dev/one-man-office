@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { devNull, tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { devNull } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { script } from './support/agents'
 import { card, openBoard } from './support/board'
 import { expect, test, type Omo } from './support/omo'
+import { withoutShellConfig } from './support/env'
+import { initRepo } from './support/git'
 
 // Export against the real server, real agents (the fake agent) and a remote
 // the test makes in its own home. The project's origin is a forge address;
@@ -18,25 +20,22 @@ import { expect, test, type Omo } from './support/omo'
 // The export job's prompt is longer than its screen, and the transcript of a
 // session keeps what a snapshot of the screen saw, so the head of a prompt
 // printed in one go may be missing from the log. The job saves its prompt
-// instead, and the tests read the file.
-const PROMPTS = join(tmpdir(), `omo-export-prompts-${process.pid}`)
-test.beforeAll(() => mkdirSync(PROMPTS, { recursive: true }))
-// Tests of one worker number their first ticket alike: an earlier test's file must not be read.
-test.beforeEach(() => {
-  rmSync(PROMPTS, { recursive: true, force: true })
-  mkdirSync(PROMPTS, { recursive: true })
-})
-test.afterAll(() => rmSync(PROMPTS, { recursive: true, force: true }))
-const promptFile = (n: number) => join(PROMPTS, `prompt-${n}.txt`)
+// instead, and the tests read the file. The job's own folder is
+// <home>/omo/run/export/<n>-<project>, so four levels up is the test's home:
+// each test keeps its prompts in a folder of its own there, which goes with the
+// home, so no test can read another test's file or find its folder gone.
+const PROMPT_SCRIPT_PATH = '../../../../export-prompts/prompt-$TICKET.txt'
+test.beforeEach(({ omo }) => mkdirSync(join(omo.home, 'export-prompts')))
+const promptFile = (omo: Omo, n: number) => join(omo.home, 'export-prompts', `prompt-${n}.txt`)
 /** The saved prompt of the export job of ticket `n`, once the job has saved it. */
-async function promptOf(n: number): Promise<string> {
-  await expect.poll(() => existsSync(promptFile(n)), { message: `waiting for the export job of #${n} to save its prompt` }).toBe(true)
-  return readFileSync(promptFile(n), 'utf8')
+async function promptOf(omo: Omo, n: number): Promise<string> {
+  await expect.poll(() => existsSync(promptFile(omo, n)), { message: `waiting for the export job of #${n} to save its prompt` }).toBe(true)
+  return readFileSync(promptFile(omo, n), 'utf8')
 }
 
 test.use({
   viewport: { width: 1440, height: 900 },
-  omoOptions: { agents: { export: script('ready', `save-prompt|${join(PROMPTS, 'prompt-$TICKET.txt')}`, 'done-url|https://example.invalid/you/app/pull/$TICKET', 'wait|10m') } },
+  omoOptions: { agents: { export: script('ready', `save-prompt|${PROMPT_SCRIPT_PATH}`, 'done-url|https://example.invalid/you/app/pull/$TICKET', 'wait|10m') } },
 })
 
 const FORGE = 'https://example.invalid/you/app.git'
@@ -44,7 +43,7 @@ const FORGE = 'https://example.invalid/you/app.git'
 const WITH_SECRET = 'https://exporter:s3cret-pass@example.invalid/you/app.git'
 const SECRET = 's3cret-pass'
 
-const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+const gitEnv = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv, stdio: 'pipe' }).toString().trim()
 
 /** A bare repository in the test's home. */
@@ -84,13 +83,13 @@ interface Ticket {
   attention: string
   resolution: string
   export_url: string | null
-  projects: { project: string; branch: string; export_url?: string }[]
+  projects: { project: string; branch: string; export_url?: string; export_state: string; export_error: string }[]
 }
 const ticketOf = (omo: Omo, n: number) => omo.api<Ticket>('GET', `/api/tickets/${n}`)
 
 /** A task the developer works and hands in; resolves once it waits for the user's review. */
-async function reviewed(omo: Omo, title: string): Promise<Ticket> {
-  const t = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title, projects: [omo.project], review: 'human' })
+async function reviewed(omo: Omo, title: string, project = omo.project): Promise<Ticket> {
+  const t = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title, projects: [project], review: 'human' })
   await omo.moveTicket(t.number, 'ready')
   await expect
     .poll(async () => {
@@ -163,7 +162,7 @@ test('Export… waits in Review with its pull request until Check now finds the 
   // The export job worked in its own folder and was told so.
   const sessions = await omo.api<{ id: number; purpose: string }[]>('GET', `/api/tickets/${n}/agents`)
   expect(sessions.find((s) => s.purpose === 'export')).toBeDefined()
-  expect(await promptOf(n)).toContain(`Work in your current folder, ${join(omo.home, 'omo', 'run', 'export', `${n}-${t.projects[0]!.project}`)}.`)
+  expect(await promptOf(omo, n)).toContain(`Work in your current folder, ${join(omo.home, 'omo', 'run', 'export', `${n}-${t.projects[0]!.project}`)}.`)
   // main did not move.
   expect(head(repo, 'main')).toBe(initialMain)
 
@@ -214,7 +213,7 @@ test.describe('with a remote that is a folder on this machine', () => {
   // A local remote takes no pull request address: the prompt says so, and the
   // export job reports the failure as it is told to.
   const LOCAL = 'the remote is a folder on this machine, not a forge'
-  test.use({ omoOptions: { agents: { export: script('ready', `save-prompt|${join(PROMPTS, 'prompt-$TICKET.txt')}`, `done-failed|${LOCAL}`, 'wait|10m') } } })
+  test.use({ omoOptions: { agents: { export: script('ready', `save-prompt|${PROMPT_SCRIPT_PATH}`, `done-failed|${LOCAL}`, 'wait|10m') } } })
 
   test('the push works, the job is told there is no pull request to open, and its failure leaves the ticket in Review', async ({ page, omo, repo }) => {
     const origin = bare(omo, repo)
@@ -231,6 +230,8 @@ test.describe('with a remote that is a folder on this machine', () => {
     expect(head(origin, branch)).toBe(commit)
 
     const attention = panel(page).locator('[data-attention]')
+    // demo's prefix + LOCAL is 74 characters (even a 64-character ID fits).
+    expect(Array.from(`Export of ${t.projects[0]!.project} failed: ${LOCAL}`).length).toBeLessThanOrEqual(200)
     await expect(attention).toContainText(LOCAL)
     const now = await ticketOf(omo, n)
     expect(`${now.column}/${now.review_stage}`).toBe('review/human')
@@ -238,9 +239,24 @@ test.describe('with a remote that is a folder on this machine', () => {
     await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
 
     // The job's prompt said there is no command for a folder.
-    expect(await promptOf(n)).toContain('omo has no command to open the pull request here')
+    expect(await promptOf(omo, n)).toContain('omo has no command to open the pull request here')
   })
 })
+
+async function expectProjectFailure(page: Page, now: Ticket, id: string): Promise<void> {
+  const project = now.projects.find((p) => p.project === id)!
+  expect(project.export_state).toBe('failed')
+  expect(project.export_error).not.toBe('')
+  expect(Array.from(project.export_error).length).toBeLessThanOrEqual(200)
+  // Attention has a separate budget including the project prefix. It cannot
+  // supply the independently bounded error rendered beside this project.
+  const prefix = `Export of ${id} failed: `
+  expect(now.attention.startsWith(prefix)).toBe(true)
+  expect(now.attention.length).toBeGreaterThan(prefix.length)
+  expect(Array.from(now.attention).length).toBeLessThanOrEqual(200)
+  await expect(panel(page).locator('[data-attention]')).toContainText(now.attention)
+  await expect(panel(page).locator(`[data-branch="${id}"] [data-export-state="failed"]`)).toHaveText(`export failed: ${project.export_error}`)
+}
 
 test('a project without a remote cannot be exported: the ticket stays in Review and the project says why', async ({ page, omo }) => {
   const t = await reviewed(omo, 'Export without a remote')
@@ -260,8 +276,7 @@ test('a project without a remote cannot be exported: the ticket stays in Review 
   await expect(panel(page).locator('[data-attention]')).toContainText(`Export of ${id} failed`)
   const now = await ticketOf(omo, n)
   expect(`${now.column}/${now.review_stage}`).toBe('review/human')
-  const reason = now.attention.replace(`Export of ${id} failed: `, '')
-  await expect(panel(page).locator(`[data-branch="${id}"] [data-export-state="failed"]`)).toHaveText(`export failed: ${reason}`)
+  await expectProjectFailure(page, now, id)
   await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
 })
 
@@ -284,5 +299,39 @@ test.describe('a developer who hands in without a commit', () => {
     await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
     // Nothing was pushed.
     expect(head(origin, t.projects[0]!.branch)).toBe('')
+  })
+})
+
+
+test.describe('independently bounded export failure fields', () => {
+  const REASON = '🧪'.repeat(240)
+  test.use({ omoOptions: { agents: { export: script('ready', `done-failed|${REASON}`, 'wait|10m') } } })
+
+  test('a long reason with a long project prefix keeps its own project error budget', async ({ page, omo }) => {
+    const repo = join(omo.home, 'long-export')
+    initRepo(repo)
+    const origin = bare(omo, repo)
+    git(repo, 'remote', 'add', 'origin', origin)
+    const name = 'export-' + 'x'.repeat(57)
+    const { id } = await omo.api<{ id: string }>('POST', '/api/projects', { path: repo, name })
+    expect(id).toBe(name)
+    const t = await reviewed(omo, 'Independent export error budgets', id)
+    const n = t.number
+    const branch = t.projects[0]!.branch
+    const commit = head(repo, branch)
+
+    await openBoard(page, omo)
+    await exportFromPanel(page, n)
+    const prefix = `Export of ${id} failed: `
+    await expect(panel(page).locator('[data-attention]')).toContainText(prefix)
+    const now = await ticketOf(omo, n)
+    expect(`${now.column}/${now.review_stage}`).toBe('review/human')
+    expect(now.resolution).toBe('')
+    // Each server field is bounded independently to 200 Unicode characters.
+    expect(now.attention).toBe(Array.from(prefix + REASON).slice(0, 199).join('') + '…')
+    expect(now.projects[0]!.export_error).toBe('🧪'.repeat(199) + '…')
+    await expectProjectFailure(page, now, id)
+    await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
+    expect(head(origin, branch)).toBe(commit)
   })
 })

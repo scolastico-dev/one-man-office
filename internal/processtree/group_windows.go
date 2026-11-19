@@ -160,10 +160,16 @@ func (g *Group) Kill() error {
 	}
 	return windows.TerminateJobObject(g.job, 1)
 }
+
+// Close ends every process still in the job and releases the job. It
+// terminates them itself before it closes the handle: closing a
+// kill-on-close job ends them as well, but with the exit status 0, so a
+// program that was stopped would look as if it had succeeded.
 func (g *Group) Close() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.job != 0 {
+		_ = windows.TerminateJobObject(g.job, 1)
 		_ = windows.CloseHandle(g.job)
 		g.job = 0
 	}

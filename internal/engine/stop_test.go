@@ -41,14 +41,10 @@ func (h *harness) shutdown(ctx context.Context) <-chan struct{} {
 	return done
 }
 
-// awaitClosed fails the test unless ch is closed within the deadline.
+// awaitClosed waits until ch is closed.
 func (h *harness) awaitClosed(what string, ch <-chan struct{}) {
 	h.t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		h.t.Fatalf("timed out waiting for %s", what)
-	}
+	<-ch
 }
 
 // checkAllStopped fails unless every fake agent was killed and every
@@ -117,12 +113,12 @@ func TestShutdownKillsAfterHandoffTimeout(t *testing.T) {
 	h.typeAtOnce()
 	_, dev1 := h.readyDeveloper("one")
 	h.readyDeveloper("two")
-	ctx, cancel := context.WithTimeout(h.ctx, 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(h.ctx)
 	defer cancel()
-	h.awaitClosed("Shutdown", h.shutdown(ctx))
-	if !handoffAsked(h.agent(dev1.ID)) {
-		t.Fatal("no handoff request")
-	}
+	done := h.shutdown(ctx)
+	h.waitFor("the handoff request", func() bool { return handoffAsked(h.agent(dev1.ID)) })
+	cancel()
+	h.awaitClosed("Shutdown", done)
 	h.checkAllStopped("omo stopped")
 }
 
@@ -374,11 +370,7 @@ func TestStopAllEndsAgentWhoseStartCompletesAfterARound(t *testing.T) {
 // awaitClosedSignal waits for one value on ch.
 func (h *harness) awaitClosedSignal(ch <-chan struct{}) {
 	h.t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		h.t.Fatal("timed out")
-	}
+	<-ch
 }
 
 // runInBackground runs Run with ctx; the channel is closed when it returns.

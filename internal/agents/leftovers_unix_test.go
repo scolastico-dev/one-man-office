@@ -32,12 +32,6 @@ func leftover(t *testing.T, helper string) (*exec.Cmd, <-chan struct{}) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if helper == "stubborn" {
-		// Wait until it ignores SIGTERM.
-		if _, err := bufio.NewReader(stdout).ReadString('\n'); err != nil {
-			t.Fatal(err)
-		}
-	}
 	exited := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
@@ -47,6 +41,15 @@ func leftover(t *testing.T, helper string) (*exec.Cmd, <-chan struct{}) {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-exited
 	})
+	if helper == "stubborn" {
+		// Register cleanup before waiting for its signal-handler readiness.
+		ready := make(chan error, 1)
+		go func() { _, err := bufio.NewReader(stdout).ReadString('\n'); ready <- err }()
+		err := <-ready
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return cmd, exited
 }
 
@@ -99,12 +102,8 @@ func TestEndLeftoversVerifiesBeforeSignalling(t *testing.T) {
 	if ended != 2 {
 		t.Fatalf("ended %d process groups, want 2", ended)
 	}
-	for name, ch := range map[string]<-chan struct{}{"SIGTERM": politeExited, "SIGKILL after the grace": stubbornExited} {
-		select {
-		case <-ch:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("leftover not ended by %s", name)
-		}
+	for _, ch := range []<-chan struct{}{politeExited, stubbornExited} {
+		<-ch
 	}
 	select {
 	case <-strangerExited:

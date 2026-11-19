@@ -525,6 +525,7 @@ func TestDatabaseSnapshotWhileWriting(t *testing.T) {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+	firstCommit := make(chan struct{})
 	go func() {
 		for i := 0; ; i++ {
 			if ctx.Err() != nil {
@@ -542,6 +543,9 @@ func TestDatabaseSnapshotWhileWriting(t *testing.T) {
 				done <- err
 				return
 			}
+			if i == 0 {
+				close(firstCommit)
+			}
 		}
 	}()
 	defer func() {
@@ -550,7 +554,7 @@ func TestDatabaseSnapshotWhileWriting(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	<-firstCommit
 	for round := 0; round < 3; round++ {
 		got := entries(t, h.export(t, true))
 		var m api.BackupManifest

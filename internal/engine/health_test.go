@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -582,25 +584,28 @@ func TestHangingGitEnvironmentBlocksNeitherTickNorStop(t *testing.T) {
 	}
 	h := newHarness(t)
 	g := h.st.General()
-	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "`sleep 60`"}
+	started := filepath.Join(t.TempDir(), "started")
+	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "`printf started > '" + strings.ReplaceAll(started, "'", "'\\''") + "'; exec sleep 60`"}
 	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	began := time.Now()
-	h.e.checkHealth(h.ctx, h.clock.Now())
-	h.e.SettingsChanged()
-	if d := time.Since(began); d > 2*time.Second {
-		t.Fatalf("the health tick waited %v for the command", d)
-	}
+	ticked := make(chan struct{})
+	go func() {
+		h.e.checkHealth(h.ctx, h.clock.Now())
+		h.e.SettingsChanged()
+		close(ticked)
+	}()
+	h.awaitClosed("the health tick and settings feed", ticked)
+	h.waitFor("the environment command to start", func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	})
 	stopped := make(chan struct{})
 	go func() {
 		h.e.halt(context.Background(), "test over")
 		close(stopped)
 	}()
 	h.awaitClosed("the stop", stopped)
-	if d := time.Since(began); d > 5*time.Second {
-		t.Fatalf("the stop waited %v for the command", d)
-	}
 }
 
 // A reviewer that parks without giving its verdict holds its review round:

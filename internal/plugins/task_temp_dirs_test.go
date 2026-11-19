@@ -145,11 +145,7 @@ func TestTaskTempDirLifecycleCleanup(t *testing.T) {
 			}
 			switch mode {
 			case "natural":
-				select {
-				case <-notified:
-				case <-time.After(3 * time.Second):
-					t.Fatal("natural exit did not notify")
-				}
+				<-notified // a missing notification is reported by the test binary's own time limit
 			case "explicit":
 				err = e.m.StopTask("p", "worker")
 			case "id":
@@ -337,10 +333,19 @@ func TestTaskTempDirUnattachedBoundsExpiryAndRuntimeEnd(t *testing.T) {
 	tempDirRemoved(t, other.Path)
 }
 
-func TestTaskTempDirCleanupDoesNotFollowSymlinks(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary")
+// requireSymlinks skips only where this account cannot make a symbolic link
+// (Windows without Developer Mode or elevation): the capability is probed, not
+// assumed from the operating system, so an account that can makes the test run.
+func requireSymlinks(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(dir, filepath.Join(dir, "probe")); err != nil {
+		t.Skipf("this account cannot create symbolic links: %v", err)
 	}
+}
+
+func TestTaskTempDirCleanupDoesNotFollowSymlinks(t *testing.T) {
+	requireSymlinks(t)
 	e := tempDirPlugin(t)
 	lease := newTestTaskTempDir(t, e, "p")
 	outside := t.TempDir()
@@ -393,9 +398,7 @@ func TestTaskTempDirExpiryBeforeTimerAndAttachedLifetime(t *testing.T) {
 }
 
 func TestTaskTempDirCleanupDoesNotFollowReplacedAllocation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink privileges vary")
-	}
+	requireSymlinks(t)
 	e := tempDirPlugin(t)
 	lease := newTestTaskTempDir(t, e, "p")
 	outside := t.TempDir()
@@ -403,11 +406,14 @@ func TestTaskTempDirCleanupDoesNotFollowReplacedAllocation(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Move the empty allocation into the test's own cleanup tree and replace its
-	// old name with a link. The allocator must unlink rather than follow it.
-	if err := os.Rename(lease.Path, filepath.Join(t.TempDir(), "allocation")); err != nil {
+	// Move the empty allocation aside, next to its old name (a rename inside
+	// one folder never crosses a file system, whatever TMPDIR is), and replace
+	// the old name with a link. The allocator must unlink rather than follow it.
+	moved := lease.Path + "-moved"
+	if err := os.Rename(lease.Path, moved); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.Remove(moved) })
 	if err := os.Symlink(outside, lease.Path); err != nil {
 		t.Fatal(err)
 	}
@@ -497,11 +503,9 @@ func TestTaskTempDirCleanupPersistentFailureIsBounded(t *testing.T) {
 	dir, fault := faultTaskTempRoot(t, e, lease, 1000, errors.New("persistent sharing violation"))
 	done := make(chan struct{})
 	go func() { e.m.discardTaskTempDir(dir.owner, lease.ID); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("temporary directory cleanup retried without a finite bound")
-	}
+	// A cleanup that retried without a finite bound would never finish: the test
+	// binary's own time limit reports it, and the fault counts below pin the bound.
+	<-done
 	tempDirExists(t, lease.Path)
 	if len(fault.names) != 11 || fault.closes != 1 {
 		t.Fatalf("removals=%d closes=%d", len(fault.names), fault.closes)

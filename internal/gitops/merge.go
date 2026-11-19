@@ -283,9 +283,7 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 	if style != StyleMerge && style != StyleSquash {
 		return MergeResult{}, fmt.Errorf("unknown merge style %q", style)
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	t, err := g.commitOf(repo, target)
 	if err != nil {
 		return MergeResult{}, err
@@ -371,9 +369,7 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 // and attributes: a policy that discards source content is not evidence
 // of inclusion. A merge that conflicts is not applied.
 func (g *Git) SquashApplied(repo, target, source string) (bool, error) {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	t, err := g.commitOf(repo, target)
 	if err != nil {
 		return false, err
@@ -428,9 +424,7 @@ func (g *Git) AdvanceBranch(repo, branch, from, to string) error {
 	if err := g.checkBranchName(repo, branch); err != nil {
 		return err
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	fromID, err := g.commitOf(repo, from)
 	if err != nil {
 		return err

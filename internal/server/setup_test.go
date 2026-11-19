@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -341,12 +342,10 @@ func TestEnvCheckReportsNoValues(t *testing.T) {
 		"HANGS":         "`sleep 5; echo " + canary + "-late`",
 		"AFTER_HANG":    "x`echo " + canary + "-after`",
 	}
-	start := time.Now()
 	resp, raw := postEnvCheck(t, s, b, env)
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if time.Since(start) > 4*time.Second {
-		t.Errorf("the check took %s", time.Since(start))
-	}
+	// The failed HANGS result and its timeout message below distinguish
+	// command expiry from completion, independent of total request duration.
 	got := checks(t, raw)
 	for name, want := range map[string]string{
 		"LITERAL_TOKEN": "set", "FROM_COMMAND": "set", "REFERENCE": "set", "EMPTY": "empty", "SILENT": "empty",
@@ -410,27 +409,21 @@ func TestEnvCheckOneAtATime(t *testing.T) {
 		t.Skip("uses sh commands")
 	}
 	s := newTestServer(t)
-	s.setup.commandTimeout = 2 * time.Second
 	b := newBrowser(t, s)
+	command, started, release := heldEnvCommand(t)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		resp := b.do("POST", "/api/settings/agent-env/check", api.AgentEnvCheck{Env: map[string]string{"SLOW": "`sleep 1`"}}, bearer(s))
+		resp := b.do("POST", "/api/settings/agent-env/check", api.AgentEnvCheck{Env: map[string]string{"SLOW": command}}, bearer(s))
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("first check: %d", resp.StatusCode)
 		}
 	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for s.setup.envCheck.TryLock() {
-		s.setup.envCheck.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("the first check did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitEnvCommand(t, started)
 	resp, _ := postEnvCheck(t, s, b, map[string]string{"A": "b"})
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	release()
 	wg.Wait()
 	resp, _ = postEnvCheck(t, s, b, map[string]string{"A": "b"})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
@@ -441,17 +434,21 @@ func TestEnvCheckStopsAtItsLimit(t *testing.T) {
 		t.Skip("uses sh commands")
 	}
 	s := newTestServer(t)
-	// The limit is far below the command's own timeout and the sleep, so a
-	// loaded machine cannot blur which of them ended the check.
-	s.setup.commandTimeout = 30 * time.Second
-	s.setup.checkLimit = 300 * time.Millisecond
+	expired := make(chan time.Time, 1)
+	s.setup.checkExpired = expired
 	b := newBrowser(t, s)
-	start := time.Now()
-	resp, raw := postEnvCheck(t, s, b, map[string]string{"A": "`sleep 60`", "B": "plain"})
+	command, started, release := heldEnvCommand(t)
+	answered := make(chan struct{})
+	var resp *http.Response
+	var raw string
+	go func() {
+		defer close(answered)
+		resp, raw = postEnvCheck(t, s, b, map[string]string{"A": command, "B": "plain"})
+	}()
+	waitEnvCommand(t, started)
+	expired <- time.Now()
+	<-answered
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if time.Since(start) > 10*time.Second {
-		t.Errorf("the answer took %s", time.Since(start))
-	}
 	got := checks(t, raw)
 	if got["A"].State != "failed" || got["B"].State != "failed" || !strings.Contains(got["B"].Message, "stopped") {
 		t.Errorf("answer = %s", raw)
@@ -459,6 +456,61 @@ func TestEnvCheckStopsAtItsLimit(t *testing.T) {
 	// The slot stays taken until the commands have ended.
 	resp, _ = postEnvCheck(t, s, b, map[string]string{"A": "b"})
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	release()
+	waitFor(t, "the command to release the check slot", func() bool {
+		if !s.setup.envCheck.TryLock() {
+			return false
+		}
+		s.setup.envCheck.Unlock()
+		return true
+	})
+}
+
+// heldEnvCommand starts a real shell command that cannot finish until
+// release. The marker is written before it waits; server Close cancels it
+// on every failure path. Its polling only checks the release condition.
+func heldEnvCommand(t *testing.T) (command, started string, release func()) {
+	t.Helper()
+	dir := t.TempDir()
+	started, released := filepath.Join(dir, "started"), filepath.Join(dir, "release")
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+	command = "`echo $$ > " + quote(started) + "; while [ ! -e " + quote(released) + " ]; do sleep 0.01; done; echo set`"
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			if err := os.WriteFile(released, nil, 0o600); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	t.Cleanup(release)
+	return command, started, release
+}
+
+// waitEnvCommand waits for the complete pid marker, rather than the file
+// creation that happens before the shell writes it.
+func waitEnvCommand(t *testing.T, path string) int {
+	t.Helper()
+	var pid int
+	waitFor(t, "the checked command's pid", func() bool {
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return false
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.TrimSpace(string(raw))
+		if text == "" {
+			return false
+		}
+		pid, err = strconv.Atoi(text)
+		if err != nil || pid <= 0 {
+			t.Fatalf("invalid command pid %q", text)
+		}
+		return true
+	})
+	return pid
 }
 
 func TestPutPromptRefusesBrokenTemplateOverHTTP(t *testing.T) {

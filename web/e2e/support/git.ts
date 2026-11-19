@@ -1,11 +1,15 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { devNull } from 'node:os'
+import { withoutShellConfig } from './env.ts' // with its extension: scripts/git-isolation.test.mjs loads this file straight under Node
 
-/** Runs Git in a test-owned folder without inherited Git configuration. */
+/**
+ * Runs Git in a test-owned folder without inherited Git configuration, omo
+ * identity or the runner's shell configuration.
+ */
 export function git(cwd: string, ...args: string[]): Buffer {
   const env: NodeJS.ProcessEnv = {}
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(withoutShellConfig())) {
     const upper = key.toUpperCase()
     if (upper.startsWith('GIT_CONFIG') || upper.startsWith('OMO_')) continue
     env[key] = value

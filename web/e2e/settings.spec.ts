@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
 import { expectBoardLive, openBoard } from './support/board'
 import { expect, test } from './support/omo'
+import { expectSettingsReady } from './support/settings'
 
 const SECTIONS = [
   ['projects', 'Projects'],
@@ -225,7 +226,7 @@ for (const width of [1440, 390]) {
     for (const [id, label] of SECTIONS) {
       await page.goto(omo.url(`/settings/${id}`))
       await expect(title(page)).toHaveText(label)
-      await expect(page.locator('[data-settings-loading]')).toHaveCount(0)
+      await expectSettingsReady(page, id)
       const bars = page.locator('[data-settings] .savebar')
       if ((await bars.count()) === 0) continue
       // The field just before the last Save bar: from the top of the page, the focus brings it into view above the bar.

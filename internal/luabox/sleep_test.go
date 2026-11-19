@@ -41,12 +41,11 @@ func TestSleepRefusesBadArguments(t *testing.T) {
 // TestSleepEndsWithTheRun: a sleep longer than the time the run has left
 // ends with the run's time limit, not after the sleep.
 func TestSleepEndsWithTheRun(t *testing.T) {
-	start := time.Now()
-	_, err := sleepCall(t, Limits{Timeout: 100 * time.Millisecond}, `function f() omo.sleep(10) return "woke" end`)
+	var err error
+	completeWithin(t, 2*time.Second, func() {
+		_, err = sleepCall(t, Limits{Timeout: 100 * time.Millisecond}, `function f() omo.sleep(10) return "woke" end`)
+	})
 	if err == nil || !strings.Contains(err.Error(), msgTimeLimit) {
 		t.Fatalf("err %v", err)
-	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("the run ended after %v", took)
 	}
 }

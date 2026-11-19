@@ -5,10 +5,6 @@ package server
 import (
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -19,32 +15,29 @@ import (
 // waits for the check, within a bound.
 func TestCloseEndsEnvCheck(t *testing.T) {
 	s := newTestServer(t)
-	s.setup.commandTimeout = time.Minute
-	s.setup.checkLimit = 200 * time.Millisecond
+	expired := make(chan time.Time, 1)
+	s.setup.checkExpired = expired
 	b := newBrowser(t, s)
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	resp, raw := postEnvCheck(t, s, b, map[string]string{"A": "`echo $$ > " + pidFile + "; exec sleep 60`"})
+	command, pidFile, _ := heldEnvCommand(t)
+	answered := make(chan struct{})
+	var resp *http.Response
+	var raw string
+	go func() {
+		defer close(answered)
+		resp, raw = postEnvCheck(t, s, b, map[string]string{"A": command})
+	}()
+	pid := waitEnvCommand(t, pidFile)
+	expired <- time.Now()
+	<-answered
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	if got := checks(t, raw); got["A"].State != "failed" {
 		t.Fatalf("answer = %s", raw)
 	}
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatal(err)
-	}
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waits for the environment check's command")
+	err := <-closed
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 		syscall.Kill(pid, syscall.SIGKILL)

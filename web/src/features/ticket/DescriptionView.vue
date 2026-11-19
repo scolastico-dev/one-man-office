@@ -83,6 +83,8 @@ function onClick(e: MouseEvent) {
 .md :deep(pre) {
   padding: calc(var(--omo-space) * 3);
   overflow-x: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel (the panel's code blocks needed it). */
+  will-change: transform;
   border: var(--omo-border) solid var(--omo-line);
   background: var(--omo-raised);
 }

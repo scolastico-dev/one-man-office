@@ -6,6 +6,7 @@
 // One more image is one more entry of VIEWS. OMO_README_SHOTS_ONLY=<text>
 // takes only the views whose name contains it; OMO_README_SHOTS_DIR=<folder>
 // writes somewhere else than .github/assets (to compare before replacing).
+import { withoutShellConfig } from '../support/env'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { devNull, tmpdir } from 'node:os'
@@ -22,7 +23,7 @@ const OUT = process.env.OMO_README_SHOTS_DIR ?? join(REPO_DIR, '.github', 'asset
 
 /** Commits `files` on a new branch of the repository `dir`, then returns to main. */
 function commitOnBranch(dir: string, branch: string, message: string, files: Record<string, string>) {
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env, stdio: 'pipe' })
   git('checkout', '-q', '-b', branch)
   for (const [path, text] of Object.entries(files)) {

@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/mcprelay/fakemcp"
 	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 )
@@ -104,7 +105,14 @@ type fixture struct {
 func newFixture(t *testing.T, tune func(*tunables), servers ...api.MCPServer) *fixture {
 	t.Helper()
 	f := &fixture{t: t, events: &events{}, logDir: t.TempDir(), home: t.TempDir(), servers: servers, store: NewMemoryStore()}
-	f.env = append(childenv.Inherited(), "OMO_SECRET_OF_OMO=not-for-children", "OMO_HOME=/nowhere")
+	// Strip inherited board credentials before adding fixture-only samples.
+	f.env = childEnvironment(childenvtest.ShellEnv(childenv.Inherited(), f.home), map[string]string{
+		"HOME": f.home, "USERPROFILE": f.home, "XDG_CONFIG_HOME": t.TempDir(), "APPDATA": t.TempDir(),
+		"GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_SYSTEM": os.DevNull, "GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_PARAMETERS": "",
+	})
+	f.env = append(f.env, "OMO_SECRET_OF_OMO=not-for-children", "OMO_HOME=/nowhere")
+	childenvtest.CheckOmo(t, childEnvironment(f.env, nil), nil)
 	tun := testTunables()
 	if tune != nil {
 		tune(&tun)
@@ -222,14 +230,11 @@ func (f *fixture) state(name string) api.MCPServerState {
 	return api.MCPServerState{}
 }
 
-// eventually polls cond until it holds or the deadline passes.
+// eventually polls cond until it holds; a condition that never holds ends with
+// the test binary's own time limit and a dump of every goroutine.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
 	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }

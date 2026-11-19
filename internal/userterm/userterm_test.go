@@ -73,6 +73,19 @@ func TestShellEnvIsDetachedFromTheIDE(t *testing.T) {
 	}
 }
 
+// Isolation belongs to fixtures: users deliberately configure their shells.
+func TestShellEnvKeepsOwnedShellConfiguration(t *testing.T) {
+	base := []string{"BASH_ENV=/fixture/startup", "ENV=/fixture/posix", "INPUTRC=/fixture/inputrc",
+		"ZDOTDIR=/fixture/zsh", "SHELLOPTS=posix", "BASHOPTS=nullglob", "POSIXLY_CORRECT=1",
+		"BASH_FUNC_probe%%=() { :; }", "PROMPT_COMMAND=fixture", "HISTFILE=/fixture/history", "EDITOR=vi"}
+	got := ShellEnv(base, "")
+	for _, entry := range base {
+		if !slices.Contains(got, entry) {
+			t.Errorf("user shell lost owned configuration %s", strings.SplitN(entry, "=", 2)[0])
+		}
+	}
+}
+
 func TestStripIdentityRemovesIdentityFromAnyEnv(t *testing.T) {
 	got := stripIdentity([]string{"A=1", "omo_agent_id=x", "OMO_FAKE_SCRIPT_1=y", "OMO_SOCKET=s"})
 	if !slices.Equal(got, []string{"A=1", "OMO_SOCKET=s"}) {

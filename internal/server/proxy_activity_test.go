@@ -17,6 +17,31 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 )
 
+// expireWhenDue waits until the forward's idle deadline has passed (a clock
+// reaching a point, a positive condition) and then runs the expiry the timer
+// would run, synchronously and with the forward's current revision. Whether a
+// live connection protects the task is then decided by the code and read from
+// the result, with no interval during which "nothing happened".
+func expireWhenDue(t *testing.T, s *Server, id string) {
+	t.Helper()
+	reg := &s.pluginForwards
+	for {
+		reg.Lock()
+		st := reg.entries[id]
+		due := st != nil && time.Until(st.since.Add(st.idle)) <= 0
+		var revision uint64
+		if st != nil {
+			revision = st.activity.Revision
+		}
+		reg.Unlock()
+		if due {
+			s.expireForward(id, st, revision)
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestPluginForwardWebSocketActivity(t *testing.T) {
 	for _, mode := range []string{"path", "subdomain"} {
 		t.Run(mode, func(t *testing.T) {
@@ -120,15 +145,12 @@ func TestPluginForwardWebSocketActivity(t *testing.T) {
 			}
 			wait := func(n int) plugins.ForwardActivity {
 				t.Helper()
-				deadline := time.Now().Add(3 * time.Second)
 				for {
 					a := activity()
 					if a.ActiveWebSockets == n && a.ActiveRequests == n {
 						return a
 					}
-					if time.Now().After(deadline) {
-						t.Fatalf("activity %+v want %d", a, n)
-					}
+
 					time.Sleep(time.Millisecond)
 				}
 			}
@@ -149,7 +171,7 @@ func TestPluginForwardWebSocketActivity(t *testing.T) {
 			if err := s.WatchForward(t.Context(), "one", f.ID, .02); err != nil {
 				t.Fatal(err)
 			}
-			time.Sleep(50 * time.Millisecond)
+			expireWhenDue(t, s, f.ID)
 			tasks, _ := s.plugins.m.Tasks("one")
 			if tasks[0].State != "running" {
 				t.Fatal("live WebSockets lost idle deadline")
@@ -216,7 +238,7 @@ func TestPluginForwardIdleWatchAtomicDeadline(t *testing.T) {
 	s.forwardSocketOpenedLocked(f.ID, st)
 	reg.Unlock()
 	s.expireForward(f.ID, st, oldRevision) // A queued stale timer must lose to reconnect.
-	time.Sleep(80 * time.Millisecond)
+	expireWhenDue(t, s, f.ID)
 	tasks, _ := s.plugins.m.Tasks("one")
 	if tasks[0].State != "running" {
 		t.Fatal("active browser killed")
@@ -224,15 +246,12 @@ func TestPluginForwardIdleWatchAtomicDeadline(t *testing.T) {
 	reg.Lock()
 	s.forwardSocketClosedLocked(f.ID, st)
 	reg.Unlock()
-	deadline := time.Now().Add(2 * time.Second)
 	for {
 		tasks, _ = s.plugins.m.Tasks("one")
 		if tasks[0].State == "exited" {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("idle deadline not applied")
-		}
+
 		time.Sleep(time.Millisecond)
 	}
 	if tasks[0].Reason != "idle" {

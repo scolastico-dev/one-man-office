@@ -538,6 +538,10 @@ type Manager struct {
 	artifactsMu    sync.Mutex
 	artifacts      map[string]map[string]*artifactJob
 	artifactLimits *artifactLimits // tests override finite production bounds
+	// unloadBlocked, when set by a test, is called when an unload finds an
+	// in-flight forward helper holding the plugin's forward lock, just before
+	// the unload waits for it.
+	unloadBlocked  func()
 	taskTempDirsWG sync.WaitGroup
 	taskTempDirs   map[string]*taskTempDir // unattached leases; guarded by tasksMu
 	tasksWG        sync.WaitGroup
@@ -831,7 +835,12 @@ func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 		}
 		e.p.wg.Wait()
 		if reason != "" && m.o.Unloaded != nil {
-			e.p.forwardMu.Lock()
+			if !e.p.forwardMu.TryLock() {
+				if m.unloadBlocked != nil {
+					m.unloadBlocked()
+				}
+				e.p.forwardMu.Lock()
+			}
 			m.o.Unloaded(e.settings.Name, reason)
 			e.p.forwardMu.Unlock()
 		}

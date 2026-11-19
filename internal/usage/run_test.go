@@ -195,34 +195,46 @@ func TestRunErrorsAreOneShortLine(t *testing.T) {
 
 func TestRunEndsWithItsContext(t *testing.T) {
 	cleanEnv(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	j := Job{Script: "t", Text: "function usage() while true do end end", Profile: api.Profile{CLI: "custom"}}
-	_, err := Run(ctx, j, RunOptions{Home: t.TempDir(), HTTPClient: noNetwork(t)})
-	if err == nil {
-		t.Fatal("endless script returned no error")
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Fatalf("run took %s after its context ended", time.Since(start))
-	}
-
-	// A helper that blocks (here: the Codex refresh) ends with the run too.
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel2()
-	j = Job{Script: "t", Text: `function usage() local ok, err = omo.codex_refresh("/x/auth.json") error(err) end`,
-		Profile: api.Profile{CLI: "codex", Command: "codex"}}
-	start = time.Now()
-	_, err = Run(ctx2, j, RunOptions{Home: t.TempDir(), HTTPClient: noNetwork(t),
-		RefreshCodex: func(ctx context.Context, _ string, _ []string, _ string) error {
-			<-ctx.Done()
-			return ctx.Err()
-		}})
-	if err == nil {
-		t.Fatal("no error")
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Fatalf("run took %s after its context ended", time.Since(start))
+	for _, helper := range []bool{false, true} {
+		name := "running script"
+		if helper {
+			name = "blocked helper"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entered := make(chan struct{})
+			opts := RunOptions{Home: t.TempDir(), HTTPClient: noNetwork(t)}
+			j := Job{Script: "t", Text: `function usage() omo.read_file("~/ready"); while true do end end`, Profile: api.Profile{CLI: "custom"}}
+			opts.ReadFile = func(string, int64) ([]byte, error) {
+				close(entered)
+				return []byte("ready"), nil
+			}
+			if helper {
+				j.Text = `function usage() local ok, err = omo.codex_refresh("~/auth.json"); error(err) end`
+				j.Profile = api.Profile{CLI: "codex", Command: "codex"}
+				opts.RefreshCodex = func(ctx context.Context, _ string, _ []string, _ string) error {
+					close(entered)
+					<-ctx.Done()
+					return ctx.Err()
+				}
+			}
+			result := make(chan error, 1)
+			go func() { _, err := Run(ctx, j, opts); result <- err }()
+			// The paths are below the run's home, so they are absolute on
+			// every platform. A run that ends before it reaches the helper
+			// is reported, not waited for.
+			select {
+			case <-entered:
+			case err := <-result:
+				t.Fatalf("the run ended before the script reached the helper: %v", err)
+			}
+			cancel()
+			err := <-result
+			if err == nil || err.Error() != "run canceled" {
+				t.Fatalf("run after cancellation: %v", err)
+			}
+		})
 	}
 }
 

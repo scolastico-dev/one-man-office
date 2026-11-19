@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
@@ -76,6 +77,32 @@ func childHandle(t *testing.T, path string) windows.Handle {
 	}
 	t.Fatal("root never reported its immediate child")
 	return 0
+}
+
+// assertNeverRan checks that the process has not executed any user-mode code.
+// The first code a new process runs is the loader's initialization in ntdll,
+// which sets the loader data pointer (PEB.Ldr); until then it is nil. A process
+// created suspended and not resumed has not run, however long ago it was
+// created, so no interval is waited and no file is expected to stay absent.
+func assertNeverRan(t *testing.T, pid int) {
+	t.Helper()
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ, false, uint32(pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(h)
+	var info windows.PROCESS_BASIC_INFORMATION
+	if err := windows.NtQueryInformationProcess(h, windows.ProcessBasicInformation, unsafe.Pointer(&info), uint32(unsafe.Sizeof(info)), nil); err != nil {
+		t.Fatal(err)
+	}
+	var ldr uintptr
+	at := uintptr(unsafe.Pointer(info.PebBaseAddress)) + unsafe.Offsetof(windows.PEB{}.Ldr)
+	if err := windows.ReadProcessMemory(h, at, (*byte)(unsafe.Pointer(&ldr)), unsafe.Sizeof(ldr), nil); err != nil {
+		t.Fatal(err)
+	}
+	if ldr != 0 {
+		t.Fatalf("the program ran: its loader is initialized (PEB.Ldr = %#x)", ldr)
+	}
 }
 
 func assertEnded(t *testing.T, h windows.Handle) {
@@ -174,11 +201,9 @@ func TestSuspendedLaunchDoesNotExecuteBeforeAssignment(t *testing.T) {
 	defer cmd.Wait()
 	defer cmd.Process.Kill()
 	// The process must be unable to reach user code during an arbitrarily
-	// delayed assignment. Losing CREATE_SUSPENDED makes this test fail.
-	time.Sleep(200 * time.Millisecond)
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("program ran before containment: %v", err)
-	}
+	// delayed assignment. Losing CREATE_SUSPENDED makes this test fail: the
+	// state is read from the process itself, not inferred from a quiet interval.
+	assertNeverRan(t, cmd.Process.Pid)
 	if err := g.assignAndResume(process, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -255,10 +280,7 @@ func TestResumeReportsFailure(t *testing.T) {
 	if err := resumeProcess(limited); err == nil {
 		t.Fatal("resuming without the right to resume reported success")
 	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("program ran although resuming failed: %v", err)
-	}
+	assertNeverRan(t, cmd.Process.Pid)
 }
 
 func TestFailedAssignmentNeverExecutes(t *testing.T) {
@@ -335,7 +357,7 @@ func TestPTYOutputEndsAfterHangup(t *testing.T) {
 			}
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if code, err := p.Wait(ctx); err != nil || code != 0 {
 		t.Fatalf("wait: code %d, %v", code, err)
@@ -344,16 +366,12 @@ func TestPTYOutputEndsAfterHangup(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Hangup()
-	select {
-	case got := <-read:
-		if got.err != io.EOF {
-			t.Errorf("output ended with %v, want io.EOF", got.err)
-		}
-		if !strings.Contains(got.output, "last words") {
-			t.Errorf("output before the end = %q", got.output)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the output did not end after Hangup")
+	got := <-read
+	if got.err != io.EOF {
+		t.Errorf("output ended with %v, want io.EOF", got.err)
+	}
+	if !strings.Contains(got.output, "last words") {
+		t.Errorf("output before the end = %q", got.output)
 	}
 	if err := p.Resize(100, 30); err == nil {
 		t.Error("a closed pseudoconsole was resized")
@@ -383,13 +401,9 @@ func TestPTYArgumentsEnvironmentAndResize(t *testing.T) {
 			}
 		}
 	}()
-	select {
-	case got := <-output:
-		if !strings.Contains(got, "hello tree") {
-			t.Fatal(fmt.Sprintf("environment not passed: %q", got))
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("no console output")
+	got := <-output
+	if !strings.Contains(got, "hello tree") {
+		t.Fatal(fmt.Sprintf("environment not passed: %q", got))
 	}
 }
 
@@ -453,14 +467,10 @@ func TestCancellationEndsImmediateDescendant(t *testing.T) {
 	}()
 	child := childHandle(t, path)
 	cancel()
-	select {
-	case err := <-waited:
-		reaped = true
-		if err == nil {
-			t.Fatal("cancelled command succeeded")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("cancellation did not reap root")
+	err = <-waited
+	reaped = true
+	if err == nil {
+		t.Fatal("cancelled command succeeded")
 	}
 	assertEnded(t, child)
 }

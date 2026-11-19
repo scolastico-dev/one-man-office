@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/testpath"
+	"github.com/scolastico-dev/one-man-office/internal/testport"
 )
 
 // smoke drives a real omo binary against an isolated home.
@@ -68,7 +68,7 @@ func (s *smoke) mustFail(wantInOutput string, args ...string) {
 
 func environment(home string) []string {
 	env := []string{}
-	for _, kv := range os.Environ() {
+	for _, kv := range childenvtest.ShellEnv(os.Environ(), home) {
 		key, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(strings.ToUpper(key), "OMO_") {
 			continue
@@ -109,16 +109,6 @@ func TestSmokeEnvironmentReachesNoAgentProgram(t *testing.T) {
 	}
 }
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
-
 func TestSmokeServerAndAI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and starts the real binary")
@@ -131,11 +121,7 @@ func TestSmokeServerAndAI(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", binary, ".")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	childenvtest.GoBuild(t, ".", binary)
 
 	s := &smoke{t: t, binary: binary, env: environment(root), home: filepath.Join(root, "omo")}
 	// Stop whatever this test started, also when it fails halfway.
@@ -150,17 +136,31 @@ func TestSmokeServerAndAI(t *testing.T) {
 		{"-c", "user.email=smoke@example.invalid", "-c", "user.name=smoke", "commit", "-q", "--allow-empty", "-m", "init"},
 	} {
 		cmd := exec.Command("git", args...)
+		cmd.Env = childenvtest.ShellEnv(os.Environ(), s.home)
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 
-	port := freePort(t)
-	s.must("config", "set", "port", strconv.Itoa(port))
-
 	// Background start waits for readiness and prints the address and token.
-	started := s.must("-d")
+	var started string
+	port, err := testport.Acquire(func(port int) error {
+		if out, err := s.run("config", "set", "port", strconv.Itoa(port)); err != nil {
+			return fmt.Errorf("configure fixture port: %w\n%s", err, out)
+		}
+		var err error
+		started, err = s.run("-d")
+		if err != nil {
+			log, _ := os.ReadFile(filepath.Join(s.home, "run", "omo.log"))
+			// StartDetached reaps its failed child before returning.
+			return fmt.Errorf("fixture startup: %w\n%s\n%s", err, started, log)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(started, "omo.localhost:"+strconv.Itoa(port)) {
 		t.Fatalf("omo -d did not print the address:\n%s", started)
 	}

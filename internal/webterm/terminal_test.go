@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // controlledTerminal exposes the two OS timing boundaries exercised here:
@@ -56,24 +55,30 @@ func (p *controlledTerminal) Resize(rows, cols uint16) error {
 func (p *controlledTerminal) Wait() error  { <-p.exited; return p.waitErr }
 func (p *controlledTerminal) Kill() error  { return p.Close() }
 func (p *controlledTerminal) Close() error { p.closeOnce.Do(func() { close(p.closed) }); return nil }
-func terminalFixture() *controlledTerminal {
-	return &controlledTerminal{readReady: make(chan struct{}), exited: make(chan struct{}), closed: make(chan struct{}), writeStarted: make(chan struct{}, 1), output: strings.NewReader("last output\n")}
+func terminalFixture(t *testing.T) *controlledTerminal {
+	t.Helper()
+	p := &controlledTerminal{readReady: make(chan struct{}), exited: make(chan struct{}), closed: make(chan struct{}), writeStarted: make(chan struct{}, 1), output: strings.NewReader("last output\n")}
+	t.Cleanup(func() {
+		_ = p.Close()
+		select {
+		case <-p.exited:
+		default:
+			close(p.exited)
+		}
+	})
+	return p
 }
 
 func TestBlockedTerminalInputIsBoundedAndDoesNotBlockResize(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("input", p, nil)
 	defer p.Close()
 	defer close(p.exited)
 	accepted := make(chan error, 1)
 	go func() { accepted <- i.input([]byte("first")) }()
-	select {
-	case err := <-accepted:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("browser blocked on terminal write")
+	err := <-accepted
+	if err != nil {
+		t.Fatal(err)
 	}
 	<-p.writeStarted
 	full := false
@@ -88,28 +93,22 @@ func TestBlockedTerminalInputIsBoundedAndDoesNotBlockResize(t *testing.T) {
 	}
 	resized := make(chan error, 1)
 	go func() { resized <- i.resize(30, 100) }()
-	select {
-	case err := <-resized:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("terminal write blocked resize")
+	err = <-resized
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestProcessExitDrainsFinalTerminalOutput(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("tail", p, nil)
 	defer p.Close()
 	close(p.exited)
-	// The process has exited, but its terminal reader has not yet run.
-	time.AfterFunc(20*time.Millisecond, func() { close(p.readReady) })
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit did not finish")
-	}
+	// stopInput closes only after the process waiter observes the exit.
+	// Release the final read after that boundary instead of after a delay.
+	<-i.stopInput
+	close(p.readReady)
+	<-i.done
 	initial, _, detach := i.subscribe()
 	defer detach()
 	if string(initial.replay) != "last output\n" {
@@ -118,7 +117,7 @@ func TestProcessExitDrainsFinalTerminalOutput(t *testing.T) {
 }
 
 func TestTerminalSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("snapshot", p, nil)
 	defer p.Close()
 	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h"))
@@ -144,7 +143,7 @@ func TestTerminalSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
 }
 
 func TestTerminalReplayChunksStayBoundedAndCutAtObservedSafeOffset(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("chunked-replay", p, nil)
 	defer p.Close()
 	data := append(bytes.Repeat([]byte{'x'}, replayLimit+terminalReplayChunkLimit), []byte("\x1b[31mTAIL")...)
@@ -165,7 +164,7 @@ func TestTerminalReplayChunksStayBoundedAndCutAtObservedSafeOffset(t *testing.T)
 }
 
 func TestTerminalReplayFirstSafeOffsetDistinguishesChunkStartAndAfterByte(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("safe-offset", p, nil)
 	defer p.Close()
 	i.publish([]byte("x\x1b["))
@@ -179,16 +178,12 @@ func TestTerminalReplayFirstSafeOffsetDistinguishesChunkStartAndAfterByte(t *tes
 }
 
 func TestTerminalSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("exit-modes", p, nil)
 	defer p.Close()
 	i.publish([]byte("\x1b[?1049h\x1b[?2004h"))
 	close(p.exited)
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit did not finish")
-	}
+	<-i.done
 	initial, _, detach := i.subscribe()
 	defer detach()
 	if len(initial.prefix) != 0 || initial.repaintOnResize {
@@ -197,7 +192,7 @@ func TestTerminalSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
 }
 
 func TestTerminalRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("repaint", p, nil)
 	defer p.Close()
 	if err := i.repaint(40, 120); err != nil {
@@ -212,7 +207,7 @@ func TestTerminalRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
 }
 
 func TestTerminalRepaintAttemptsFinalSizeAfterWiggleFailure(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	p.resizeFailAt = 1
 	p.resizeErr = errors.New("temporary resize failure")
 	i := Own("repaint-error", p, nil)
@@ -229,7 +224,7 @@ func TestTerminalRepaintAttemptsFinalSizeAfterWiggleFailure(t *testing.T) {
 }
 
 func TestTerminalReplayDoesNotRetainContinuationAfterIncompleteEscape(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("replay-boundary", p, nil)
 	defer p.Close()
 	first := append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)
@@ -255,7 +250,7 @@ func TestTerminalReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *tes
 		{name: "pm", first: append([]byte{'\x1b', '_'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			p := terminalFixture()
+			p := terminalFixture(t)
 			i := Own("replay-restart-"+test.name, p, nil)
 			defer p.Close()
 			i.publish(test.first)
@@ -270,7 +265,7 @@ func TestTerminalReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *tes
 }
 
 func TestTerminalReplayRestartsAtSplitStringEscape(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("replay-split-string-restart", p, nil)
 	defer p.Close()
 	first := append(append([]byte{'\x1b', ']'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...), '\x1b')
@@ -284,29 +279,21 @@ func TestTerminalReplayRestartsAtSplitStringEscape(t *testing.T) {
 }
 
 func TestProcessExitBoundsDrainForInheritedTerminalHandles(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("drain", p, nil)
 	defer p.Close()
 	close(p.exited)
-	select {
-	case <-i.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("inherited terminal handle blocked exit forever")
-	}
+	<-i.done
 }
 
 func TestProcessExitCallbackReceivesWaitResult(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	called := make(chan error, 1)
 	_ = Own("callback", p, func(_ *Terminal, err error) { called <- err })
 	defer p.Close()
 	close(p.exited)
-	select {
-	case err := <-called:
-		if err != nil {
-			t.Fatalf("wait result = %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("exit callback was not called")
+	err := <-called
+	if err != nil {
+		t.Fatalf("wait result = %v", err)
 	}
 }

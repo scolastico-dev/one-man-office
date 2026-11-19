@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 // The test binary is also the fake claude, codex and agy: a small sh script
@@ -24,7 +26,7 @@ func TestMain(m *testing.M) {
 	if cli := os.Getenv("OMO_FAKECLI"); cli != "" {
 		os.Exit(fakeCLI(cli, os.Args[1:]))
 	}
-	os.Exit(m.Run())
+	os.Exit(childenvtest.Run(m))
 }
 
 // call is one recorded run of a fake program.

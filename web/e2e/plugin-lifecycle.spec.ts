@@ -6,7 +6,6 @@ import { configure, expectClean, expectTreeGone, forwards, processTree, tasks } 
 import { openBoard, markPage, expectNotReloaded, nudgeReconnect } from './support/board'
 import { git } from './support/git'
 
-test.skip(process.platform !== 'linux', 'local process fixture is exercised on Linux; native task tests cover other platforms')
 async function status(omo: Omo) {
   return (await omo.api<{ message: string }>('POST', '/api/plugins/sample/actions/status', {})).message
 }
@@ -74,7 +73,10 @@ test('one sample uses declarations and the public facade across routes, configur
   await expect(task.locator('pre')).toContainText('\\u{202E}')
   expect(await task.textContent()).not.toContain('fixture-secret-value')
   await detail.getByRole('combobox', { name: 'Sample mode' }).selectOption('two')
+  // The save reloads the plugin and cancels the old runtime's context: an action started before the save has completed can be cancelled with it.
+  const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok())
   await detail.getByRole('button', { name: 'Save', exact: true }).click()
+  await saved
   await expect.poll(() => status(omo)).toBe('starts=1 running=1 mode=two')
   await expect(task.locator('[data-task-stop]')).toBeEnabled()
   await task.locator('[data-task-stop]').click()
@@ -93,7 +95,11 @@ test('one sample uses declarations and the public facade across routes, configur
   await detail.locator('[data-plugin-enabled]').click()
   await expect(page.locator('script[data-omo-plugin="sample"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Dynamic status', exact: true })).toHaveCount(0)
+  // Enabling reloads the plugin: wait for the saved response before the status action.
+  // It names the enabling request: the earlier disabling PUT may still be answered after this waiter exists.
+  const enabled = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith('/api/plugins/sample') && r.ok() && r.request().postDataJSON()?.enabled === true)
   await detail.locator('[data-plugin-enabled]').click()
+  await enabled
   await expect.poll(() => status(omo)).toBe('starts=2 running=0 mode=two')
   await expect(page.locator('script[data-omo-plugin="sample"]')).toHaveCount(1)
   tree = await start(omo, n)

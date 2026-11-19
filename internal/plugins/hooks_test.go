@@ -55,11 +55,11 @@ func TestCommandHookArgumentsAreTheManifests(t *testing.T) {
 	command := helperArgs(t, "record", out, "--flag=$(id)", "two words")
 	e.plugin("cmd", manifestOf(map[string]any{"event": EventTicketCreated, "command": command}), nil)
 	e.load(enabled("cmd", nil))
-	for _, title := range hostileTitles {
+	for i, title := range hostileTitles {
 		_ = os.Remove(out)
 		ev := ticketEvent(7, title)
 		e.m.Dispatch(ev)
-		eventually(t, "the record", func() bool { _, err := os.Stat(out); return err == nil })
+		e.waitFinished("cmd", i+1)
 		var rec struct {
 			Args  []string `json:"args"`
 			Env   []string `json:"env"`
@@ -110,7 +110,7 @@ func TestCommandHookEnvironment(t *testing.T) {
 	e.plugin("cmd", manifestOf(map[string]any{"event": EventTicketMoved, "command": helperArgs(t, "record", out)}), nil)
 	e.load(enabled("cmd", map[string]any{"user_key": "abc"}))
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{"ticket": TicketPayload(api.TicketSummary{Number: 3, Title: "MOVED-TITLE"}, ""), "from": "ready", "to": "in_progress"}})
-	eventually(t, "the record", func() bool { _, err := os.Stat(out); return err == nil })
+	e.waitFinished("cmd", 1)
 	var rec struct {
 		Env []string `json:"env"`
 	}
@@ -165,7 +165,7 @@ omo.store_set("t" .. event.data.ticket.number, title)
 	for i, title := range titles {
 		e.m.Dispatch(ticketEvent(i+1, title))
 	}
-	eventually(t, "every title", func() bool { return e.stored("lua", "t"+itoa(len(titles))) != "" })
+	e.waitFinished("lua", len(titles))
 	for i, title := range titles {
 		var got string
 		if err := json.Unmarshal([]byte(e.stored("lua", "t"+itoa(i+1))), &got); err != nil {
@@ -199,7 +199,7 @@ omo.store_set("t" .. event.data.ticket.number, title)
 	}
 	e.m.Dispatch(Event{Name: EventTicketCreated, Data: deep})
 	e.m.Dispatch(ticketEvent(999, "after"))
-	eventually(t, "the event after", func() bool { return e.stored("lua", "t999") != "" })
+	e.waitFinished("lua", len(titles)+2)
 	if !strings.Contains(e.logText("lua"), "the event cannot be handed to Lua") {
 		t.Fatalf("log = %s", e.logText("lua"))
 	}
@@ -221,7 +221,11 @@ func TestConfigValuesNeverInLogsOrErrors(t *testing.T) {
 	e.plugin("cmd", manifestOf(map[string]any{"event": EventTicketMoved, "command": helperArgs(t, "config-to-stderr")}, map[string]any{"event": "manual", "name": "fail", "description": "Fail", "command": helperArgs(t, "config-to-stderr")}), nil)
 	e.load(enabled("lua", config), enabled("cmd", config))
 	e.m.Dispatch(Event{Name: EventTicketMoved, Data: map[string]any{}})
-	eventually(t, "both errors", func() bool { return e.info("lua").State == StateError && e.info("cmd").State == StateError })
+	e.waitFinished("lua", 1)
+	e.waitFinished("cmd", 1)
+	if e.info("lua").State != StateError || e.info("cmd").State != StateError {
+		t.Fatal("the failing hooks did not record their errors")
+	}
 	answer, err := e.m.Trigger(t.Context(), "lua", "send", nil)
 	if err != nil {
 		t.Fatal(err)

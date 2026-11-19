@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -31,11 +33,12 @@ const (
 type fakePushover struct {
 	srv *httptest.Server
 
-	mu     sync.Mutex
-	forms  []url.Values
-	status int
-	body   string
-	got    chan url.Values
+	mu      sync.Mutex
+	forms   []url.Values
+	status  int
+	body    string
+	got     chan url.Values
+	offline bool
 }
 
 func newFakePushover(t *testing.T) *fakePushover {
@@ -58,6 +61,21 @@ func newFakePushover(t *testing.T) *fakePushover {
 	return f
 }
 
+// client can fail at the transport boundary while the server keeps ownership
+// of its port, so the failure test never connects to a reused address.
+func (f *fakePushover) client() *http.Client {
+	transport := f.srv.Client().Transport
+	return &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		f.mu.Lock()
+		offline := f.offline
+		f.mu.Unlock()
+		if offline {
+			return nil, errors.New("connection refused")
+		}
+		return transport.RoundTrip(r)
+	})}
+}
+
 func (f *fakePushover) answer(status int, body string) {
 	f.mu.Lock()
 	f.status, f.body = status, body
@@ -73,22 +91,18 @@ func (f *fakePushover) count() int {
 // next waits for the next request.
 func (f *fakePushover) next(t *testing.T) url.Values {
 	t.Helper()
-	select {
-	case v := <-f.got:
-		return v
-	case <-time.After(10 * time.Second):
-		t.Fatal("no request reached the fake Pushover")
-		return nil
-	}
+	return <-f.got
 }
 
 // pushoverRun is the shipped pushover plugin, installed and loaded in the
 // plugin runtime, whose HTTP client is the fake's.
 type pushoverRun struct {
-	t    *testing.T
-	m    *plugins.Manager
-	fake *fakePushover
-	db   *sql.DB
+	t          *testing.T
+	m          *plugins.Manager
+	fake       *fakePushover
+	db         *sql.DB
+	dispatched int64
+	completed  *atomic.Int64
 }
 
 func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
@@ -109,7 +123,12 @@ func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := plugins.New(plugins.Options{Root: e.root, DB: d, HTTP: fake.srv.Client(), Socket: func() string { return "" }})
+	completed := &atomic.Int64{}
+	m := plugins.New(plugins.Options{Root: e.root, DB: d, HTTP: fake.client(), Socket: func() string { return "" }, Changed: func(info api.PluginInfo) {
+		if info.LastRunAt != nil && info.State != plugins.StateRunning && info.LastEvent != plugins.EventManual {
+			completed.Add(1)
+		}
+	}})
 	t.Cleanup(func() {
 		m.Close()
 		_ = d.Close()
@@ -117,7 +136,7 @@ func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
 	if errs := m.Load([]api.PluginSettings{s}); errs["pushover"] != nil {
 		t.Fatal(errs["pushover"])
 	}
-	return &pushoverRun{t: t, m: m, fake: fake, db: d}
+	return &pushoverRun{t: t, m: m, fake: fake, db: d, completed: completed}
 }
 
 func ticket(n int, title, attention string) map[string]any {
@@ -126,11 +145,13 @@ func ticket(n int, title, attention string) map[string]any {
 }
 
 func (r *pushoverRun) attention(n int, title, reason string) {
+	r.dispatched++
 	r.m.Dispatch(plugins.Event{Name: plugins.EventNeedsAttention, At: time.Now(),
 		Data: map[string]any{"ticket": ticket(n, title, reason), "reason": reason}})
 }
 
 func (r *pushoverRun) question(n int, title, body string, to api.Role) {
+	r.dispatched++
 	c := api.Comment{ID: 5, Ticket: n, Author: api.Actor{Role: api.RoleDeveloper, Name: "dev-1"}, Body: body, QuestionTo: to}
 	r.m.Dispatch(plugins.Event{Name: plugins.EventQuestionAsked, At: time.Now(),
 		Data: map[string]any{"ticket": ticket(n, title, ""), "comment": plugins.CommentPayload(c)}})
@@ -139,25 +160,18 @@ func (r *pushoverRun) question(n int, title, body string, to api.Role) {
 // settle waits until no run of the plugin is going on and returns its log.
 func (r *pushoverRun) settle() string {
 	r.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		var state string
-		for _, i := range r.m.Infos() {
-			if i.Name == "pushover" {
-				state = i.State
-			}
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for r.completed.Load() < r.dispatched {
+		select {
+		case <-tick.C:
 		}
-		if state != plugins.StateRunning {
-			var b strings.Builder
-			for _, l := range r.m.LogLines("pushover", plugins.LogLines) {
-				b.WriteString(l.Message + "\n")
-			}
-			return b.String()
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	r.t.Fatal("the plugin did not settle")
-	return ""
+	var b strings.Builder
+	for _, l := range r.m.LogLines("pushover", plugins.LogLines) {
+		b.WriteString(l.Message + "\n")
+	}
+	return b.String()
 }
 
 func (r *pushoverRun) state() api.PluginInfo {
@@ -274,14 +288,12 @@ func TestPushoverFailuresAreLoggedNotThrown(t *testing.T) {
 	}
 
 	// No connection: logged, not thrown.
-	r.fake.srv.Close()
+	r.fake.mu.Lock()
+	r.fake.offline = true
+	r.fake.mu.Unlock()
 	r.attention(2, "Two", "needs you")
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(r.settle(), "not sent: http request failed") {
-		if time.Now().After(deadline) {
-			t.Fatalf("log = %q", r.settle())
-		}
-		time.Sleep(10 * time.Millisecond)
+	if log := r.settle(); !strings.Contains(log, "not sent: http request failed") {
+		t.Fatalf("log = %q", log)
 	}
 	if st := r.state(); st.State != plugins.StateReady {
 		t.Fatalf("state = %s (%s)", st.State, st.Message)
@@ -297,12 +309,8 @@ func TestPushoverFailuresAreLoggedNotThrown(t *testing.T) {
 func TestPushoverWithoutCredentialsSendsNothing(t *testing.T) {
 	r := newPushoverRun(t, map[string]any{"app_token": ""})
 	r.attention(1, "One", "needs you")
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(r.settle(), "user_key and app_token are not set") {
-		if time.Now().After(deadline) {
-			t.Fatalf("log = %q", r.settle())
-		}
-		time.Sleep(10 * time.Millisecond)
+	if log := r.settle(); !strings.Contains(log, "user_key and app_token are not set") {
+		t.Fatalf("log = %q", log)
 	}
 	msg, err := r.m.Trigger(context.Background(), "pushover", "test", nil)
 	if err != nil || !strings.HasPrefix(msg, "Not sent: set user_key and app_token") {
@@ -321,12 +329,8 @@ func TestPushoverReachesOnlyAllowedAddresses(t *testing.T) {
 	// helper before anything is sent.
 	r := newPushoverRun(t, map[string]any{"api_url": "http://pushover.example/1/messages.json"})
 	r.attention(1, "One", "needs you")
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(r.settle(), "not sent: http address not allowed") {
-		if time.Now().After(deadline) {
-			t.Fatalf("log = %q", r.settle())
-		}
-		time.Sleep(10 * time.Millisecond)
+	if log := r.settle(); !strings.Contains(log, "not sent: http address not allowed") {
+		t.Fatalf("log = %q", log)
 	}
 	if n := r.fake.count(); n != 0 {
 		t.Fatalf("%d requests", n)
@@ -340,12 +344,9 @@ func TestPushoverHoldsBackAfterItsHourlyCap(t *testing.T) {
 	}
 	// The plugin counts what it held back: the fourth (whose place the
 	// notice took), the fifth and the sixth.
-	deadline := time.Now().Add(10 * time.Second)
-	for r.window()["held"] != 3 {
-		if time.Now().After(deadline) {
-			t.Fatalf("window = %v, want 3 held back", r.window())
-		}
-		time.Sleep(10 * time.Millisecond)
+	r.settle()
+	if w := r.window(); w["held"] != 3 {
+		t.Fatalf("window = %v, want 3 held back", w)
 	}
 	r.fake.mu.Lock()
 	forms := append([]url.Values(nil), r.fake.forms...)
@@ -366,6 +367,7 @@ func TestPushoverHoldsBackAfterItsHourlyCap(t *testing.T) {
 	}
 
 	// The test action is the user's own and is not counted or held back.
+	r.settle()
 	if msg, err := r.m.Trigger(context.Background(), "pushover", "test", nil); err != nil || msg != "Sent a test notification." {
 		t.Fatalf("test action: %q, %v", msg, err)
 	}

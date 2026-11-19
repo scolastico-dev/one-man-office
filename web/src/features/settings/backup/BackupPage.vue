@@ -277,6 +277,8 @@ async function apply() {
   list-style: none;
   max-height: 40vh;
   overflow: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: transform;
 }
 .backup__files code {
   font-family: inherit;

@@ -563,11 +563,7 @@ func TestCancelKillsRunningAgentProcess(t *testing.T) {
 	w.waitSession(n, api.RoleDeveloper, api.SessionRunning)
 	agent := w.runner.all()[0]
 	w.do("POST", "/api/tickets/"+itoa(n)+"/cancel", api.CancelRequest{DeleteBranch: true}, nil)
-	select {
-	case <-agent.Done():
-	case <-time.After(time.Minute):
-		t.Fatal("the agent process outlived the cancel")
-	}
+	<-agent.Done()
 	if tk := w.ticket(n); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCancelled {
 		t.Fatalf("column %s resolution %q", tk.Column, tk.Resolution)
 	}

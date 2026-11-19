@@ -68,6 +68,8 @@ watch(
   margin: 0;
   padding: calc(var(--omo-space) * 3);
   overflow: auto;
+  /* A composited layer: the compositor then finds this scroll box under a wheel itself, where asking the main thread can drop the wheel. */
+  will-change: transform;
   font-family: inherit;
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);

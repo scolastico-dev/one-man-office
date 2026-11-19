@@ -1,0 +1,1634 @@
+{
+  "GOMAXPROCS": 4,
+  "affinity": [
+    0,
+    1
+  ],
+  "allowed_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "attempts": [
+    {
+      "attempt": 1,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 26.5888659609991,
+      "seed": 1795006222869594230,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82beca65992917fb62e0b14f44c56db33fd3d31b4319487ea80a0f78127be80e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 2,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594231\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:47:56.792100314+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.20s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.308s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 10.677802349004196,
+      "seed": 1795006222869594231,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "035466e599562e5ccd23424a2818fe1c281c4801f0ba6de925b9aed59083ebc6",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 3,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.626605012999789,
+      "seed": 1795006222869594232,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "362826e65f64247a2649bfe5df6455ff99c3b25510e535cad1dc5a152bdd8e12",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 4,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.380174041994906,
+      "seed": 1795006222869594233,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f581d4894caf5675fa93ae15fa0d47e65de471a1a631bfb64a7ecb8d0f3df7c0",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 5,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.176299217004271,
+      "seed": 1795006222869594234,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "29891a831d24b99a7638685aca4dc2bc537afe35103724e73a6727f9a69588b8",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 6,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.229477876993769,
+      "seed": 1795006222869594235,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "003771b7e4bb0c688637ea54a41eebda045da794bb12a4a4c7753e7b6f28db87",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 7,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.229347141001199,
+      "seed": 1795006222869594236,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82187989637676cf386f84a232513a4348d14331c01782b8c56802c6f8e1a3ef",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 8,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.379783345997566,
+      "seed": 1795006222869594237,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "af01b0839bd9801b526065b8df6fdfdd536ccee8080f49e81c2e675197843623",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 9,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.32491977900645,
+      "seed": 1795006222869594238,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6a5d23a1abf6f8bf9ed03260f7cf5ab4c01557f88767d69a0e786276c74d4cf8",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 10,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.5344191230033175,
+      "seed": 1795006222869594239,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0abbae41be12ec6bad92c7854a967aaed2cc08a00df8311820c878f52dac201c",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 11,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594240\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:48:41.339932251+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.07s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.088s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.6263658780007972,
+      "seed": 1795006222869594240,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1623c26a76e104c9f72e4ca7d6dc3c612120de1bc941b0b4f366fda371cec7dc",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 12,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.679196288998355,
+      "seed": 1795006222869594241,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0e5baf590aa341091503cafff0c48a0a9ed3b8ccc54db71eefd615378a244999",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 13,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594242\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:48:50.189817148+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.18s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.209s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.130723996000597,
+      "seed": 1795006222869594242,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4712a27063cac6e48ab8ad052c0e970a57057db1ac672594319b3c846f36b16e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 14,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.78051559299638,
+      "seed": 1795006222869594243,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4625c4a81c254fd50a4ed89485473cfaea343b55f58c8e4b398c98f0b7c32c9e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 15,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.67797329199675,
+      "seed": 1795006222869594244,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a18f3319d376be5c5646eedd62bae96e47cc7cfe646dfbdcfc220e8fe0c7e0bb",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 16,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594245\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:49:03.63445085+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.09s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.111s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.978847805999976,
+      "seed": 1795006222869594245,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3b101f7af46e82e27877334f45eb71020a4f846234bb00a6fb14b67781a262d3",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 17,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.430334151002171,
+      "seed": 1795006222869594246,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "7e78dee7ac3aa4bfa36fa2b4a73f40c6ecfdc0f115ac292157199df5d5213e20",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 18,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.627257471998746,
+      "seed": 1795006222869594247,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cb2ed966ee21dc4021d123d19d3b850e65a3b229e461603ae92aa20a96a5df30",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 19,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.57888079300028,
+      "seed": 1795006222869594248,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "678072edae68a9c902e9d3c4ba955fc2b63312defe9551a6a1b1cd71210f24d2",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 20,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594249\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:49:20.622334709+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.08s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.119s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.3778306180029176,
+      "seed": 1795006222869594249,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e2ca3811bbf835f715a9ecc3e818d452fb0e0588e97ec990272cd849a1fa31b4",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 21,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.18014964699978,
+      "seed": 1795006222869594250,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "4d1c234ea37392846849afe22dd192f6f53564561bbbb3ad5cb18d4d6d2bc8e1",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 22,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 3.7783039749992895,
+      "seed": 1795006222869594251,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ba90c5a0a6dd7b9dcca821843f5445f774af1470570bc08bda07e70cdf97d998",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 23,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.079518476006342,
+      "seed": 1795006222869594252,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5844eb9d6c20007b74c5737f0aed617091d305a3eb2440a9b3291a10992b8d1c",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 24,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.225708990001294,
+      "seed": 1795006222869594253,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c43001078a39e233ed8de8dd5e3c702c3a1f6056ac00d518ae39e772d08fd757",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 25,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.831037118994573,
+      "seed": 1795006222869594254,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cb562ff5817705ae1465f5f5ff7635b39ab3de2385be88f2a5d2f33c99dec045",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 26,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.132579971002997,
+      "seed": 1795006222869594255,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9e6fa7c0d9252b38d71886d21c2e96e372810d10aebea943676feafa56a94258",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 27,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594256\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:49:50.972800219+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.20s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.272s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.128033007997146,
+      "seed": 1795006222869594256,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "29bdcec8188d6d795be5819d996812c4048f81624f60deccde4d074d0000aee3",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 28,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.027179688004253,
+      "seed": 1795006222869594257,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d36b0c9ca7cfa7af9c58df4e1b1c41ab5f5bcfbc07eee6d9d853bbabb2709f7f",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 29,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.9299866130022565,
+      "seed": 1795006222869594258,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d5a02092aa98c423bdb02853172cf6ed708356ba88afc20114d92202ffc41e19",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 30,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.130506270004844,
+      "seed": 1795006222869594259,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "67c013c203df8359f5c25cbd0448017c163c8f06f949f09b9f7d86634224d5ba",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 31,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.132922798999061,
+      "seed": 1795006222869594260,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a1888e767cd9507b1cfdf38ebfb9b14a220316d203b750bd92cb29560cb178a4",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 32,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594261\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:50:15.83346758+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.10s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.163s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.632771299999149,
+      "seed": 1795006222869594261,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "312f597e888458093cb67bcd2a6c4038d687412516974d367ba0f89d2afbe405",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 33,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594262\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:50:20.170520542+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.16s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.196s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.335784043003514,
+      "seed": 1795006222869594262,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0b14b184cc4ea9b4201906f0da3864571472eefbf53f133166d1b5461d621fad",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 34,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.027026570001908,
+      "seed": 1795006222869594263,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3b6148559e8cc23df7fa5efa275d530492ca2c0c502e3ec6e5b6b06405ee184f",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 35,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.8790839889989,
+      "seed": 1795006222869594264,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "55f865948cb19b33fa2262b0a18348b96f073c4192a68d22d2a92cd8de75e46f",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 36,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.832114156000898,
+      "seed": 1795006222869594265,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c731f224d5cf41955b624901d14aa3d1e0b93776d1d0b44b2b13dfe75c0c3ea9",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 37,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.832704544998705,
+      "seed": 1795006222869594266,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c1f0c21dbc3d06e4969dd3135070e3056b850fede6207f1a55ae6be63478e993",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 38,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.226038328000868,
+      "seed": 1795006222869594267,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a78e4561dec306590d6fdc25e68dd90b0bbe905e636bdca862c8cc2bd9be2f9f",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 39,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.626753470001859,
+      "seed": 1795006222869594268,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "30365f76607001fdd186dba71f31b3580b5fdb3fc0e81114126829451bf6d7b4",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 40,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.7755706750031095,
+      "seed": 1795006222869594269,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "aa5894316fcb09f8a63d2bf742940ac1927b03a7206e493ab0440fe324b0588d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 41,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 7.549331111003994,
+      "seed": 1795006222869594270,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "b8198e0996ab8a467c8462f19501b1101e2c7809589fe920dafd70ae9299e3b0",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 42,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594271\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:08.883488455+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.15s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.210s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 5.932465666999633,
+      "seed": 1795006222869594271,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3f5a0d8743da064f97d9fb4f945cad24b44d6f4b5c650efe1f37534affc06f0e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 43,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594272\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:12.819558045+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.12s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.163s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.926298295999004,
+      "seed": 1795006222869594272,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "12f71f47c036d284fdb0744b4051c8101c0b21a1a4c64072ba9cd18785608ad6",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 44,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.076398559998779,
+      "seed": 1795006222869594273,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "413972755e11009776c48b3c3618cac337bddbd8ebefc85d23898bcca2bf0c73",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 45,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.676913404000516,
+      "seed": 1795006222869594274,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5ae4eac8dfa2967861be160587da25643359f7ea6a7a4fcce4ee5517a0d9fa21",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 46,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594275\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:26.298396071+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.11s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.190s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.7339870740033803,
+      "seed": 1795006222869594275,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "dfc12dcd7d2b735f7b69634519382c574dfc47a437d74dc6dc79ac6c8cbbcf53",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 47,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594276\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:30.522847848+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.12s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.165s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.2331658259936376,
+      "seed": 1795006222869594276,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6aa786a9b7b267b775f9cd70b2dea7f1bd2e437673ba487251dd2b0b1c5f3444",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 48,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.030063899997913,
+      "seed": 1795006222869594277,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a891ccabee5e3bf6cf8295418c000af9cf470b79f60a4a4c0868f4c800c48b88",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 49,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594278\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:39.396006632+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.10s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.139s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.8274105679956847,
+      "seed": 1795006222869594278,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1990e04fc4b2912d502bd44deec022fafbae0c5bf598cf6ef76cbf379d840f6d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 50,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594279\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:51:43.150713749+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.13s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.178s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.7271450930056744,
+      "seed": 1795006222869594279,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "978215816daa66befcbcc1b0fba804ca3937ba1a0573c3e88e088c4963699ab5",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 51,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.877770220999082,
+      "seed": 1795006222869594280,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1e37a06ec06e77f9d13d674aa89ed1cd378e61f72bb9938115cf61713592471e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 52,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.6785115279999445,
+      "seed": 1795006222869594281,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "72539b168337e624ee7e62376009f00b37e69aa2aa75f0f52c0599c1f309953c",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 53,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.431171881995397,
+      "seed": 1795006222869594282,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9d9f9b8c84dae71f0d02c92e4b00e0c1a3dfc2a7a03ea7851258a6e7972592b7",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 54,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 3.924071528999775,
+      "seed": 1795006222869594283,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9efec8e99db173e845881bd01c09249371015e9076b1cfc02a3bc3562ca04016",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 55,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.375279757994576,
+      "seed": 1795006222869594284,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "88ed3fd3129c49babd80886e3883a3d87f63b7772ab9b54f8e428dc87f8e9e9e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 56,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594285\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:52:08.951024215+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.10s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.138s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.5277014849998523,
+      "seed": 1795006222869594285,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "27c2697c6098376627313b3520bc34d03e15d1c45b75a8925fbd9c723a83d01d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 57,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.075821216996701,
+      "seed": 1795006222869594286,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e79ff54fe33076d2707959c2ecbae4f19f6cc411f722591883cb501b8ca43ce0",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 58,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.878680504996737,
+      "seed": 1795006222869594287,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "89248fe40c04a4ec1218473e60ae518b2c59e1c942037dc8adf61aa82af896c9",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 59,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594288\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:52:22.933567948+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.15s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.209s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.976433702999202,
+      "seed": 1795006222869594288,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "386797ebe21e419be87c22bf465278607bebaac4d9c2d7e2abb6b7b88486821e",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 60,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594289\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:52:26.731353279+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.14s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.208s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.8300771139984136,
+      "seed": 1795006222869594289,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ceda1b8e2935e9dae98426af04bf7f749658d294c594ff64a7c72bbd33dbff55",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 61,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594290\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:52:31.193675907+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.15s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.203s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 4.4826844859999255,
+      "seed": 1795006222869594290,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "519367720ebf71f1d962c960261f3e6f048e683c4472d54dca9c1212d75f5528",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 62,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.977375378002762,
+      "seed": 1795006222869594291,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e2128eda8ec92693e096324a3577d0403c77689e983316227d3152ad2d3eaf7c",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 63,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.129806749006093,
+      "seed": 1795006222869594292,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "fcf83830c602dac2e7a93b1308babed448c0f12eec706a6fc03c42eba46d53e6",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 64,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.480770151996694,
+      "seed": 1795006222869594293,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "deee240d0aca28652fc54bb2332b753676ebab360fd7b1d908f3b82d6e9dd323",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 65,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.178319589002058,
+      "seed": 1795006222869594294,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e4bd0d4895c45e600d45e619225ecd355fa9713c7d71fc40f49e3fd725b0a55a",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 66,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.831762098001491,
+      "seed": 1795006222869594295,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "47a8873a58a89c60d08b5e7e5171e5ece0d7cec78dcc6b15a2aa3b83c8d1c7fe",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 67,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.428877061000094,
+      "seed": 1795006222869594296,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "90f7214d427210c05509fdb6248e7ce742889042386703156287bf3eadd7fa93",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 68,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.026516017001995,
+      "seed": 1795006222869594297,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "7f4244d642e59b95352586691886c118a90f16bb7a2be61b12d6815dc03b9795",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 69,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.78625818999717,
+      "seed": 1795006222869594298,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "199e1e56860fe0916e1d999d8fc9aefc959fba1f9250c258247353833aa24b0d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 70,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 5.080645914000343,
+      "seed": 1795006222869594299,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c03dc4b280cea36a183e506aaa86a786f655ec0af28d0deb9ed6e7320e196d48",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 71,
+      "cleaned": true,
+      "diagnostic_output": "-test.shuffle 1795006222869594300\n=== RUN   TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced\n    stdio_test.go:475: an unchanged list was announced:\n        mcp.tools_changed null\n        mcp.changed {\"name\":\"fake\",\"state\":\"running\",\"instances\":1,\"tools\":[\"fake__add_tool\",\"fake__big\",\"fake__crash\",\"fake__echo\",\"fake__printenv\",\"fake__rpcerror\",\"fake__sleep\",\"fake__stderr\",\"fake__whoami\"],\"omitted\":[],\"last_error\":\"\",\"started_at\":\"2026-11-18T14:53:22.574585531+01:00\",\"auth\":{\"state\":\"none\",\"expires_at\":null,\"scopes\":null},\"offers_resources\":false,\"offers_prompts\":false}\n--- FAIL: TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced (1.11s)\nFAIL\nFAIL\tgithub.com/scolastico-dev/one-man-office/internal/mcprelay\t1.139s\n",
+      "errors": [
+        "package failed: github.com/scolastico-dev/one-man-office/internal/mcprelay",
+        "command exit 1"
+      ],
+      "ok": false,
+      "returncode": 1,
+      "seconds": 3.3255058840004494,
+      "seed": 1795006222869594300,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "931b26bca457c44ff465e87a2d46095de087df836de7dd0709c1d9eb3a037993",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "failed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 72,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 4.578161477998947,
+      "seed": 1795006222869594301,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1be9884999b7c8b45b290a364a08d6e10e03fa9525e6b3a9b5369c7f3e23cfaa",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 73,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.923561322997557,
+      "seed": 1795006222869594302,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "202a4fbade86ada6d57abfde066eb792a24603613714d68326ae8b96099fdabe",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 74,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.671558248002839,
+      "seed": 1795006222869594303,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ae88c2aafaeed7c9b1be0f823b980b86af3cb60b7a56d81bf098f15940ef7b5c",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 75,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6708714490014245,
+      "seed": 1795006222869594304,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0857a7d2dfc6e6b979ca2270cdc59b2aff76db47d7d6221829612d631a53baf5",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 76,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6707190419983817,
+      "seed": 1795006222869594305,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ac0e8295d83cf62ed593acb1ff329bc9120f7fbc14506f810150e4c1e76c35f7",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 77,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.671319034001499,
+      "seed": 1795006222869594306,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8016867fa0650dc24e09ca9a32858cd84d30683c8a8a0f46206acd2572df7f16",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 78,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6711878459973377,
+      "seed": 1795006222869594307,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "bc3940a204dab07bdf6d51256b75d612ded2a7afdfe939b71c642d07b161281d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 79,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 1.6691700390001643,
+      "seed": 1795006222869594308,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6f915f88c503917d774d1f2b0bf4f0122ccd97887da920942352782a52c6c8d9",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 80,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6741659059989615,
+      "seed": 1795006222869594309,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9700446e50a5e61eed55f069683c9e4e2fdc7ea804e4eef2fb4d58584a9edea5",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 81,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6711002980009653,
+      "seed": 1795006222869594310,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f4f0609033f1725ac260ce6110d14f1cff6e18bc6fdce323556c02c861e73f8b",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 82,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.7215532659974997,
+      "seed": 1795006222869594311,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "71ad9bad907188cd7b04fdf9726fc76766ad6f0726b28c379923595cf7042eda",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 83,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6712293069940642,
+      "seed": 1795006222869594312,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "59df170ccb37cb2bf48522406b7a96d940c55d2bd5e6874647666fdb192fa906",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 84,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.670868007997342,
+      "seed": 1795006222869594313,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2a5eafef8c96d4586ea752098608245f6b28925b3b7aef8f2f44971d432b486a",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 85,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.67239170299581,
+      "seed": 1795006222869594314,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "97af47c20643a785c696bbecd7e6a9b9619d64db8bd6e164fa5e5cd59dc4f77a",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 86,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6730009219973,
+      "seed": 1795006222869594315,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "252a1948955b20220e0e1a11760703d470e11943a4052fab6d1b09e3eaa387bd",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 87,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.623183053001412,
+      "seed": 1795006222869594316,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "256f4c5d627fec42099efc70e869523ce1587f96ed6b6ba794599105b72620c3",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 88,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.622105180998915,
+      "seed": 1795006222869594317,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "2b1d9c24ac86abc67504a9f2557b0dca8b7bf7fdb54531fbfccad29b838da068",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 89,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.621755795000354,
+      "seed": 1795006222869594318,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "eb36b5d8ccf51b0d8fa6c8065dff59394290283369e63d634ac4d248b61bda06",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 90,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6231628599998658,
+      "seed": 1795006222869594319,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "892b4a92ad94030c302521fb7e383b908c4f179dc2507002bc70fd5d8a5135dc",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 91,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.773352372998488,
+      "seed": 1795006222869594320,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d87db1bc13b2944dfeb83368760e40e3d5020b77285cfba7457294bf6840b4c9",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 92,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6250164209996,
+      "seed": 1795006222869594321,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3cba496f68c3987c31df31885e084922bb46bcd017fcb2a1e53eebe54e9f073d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 93,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6223073239962105,
+      "seed": 1795006222869594322,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6c28f5858e992f0b31ab5d8a39885691e571767cd1bc78b049eacb8c65fa0bde",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 94,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6226787160048843,
+      "seed": 1795006222869594323,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c14e144152344e11031425746dfbf5767f56abe0401f5b5897c205f332d8e4c3",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 95,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6245501529992907,
+      "seed": 1795006222869594324,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8998ac756a9211721f97b99ca8487217fe97d04ec31843cc634038189c8c754d",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 96,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.622782157995971,
+      "seed": 1795006222869594325,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "115fa01d34421045b3644ca8b8c96ac3092269672f03877a2a9c808e55a2a285",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 97,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6236312780019944,
+      "seed": 1795006222869594326,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "366619cb38f875849382c867056da750303cdb5a7c4385dd2053bc4a3cbb2b79",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 98,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6237080709979637,
+      "seed": 1795006222869594327,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "89352d851be19fc9dae096a06a21f9f0a2d0c3a0b687012513284c0e5eaba076",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 99,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.622702233995369,
+      "seed": 1795006222869594328,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e14a51f33f675e19674118a5ceb8e26ae9151f066d0098ca3d8bb2d4dea5fc44",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    },
+    {
+      "attempt": 100,
+      "cleaned": true,
+      "errors": [],
+      "ok": true,
+      "returncode": 0,
+      "seconds": 2.6229618990037125,
+      "seed": 1795006222869594329,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e83af4831a2592acacd63309f5cb8829cfb118fcd1464194f552c687d2fad1fa",
+      "tests": {
+        "github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": "passed"
+      },
+      "timed_out": false
+    }
+  ],
+  "base_seed": 1795006222869594230,
+  "campaign_exit_code": 1,
+  "command_template": "go test -json -race -count=1 -shuffle=<seed> -p=4 -parallel=4 -timeout=60m -run ^TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced$ ./internal/mcprelay",
+  "completed": {
+    "go": 100
+  },
+  "count_per_attempt": 1,
+  "go_version": "go version go1.27.2 linux/amd64",
+  "go_workers": 4,
+  "harness_command": "python3 scripts/stress/run.py --source bin/stress-calibration/source --suite go --go-runs 100 --packages ./internal/mcprelay --go-test ^TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced$ --seed 1795006222869594230 --output bin/stress-calibration/logs",
+  "isolation_patch": null,
+  "manifest_format": "Historical source file hashes without mode prefixes; current runner additionally fingerprints file modes.",
+  "race": true,
+  "raw_artifacts": "bin/stress-calibration/logs/20261118T134720Z-1v8xminh",
+  "requested": {
+    "go": 100
+  },
+  "source": {
+    "commit": "2a81d945d143a86aac818e1a0a47621db64a202f",
+    "dirty": false,
+    "manifest_sha256": "ba0e2c507a3350ec8763a990670aa9636cb0a05013e759d8e9761c031b2741bb",
+    "tree": "c3369a7728a74411cdbedad9f70851f1f546f10a"
+  },
+  "tests": {
+    "go::github.com/scolastico-dev/one-man-office/internal/mcprelay::TestChangeNoticesAreCoalescedAndOnlyARealChangeIsAnnounced": {
+      "attempts": 100,
+      "failed": 19,
+      "passed": 81,
+      "skipped": 0
+    }
+  }
+}

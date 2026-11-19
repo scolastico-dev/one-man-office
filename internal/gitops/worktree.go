@@ -245,9 +245,7 @@ func (g *Git) AddWorktreeForBranch(repo, dir, branch string) error {
 	if !exists {
 		return fmt.Errorf("branch %s does not exist in %s", branch, repo)
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "add", "--end-of-options", abs, branch)
 	return err
 }
@@ -340,9 +338,7 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir, branch string) (dirty []string, e
 	if err != nil {
 		return nil, err
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	if _, err := os.Lstat(abs); os.IsNotExist(err) {
 		return nil, g.forgetMissing(repo, abs)
 	}
@@ -414,9 +410,7 @@ func (g *Git) ForceRemoveWorktree(repo, dir string) error {
 	if err != nil {
 		return err
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	if wt, ok, err := g.findWorktree(repo, abs); err != nil {
 		return err
 	} else if ok && wt.locked {
@@ -474,9 +468,7 @@ func (g *Git) DeleteBranch(repo, branch, expected string) error {
 	if expected == "" {
 		return fmt.Errorf("delete %s: the expected tip is required", branch)
 	}
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
+	defer g.lockRepo(repo)()
 	expID, err := g.commitOf(repo, expected)
 	if err != nil {
 		return err

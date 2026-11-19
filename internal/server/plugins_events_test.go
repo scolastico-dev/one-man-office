@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 )
 
@@ -232,13 +233,10 @@ func TestPluginEventsNotReplayedAfterRestart(t *testing.T) {
 	}
 
 	s2 := openServer(t, layout, testConfig())
-	time.Sleep(300 * time.Millisecond)
-	if n := len(readLines(t, events)); n != 1 {
-		t.Fatalf("%d lines after the restart, want 1: events were replayed", n)
-	}
 	m2 := &ticketMaker{t: t, s: s2, project: m.project}
-	m2.create()
-	got := eventNames(recordedEvents(t, waitLines(t, events, 2)))
+	marker := m2.create()
+	waitTicketRecorded(t, events, marker)
+	got := eventNames(recordedEvents(t, readLines(t, events)))
 	if len(got) != 2 {
 		t.Fatalf("events %v", got)
 	}
@@ -268,12 +266,15 @@ func TestPluginAttentionNotRepeatedAfterRestart(t *testing.T) {
 	if err := s2.board.SetAttention(ctx, int64(n), "now this"); err != nil {
 		t.Fatal(err)
 	}
-	waitLines(t, events, 2)
-	time.Sleep(200 * time.Millisecond)
+	// A later recorded ticket is a barrier through the attention change,
+	// including every hook mapped from it.
+	m2 := &ticketMaker{t: t, s: s2, project: m.project}
+	marker := m2.create()
+	waitTicketRecorded(t, events, marker)
 	// Setting attention also writes a system comment; only the ticket
 	// events matter here.
 	got := slices.DeleteFunc(eventNames(recordedEvents(t, readLines(t, events))), func(n string) bool {
-		return n == plugins.EventCommentWritten
+		return n == plugins.EventCommentWritten || n == plugins.EventTicketCreated
 	})
 	if !slices.Equal(got, []string{plugins.EventTicketMoved, plugins.EventNeedsAttention}) {
 		t.Fatalf("events %v, want one ticket_moved and one ticket_needs_attention for the new text", got)
@@ -288,26 +289,53 @@ func TestPluginDispatchNeverSlowsTheBoard(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
 	man := recordManifest("slow")
-	man["hooks"] = []any{map[string]any{"event": plugins.EventTicketCreated, "command": []string{"sh", "-c", "sleep 30"}, "timeout": "30s"}}
+	man["hooks"] = []any{map[string]any{"event": plugins.EventTicketCreated, "command": []string{"sh", "-c", `echo started >> "$OMO_PLUGIN_DATA/started"; while [ ! -e "$OMO_PLUGIN_DATA/release" ]; do sleep 0.01; done`}, "timeout": "30s"}}
 	resp := asUser(b, s, "POST", "/api/plugins", community(api.PluginSettings{Name: "slow", Source: pluginRepo(t, man)}))
 	if resp.StatusCode != 201 {
 		t.Fatalf("install: %d %s", resp.StatusCode, respText(t, resp))
 	}
 	m := newTicketMaker(t, s)
-	started := time.Now()
+	first := m.create()
+	started := dataFile(s, "slow", "started")
+	waitLines(t, started, 1)
+	// Feed a burst through the real committed log in one transaction. Hundreds
+	// of separate SQLite fsyncs measure the host's disk, not backpressure.
+	ticket, err := s.board.Get(t.Context(), board.User, int64(first))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(api.TicketCreatedData{Ticket: ticket.TicketSummary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	for range plugins.QueueSize + 50 {
-		m.create()
-	}
-	// The same burst without any plugin takes a fraction of this; a
-	// dispatch that waited for the hook would take 30 s per event.
-	if d := time.Since(started); d > 20*time.Second {
-		t.Fatalf("creating %d tickets took %s with a hanging plugin", plugins.QueueSize+50, d)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for s.pluginInfo("slow").State != plugins.StateRunning {
-		if time.Now().After(deadline) {
-			t.Fatalf("the hook never ran: %+v", s.pluginInfo("slow"))
+		if _, err := db.AppendEvent(tx, api.KindTicketCreated, `{"role":"user"}`, int64(first), string(payload)); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(20 * time.Millisecond)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	waitPluginDispatch(t, s)
+
+	written := make(chan error, 1)
+	go func() {
+		_, err := s.board.Create(t.Context(), board.User, api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{m.project}})
+		written <- err
+	}()
+	err = <-written
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitPluginDispatch(t, s)
+	// The complete burst was dispatched while the first hook remained held:
+	// neither a blocking dispatch nor a timed-out and restarted hook passes.
+	if got := readLines(t, started); len(got) != 1 || s.pluginInfo("slow").State != plugins.StateRunning {
+		t.Fatalf("the hook did not stay blocked through the burst: starts %v, info %+v", got, s.pluginInfo("slow"))
 	}
 }

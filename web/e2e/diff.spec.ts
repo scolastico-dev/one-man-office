@@ -8,6 +8,7 @@ import { expect, test, type Omo } from './support/omo'
 import { script, waitForSession } from './support/agents'
 import { openBoard } from './support/board'
 import { initRepo } from './support/git'
+import { withoutShellConfig } from './support/env'
 
 const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
 const section = (page: Page, id: 'committed' | 'uncommitted') => panel(page).locator(`[data-diff-section="${id}"]`)
@@ -22,7 +23,7 @@ const LONG_LINE = 'L'.repeat(600)
 /** Commits files into a worktree the way an agent would, leaving every other change alone. */
 function commitInto(dir: string, files: Record<string, string | Buffer>, message: string): void {
   for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body)
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+  const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env, stdio: 'pipe' })
   git('add', '--', ...Object.keys(files))
   git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', message)
@@ -140,7 +141,7 @@ test.describe('a developer at work', () => {
   test('a base behind its remote-tracking branch is said, and the diff can compare with that branch', async ({ page, omo, repo }) => {
     // The project's main has a remote-tracking branch origin/main in a bare repository beside it, equal at first.
     const origin = join(dirname(repo), 'origin.git')
-    const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+    const env = { ...withoutShellConfig(), GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
     const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env, stdio: 'pipe' })
     git(dirname(repo), 'init', '-q', '--bare', '-b', 'main', origin)
     git(repo, 'remote', 'add', 'origin', origin)

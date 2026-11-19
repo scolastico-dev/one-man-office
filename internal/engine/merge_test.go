@@ -514,6 +514,7 @@ func TestBlockedMergeStaysInReviewWithRetry(t *testing.T) {
 }
 
 func TestOperationInProgressBlocksMerge(t *testing.T) {
+	useLongTempRoot(t)
 	h := gitHarness(t)
 	n := h.skippedTask("Add b")
 	h.finishTask(n, h.project, "b.txt", "b\n")
@@ -529,9 +530,10 @@ func TestOperationInProgressBlocksMerge(t *testing.T) {
 	h.step()
 
 	tk := h.ticket(n)
-	if tk.FailedStep != api.FailedMerge || !strings.Contains(tk.Attention, "merge is in progress") {
+	if tk.FailedStep != api.FailedMerge {
 		t.Fatalf("failed step %q attention %q", tk.FailedStep, tk.Attention)
 	}
+	h.wantAttentionReason(n, fmt.Sprintf("%s: a merge is in progress, which blocks merging into main (project %s). Finish or abort it there, then retry.", h.repo, h.project))
 	h.checkClaimEnded(n)
 	sameState(t, "user folder", before, repoState(t, h.repo))
 }

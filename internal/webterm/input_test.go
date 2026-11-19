@@ -49,8 +49,9 @@ func (p *pasteTerminal) Close() error                { p.once.Do(func() { close(
 func TestTerminalPasteAcknowledgesCompleteWritesAndKeepsConnection(t *testing.T) {
 	p := &pasteTerminal{gate: make(chan struct{}), started: make(chan struct{}, 1), closed: make(chan struct{})}
 	i := Own("paste", p, nil)
+	t.Cleanup(func() { _ = p.Close(); <-i.Done() })
 	server := serveTerminal(t, i)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	endpoint, err := url.Parse(server.URL)
 	if err != nil {
@@ -117,10 +118,10 @@ func TestTerminalPasteAcknowledgesCompleteWritesAndKeepsConnection(t *testing.T)
 }
 
 func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("tail", p, nil)
 	server := serveTerminal(t, i)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -142,11 +143,11 @@ func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
 }
 
 func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("reconnect", p, nil)
 	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h"))
 	server := serveTerminal(t, i)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -176,10 +177,10 @@ func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T
 }
 
 func TestTerminalPlainShellDoesNotRepaintOnFirstResize(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("shell", p, nil)
 	server := serveTerminal(t, i)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
 	if err != nil {
@@ -227,13 +228,13 @@ func serveTerminal(t *testing.T, term *Terminal) *httptest.Server {
 const replayEnd = `{"type":"replay-end"}`
 
 func TestTerminalAttachMarksEndOfReplay(t *testing.T) {
-	p := terminalFixture()
+	p := terminalFixture(t)
 	i := Own("replay", p, nil)
 	// A query the program wrote earlier: the browser's emulator answers it
 	// while replaying, and that answer must not reach the program again.
 	i.publish([]byte("before\x1b[c"))
 	server := serveTerminal(t, i)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dial := func() *websocket.Conn {
 		c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
@@ -259,7 +260,7 @@ func TestTerminalAttachMarksEndOfReplay(t *testing.T) {
 	}
 
 	// An attach with nothing to replay is marked as well.
-	empty := Own("empty", terminalFixture(), nil)
+	empty := Own("empty", terminalFixture(t), nil)
 	server = serveTerminal(t, empty)
 	c = dial()
 	kind, data, err = c.Read(ctx)
