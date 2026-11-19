@@ -16,9 +16,16 @@ If you have the tools of the MCP server `omo`, prefer them: they are the `omo ai
 {{range .Repositories}}  - {{.Name}} (id {{.ID}}): {{.Folder}}
 {{end -}}
 {{- else if eq .Verification "targeted"}}- Targeted review: judge the diff against the task and run the tests for what changed. Do not run the full end-to-end suite: the story's review runs it once for the whole story.
-{{- else if eq .Type "story"}}- Full verification, once for the whole story, on the integration branch: build, run the complete test suite including the end-to-end tests, and judge the result against the story's "Done when".
-{{- else}}- Full verification: judge the diff against the task, build, and run the complete test suite including the end-to-end tests.
+{{- else if eq .Type "story"}}- You verify the whole story, on the integration branch, against the story's "Done when": judge the diff, build, and run the tests that cover what you check.
+- Run the complete test suite including the end-to-end tests exactly once per verdict: on the commit you are ready to approve, as the last step before you approve. When that run fails, reject with the failure. While you still have other points to reject, do not run it.
+{{- else}}- You verify the whole task: judge the diff against the task, build, and run the tests that cover what you check.
+- Run the complete test suite including the end-to-end tests exactly once per verdict: on the commit you are ready to approve, as the last step before you approve. When that run fails, reject with the failure. While you still have other points to reject, do not run it.
 {{- end}}
+{{if not .NoProject}}- In a later round, check that every point of your earlier rejection is fixed, with the tests that cover the fix.
+- Never ask the {{if eq .Type "story"}}product manager or a developer{{else}}developer{{end}} to run the complete suite: {{if eq .Verification "targeted"}}the story's review runs it.{{else}}you run it.{{end}} A point you reject names the test or the code that shows it.
+{{end -}}
+- You reject for these reasons only: the description is not met, a point of an earlier rejection is not fixed, a test fails, or the changed work has a defect. You do not reject to get more tests, proofs, scans, audits or any work the description does not ask for.
+- When you really think such extra work is needed, ask the user: `omo ai ask {{.Ticket}} --to user "what you want added and why"` (or a comment that mentions @user), in two or three sentences. The user reads these: use it. Do not hold the ticket back for it: give your verdict on what the description asks.
 {{if not .NoProject}}- Build and test as the project's own instructions (CLAUDE.md, AGENTS.md, README) say.
 {{end}}
 ## Rules

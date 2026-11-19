@@ -170,7 +170,12 @@ func TestMoveMatrix(t *testing.T) {
 						n, story := kind.build(t, b)
 						force(t, b, n, from, stageFor(from))
 						want := userOutcome(from, to)
-						if role != api.RoleUser && want.code != api.CodeInvalidTransition {
+						// A product manager stops the tasks of its story (mayStop).
+						// The user supervises the tickets of this matrix, so the
+						// CEO stops none of them.
+						pmStops := role == api.RolePM && kind.name == "in_story" && from == api.ColumnInProgress &&
+							(to == api.ColumnPlanning || to == api.ColumnReady)
+						if role != api.RoleUser && !pmStops && want.code != api.CodeInvalidTransition {
 							want = outcome{code: api.CodeForbidden}
 						}
 						got, err := b.Move(context.Background(), matrixActor(role, n, story), int64(n), api.MoveRequest{Column: to})
@@ -483,13 +488,69 @@ func TestStopStoryReturnsActiveTasksToReady(t *testing.T) {
 	}
 }
 
-func TestStopIsUserOnly(t *testing.T) {
-	b, _ := newTestBoard(t)
-	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}})
-	force(t, b, tk.Number, api.ColumnInProgress, "")
-	dev := agent(t, b, api.RoleDeveloper, int64(tk.Number))
-	_, err := b.Move(context.Background(), dev, int64(tk.Number), api.MoveRequest{Column: api.ColumnReady})
-	wantCode(t, err, api.CodeForbidden)
+// Work on a ticket is stopped by the user or by its supervisor: a product
+// manager stops the tasks of its story, the CEO the tickets it supervises.
+// Nobody else does, and no supervisor stops a ticket of another one.
+func TestStopIsForTheUserAndTheSupervisor(t *testing.T) {
+	b, env := newTestBoard(t)
+	ctx := context.Background()
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}})
+	other := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "O", Projects: []string{"api"}})
+	inStory := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(story.Number)})
+	alone := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "A", Projects: []string{"api"}})
+	ceoTask := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "C", Projects: []string{"api"}, Supervisor: api.RoleCEO})
+	for _, n := range []int{story.Number, other.Number} {
+		force(t, b, n, api.ColumnInProgress, "")
+	}
+	pm := agent(t, b, api.RolePM, int64(story.Number))
+	otherPM := agent(t, b, api.RolePM, int64(other.Number))
+	ceo := agent(t, b, api.RoleCEO, 0)
+
+	stop := func(a Actor, n int, to api.Column) error {
+		t.Helper()
+		force(t, b, n, api.ColumnInProgress, "")
+		_, err := b.Move(ctx, a, int64(n), api.MoveRequest{Column: to})
+		return err
+	}
+	refused := func(name string, a Actor, n int) {
+		t.Helper()
+		if err := stop(a, n, api.ColumnReady); errCode(err) != api.CodeForbidden {
+			t.Errorf("%s: error = %v, want forbidden", name, err)
+		}
+		if col := get(t, b, n).Column; col != api.ColumnInProgress {
+			t.Errorf("%s: the ticket is in %s", name, col)
+		}
+	}
+	allowed := func(name string, a Actor, n int, to api.Column) {
+		t.Helper()
+		if err := stop(a, n, to); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if col := get(t, b, n).Column; col != to {
+			t.Errorf("%s: the ticket is in %s, want %s", name, col, to)
+		}
+	}
+
+	refused("the task's developer", agent(t, b, api.RoleDeveloper, int64(inStory.Number)), inStory.Number)
+	refused("a standalone task's developer", agent(t, b, api.RoleDeveloper, int64(alone.Number)), alone.Number)
+	refused("the pm of another story", otherPM, inStory.Number)
+	refused("a pm, a standalone task", pm, alone.Number)
+	refused("a pm, its own story", pm, story.Number)
+	refused("the CEO, a task its pm supervises", ceo, inStory.Number)
+	refused("the CEO, a ticket the user supervises", ceo, alone.Number)
+
+	allowed("the pm, a task of its story, to ready", pm, inStory.Number, api.ColumnReady)
+	allowed("the pm, a task of its story, to planning", pm, inStory.Number, api.ColumnPlanning)
+	allowed("the CEO, a ticket it supervises", ceo, ceoTask.Number, api.ColumnReady)
+	allowed("the user", User, alone.Number, api.ColumnPlanning)
+
+	// With the CEO switched off its tickets fall to the user: a CEO session
+	// that still runs stops nothing.
+	env.setPolicy(func(p *Policy) { p.CEOEnabled = false })
+	force(t, b, ceoTask.Number, api.ColumnInProgress, "")
+	if _, err := b.Move(ctx, ceo, int64(ceoTask.Number), api.MoveRequest{Column: api.ColumnReady}); err == nil {
+		t.Error("the CEO stopped a ticket while it is switched off")
+	}
 }
 
 func TestCancelStoryCancelsOpenTasks(t *testing.T) {

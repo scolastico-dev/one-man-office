@@ -71,7 +71,7 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 		case from == api.ColumnReady && to == api.ColumnPlanning:
 			err = b.withdraw(tx, p, a, t, req.Before)
 		case from == api.ColumnInProgress && (to == api.ColumnPlanning || to == api.ColumnReady):
-			err = b.stop(tx, a, t, to, req.Before)
+			err = b.stop(tx, p, a, t, to, req.Before)
 		case from == api.ColumnReview && to == api.ColumnDone && t.ReviewStage == api.ReviewStageAwaitingMerge:
 			if a.Role != api.RoleUser {
 				return api.Errorf(api.CodeForbidden, "only the user closes an export by hand")
@@ -223,6 +223,22 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 	return forActor(a, out, err)
 }
 
+// mayStop: the user always, a pm the tasks of its story, the CEO the tickets
+// it supervises. A supervisor that sees a ticket's work cannot go on (it
+// waits for work that is not there yet) stops it instead of keeping its
+// agent busy; nobody else stops a ticket.
+func mayStop(p Policy, a Actor, t ticketRow) bool {
+	switch a.Role {
+	case api.RoleUser:
+		return true
+	case api.RolePM:
+		return t.inStory() && t.StoryID == a.Ticket
+	case api.RoleCEO:
+		return effectiveSupervisor(p, t) == api.RoleCEO
+	}
+	return false
+}
+
 // mayCancel: the user always, the CEO tickets it created, a pm the tasks it
 // created in its story.
 func mayCancel(a Actor, t ticketRow) bool {
@@ -333,12 +349,13 @@ func (b *Board) withdraw(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int
 	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d withdrawn to planning by the user.", t.ID))
 }
 
-// stop moves t from In Progress back to Planning or Ready; its branch and
-// worktree stay. Stopping a story also returns its tasks in In Progress or
+// stop moves t from In Progress back to Planning or Ready (see mayStop for
+// who may); its branch and worktree stay. Stopping a story also returns its tasks in In Progress or
 // Review to Ready. The engine stops the agents when it sees the events.
-func (b *Board) stop(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before *int) error {
-	if a.Role != api.RoleUser {
-		return api.Errorf(api.CodeForbidden, "only the user stops work on a ticket")
+func (b *Board) stop(tx *sql.Tx, p Policy, a Actor, t ticketRow, to api.Column, before *int) error {
+	if !mayStop(p, a, t) {
+		return api.Errorf(api.CodeForbidden,
+			"work on #%d is stopped by the user or by its supervisor (a product manager stops the tasks of its story, the CEO the tickets it supervises); a %s cannot stop it", t.ID, a.Role)
 	}
 	if err := checkNotBusy(tx, t); err != nil {
 		return err
