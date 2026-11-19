@@ -8,7 +8,7 @@
 import { computed, ref, watch } from 'vue'
 import { failureText } from '../../api/lostAnswer'
 import type { GateChoice, GateState, TicketGate, TicketSummary } from '../../api/types'
-import { holdSummary } from '../../board/gates'
+import { allPassed, holdSummary } from '../../board/gates'
 import type { DialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import { visibleText } from '../../components/ui/visibleText'
@@ -30,7 +30,9 @@ const move = computed(() => {
   const g = gate.value
   return g === null ? '' : `${COLUMN_TITLES[g.from]} to ${COLUMN_TITLES[g.to]}`
 })
-const refusal = computed(() => (gate.value === null ? notes.refusal(props.ticket.number) : undefined))
+const passed = computed(() => allPassed(gate.value))
+/** A refused move leaves the ticket in Planning; once it is elsewhere the note is about something that is over. */
+const refusal = computed(() => (gate.value === null && props.ticket.column === 'planning' ? notes.refusal(props.ticket.number) : undefined))
 
 /** The choice whose hook runs now, as `plugin/action`. */
 const running = ref<string | null>(null)
@@ -62,7 +64,8 @@ async function choose(g: TicketGate, c: GateChoice) {
 <template>
   <section v-if="gate" class="gate" :data-gate-held="summary?.held ? '' : undefined" data-gate aria-label="Plugin gate">
     <p class="gate__head" data-gate-head>
-      {{ summary?.held ? 'Held by a plugin' : 'Waiting for plugins' }}: {{ move }}
+      <template v-if="passed">Every plugin gave its go-ahead: omo starts #{{ ticket.number }} when it can</template>
+      <template v-else>{{ summary?.held ? 'Held by a plugin' : 'Waiting for plugins' }}: {{ move }}</template>
     </p>
     <ul class="gate__list">
       <li v-for="g in gate.gates" :key="g.plugin" class="gate__item" :data-gate-plugin="g.plugin">

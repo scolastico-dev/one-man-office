@@ -8,7 +8,15 @@ type Fn = (ev: ApiEvent) => void
 /** The part of the board store the notes use: handlers per event kind. */
 function fakeStore() {
   const handlers = new Map<string, Set<Fn>>()
+  const snapshots = new Set<() => void>()
   return {
+    snapshot() {
+      for (const fn of snapshots) fn()
+    },
+    onSnapshot(fn: () => void) {
+      snapshots.add(fn)
+      return () => snapshots.delete(fn)
+    },
     onEvent(kind: string, fn: Fn) {
       const set = handlers.get(kind) ?? new Set<Fn>()
       handlers.set(kind, set)
@@ -49,6 +57,24 @@ describe('gate notes', () => {
     s.emit('ticket.refused', { reason: 'second' })
     expect(notes.refusal(5)?.reason).toBe('second')
     expect(notes.refusal(8)?.reason).toBe('other')
+  })
+
+  test('a move of the ticket ends the memory of a refusal, though no gate event comes', () => {
+    const s = fakeStore()
+    const notes = createGateNotes(s)
+    s.emit('ticket.refused', { reason: 'no' })
+    s.emit('ticket.moved', {})
+    expect(notes.refusal(5)).toBeUndefined()
+  })
+
+  test('a snapshot ends every memory of a refusal', () => {
+    const s = fakeStore()
+    const notes = createGateNotes(s)
+    s.emit('ticket.refused', { reason: 'no' })
+    s.emit('ticket.refused', { n: 8, reason: 'no' })
+    s.snapshot()
+    expect(notes.refusal(5)).toBeUndefined()
+    expect(notes.refusal(8)).toBeUndefined()
   })
 
   test('malformed event data is ignored', () => {

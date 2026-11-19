@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { TicketGate, TicketGates } from '../api/types'
 import { ticket } from '../features/board/testing'
 import { badgeFor } from './badges'
-import { gateTarget, heldGates, holdSummary } from './gates'
+import { allPassed, gateTarget, heldGates, holdSummary } from './gates'
 
 const gate = (over: Partial<TicketGate> = {}): TicketGate => ({ plugin: 'pull-base', state: 'held', reason: 'the base is behind', choices: [], ...over })
 const gates = (list: TicketGate[], over: Partial<TicketGates> = {}): TicketGates => ({ move: 'start', from: 'ready', to: 'in_progress', gates: list, ...over })
@@ -35,6 +35,13 @@ describe('holdSummary', () => {
       text: 'waiting for a plugin',
       title: 'Waiting for pull-base to answer',
     })
+  })
+
+  test('a gate whose plugins all passed has nothing to hold or wait for', () => {
+    expect(holdSummary(gates([gate({ state: 'passed' }), gate({ plugin: 'b', state: 'passed' })]))).toBeNull()
+    expect(allPassed(gates([gate({ state: 'passed' })]))).toBe(true)
+    expect(allPassed(gates([gate({ state: 'passed' }), gate({ plugin: 'b', state: 'pending' })]))).toBe(false)
+    expect(allPassed(null)).toBe(false)
   })
 
   test('plugin names and reasons are shown as visible text', () => {

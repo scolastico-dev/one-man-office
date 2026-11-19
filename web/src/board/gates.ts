@@ -58,3 +58,8 @@ export function holdNotice(g: TicketGates | null): string | null {
   if (first !== undefined) return `${s.text}: ${visibleText(first.reason)}`
   return s.title.replace(/^Waiting/, 'waiting')
 }
+
+/** Whether every plugin of a gate gave its go-ahead: nothing holds the move, and the board only waits for a slot or the engine. */
+export function allPassed(g: TicketGates | null): boolean {
+  return g !== null && g.gates.length > 0 && g.gates.every((x) => x.state === 'passed')
+}

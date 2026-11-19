@@ -10,6 +10,7 @@ import type { TicketGates, TicketSummary } from '../../api/types'
 import { mountDialog, type DialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
+import { holdSummary } from '../../board/gates'
 import { COLUMN_TITLES } from '../board/model'
 import { registerTicketAction, type TicketAction } from './actions'
 
@@ -77,10 +78,11 @@ async function send(p: Promise<unknown>): Promise<'unknown' | undefined> {
   return undefined
 }
 
+/** Both actions apply while a plugin holds the move or has not answered; once every plugin passed there is nothing to override or cancel. */
 export const gateOverrideAction: TicketAction = {
   id: 'gate-override',
   label: 'Continue anyway…',
-  applies: (t) => t.gate !== null,
+  applies: (t) => holdSummary(t.gate) !== null,
   explain: true,
   describe: overrideSentence,
   run: async (t, ctx) => {
@@ -93,7 +95,7 @@ export const gateCancelAction: TicketAction = {
   id: 'gate-cancel',
   label: 'Cancel move…',
   tone: 'danger',
-  applies: (t) => t.gate !== null,
+  applies: (t) => holdSummary(t.gate) !== null,
   explain: true,
   describe: cancelSentence,
   run: async (t, ctx) => {

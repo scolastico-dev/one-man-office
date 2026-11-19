@@ -155,3 +155,35 @@ test('plugin text is shown as visible text', async () => {
   const w = await open(hn)
   expect(w.get('[data-gate-reason]').text()).not.toContain('‮')
 })
+
+test('a refusal is shown only while the ticket is in Planning, where a refused move leaves it', async () => {
+  const hn = await panelHarness(seeded(gated({ gate: null })))
+  const w = await open(hn)
+  hn.omo.emit('ticket.refused', { ticket: gated({ gate: null }), move: 'start', plugin: 'lint', reason: 'branch dirty', choices: [] }, 4)
+  await flushPromises()
+  expect(w.find('[data-gate-refusal]').exists()).toBe(true)
+  // The user fixes it and moves the ticket on: only ticket.moved arrives.
+  hn.omo.emit('ticket.moved', { ticket: gated({ gate: null, column: 'ready' }), from: 'planning', to: 'ready', action: 'move' }, 4)
+  await flushPromises()
+  expect(w.find('[data-gate-refusal]').exists()).toBe(false)
+})
+
+test('a refusal does not outlive a column change that no event of its own announced', async () => {
+  const hn = await panelHarness(seeded(gated({ gate: null })))
+  const w = await open(hn)
+  hn.omo.emit('ticket.refused', { ticket: gated({ gate: null }), move: 'start', plugin: 'lint', reason: 'branch dirty', choices: [] }, 4)
+  await flushPromises()
+  hn.omo.emit('ticket.updated', { ticket: gated({ gate: null, column: 'in_progress' }), fields: ['column'] }, 4)
+  await flushPromises()
+  expect(w.find('[data-gate-refusal]').exists()).toBe(false)
+})
+
+test('when every plugin passed, the panel says omo starts the ticket and offers no way out', async () => {
+  const g = held({ move: 'start', from: 'ready', to: 'in_progress', gates: [{ plugin: 'pull-base', state: 'passed', reason: '', choices: [] }] })
+  const hn = await panelHarness(seeded(gated({ column: 'ready', gate: g, start_blocked: 'gate' })))
+  const w = await open(hn)
+  expect(w.get('[data-gate-head]').text()).toBe('Every plugin gave its go-ahead: omo starts #4 when it can')
+  expect(w.get('[data-gate-state]').text()).toBe('gave its go-ahead')
+  expect(w.find('[data-action="gate-override"]').exists()).toBe(false)
+  expect(w.find('[data-action="gate-cancel"]').exists()).toBe(false)
+})
