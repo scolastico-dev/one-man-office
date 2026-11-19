@@ -282,11 +282,12 @@ defineExpose({ focus: () => field.value?.focus() })
 }
 .td__row {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: calc(var(--omo-space) * 2);
 }
 .td__field {
   flex: 1 1 auto;
+  min-height: var(--omo-control-h);
   resize: none;
   max-height: min(200px, 25dvh);
   overflow-y: auto;

@@ -137,3 +137,39 @@ test('single click focuses the draft and dragging still selects terminal output'
   await expect(term.locator('.xterm-selection div')).not.toHaveCount(0)
   await expect(field).not.toBeFocused()
 })
+
+for (const width of [1440, 390]) {
+  test(`Send follows the draft field height while growing and shrinking at ${width} px`, async ({ page, omo }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const { box } = await openAgent(page, omo)
+    const field = box.locator('[data-draft-field]')
+    // Font loading can change wrapping and therefore the field's rendered height.
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    let single = 0
+    let grown = 0
+    for (const [index, text] of ['one line', 'one\ntwo\nthree\nfour', Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n'), 'short again'].entries()) {
+      await field.fill(text)
+      await expect(field).toHaveValue(text)
+      // Wait for the component's next-tick grow work, then compare actual layout.
+      await expect.poll(() => box.evaluate((el) => {
+        const textarea = el.querySelector<HTMLTextAreaElement>('[data-draft-field]')!
+        return textarea.style.height === `${textarea.scrollHeight}px`
+      })).toBe(true)
+      const heights = await box.evaluate((el) => {
+        const field = el.querySelector<HTMLTextAreaElement>('[data-draft-field]')!
+        return { field: field.getBoundingClientRect().height, button: el.querySelector('[data-draft-send]')!.getBoundingClientRect().height, scroll: field.scrollHeight }
+      })
+      expect(heights.button).toBe(heights.field)
+      if (index === 0) single = heights.field
+      if (index === 1) {
+        grown = heights.field
+        expect(grown).toBeGreaterThan(single)
+      }
+      if (index === 2) {
+        expect(heights.field).toBeGreaterThan(grown)
+        expect(heights.scroll).toBeGreaterThan(heights.field)
+      }
+      if (index === 3) expect(heights.field).toBe(single)
+    }
+  })
+}

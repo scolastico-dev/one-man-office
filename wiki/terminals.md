@@ -36,8 +36,8 @@ moves it, so you can write a longer message in peace while omo types its own
 lines into the terminal above.
 
 - **Enter** sends the message, **Shift+Enter** starts a new line; the **Send**
-  button does the same. The box grows with the text and then scrolls. A message
-  has at most 12,000 characters.
+  button does the same. The box grows with the text and then scrolls; Send stays
+  the same height as the text field. A message has at most 12,000 characters.
 - The whole text goes into the terminal as one message, as if you had pasted it
   and pressed Enter, so several lines arrive as one message, not as several
   submitted lines. omo writes the message and its Enter in one go: a line omo
