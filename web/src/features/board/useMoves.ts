@@ -3,11 +3,13 @@
 // rules, the move itself from the store; this file asks first where a move
 // needs it (reject, stop), and tells the user how each move ended.
 import { inject, provide, readonly, ref, shallowReactive, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
-import type { Column, Role, TicketSummary } from '../../api/types'
+import type { ApiEvent, Column, Role, TicketGateData, TicketSummary } from '../../api/types'
 import { COLUMNS } from '../../api/types'
+import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useToast } from '../../components/ui/useToast'
 import { dragTargets, type RuleContext, type Target } from '../../board/moveRules'
+import { holdNotice } from '../../board/gates'
 import { beforeFor } from '../../board/ordering'
 import type { BoardStore, MoveOutcome } from '../../store'
 import { COLUMN_TITLES, type CardNotice } from './model'
@@ -181,6 +183,27 @@ export function createMoves(deps: MovesDeps): Moves {
     notices.set(n, { notice, timer })
   }
 
+  // A plugin's answer about a move arrives on its own time, also for a move omo makes by itself.
+  const gateData = (ev: ApiEvent) => ev.data as Partial<TicketGateData> | null
+  store.onEvent('ticket.held', (ev) => {
+    const d = gateData(ev)
+    const text = holdNotice(d?.ticket?.gate ?? null)
+    if (d?.ticket !== undefined && text !== null) setNotice(d.ticket.number, { tone: 'info', text })
+  })
+  store.onEvent('ticket.refused', (ev) => {
+    const d = gateData(ev)
+    if (d?.ticket === undefined) return
+    const text = `${visibleText(d.plugin ?? '')} refused the move: ${visibleText(d.reason ?? '')}`
+    setNotice(d.ticket.number, { tone: 'danger', text })
+    say.assertive(`#${d.ticket.number}: ${text}`)
+  })
+  for (const kind of ['ticket.released', 'ticket.overridden', 'ticket.hold_cancelled']) {
+    store.onEvent(kind, (ev) => {
+      const n = gateData(ev)?.ticket?.number
+      if (n !== undefined) clearNotice(n)
+    })
+  }
+
   function clearNotice(n: number): void {
     const old = notices.get(n)
     if (!old) return
@@ -207,7 +230,12 @@ export function createMoves(deps: MovesDeps): Moves {
   }
 
   function onOutcome(n: number, outcome: MoveOutcome): void {
-    if (outcome !== 'unknown') return
+    if (outcome === 'applied') {
+      // A move that plugins hold or still have to answer for leaves the card where it was: say why.
+      const text = holdNotice(store.view(n)?.gate ?? null)
+      if (text !== null) setNotice(n, { tone: 'info', text })
+      return
+    }
     const text = 'No answer from omo. The board shows what omo did.'
     setNotice(n, { tone: 'info', text })
     toast.show({ tone: 'warn', title: `No answer for #${n}`, message: 'The move may or may not have happened. The board shows what omo did.' })

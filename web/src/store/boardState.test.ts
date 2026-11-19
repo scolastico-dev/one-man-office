@@ -297,6 +297,15 @@ describe('applying events', () => {
     expect(s.tickets.get(7)!.t.rank).toBe(3000)
   })
 
+  test.each(['ticket.held', 'ticket.released', 'ticket.refused', 'ticket.overridden', 'ticket.hold_cancelled'])('%s replaces the ticket with the summary it carries', (kind) => {
+    const s = emptyState()
+    installSnapshot(s, { tickets: [summary(7, { column: 'ready' })], event_id: 10 })
+    const gate = { move: 'start' as const, from: 'ready' as const, to: 'in_progress' as const, gates: [{ plugin: 'p', state: 'held' as const, reason: 'r', choices: [] }] }
+    const data = { ticket: summary(7, { column: 'ready', gate }), move: 'start', plugin: 'p', reason: 'r', choices: [] }
+    expect(applyEvent(s, ev(11, kind, data, 7))).toBe(true)
+    expect(s.tickets.get(7)!.t.gate).toEqual(gate)
+  })
+
   test('ticket.reordered and column.renumbered set ranks', () => {
     const s = emptyState()
     installSnapshot(s, { tickets: [summary(1, { rank: 100 }), summary(2, { rank: 200 }), summary(3, { rank: 300 })], event_id: 5 })

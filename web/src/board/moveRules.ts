@@ -1,5 +1,6 @@
 import type { Column, Project, ReviewStage, TicketSummary } from '../api/types'
 import { COLUMNS } from '../api/types'
+import { gateTarget, holdSummary } from './gates'
 
 export type MoveAction = 'reorder' | 'approve' | 'withdraw' | 'stop' | 'reject' | 'move'
 
@@ -180,6 +181,11 @@ export function dragTargets(t: TicketSummary, ctx: RuleContext): Record<Column, 
     }
     // While omo works on a ticket nothing but a change of order is safe.
     if (busy && target.allowed && target.action !== 'reorder') target = refuse(to, busyReason(t.number))
+    // A plugin holds the move to this column: say so, instead of sending a move that waits.
+    const held = holdSummary(t.gate)
+    if (held !== null && to === gateTarget(t) && target.allowed && target.action !== 'reorder') {
+      target = refuse(to, `#${t.number} is ${held.text}. Use Continue anyway or Cancel move on the ticket.`)
+    }
     out[to] = target
   }
   return out

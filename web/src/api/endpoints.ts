@@ -151,6 +151,16 @@ export function checkExport(c: ApiClient, n: number): R<{ checking: boolean }> {
   return c.send('POST', `${ticketPath(n)}/check-export`, {})
 }
 
+/** Continue anyway: every plugin that has not passed counts as having given its go-ahead. The user's only. */
+export function overrideGate(c: ApiClient, n: number): R<Ticket> {
+  return c.send('POST', `${ticketPath(n)}/gate/override`, {})
+}
+
+/** Cancels the move plugins hold (the user's own cancel, no plugin named). */
+export function cancelGateMove(c: ApiClient, n: number): R<Ticket> {
+  return c.send('POST', `${ticketPath(n)}/gate/cancel`, {})
+}
+
 /** Never asks the server to discard uncommitted work. */
 export function cancelTicket(c: ApiClient, n: number, deleteBranch: boolean): R<Ticket> {
   return c.send('POST', `${ticketPath(n)}/cancel`, { delete_branch: deleteBranch })

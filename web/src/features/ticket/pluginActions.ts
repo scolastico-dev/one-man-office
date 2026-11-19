@@ -185,19 +185,26 @@ export function pluginTicketAction(a: PluginTicketAction, store: object, active:
     label,
     applies: (_t, ctx) => ctx.store === store,
     describe: (t) => `Runs the action of the plugin ${visibleText(a.plugin)} for #${t.number}; the plugin runs as you.`,
-    run: async (t, ctx) => {
-      if (!active()) throw new Error('The plugin is no longer active.')
-      let answer: string
-      try {
-        answer = (await navigatePluginResult(ctx.client, async () => (await runPluginAction(ctx.client, a.plugin, a.action, t.number)).data, active)).message ?? ''
-      } catch (e) {
-        // No answer: the action may have run; the plugin's log says.
-        if (isLostAnswer(e)) return 'unknown'
-        throw e
-      }
-      showAnswer(label, t.number, answer, ctx.dialogs)
-    },
+    run: (t, ctx) => runPluginHook(ctx.client, a, label, t.number, ctx.dialogs, active),
   }
+}
+
+/**
+ * Runs a plugin's manual hook for ticket `n` as the user and shows its answer over the panel;
+ * `unknown` when the answer was lost (the hook may have run), a refusal throws.
+ */
+export async function runPluginHook(client: ApiClient, a: { plugin: string; action: string }, label: string, n: number, dialogs: DialogScope, active: () => boolean = () => true): Promise<'unknown' | undefined> {
+  if (!active()) throw new Error('The plugin is no longer active.')
+  let answer: string
+  try {
+    answer = (await navigatePluginResult(client, async () => (await runPluginAction(client, a.plugin, a.action, n)).data, active)).message ?? ''
+  } catch (e) {
+    // No answer: the action may have run; the plugin's log says.
+    if (isLostAnswer(e)) return 'unknown'
+    throw e
+  }
+  showAnswer(label, n, answer, dialogs)
+  return undefined
 }
 
 const registered = new WeakMap<object, true>()
