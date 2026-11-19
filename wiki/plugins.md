@@ -79,6 +79,7 @@ it). The plugin's log keeps its last 500 lines, newest last.
 | [discord](../plugins/discord/README.md) | The same as a message in a Discord channel through a webhook. Button: "Send a test message". |
 | [vscode](../plugins/vscode/README.md) | Opens ticket worktrees, projectless task working directories and sidebar project repositories in code-server or OpenVSCode through omo’s sign-in; downloads verified pinned builds and stops idle editors. Microsoft’s choice is visible but unavailable pending confirmation of its terms for this integration. |
 | [pause-notice](../plugins/pause-notice/README.md) | Tells every running agent to halt when you switch on **Paused**, and to continue when you switch it off. Without it the pause only keeps omo from starting new agents (see [Pause and stop all agents](concepts.md#pause-and-stop-all-agents)). |
+| [pull-base](../plugins/pull-base/README.md) | Before a story or a task without a story starts, checks whether the branch checked out in each project folder is behind its upstream and asks to pull it first, or pulls it by itself. It gates the move to Ready For Dev or to In Progress (your choice), fast-forwards only, and **changes the checked-out branch of the project folder when it pulls**. Settings: mode, automatic pull, fetch timeout. |
 
 The VS Code plugin edits folders directly alongside agents, with no locking.
 It permits one running editor per canonical folder. Repeated clicks reuse it

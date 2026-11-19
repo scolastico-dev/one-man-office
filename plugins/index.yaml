@@ -25,3 +25,7 @@ plugins:
     tag: official
     description: Open ticket worktrees and project repositories in a verified browser editor through omo's sign-in.
     path: plugins/vscode
+  - name: pull-base
+    tag: official
+    description: Pulls a ticket's base branch (fast-forward only) before its work starts, after asking or automatically.
+    path: plugins/pull-base
