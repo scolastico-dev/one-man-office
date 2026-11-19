@@ -163,32 +163,47 @@ local function fetch(dir, branch, up, limit)
   return ok, why
 end
 
--- dirty_conflict reports whether an uncommitted or untracked path of the
--- folder is one the pull would change.
+-- in_the_way reports whether path and other are the same path or one lies
+-- inside the other (a file where the pull adds a folder, or the reverse).
+local function in_the_way(path, other)
+  return path == other
+    or string.sub(other, 1, #path + 1) == path .. "/"
+    or string.sub(path, 1, #other + 1) == other .. "/"
+end
+
+-- dirty_conflict reports whether a path of the folder that has uncommitted,
+-- untracked or ignored content is one the pull would change, or one that
+-- lies inside or around such a path.
 local function dirty_conflict(dir, branch, up)
   local changed_out, ok = git(dir, "diff", "--name-only", "-z", "--no-renames", "refs/heads/" .. branch, up.full)
   if not ok then
     return true
   end
-  local changed = {}
-  for _, path in ipairs(split_z(changed_out)) do
-    changed[path] = true
-  end
-  local status_out, status_ok = git(dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+  local changed = split_z(changed_out)
+  local status_out, status_ok = git(dir, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=dirty")
   if not status_ok then
     return true
+  end
+  local function touches(path)
+    path = string.gsub(path, "/$", "")
+    for _, c in ipairs(changed) do
+      if c ~= "" and in_the_way(path, c) then
+        return true
+      end
+    end
+    return false
   end
   local entries = split_z(status_out)
   local i = 1
   while i <= #entries do
     local entry = entries[i]
     local xy = string.sub(entry, 1, 2)
-    if changed[string.sub(entry, 4)] then
+    if #entry >= 4 and touches(string.sub(entry, 4)) then
       return true
     end
     if string.find(xy, "[RC]") then
       i = i + 1
-      if entries[i] and changed[entries[i]] then
+      if entries[i] and touches(entries[i]) then
         return true
       end
     end
@@ -233,10 +248,18 @@ local function check(project, branch, dir, may_fetch, timeout)
   return {state = "behind", n = behind, line = label .. " is " .. plural(behind, "commit") .. " behind `" .. up.short .. "`.", up = up, project = project, branch = branch, dir = dir}
 end
 
--- pull fast-forwards the branch checked out in the folder.
+-- pull fast-forwards the branch checked out in the folder. The options on
+-- the command line override what the repository's configuration would make
+-- of a merge (branch.<name>.mergeOptions such as --squash, merge.autoStash,
+-- submodule.recurse), and nothing ignored is overwritten. A pull counts only
+-- when the branch really is at the upstream afterwards.
 local function pull(r)
-  local out, ok = git(r.dir, "merge", "--ff-only", "--no-autostash", "--quiet", r.up.full)
+  local out, ok = git(r.dir, "-c", "submodule.recurse=false", "merge", "--ff-only", "--no-autostash", "--no-squash", "--no-overwrite-ignore", "--quiet", r.up.full)
   if ok then
+    local _, reached = git(r.dir, "merge-base", "--is-ancestor", r.up.full, "refs/heads/" .. r.branch)
+    if not reached then
+      return false, "`" .. r.branch .. "` of " .. r.project .. " is not at `" .. r.up.short .. "` after the pull."
+    end
     return true
   end
   return false, "`" .. r.branch .. "` of " .. r.project .. " could not be fast-forwarded: " .. first_line(out)

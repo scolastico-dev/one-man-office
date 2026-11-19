@@ -51,7 +51,7 @@ behind; the pull fast-forwards each of them.
 
 ## Only safe pulls
 
-The plugin pulls with `git merge --ff-only` and nothing else: it never merges,
+The plugin pulls with `git merge --ff-only` (with `--no-squash`, `--no-autostash` and `--no-overwrite-ignore`, so the repository's `branch.<name>.mergeOptions` and similar settings cannot change what a pull does) and nothing else: it never merges,
 rebases, stashes, resets, checks out or discards anything. When a pull is not
 possible it does not pull, in automatic mode either; it holds the ticket with
 exactly one of these reasons, offers only **Continue without pulling** and
@@ -60,7 +60,7 @@ exactly one of these reasons, offers only **Continue without pulling** and
 | Reason | When |
 |---|---|
 | `main` of app has diverged from `origin/main` (1 commit ahead, 2 behind) and cannot be fast-forwarded. | The branch has commits the upstream lacks and the upstream has commits the branch lacks. |
-| Uncommitted changes in app would be overwritten by pulling `origin/main` into `main`. | A file the pull would change has uncommitted changes in the folder, or exists there untracked. Other uncommitted changes do not stop the pull. |
+| Uncommitted changes in app would be overwritten by pulling `origin/main` into `main`. | A path the pull would change, or one inside or around such a path (a file where the pull adds a folder, or the reverse), has uncommitted changes in the folder, or exists there untracked or ignored. Other uncommitted changes do not stop the pull. |
 | `main` of app has no upstream branch to pull. | The branch has no upstream configured. |
 | `origin/main` of app could not be fetched, so it is unknown whether `main` is behind it. | The remote cannot be reached, or the fetch ran into the timeout. |
 | `main` is not the branch checked out in the folder of app, so it cannot be pulled safely. | The folder has another branch checked out. |

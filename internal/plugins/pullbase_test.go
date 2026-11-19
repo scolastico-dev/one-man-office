@@ -79,7 +79,34 @@ func (r *pbRepos) advance(n int) string {
 // branch, the checked-out files, the working tree's status.
 func (r *pbRepos) state() string {
 	r.t.Helper()
-	return pbGit(r.t, r.project, "rev-parse", "main") + "\n" + pbGit(r.t, r.project, "status", "--porcelain=v1", "--untracked-files=all")
+	return pbGit(r.t, r.project, "rev-parse", "main") + "\n" + pbGit(r.t, r.project, "status", "--porcelain=v1", "--untracked-files=all", "--ignored") + "\n" + pbFiles(r.t, r.project)
+}
+
+// pbFiles lists the files of the folder (not .git) with their content.
+func pbFiles(t *testing.T, dir string) string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(dir, path)
+			out = append(out, rel+"="+string(raw))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (r *pbRepos) head() string { return pbGit(r.t, r.project, "rev-parse", "main") }
@@ -406,6 +433,49 @@ var pbBlockedCases = []struct {
 		},
 		"`origin/main` of app could not be fetched, so it is unknown whether `main` is behind it.",
 	},
+	{
+		"an ignored file the pull would overwrite",
+		func(r *pbRepos) {
+			r.advance(1)
+			exclude := filepath.Join(r.project, ".git", "info", "exclude")
+			if err := os.WriteFile(exclude, []byte("remote.txt\n"), 0o600); err != nil {
+				r.t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(r.project, "remote.txt"), []byte("uncommitted user data\n"), 0o600); err != nil {
+				r.t.Fatal(err)
+			}
+		},
+		"Uncommitted changes in app would be overwritten by pulling `origin/main` into `main`.",
+	},
+	{
+		"an untracked file where the pull adds a folder",
+		func(r *pbRepos) {
+			pbGit(r.t, r.other, "pull", "-q", "--ff-only")
+			if err := os.MkdirAll(filepath.Join(r.other, "dir"), 0o700); err != nil {
+				r.t.Fatal(err)
+			}
+			r.commit(r.other, filepath.Join("dir", "file.txt"), "remote\n", "add dir")
+			pbGit(r.t, r.other, "push", "-q", "origin", "main")
+			if err := os.WriteFile(filepath.Join(r.project, "dir"), []byte("mine\n"), 0o600); err != nil {
+				r.t.Fatal(err)
+			}
+		},
+		"Uncommitted changes in app would be overwritten by pulling `origin/main` into `main`.",
+	},
+	{
+		"an untracked folder where the pull adds a file",
+		func(r *pbRepos) {
+			r.commit(r.other, "dir", "remote\n", "add dir")
+			pbGit(r.t, r.other, "push", "-q", "origin", "main")
+			if err := os.MkdirAll(filepath.Join(r.project, "dir"), 0o700); err != nil {
+				r.t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(r.project, "dir", "mine.txt"), []byte("mine\n"), 0o600); err != nil {
+				r.t.Fatal(err)
+			}
+		},
+		"Uncommitted changes in app would be overwritten by pulling `origin/main` into `main`.",
+	},
 }
 
 func TestPullBaseBlockedStatesHoldWithTheirReasonAndChangeNothing(t *testing.T) {
@@ -424,6 +494,34 @@ func TestPullBaseBlockedStatesHoldWithTheirReasonAndChangeNothing(t *testing.T) 
 					t.Fatalf("the folder changed:\n%s\n--\n%s", before, after)
 				}
 			})
+		}
+	}
+}
+
+func TestPullBaseRepositoryMergeOptionsCannotTurnThePullIntoASquash(t *testing.T) {
+	for _, automatic := range []bool{true, false} {
+		r := newPbRepos(t)
+		e, desk := pbPlugin(t, map[string]any{"automatic": automatic})
+		pbGit(t, r.project, "config", "branch.main.mergeoptions", "--squash")
+		pbGit(t, r.project, "config", "merge.ff", "false")
+		tip := r.advance(2)
+		got := pbGate(t, e, api.GateMoveRelease, 7, false, pbProject("app", "main", r.project))
+		if !automatic {
+			if got.Kind != GateHold {
+				t.Fatalf("answer %+v", got)
+			}
+			pbAction(t, e, "pull", 7)
+		} else if got.Kind != GateGoAhead {
+			t.Fatalf("answer %+v", got)
+		}
+		if r.head() != tip {
+			t.Fatalf("automatic=%v: main is at %s, want %s", automatic, r.head(), tip)
+		}
+		if st := pbGit(t, r.project, "status", "--porcelain=v1"); st != "" {
+			t.Fatalf("automatic=%v: status after the pull: %q", automatic, st)
+		}
+		if !automatic && !slices.Equal(desk.all(), []string{"release pull-base 7"}) {
+			t.Fatalf("calls %v", desk.all())
 		}
 	}
 }
