@@ -499,6 +499,17 @@ The events `ticket.held`, `ticket.released` (every plugin gave its go-ahead),
 with the board change. A hold is stored: it survives a restart of omo, and a
 gate that was still being asked is asked again.
 
+**In the board.** A held ticket's card shows the badge "held by `<plugin>`" (a gate
+that no plugin holds yet but some has not answered shows "waiting for a plugin"),
+and a move that a plugin holds or refuses says so on the card (the refusal with
+the plugin's reason) instead of looking like a failed move; the column a held
+move goes to refuses a drag with the same words. The ticket panel and page list
+every plugin's state with its reason and its choices (a choice runs the plugin's
+manual hook for the ticket, as you) and offer **Continue anyway** and **Cancel
+move** (each asks first; a cancelled release stays in Planning, a cancelled start
+goes back to Planning). A refusal is shown until the next gate event of the
+ticket; the comment on the ticket is the lasting record.
+
 Automatic progress respects a hold like a user's move: a product manager's or
 the CEO's release goes through the gate, and the engine does not start a ticket
 whose start gate is pending or held. While it waits, the ticket holds no slot.
