@@ -65,6 +65,7 @@ type Session struct {
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
 	inputMu  sync.Mutex // keeps injected prompts and terminal input from interleaving
+	replyMu  sync.Mutex // keeps automatic query replies out of multipart messages
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error
@@ -214,6 +215,27 @@ func (s *Session) SendTextAndKeysIf(text, keys string, ready func() bool) (bool,
 		return false, nil
 	}
 	return true, s.sendTextAndKeys(text, keys)
+}
+
+// SendPartsAndKeys injects each paste in order and submits once, holding input
+// against notifications, prompts, direct typing and every other session writer.
+func (s *Session) SendPartsAndKeys(parts []string, keys string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	s.replyMu.Lock()
+	defer s.replyMu.Unlock()
+	for _, part := range parts {
+		if err := s.sendText(part); err != nil {
+			return err
+		}
+	}
+	if len(parts) > 0 && keys != "" {
+		time.Sleep(SubmitDelay)
+	}
+	if keys != "" {
+		return s.sendText(keys)
+	}
+	return nil
 }
 
 func (s *Session) sendTextAndKeys(text, keys string) error {

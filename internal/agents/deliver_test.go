@@ -48,6 +48,11 @@ func (f *fakeTerminal) SendTextAndKeysIf(text, keys string, ready func() bool) (
 	return true, nil
 }
 
+func (f *fakeTerminal) SendPartsAndKeys(parts []string, keys string) error {
+	_, err := f.SendTextAndKeysIf(strings.Join(parts, ""), keys, func() bool { return true })
+	return err
+}
+
 func (f *fakeTerminal) SendPrompt(text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

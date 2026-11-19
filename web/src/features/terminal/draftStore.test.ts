@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import { clearDraft, loadDraft, messageOf, saveDraft, MAX_MESSAGE_CHARS } from './draftStore'
+import { editDraft, insertImage, clearDraft, loadDraft, messageOf, saveDraft, MAX_MESSAGE_CHARS } from './draftStore'
 
 beforeEach(() => window.localStorage.clear())
 
 describe('draft storage', () => {
   test('a draft is kept per terminal and survives a new load', () => {
-    saveDraft('a', { text: 'hello', attachments: [{ path: '/x/one.png', name: 'one.png' }] })
+    saveDraft('a', insertImage({ text: 'hello', attachments: [] }, 5, 5, { path: '/x/one.png', name: 'one.png' }))
     saveDraft('b', { text: 'other', attachments: [] })
-    expect(loadDraft('a')).toEqual({ text: 'hello', attachments: [{ path: '/x/one.png', name: 'one.png' }] })
+    expect(loadDraft('a')).toEqual({ text: 'hello[image 1]', attachments: [{ path: '/x/one.png', name: 'one.png', at: 5, marker: '[image 1]' }] })
     expect(loadDraft('b').text).toBe('other')
     expect(loadDraft('c')).toEqual({ text: '', attachments: [] })
   })
@@ -26,7 +26,7 @@ describe('draft storage', () => {
     expect(loadDraft('a')).toEqual({ text: '', attachments: [] })
     window.localStorage.setItem('omo.terminalDrafts', JSON.stringify({ a: { text: 5, attachments: [{ path: 1 }] }, b: { text: 'ok', attachments: [{ path: '/p', name: 3 }, { path: '/q', name: 'q' }] } }))
     expect(loadDraft('a')).toEqual({ text: '', attachments: [] })
-    expect(loadDraft('b')).toEqual({ text: 'ok', attachments: [{ path: '/q', name: 'q' }] })
+    expect(loadDraft('b')).toEqual({ text: 'ok[image 1]', attachments: [{ path: '/q', name: 'q', at: 2, marker: '[image 1]' }] })
   })
 
   test('drafts older than two weeks are dropped when another is saved', () => {
@@ -50,21 +50,46 @@ describe('draft storage', () => {
 })
 
 describe('the message', () => {
-  test('text and the image paths form one message, the paths on their own line', () => {
-    expect(messageOf('look at this', ['/a b/one.png', '/two.png'])).toBe("look at this\n'/a b/one.png' /two.png")
-    expect(messageOf('', ['/two.png'])).toBe('/two.png')
-    expect(messageOf('only text', [])).toBe('only text')
+  test('text and image paths remain separate paste parts', () => {
+    const d = insertImage({ text: 'look at this ', attachments: [] }, 13, 13, { path: '/a b/one.png', name: 'one.png' })
+    expect(messageOf(d.text, d.attachments)).toEqual(['look at this ', "'/a b/one.png'"])
+    expect(messageOf('only text', [])).toEqual(['only text'])
   })
 
   test('the text is cleaned like a paste: control characters go, tabs and line breaks stay', () => {
-    expect(messageOf('a\x1b[201~b\x03c\td\r\ne', [])).toBe('a[201~bc\td\r\ne')
+    expect(messageOf('a\x1b[201~b\x03c\td\r\ne', [])).toEqual(['a[201~bc\td\r\ne'])
   })
 
   test('blank drafts make no message', () => {
-    expect(messageOf('  \n ', [])).toBe('')
+    expect(messageOf('  \n ', [])).toEqual([])
   })
 
   test('the limit leaves room for the markers inside the 64 KiB the server takes', () => {
     expect(MAX_MESSAGE_CHARS).toBeLessThan(64 * 1024 / 4)
+  })
+})
+
+describe('inline image markers', () => {
+  test('inserts at the selection and sends text and images in that order', () => {
+    const d = insertImage({ text: 'before after', attachments: [] }, 7, 7, { path: '/a b.png', name: 'a.png' })
+    expect(d.text).toBe('before [image 1]after')
+    expect(messageOf(d.text, d.attachments)).toEqual(['before ', "'/a b.png'", 'after'])
+    saveDraft('inline', d)
+    expect(loadDraft('inline')).toEqual(d)
+  })
+
+  test('replacing any part of a marker removes the entire marker and its attachment', () => {
+    const d = insertImage({ text: 'ab', attachments: [] }, 1, 1, { path: '/a.png', name: 'a.png' })
+    expect(editDraft(d, 4, 5, 'x')).toEqual({ text: 'axb', attachments: [] })
+    expect(editDraft(d, 9, 10, '')).toEqual({ text: 'ab', attachments: [] })
+  })
+
+  test('edits move the remaining markers and labels typed as text stay text', () => {
+    let d = insertImage({ text: 'ab', attachments: [] }, 1, 1, { path: '/a.png', name: 'a.png' })
+    d = editDraft(d, 0, 0, '[image 1]')
+    expect(messageOf(d.text, d.attachments)).toEqual(['[image 1]a', '/a.png', 'b'])
+    d = insertImage(d, d.text.length, d.text.length, { path: '/b.png', name: 'b.png' })
+    expect(d.text).toBe('[image 1]a[image 1]b[image 2]')
+    expect(messageOf(d.text, d.attachments)).toEqual(['[image 1]a', '/a.png', 'b', '/b.png'])
   })
 })

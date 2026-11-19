@@ -37,7 +37,10 @@ type terminalInput struct {
 	message *terminalMessage
 }
 
-type terminalMessage struct{ text, keys string }
+type terminalMessage struct {
+	parts []string
+	keys  string
+}
 
 // pasted is the message as a terminal takes a paste: without control
 // characters (so it cannot end its own paste early or act on the program),
@@ -48,11 +51,18 @@ func (i *Terminal) pasted(m terminalMessage) terminalMessage {
 	i.mu.Lock()
 	bracketed := i.modes.state(2004) == terminalModeSet
 	i.mu.Unlock()
-	body := cleanMessage(m.text)
-	if bracketed {
-		body = "\x1b[200~" + body + "\x1b[201~"
+	parts := make([]string, 0, len(m.parts))
+	for _, part := range m.parts {
+		body := cleanMessage(part)
+		if body == "" {
+			continue
+		}
+		if bracketed {
+			body = "\x1b[200~" + body + "\x1b[201~"
+		}
+		parts = append(parts, body)
 	}
-	return terminalMessage{text: body, keys: m.keys}
+	return terminalMessage{parts: parts, keys: m.keys}
 }
 
 // cleanMessage drops every control character except tab, and turns each line
@@ -74,12 +84,12 @@ func cleanMessage(text string) string {
 	return b.String()
 }
 
-// Messenger is a process that takes a whole message: text, then keys (the
+// Messenger is a process that takes a whole message: paste parts, then keys (the
 // Enter that submits it), written in one go with nothing else getting between
 // them. Without it a message is written as its text and then its keys, which
 // anything else writing to the process may split.
 type Messenger interface {
-	SendMessage(text, keys string) error
+	SendMessage(parts []string, keys string) error
 }
 
 type terminalInitial struct {
@@ -279,12 +289,16 @@ func (i *Terminal) queueInput(data []byte, written func(error)) error {
 	return i.enqueue(terminalInput{data: append([]byte(nil), data...), written: written})
 }
 
-// queueMessage queues text and keys to be written as one message.
-func (i *Terminal) queueMessage(text, keys string, written func(error)) error {
-	if len(text) > terminalInputLimit || len(keys) > 16 {
-		return fmt.Errorf("terminal message exceeds 64 KiB")
+// All parts share the message's size limit and its place in the input queue.
+func (i *Terminal) queueMessageParts(parts []string, keys string, written func(error)) error {
+	size := 0
+	for _, part := range parts {
+		size += len(part)
 	}
-	return i.enqueue(terminalInput{message: &terminalMessage{text: text, keys: keys}, written: written})
+	if size > terminalInputLimit || len(parts) > 1024 || len(keys) > 16 {
+		return fmt.Errorf("terminal message exceeds 64 KiB or 1024 parts")
+	}
+	return i.enqueue(terminalInput{message: &terminalMessage{parts: parts, keys: keys}, written: written})
 }
 
 func (i *Terminal) enqueue(in terminalInput) error {
@@ -370,10 +384,12 @@ func writeTerminalInput(w io.Writer, data []byte) error {
 
 func writeTerminalMessage(p io.Writer, m terminalMessage) error {
 	if messenger, ok := p.(Messenger); ok {
-		return messenger.SendMessage(m.text, m.keys)
+		return messenger.SendMessage(m.parts, m.keys)
 	}
-	if err := writeTerminalInput(p, []byte(m.text)); err != nil {
-		return err
+	for _, part := range m.parts {
+		if err := writeTerminalInput(p, []byte(part)); err != nil {
+			return err
+		}
 	}
 	return writeTerminalInput(p, []byte(m.keys))
 }

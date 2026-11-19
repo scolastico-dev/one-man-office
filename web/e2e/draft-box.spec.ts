@@ -65,7 +65,7 @@ test('keys and paste do nothing in a read-only agent terminal; the draft box is 
   await expect(field).toHaveValue('')
 })
 
-test('an image dropped on the draft box is shown there, can be removed, and its path arrives with the message', async ({ page, omo }) => {
+test('inline images can be deleted and are pasted between their surrounding text in order', async ({ page, omo }) => {
   const { box, term } = await openAgent(page, omo)
   const field = box.locator('[data-draft-field]')
   const pasteImage = (name: string) =>
@@ -84,14 +84,25 @@ test('an image dropped on the draft box is shown there, can be removed, and its 
 
   await pasteImage('discard me.png')
   await expect(box.locator('[data-draft-attachment]')).toHaveCount(1)
-  await box.locator('[data-draft-remove]').click()
+  await expect(field).toHaveValue('[image 1]')
+  await field.press('Backspace')
+  await expect(field).toHaveValue('')
   await expect(box.locator('[data-draft-attachment]')).toHaveCount(0)
 
+  await field.fill('before after')
+  await field.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(7, 7))
   await pasteImage('keep me.png')
-  await expect(box.locator('[data-draft-attachment]')).toContainText('keep me.png')
-  await field.fill('see this')
+  await expect(box.locator('[data-draft-send]')).toBeEnabled()
+  await expect(field).toHaveValue('before [image 2]after')
+  await field.pressSequentially(' between ')
+  await pasteImage('keep this too.png')
+  await expect(box.locator('[data-draft-send]')).toBeEnabled()
+  await expect(field).toHaveValue('before [image 2] between [image 3]after')
+  await expect(box.locator('[data-draft-attachment]')).toHaveCount(2)
   await field.press('Enter')
   await expectTerminalText(term, 'got both')
+  await expectTerminalText(term, /typed: before .*images\/terminal\/[^ ]+.* between .*images\/terminal\/[^ ]+.*after/)
+  await expect(term.locator('.xterm-rows')).not.toContainText('[image 2]')
   await expect(box.locator('[data-draft-attachment]')).toHaveCount(0)
   await expect(field).toHaveValue('')
 })
@@ -107,4 +118,22 @@ test('the toggle makes the terminal writable and the draft survives a reload', a
   await expect(panel(page).locator('[data-draft-field]')).toHaveValue('unfinished thought')
   await omo.api('POST', '/api/agents/stop-all', {})
   await expectNoAgentProcesses(omo)
+})
+
+test('single click focuses the draft and dragging still selects terminal output', async ({ page, omo }) => {
+  const { box, term } = await openAgent(page, omo)
+  const field = box.locator('[data-draft-field]')
+  const row = term.locator('.xterm-rows > div').filter({ hasText: 'hello from fake' }).last()
+  // Rows are xterm's text mirror; the screen above them receives real pointers.
+  await term.locator('.xterm-screen').click({ position: { x: 8, y: 6 } })
+  await expect(field).toBeFocused()
+  await panel(page).locator('[data-terminal-mode]').focus()
+  const bounds = await row.boundingBox()
+  if (!bounds) throw new Error('terminal output has no bounds')
+  await page.mouse.move(bounds.x + 2, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + 100, bounds.y + bounds.height / 2, { steps: 5 })
+  await page.mouse.up()
+  await expect(term.locator('.xterm-selection div')).not.toHaveCount(0)
+  await expect(field).not.toBeFocused()
 })

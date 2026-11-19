@@ -3,6 +3,7 @@ package webterm
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -18,10 +19,10 @@ type messageTerminal struct {
 	err      error
 }
 
-func (m *messageTerminal) SendMessage(text, keys string) error {
+func (m *messageTerminal) SendMessage(parts []string, keys string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages = append(m.messages, [2]string{text, keys})
+	m.messages = append(m.messages, [2]string{strings.Join(parts, ""), keys})
 	return m.err
 }
 
@@ -218,5 +219,47 @@ func TestTerminalMessageNeedsAPositiveIDAndIsOtherwiseIgnored(t *testing.T) {
 	}
 	if got := p.got(); len(got) != 1 || got[0][0] != "yes" {
 		t.Fatalf("messages = %q", got)
+	}
+}
+
+func TestTerminalMessagePartsAreIndependentPastesInOrder(t *testing.T) {
+	p := &recordingTerminal{controlledTerminal: terminalFixture(t)}
+	i := Own("message-parts", p, nil)
+	i.publish([]byte("\x1b[?2004h"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := dialTerminal(t, ctx, i)
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "parts": []string{"before ", "'/image one.png'", " between ", "/two.png", " after"}, "keys": "\r"})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	if id, e := readAck(t, ctx, c); id != 1 || e != "" {
+		t.Fatalf("ack = %d %q", id, e)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	want := []string{"\x1b[200~before \x1b[201~", "\x1b[200~'/image one.png'\x1b[201~", "\x1b[200~ between \x1b[201~", "\x1b[200~/two.png\x1b[201~", "\x1b[200~ after\x1b[201~", "\r"}
+	if !reflect.DeepEqual(p.writes, want) {
+		t.Fatalf("writes = %q, want %q", p.writes, want)
+	}
+}
+
+func TestTerminalMessagePartsShareTheSizeLimit(t *testing.T) {
+	p := &recordingTerminal{controlledTerminal: terminalFixture(t)}
+	i := Own("message-parts-big", p, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := dialTerminal(t, ctx, i)
+	frame, _ := json.Marshal(map[string]any{"type": "message", "id": 1, "parts": []string{strings.Repeat("a", terminalInputLimit/2), strings.Repeat("b", terminalInputLimit/2+1)}, "keys": "\r"})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	if id, e := readAck(t, ctx, c); id != 1 || e == "" {
+		t.Fatalf("ack = %d %q, want a refusal", id, e)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.writes) != 0 {
+		t.Fatalf("oversized parts were written: %q", p.writes)
 	}
 }

@@ -45,14 +45,20 @@ lines into the terminal above.
   sending, the box is empty; if sending fails (the terminal is disconnected, for
   example) your text stays and the reason is shown.
 - Paste an image, or drop image files on the box: omo stores them as it does for
-  a terminal ([Images](#images)) and the box lists them above the text, each
-  with a button to remove it. Their paths go with the message, on a line of their
-  own. Pasted text is cleaned of control characters, as in a terminal. Other
-  files are refused with a note.
+  a terminal ([Images](#images)). Each image appears at the cursor as a marker
+  such as `[image 1]`, without showing its file path. Backspace at a marker
+  removes the whole marker and its image; the image list also offers a remove
+  button. Send pastes the text and images in their draft order, each image using
+  the terminal's normal image paste, then presses Enter once. The terminal's
+  input stays locked for the whole message, including against omo's own lines
+  and input from other views. Pasted text is cleaned of control characters, as
+  in a terminal. Other files are refused with a note.
 - Each terminal keeps its own draft in this browser: it survives a reload,
   switching to another ticket and back, and opening the terminal in its own
   window or bringing it back. Drafts of terminals untouched for two weeks are
   dropped.
+- A single left click in the agent terminal focuses the message box. Dragging
+  still selects terminal text, and scrolling keeps working.
 - The box is not shown once the agent has ended.
 - The box sends whatever the read-only switch says: that switch blocks only
   direct typing into the terminal.
