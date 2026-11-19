@@ -13,6 +13,7 @@ const START_BLOCKED: Record<Exclude<StartBlocked, '' | 'slot'>, string> = {
   paused: 'paused',
   no_model: 'no usable model',
   usage: 'waiting for usage',
+  gate: 'waiting for a plugin',
 }
 
 const WAITING_SUFFIX: Record<WaitingReason, string> = {

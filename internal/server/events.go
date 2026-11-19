@@ -28,6 +28,7 @@ func (s *Server) registerEvents(mux *http.ServeMux) {
 // event stream and the engine.
 func (s *Server) boardChanged() {
 	s.events.Wake()
+	s.gates.poke()
 	s.wakeMCPSessionEnds()
 	if s.engine != nil {
 		s.engine.Wake()

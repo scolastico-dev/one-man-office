@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -74,6 +75,11 @@ type ticketMoveIn struct {
 
 type ticketIn struct {
 	Ticket int `json:"ticket" arg:"0" jsonschema:"the ticket number"`
+}
+
+type ticketGateIn struct {
+	Ticket int    `json:"ticket" arg:"0" jsonschema:"the ticket number"`
+	Plugin string `json:"plugin,omitempty" flag:"plugin" help:"the plugin that acts (default: OMO_PLUGIN_NAME, set in a plugin's hooks)" jsonschema:"the plugin that acts"`
 }
 
 type ticketCancelIn struct {
@@ -152,6 +158,25 @@ its story.`,
 		Def("ticket check-export", "Check now whether exported work has merged (user only)", nil, ticketCheckExport).help("check-export N",
 			`Check the remote targets of all waiting exports now, sharing one fetch per target with any check already running. N must be waiting for its export to merge. Periodic checks may be off; omo must be running and unpaused. Only the user requests a check.`,
 			"  omo ai ticket check-export 12").commandLineOnly(),
+		Def("ticket gate-release", "Give the go-ahead of a plugin to the move it holds on ticket N (plugin hooks)", nil, ticketGateRelease).help("gate-release N [--plugin NAME]",
+			`A plugin that holds a ticket's move (a gate that answered "hold") lets it go
+with this command, from a hook of its own: omo then carries the move out once
+every plugin that gates it has given its go-ahead. In a plugin's hooks the plugin
+is named by OMO_PLUGIN_NAME; the command acts as the user, like all programs of
+a plugin. Prints the ticket as #N type column title.`,
+			"  omo ai ticket gate-release 12 --plugin pull").commandLineOnly(),
+		Def("ticket gate-cancel", "Cancel the move a plugin holds on ticket N (user, or a plugin's hook)", nil, ticketGateCancel).help("gate-cancel N [--plugin NAME]",
+			`Cancel the move that plugins hold on ticket N. A held move to Ready For Dev
+leaves the ticket in Planning; a held start puts the ticket back into Planning, so
+omo does not start it again by itself. Without --plugin (and without
+OMO_PLUGIN_NAME) it is the user's own cancel; a plugin's hook names itself.
+Prints the ticket as #N type column title.`,
+			"  omo ai ticket gate-cancel 12").commandLineOnly(),
+		Def("ticket gate-override", "Continue anyway: let the move plugins hold on ticket N go ahead (user only)", nil, ticketGateOverride).help("gate-override N",
+			`The user can always let a held move go, whatever the plugins that hold it say:
+every gate of ticket N that has not given its go-ahead counts as having given it.
+Prints the ticket as #N type column title.`,
+			"  omo ai ticket gate-override 12").commandLineOnly(),
 		Def("ticket cancel", "Cancel ticket N and print it as #N type column title", everyone, ticketCancel).help("cancel N [--delete-branch [--discard-uncommitted]]",
 			`Close ticket N as cancelled; cancelling a story also cancels its open tasks.
 The user cancels every ticket, the CEO tickets it created, a product manager
@@ -347,6 +372,43 @@ func ticketCancel(ctx context.Context, c *apiclient.Client, in ticketCancelIn) (
 	}
 	t, err := c.Cancel(ctx, in.Ticket, api.CancelRequest{DeleteBranch: in.DeleteBranch, DiscardUncommitted: in.DiscardUncommitted})
 	if err != nil {
+		return Result{}, err
+	}
+	return summaryLine(c, t), nil
+}
+
+// gatePlugin is the plugin a gate command acts for: the flag, else the
+// plugin whose hook runs the command.
+func gatePlugin(in ticketGateIn) string {
+	if p := strings.TrimSpace(in.Plugin); p != "" {
+		return p
+	}
+	return strings.TrimSpace(os.Getenv("OMO_PLUGIN_NAME"))
+}
+
+func ticketGateRelease(ctx context.Context, c *apiclient.Client, in ticketGateIn) (Result, error) {
+	plugin := gatePlugin(in)
+	if plugin == "" {
+		return Result{}, fmt.Errorf("name the plugin with --plugin (a plugin's hooks have OMO_PLUGIN_NAME); the user continues anyway with gate-override")
+	}
+	var t api.Ticket
+	if err := c.Do(ctx, "POST", fmt.Sprintf("/api/tickets/%d/gate/release", in.Ticket), api.GateReleaseRequest{Plugin: plugin}, &t); err != nil {
+		return Result{}, err
+	}
+	return summaryLine(c, t), nil
+}
+
+func ticketGateCancel(ctx context.Context, c *apiclient.Client, in ticketGateIn) (Result, error) {
+	var t api.Ticket
+	if err := c.Do(ctx, "POST", fmt.Sprintf("/api/tickets/%d/gate/cancel", in.Ticket), api.GateCancelRequest{Plugin: gatePlugin(in)}, &t); err != nil {
+		return Result{}, err
+	}
+	return summaryLine(c, t), nil
+}
+
+func ticketGateOverride(ctx context.Context, c *apiclient.Client, in ticketIn) (Result, error) {
+	var t api.Ticket
+	if err := c.Do(ctx, "POST", fmt.Sprintf("/api/tickets/%d/gate/override", in.Ticket), struct{}{}, &t); err != nil {
 		return Result{}, err
 	}
 	return summaryLine(c, t), nil

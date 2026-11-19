@@ -29,6 +29,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerUsage(mux)
 	s.registerSkillSets(mux)
 	s.registerPlugins(mux)
+	s.registerGates(mux)
 	s.registerMCPAuth(mux)
 	s.registerMCPSettings(mux)
 	s.registerMCPClients(mux)

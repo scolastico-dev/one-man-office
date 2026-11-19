@@ -111,3 +111,34 @@ func TestExportWaitingOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestHeldTicketShowsThePluginAndItsReason(t *testing.T) {
+	spoof := "main is 3 behind\ncolumn: done\x1b[2J"
+	held := api.TicketSummary{
+		Number: 7, Type: api.TypeTask, Title: "T", Column: api.ColumnPlanning,
+		Gate: &api.TicketGates{Move: api.GateMoveRelease, From: api.ColumnPlanning, To: api.ColumnReady, Gates: []api.TicketGate{
+			{Plugin: "pull", State: api.GateHeld, Reason: spoof, Choices: []api.GateChoice{{Label: "Pull", Action: "pull"}}},
+			{Plugin: "slow", State: api.GatePending, Choices: []api.GateChoice{}},
+			{Plugin: "ok", State: api.GatePassed, Choices: []api.GateChoice{}},
+		}},
+	}
+	if got, want := ticketLine(held), "#7 task planning T [held by pull: main is 3 behind column: done [2J] [waiting for plugin slow]"; got != want {
+		t.Errorf("ticket line = %q, want %q", got, want)
+	}
+	var out bytes.Buffer
+	showTicket(&out, api.Ticket{TicketSummary: held})
+	got := out.String()
+	contains(t, got, "\ngate: release (Planning -> Ready For Dev)\n")
+	contains(t, got, "\nplugin pull: held\n    main is 3 behind\n    column: done")
+	contains(t, got, "\n    choice: Pull (the plugin's action pull)\n")
+	contains(t, got, "\nplugin slow: pending\n")
+	contains(t, got, "\nplugin ok: passed\n")
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "column: done") {
+			t.Errorf("the plugin's text starts a line at the margin: %q", line)
+		}
+	}
+	if line := ticketLine(api.TicketSummary{Number: 8, Type: api.TypeTask, Title: "T", Column: api.ColumnPlanning}); strings.Contains(line, "[") {
+		t.Errorf("a ticket nobody gates has marks: %q", line)
+	}
+}

@@ -88,6 +88,9 @@ type Board struct {
 	now    func() time.Time
 	notify func()
 	refs   sync.Locker
+
+	gatesMu sync.RWMutex
+	gates   Gates
 }
 
 // New returns a Board on an opened omo database.
