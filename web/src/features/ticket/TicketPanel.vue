@@ -22,7 +22,6 @@ import { closeDialog, showModal } from '../../components/ui/modalLayer'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import TicketActions from './TicketActions.vue'
-import ForwardList from '../proxy/ForwardList.vue'
 import TicketDescription from './TicketDescription.vue'
 import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
@@ -231,7 +230,6 @@ function onDialogClose() {
         <div v-else class="tpanel__grid">
           <div class="tpanel__main">
             <TicketDescription :view="view" :ticket="ticket" :heading-id="`${titleId}-desc`" />
-            <ForwardList :key="ticket.number" :ticket="ticket" />
           </div>
           <aside class="tpanel__side" :aria-labelledby="`${titleId}-fields`">
             <h3 :id="`${titleId}-fields`" class="tpanel__h3">Details</h3>

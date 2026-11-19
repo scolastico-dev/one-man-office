@@ -7,8 +7,7 @@ an address; you or an agent start and stop the target process separately.
 
 ## Open and manage forwards
 
-On a ticket, find **Forwards** beneath the description in the panel, or in
-**Overview** on the full page.
+On a task or story, open the **Forwards** tab in the panel or on the full page.
 Choose **Add forward**, enter its name and target port, then copy the returned
 base path before starting the app. **Open** opens its start path in a new
 browser tab. **Remove** unregisters it without stopping the app, except that a plugin forward

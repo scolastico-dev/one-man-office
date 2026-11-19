@@ -211,14 +211,35 @@ test('loading and read failure have accessible messages and Retry restores the l
   expect(w.get('[data-forward-empty]').text()).toContain('No forwards')
 })
 
-test.each([TicketPanel, TicketPage])('both ticket views mount the shared scoped forward list', async (component) => {
-  const hn = await panelHarness((o) => { o.tickets = [ticket({ number: 4 })] })
+test.each([
+  { component: TicketPanel, type: 'task' as const },
+  { component: TicketPanel, type: 'story' as const },
+  { component: TicketPage, type: 'task' as const },
+  { component: TicketPage, type: 'story' as const },
+])('$type forwards appear only in their own tab in $component.__name', async ({ component, type }) => {
+  const hn = await panelHarness((o) => { o.tickets = [ticket({ number: 4, type })] })
   stops.push(() => hn.session.store.stop())
   hn.omo.forwards = [forward(), forward({ id: 'other', ticket: 5 })]
-  const { wrapper: w } = await mountPanel(hn, component, { number: 4 }, '/ticket/4', {}, { routes: [{ path: '/ticket/:n', component: { render: () => null } }] })
+  const { wrapper: w, router } = await mountPanel(hn, component, { number: 4 }, '/ticket/4', {}, { routes: [
+    { path: '/ticket/:n', component: { render: () => null } },
+    { path: '/:n', component: { render: () => null } },
+  ] })
   mounted = w
+  expect(w.find('[data-forward-list]').exists()).toBe(false)
+  const tab = w.get('[role="tab"][data-tab="forwards"]')
+  expect(tab.text()).toBe('Forwards')
+  await tab.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.query.tab).toBe('forwards')
+  expect(w.find('[role="tabpanel"] [data-forward-list]').exists()).toBe(true)
   expect(w.get('[data-forward="abc"]').text()).toContain('Dev server')
   expect(w.find('[data-forward="other"]').exists()).toBe(false)
+  await w.get('[data-forward-add]').trigger('click')
+  expect(w.find('[data-forward-form]').exists()).toBe(true)
+  expect(w.find('[name="ticket"]').exists()).toBe(false)
+  await router.replace({ query: {} })
+  await flushPromises()
+  expect(w.find('[data-forward-list]').exists()).toBe(false)
 })
 
 test('the topbar control opens the overall list in the modal layer and a ticket link closes it', async () => {
@@ -298,6 +319,8 @@ test('ticket completion closes an open add form in the mounted ticket view', asy
   hn.session.client.get = ((path: string, q?: never) => path === '/api/proxy/forwards' ? Promise.resolve(ok({ forwards: [] })) : get(path, q)) as typeof get
   const { wrapper: w } = await mountPanel(hn, TicketPanel, { number: 4 })
   mounted = w
+  await w.get('[data-tab="forwards"]').trigger('click')
+  await flushPromises()
   await w.get('[data-forward-add]').trigger('click')
   expect(w.find('[data-forward-form]').exists()).toBe(true)
   hn.omo.change('ticket.moved', ticket({ number: 4, column: 'done', resolution: 'cancelled' }))

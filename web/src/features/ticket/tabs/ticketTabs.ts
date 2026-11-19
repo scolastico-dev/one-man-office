@@ -6,6 +6,7 @@
 import { shallowReactive, type Component } from 'vue'
 import type { TicketSummary } from '../../../api/types'
 import CommentThread from '../../comments/CommentThread.vue'
+import ForwardList from '../../proxy/ForwardList.vue'
 import { withoutProject } from '../fieldRules'
 import AgentsTab from './AgentsTab.vue'
 import DiffTab from './DiffTab.vue'
@@ -80,3 +81,4 @@ registerTicketTab({
   component: TasksTab,
   count: (t) => t.progress?.total,
 })
+registerTicketTab({ id: 'forwards', label: 'Forwards', order: 50, applies: () => true, component: ForwardList })
