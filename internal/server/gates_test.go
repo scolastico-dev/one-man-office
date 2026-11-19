@@ -480,3 +480,41 @@ func TestGateRemovedPluginLeavesALogLine(t *testing.T) {
 		t.Fatalf("no log line of the removed plugin: %v", log)
 	}
 }
+
+// A plugin that is reloaded (a configuration save) while its gate hook runs,
+// and while another gate waits behind that hook, must answer both gates
+// afterwards with no other board change: the reload ends the runs without an
+// answer, so the runner has to ask again by itself.
+func TestGateRunCutShortByAReloadIsAskedAgain(t *testing.T) {
+	g := newGateServer(t, false)
+	manifest := map[string]any{
+		"name": "slowgate", "version": "1.0.0", "description": "answers its gate when released",
+		"hooks": []any{map[string]any{
+			"event": plugins.EventGate, "move": "release", "timeout": "30s",
+			"command": []string{"sh", "-c", `echo started >> "$OMO_PLUGIN_DATA/started"; while [ ! -e "$OMO_PLUGIN_DATA/release" ]; do sleep 0.01; done`},
+		}},
+	}
+	repo := pluginRepo(t, manifest)
+	resp := asUser(g.b, g.s, "POST", "/api/plugins", community(api.PluginSettings{Name: "slowgate", Source: repo, Enabled: true}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("install: status %d: %s", resp.StatusCode, respText(t, resp))
+	}
+	first, second := g.task("first"), g.task("second")
+	g.ready(first)
+	g.ready(second)
+	started := dataFile(g.s, "slowgate", "started")
+	// One hook runs; the other gate waits behind it.
+	waitLines(t, started, 1)
+
+	resp = asUser(g.b, g.s, "PUT", "/api/plugins/slowgate", api.PluginSettings{Name: "slowgate", Source: repo, Enabled: true, Config: map[string]any{"changed": true}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reload: status %d: %s", resp.StatusCode, respText(t, resp))
+	}
+	// The cut-short run is asked again by the runner alone: a second start.
+	waitLines(t, started, 2)
+	if err := os.WriteFile(dataFile(g.s, "slowgate", "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.wait(first, "the first gate answered after the reload", inColumn(api.ColumnReady))
+	g.wait(second, "the second gate answered after the reload", inColumn(api.ColumnReady))
+}

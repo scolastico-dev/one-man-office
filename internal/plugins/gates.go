@@ -28,7 +28,7 @@ import (
 // choice is {label, action} naming a manual hook of the same plugin) or
 // refuse ({action = "refuse", reason}). A held move is let go later by the
 // plugin from any hook with omo.gate_release(ticket) (a command hook runs
-// "omo ai gate release N", which names the plugin by OMO_PLUGIN_NAME) and
+// "omo ai ticket gate-release N", which names the plugin by OMO_PLUGIN_NAME) and
 // can be cancelled with omo.gate_cancel(ticket).
 
 // The answers of a gate hook (GateResult.Kind).

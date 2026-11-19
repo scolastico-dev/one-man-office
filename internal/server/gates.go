@@ -197,12 +197,16 @@ func (s *Server) askOpenGates(ctx context.Context) {
 		s.gates.inflight[key] = true
 		s.gates.mu.Unlock()
 		if !s.background(func(ctx context.Context) {
-			defer func() {
-				s.gates.mu.Lock()
-				delete(s.gates.inflight, key)
-				s.gates.mu.Unlock()
-			}()
-			s.askGate(ctx, key, g.FailureHold)
+			unanswered := s.askGate(ctx, key, g.FailureHold)
+			s.gates.mu.Lock()
+			delete(s.gates.inflight, key)
+			s.gates.mu.Unlock()
+			// A change that came while the run was in flight was skipped (the
+			// key was still taken); with no answer recorded, only asking again
+			// now settles the gate.
+			if unanswered && ctx.Err() == nil {
+				s.gates.poke()
+			}
 		}) {
 			s.gates.mu.Lock()
 			delete(s.gates.inflight, key)
@@ -254,31 +258,38 @@ func (s *Server) finishGate(ctx context.Context, key gateKey, ans board.GateAnsw
 }
 
 // askGate runs plugin's gate hook for one ticket's move and records what
-// it decided.
-func (s *Server) askGate(ctx context.Context, key gateKey, failureHold bool) {
+// it decided. It reports true when the run ended with no answer recorded
+// because the plugin was stopped or reloaded during it: the caller asks
+// again once the run no longer counts as in flight.
+func (s *Server) askGate(ctx context.Context, key gateKey, failureHold bool) (unanswered bool) {
+	var res plugins.GateResult
 	data, err := s.gateEventData(ctx, key)
 	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Printf("gates: build the gate event of #%d: %v", key.ticket, err)
+		if ctx.Err() != nil {
+			return false
 		}
-		return
-	}
-	res, err := s.plugins.m.RunGate(ctx, key.plugin, key.move, data)
-	switch {
-	case errors.Is(err, plugins.ErrNoGate):
-		s.givenUp(ctx, key, board.OpenGate{FailureHold: failureHold, State: api.GatePending})
-		return
-	case err != nil:
-		// Stopped or reloaded during the run: the plugin changed, and its
-		// change asks again.
-		return
+		// The hook cannot be asked: that is a failure of the gate, answered
+		// by its failure policy like any other, never left pending.
+		s.log.Printf("gates: build the gate event of #%d: %v", key.ticket, err)
+		res = plugins.GateResult{Failure: "the ticket could not be read to ask the gate", FailureHolds: failureHold}
+	} else {
+		res, err = s.plugins.m.RunGate(ctx, key.plugin, key.move, data)
+		switch {
+		case errors.Is(err, plugins.ErrNoGate):
+			s.givenUp(ctx, key, board.OpenGate{FailureHold: failureHold, State: api.GatePending})
+			return false
+		case err != nil:
+			// Stopped or reloaded during the run (or omo is stopping, which
+			// the next start asks again).
+			return ctx.Err() == nil
+		}
 	}
 	if res.Failure != "" {
 		if res.FailureHolds {
 			s.finishGate(ctx, key, board.GateAnswer{Kind: board.GateHold,
 				Reason: fmt.Sprintf("The gate of plugin %s failed: %s", key.plugin, res.Failure)},
 				"the gate of #%d failed (%s); its manifest says a failure holds", key.ticket, res.Failure)
-			return
+			return false
 		}
 		s.finishGate(ctx, key, board.GateAnswer{Kind: board.GateGoAhead,
 			Note: fmt.Sprintf("The gate of plugin %s failed (%s): the move goes ahead.", key.plugin, res.Failure)},
@@ -295,6 +306,7 @@ func (s *Server) askGate(ctx context.Context, key gateKey, failureHold bool) {
 		ans.Kind = board.GateGoAhead
 	}
 	s.finishGate(ctx, key, ans, "")
+	return false
 }
 
 // gateEventData is the data of a gate hook's event: the ticket as the other
