@@ -88,8 +88,14 @@ async function main(){
  });
  const board=await context.newPage();
  await board.goto((subdomain&&!crossSite?'http://apps.localhost:'+port:base)+'/#'+token);await board.locator('[data-sidebar-toggle]').click();
- const button=board.locator('.sidebar-plugins > section[aria-label="Editor probe"] button').filter({hasText:'Open in VS Code'});await button.waitFor();
- const popup=context.waitForEvent('page',{timeout:35*60000});await button.click();const page=await popup;
+ async function openProject(name='Editor probe') {
+  await board.getByRole('tab',{name:'VS Code',exact:true}).click();
+  const tab=board.locator('[data-plugin-tab="vscode:editor"]');
+  await tab.getByRole('button',{name:'Open in VS Code',exact:true}).click();
+  await tab.getByRole('combobox',{name:'Search projects'}).fill(name);
+  await tab.getByRole('option').filter({has:board.locator('[data-pick-label]',{hasText:new RegExp('^'+name+'$')})}).click();
+ }
+ const popup=context.waitForEvent('page',{timeout:35*60000});await openProject();const page=await popup;
  // The same reserved tab survives the asynchronous install; no second click.
  await page.waitForURL(url=>url.pathname.includes('/proxy/')||url.hostname.endsWith('.apps.localhost'),{timeout:35*60000});
  const failed=[];page.on('response',r=>{if(r.status()>=400){const u=new URL(r.url()),item={status:r.status(),path:u.pathname};if(u.pathname.endsWith('/vscode-remote-resource')){item.resource=u.searchParams.get('path');r.text().then(body=>item.body=body.slice(0,500),()=>{});}failed.push(item)}});
@@ -117,15 +123,14 @@ async function main(){
  }
  const routing={publisher:true,version:editor==='code-server'?'4.145.2':'1.109.5',platform:process.platform+'-'+process.arch,mode:subdomain?'subdomain':'path',boardOutsideProxyDomain:subdomain&&crossSite,authenticatedBootstrap:true,unauthenticatedDenied:true,clientBase,assets:assets.length,websockets:traffic.sockets};
  // Second click must reuse exactly the same process and forward.
- const secondPage=context.waitForEvent('page');await button.click();const page2=await secondPage;await page2.locator('.monaco-workbench').waitFor({timeout:90000});
+ const secondPage=context.waitForEvent('page');await openProject();const page2=await secondPage;await page2.locator('.monaco-workbench').waitFor({timeout:90000});
  const second=await api('GET','/api/plugins/vscode/tasks');assert.equal(second.tasks.filter(t=>t.state==='running').length,1);assert.deepEqual(pinInstance(second.tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
  const profile=path.join(home,'plugins','.data','vscode','profiles',editor),settingsFile=path.join(profile,'portable','user-data','Machine','settings.json');
  const retained=JSON.parse(fs.readFileSync(settingsFile));retained['files.autoSave']='off';retained['terminal.integrated.env.linux'].EDITOR_PROBE_SETTING='retained';fs.writeFileSync(settingsFile,JSON.stringify(retained));
  const extensionMarker=path.join(profile,'extensions','.omo-probe-preserved');fs.writeFileSync(extensionMarker,'retained across folders');
  // Keep two different folders active with the shared editor profile. Closing
  // one must reap only that stable identity while the other remains usable.
- const otherButton=board.locator('.sidebar-plugins > section[aria-label="Second editor probe"] button').filter({hasText:'Open in VS Code'});
- const otherPopup=context.waitForEvent('page');await otherButton.click();const otherPage=await otherPopup;
+ const otherPopup=context.waitForEvent('page');await openProject('Second editor probe');const otherPage=await otherPopup;
  await otherPage.locator('.monaco-workbench').waitFor({timeout:90000});
  await terminalCheck(otherPage,otherProject,true);
  await editCheck(otherPage,otherProject);
@@ -145,7 +150,7 @@ async function main(){
  console.log(editor+' workbench ready through '+(subdomain?'subdomain':'path')+' proxy; checking active/reconnect/idle');
  await pause(65000);assert.equal((await api('GET','/api/plugins/vscode/tasks')).tasks.filter(t=>t.state==='running').length,2);
  await page.close();await page2.close();await pause(5000);
- const reopened=context.waitForEvent('page');await button.click();const page3=await reopened;await page3.locator('.monaco-workbench').waitFor({timeout:90000});
+ const reopened=context.waitForEvent('page');await openProject();const page3=await reopened;await page3.locator('.monaco-workbench').waitFor({timeout:90000});
  assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
  await pause(65000);assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
  captureChildren();const firstClosed=performance.now();await page3.close();await checkpoint('first-folder-disconnected');await wait(async()=>(await api('GET','/api/plugins/vscode/tasks')).tasks.some(t=>t.id===firstInstance.taskID&&t.state==='exited'&&t.reason==='idle'),90000);const firstIdleMs=Math.round(performance.now()-firstClosed);

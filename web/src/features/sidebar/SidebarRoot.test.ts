@@ -5,6 +5,10 @@ import { agent, emitAgent, mountSidebar, sidebarHarness } from './sidebarTesting
 import SidebarRoot from './SidebarRoot.vue'
 import { LazyTerminal } from '../terminal/LazyTerminal'
 import { resetSidebar, SIDEBAR_KEY, useSidebar } from './useSidebar'
+import { general, project } from '../../testing/fakeOmo'
+import type { PluginInfo, PluginTask, PluginsResponse } from '../../api/types'
+import type { PluginFacade } from '../plugins/frontendRuntime'
+import { disposePluginExtensions } from '../plugins/usePluginExtensions'
 
 let mounted: VueWrapper | null = null
 beforeEach(() => {
@@ -29,6 +33,72 @@ async function open(path = '/') {
 }
 
 const tabNames = (w: VueWrapper) => w.findAll('[role="tab"]').map((t) => t.text())
+
+test.each([false, true])('plugin tabs isolate controls, search projects and stop running instances (narrow: %s)', async (narrow) => {
+  vi.stubGlobal('matchMedia', () => ({ matches: narrow, addEventListener() {}, removeEventListener() {} }))
+  const hn = await sidebarHarness(omo => {
+    omo.settings = { ...general, ceo: { ...general.ceo, enabled: true } }
+    omo.projects = [project('one', 'First project'), project('two', 'Second project'), { ...project('off', 'Disabled'), enabled: false }, { ...project('gone', 'Missing'), missing: true }]
+  })
+  hn.agents.list = [agent({ role: 'ceo' })]
+  const plugin: PluginInfo = { name: 'editor', state: 'ready', content_id: 'a'.repeat(64), commit: '', version: '1', description: '', message: '', last_event: '', last_run_at: null, config_fields: [], hooks: [{ event: 'manual', name: 'open', scope: 'global', description: '', interval: '' }], buttons: [], frontend: { script: 'entry.js' } }
+  const response: PluginsResponse = { plugins: [plugin], settings: [{ name: 'editor', enabled: true, source: '/repo', subpath: '', ref: '', config: {} }], errors: [] }
+  let tasks: PluginTask[] = [
+    { id: 'run-1', name: 'first-editor', state: 'running', started_at: '2026-11-18T10:00:00Z', output: [] },
+    { id: 'run-2', name: 'old-editor', state: 'exited', started_at: '2026-11-18T10:00:00Z', output: [] },
+    { id: 'run-3', name: 'second-editor', ticket: 3, state: 'running', started_at: '2026-11-18T10:00:00Z', output: [] },
+  ]
+  const base = hn.session.client.get.bind(hn.session.client)
+  hn.session.client.get = ((path: string, q?: never) => path === '/api/plugins' ? Promise.resolve({ data: response, eventId: null }) : path === '/api/plugins/editor/tasks' ? Promise.resolve({ data: { tasks }, eventId: null }) : base(path, q)) as typeof base
+  const send = vi.fn(async (_method, path, _body) => {
+    if (path.endsWith('/stop')) tasks = tasks.map(t => t.id === 'run-1' ? { ...t, state: 'exited' } : t)
+    return { data: { message: 'Opened' }, eventId: null }
+  })
+  hn.session.client.send = send as typeof hn.session.client.send
+  const append = document.head.append.bind(document.head)
+  const noFetch = vi.spyOn(document.head, 'append').mockImplementation((...nodes) => {
+    for (const node of nodes) if (node instanceof HTMLScriptElement) node.type = 'text/plain'
+    append(...nodes)
+  })
+  const { wrapper: w } = await mountSidebar(hn, SidebarRoot)
+  mounted = w
+  try {
+    const entry = document.querySelector<HTMLScriptElement & { omo: PluginFacade }>('script[data-omo-plugin="editor"]')!
+    entry.omo.initialize(omo => {
+      omo.addSidebarTab({ id: 'editor', label: 'Editor', tasks: true })
+      omo.addButton({ id: 'open', label: 'Open editor', place: 'sidebar', tab: 'editor', pick_project: true, action: 'open' })
+      omo.addPanel({ id: 'progress', title: 'Progress', text: 'In this tab only', place: 'sidebar', tab: 'editor' })
+    })
+    entry.dispatchEvent(new Event('load'))
+    useSidebar().openOn('ceo')
+    await flushPromises()
+    expect(w.find('[data-plugin-control]').exists()).toBe(false)
+    expect(w.text()).not.toContain('In this tab only')
+    expect(tabNames(w)).toContain('Editor')
+    await w.get('[data-tab="plugin:editor:editor"]').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-plugin-control]')).toHaveLength(1)
+    expect(w.text()).toContain('In this tab only')
+    expect(w.text()).not.toContain('old-editor')
+    expect(w.findAll('[data-task-stop]')).toHaveLength(2)
+    await w.get('[data-plugin-control] button').trigger('click')
+    await w.get('input[role="combobox"]').setValue('second')
+    expect(w.findAll('[role="option"]')).toHaveLength(1)
+    await w.get('[role="option"]').trigger('click')
+    await flushPromises()
+    expect(send).toHaveBeenCalledWith('POST', '/api/plugins/editor/actions/open', { project: 'two' })
+    await w.findAll('[data-task-stop]')[0]!.trigger('click')
+    await flushPromises()
+    expect(send).toHaveBeenCalledWith('POST', '/api/plugins/editor/tasks/first-editor/stop', {})
+    expect(w.findAll('[data-task-stop]')).toHaveLength(1)
+    expect(w.text()).toContain('second-editor')
+    plugin.state = 'disabled'
+    hn.omo.emit('settings.changed', { section: 'plugins', name: 'editor' })
+    await flushPromises()
+    expect(tabNames(w)).not.toContain('Editor')
+    expect(w.get('[role="tab"][aria-selected="true"]').text()).toMatch(/^Agents/)
+  } finally { disposePluginExtensions(hn.session.store); noFetch.mockRestore() }
+})
 
 test('collapsed it is a strip of tabs with counts; choosing one expands it on that tab and remembers it', async () => {
   const { w } = await open()

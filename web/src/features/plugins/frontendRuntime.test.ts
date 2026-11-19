@@ -29,6 +29,22 @@ function setup(...plugins: PluginInfo[]) {
   return { runtime, list, context, suspended, send, script }
 }
 
+test('sidebar tabs are owner scoped, replaceable and removed with their frontend lifetime', async () => {
+  const { script, runtime, list } = setup(info('one'), info('two'))
+  const one = script('one').omo
+  const two = script('two').omo
+  const old = one.addSidebarTab({ id: 'editor', label: 'Old' })
+  one.addSidebarTab({ id: 'editor', label: 'Editor', tasks: true })
+  two.addSidebarTab({ id: 'editor', label: 'Other' })
+  old()
+  expect(runtime.tabs.value.map(t => [t.plugin, t.id, t.label])).toEqual([['one', 'editor', 'Editor'], ['two', 'editor', 'Other']])
+  expect(() => one.addButton({ id: 'bad', place: 'ticket', tab: 'editor', label: 'Bad', action: 'run' })).toThrow(/button/i)
+  expect(() => one.addButton({ id: 'bad', place: 'sidebar', tab: 'unknown', label: 'Bad', action: 'run' })).toThrow(/tab/i)
+  list.value = response(info('two'))
+  expect(runtime.tabs.value.map(t => t.plugin)).toEqual(['two'])
+  expect(() => one.addSidebarTab({ id: 'late', label: 'Late' })).toThrow(/active/i)
+})
+
 test('concurrent entries receive separate facades and only invoke their own manual hooks', async () => {
   const { script, send, runtime } = setup(info('one'), info('two'))
   const one = script('one').omo

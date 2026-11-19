@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { getPluginTasks, stopPluginTask } from '../../../api/endpoints'
-import { failureText } from '../../../api/lostAnswer'
-import type { PluginTask } from '../../../api/types'
-import UiButton from '../../../components/ui/UiButton.vue'
-import { visibleLines, visibleText } from '../../../components/ui/visibleText'
-import { useNow } from '../../../components/ui/useNow'
-import { useSession } from '../../../session'
+import { getPluginTasks, stopPluginTask } from '../../api/endpoints'
+import { failureText } from '../../api/lostAnswer'
+import type { PluginTask } from '../../api/types'
+import UiButton from '../../components/ui/UiButton.vue'
+import { visibleLines, visibleText } from '../../components/ui/visibleText'
+import { useNow } from '../../components/ui/useNow'
+import { useSession } from '../../session'
 
-const props = defineProps<{ name: string }>()
+const props = defineProps<{ name: string; runningOnly?: boolean }>()
 const session = useSession()
 const tasks = ref<PluginTask[] | null>(null)
 const error = ref('')
@@ -16,6 +16,7 @@ const stopping = ref<string | null>(null)
 const reading = ref(false)
 const now = useNow()
 const suspended = computed(() => session.phase.value !== 'ready')
+const shown = computed(() => (tasks.value ?? []).filter(t => !props.runningOnly || t.state === 'running'))
 let alive = true
 let seq = 0
 async function refresh() {
@@ -63,13 +64,13 @@ onBeforeUnmount(() => { alive = false; seq++; offEvent(); offSnapshot() })
 <template>
   <section class="plugin-tasks" :aria-label="`Tasks of ${visibleText(name)}`" :data-plugin-tasks="name">
     <div class="plugin-tasks__bar">
-      <h4>Background tasks</h4>
+      <h4>{{ runningOnly ? 'Running instances' : 'Background tasks' }}</h4>
       <UiButton size="sm" :disabled="reading || suspended" :aria-busy="reading ? 'true' : undefined" @click="refresh">Refresh tasks</UiButton>
     </div>
     <p v-if="error" role="alert">{{ visibleText(error) }}</p>
     <p v-if="tasks === null">Reading tasks…</p>
-    <p v-else-if="!tasks.length">No tasks.</p>
-    <article v-for="task in tasks ?? []" :key="task.id" class="plugin-tasks__task" :aria-label="visibleText(task.name)">
+    <p v-else-if="!shown.length">{{ runningOnly ? 'No running instances.' : 'No tasks.' }}</p>
+    <article v-for="task in shown" :key="task.id" class="plugin-tasks__task" :aria-label="visibleText(task.name)">
       <div class="plugin-tasks__bar">
         <strong>{{ visibleText(task.name) }}</strong>
         <span v-if="task.ticket">Ticket #{{ task.ticket }}</span>
@@ -78,8 +79,8 @@ onBeforeUnmount(() => { alive = false; seq++; offEvent(); offSnapshot() })
         <UiButton v-if="task.state === 'running'" size="sm" :disabled="!!stopping || suspended" :aria-busy="stopping === task.id ? 'true' : undefined" data-task-stop @click="stop(task)">Stop<span class="sr-only"> {{ visibleText(task.name) }}</span></UiButton>
       </div>
       <p v-if="task.error" role="status">{{ visibleText(task.error) }}</p>
-      <pre v-if="task.output?.length" class="omo-logtext" tabindex="0" :aria-label="`Output of ${visibleText(task.name)}`">{{ output(task) }}</pre>
-      <p v-else>No output yet.</p>
+      <pre v-if="!runningOnly && task.output?.length" class="omo-logtext" tabindex="0" :aria-label="`Output of ${visibleText(task.name)}`">{{ output(task) }}</pre>
+      <p v-else-if="!runningOnly">No output yet.</p>
     </article>
   </section>
 </template>

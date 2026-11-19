@@ -2,12 +2,20 @@ import { expect, test } from 'vitest'
 import type { PluginsResponse } from '../../api/types'
 import { ticket } from '../board/testing'
 import { controlsOf } from './controls'
+import type { OwnedButton } from './frontendRuntime'
 
 const list = { plugins: [{ name: 'editor', state: 'ready', buttons: [
   { label: 'Edit', place: 'ticket', action: 'edit', per_worktree: true },
   { label: 'Project editor', place: 'project', action: 'project' },
   { label: 'Global', place: 'sidebar', action: 'global' },
 ] }], settings: [{ name: 'editor', enabled: true }] } as PluginsResponse
+
+test('tab controls stay out of shared sidebar controls and other plugins tabs', () => {
+  const b = { id: 'open', plugin: 'editor', place: 'sidebar', tab: 'editor', label: 'Open editor', active: () => true } as OwnedButton
+  expect(controlsOf(list, [b], 'sidebar').map(b => b.label)).toEqual(['Global'])
+  expect(controlsOf(list, [b], 'sidebar', undefined, undefined, { plugin: 'editor', id: 'editor' }).map(b => b.label)).toEqual(['Open editor'])
+  expect(controlsOf(list, [b], 'sidebar', undefined, undefined, { plugin: 'other', id: 'editor' })).toEqual([])
+})
 
 test('per-worktree ticket controls expand only recorded usable worktrees and send the selected project', () => {
   const t = ticket({ number: 7, projects: [

@@ -70,7 +70,27 @@ test.describe('with a CEO', () => {
     const terminal = terminalIn(sidebar(page))
     await expect(terminal).toBeVisible({ timeout: 30_000 })
     await expectTerminalText(terminal, 'CEO ready')
-    await expect(sidebar(page).getByText('Write to the CEO in the box below the terminal.')).toBeVisible()
+    await expect(sidebar(page).getByText('Write to the CEO in the box below the terminal.')).toHaveCount(0)
+    await page.evaluate(() => document.fonts.ready)
+    for (const size of ['480', '320']) {
+      const splitter = page.getByRole('separator', { name: 'Sidebar width' })
+      if (size === '320') { await splitter.focus(); await page.keyboard.press('Home') }
+      await expect(splitter).toHaveAttribute('aria-valuenow', size)
+      const bar = sidebar(page).locator('.ceo__bar')
+      const bounds = (await bar.boundingBox())!
+      const controls = sidebar(page).locator('[data-ceo-new], [data-ceo-stop], [data-ceo-model] .pick > button, [data-terminal-mode], [data-terminal-popout]')
+      const boxes = await controls.evaluateAll(nodes => nodes.map(n => { const b = n.getBoundingClientRect(); return { y: Math.round(b.y), right: b.right } }))
+      expect(new Set(boxes.map(b => b.y)).size).toBeLessThanOrEqual(2)
+      expect(boxes.every(b => b.right <= bounds.x + bounds.width + 1)).toBe(true)
+    }
+    const mode = sidebar(page).getByRole('switch', { name: 'Read only', exact: true })
+    await expect(mode).toBeChecked()
+    await mode.focus()
+    await page.keyboard.press('Space')
+    await expect(mode).not.toBeChecked()
+    await expect(terminalIn(sidebar(page))).not.toHaveAttribute('data-readonly', '')
+    await mode.click()
+    await expect(mode).toBeChecked()
     expect(await liveCeos(omo)).toHaveLength(1)
     expectNoTokenInUrls(seen, omo.token)
     await expectNoAgentProcesses(omo)
@@ -194,6 +214,13 @@ test.describe('with a CEO', () => {
     await page.getByRole('option', { name: /fake\/second/ }).click()
     const next = sidebar(page).locator('[data-ceo-model-next]')
     await expect(next).toContainText('The CEO runs fake/default; fake/second takes effect at its next start.')
+    await page.getByRole('separator', { name: 'Sidebar width' }).focus()
+    await page.keyboard.press('Home')
+    const toolbar = sidebar(page).locator('.ceo__bar')
+    // A pending model change must not turn the compact controls into a tall notice.
+    const toolbarHeight = await toolbar.evaluate(el => el.getBoundingClientRect().height)
+    const controlHeight = await toolbar.locator('[data-ceo-new]').evaluate(el => el.getBoundingClientRect().height)
+    expect(toolbarHeight).toBeLessThanOrEqual(controlHeight + 1)
     const roles = await omo.api<{ name: string; models: string[]; assignment: string }[]>('GET', '/api/roles')
     expect(roles.find((r) => r.name === 'ceo')).toMatchObject({ models: ['fake/second'], assignment: 'round_robin' })
     // The running CEO keeps its model until it starts again.

@@ -84,11 +84,14 @@ it). The plugin's log keeps its last 500 lines, newest last.
 The VS Code plugin edits folders directly alongside agents, with no locking.
 It permits one running editor per canonical folder. Repeated clicks reuse it
 only when editor, pinned version and ticket/global binding all match. To change
-any of those for an open folder, use **Stop** in the plugin's settings first;
+any of those for an open folder, use **Stop** in the **VS Code** sidebar tab first;
 the refusal keeps the existing editor running. Different folders can run
 independently. Its default is code-server, its idle setting defaults to 30 minutes after the
-last connected browser disconnects, and its task output/Stop control lives on
-its settings page. First-use progress completes in the tab reserved by that
+last connected browser disconnects. The **VS Code** sidebar tab has one
+**Open in VS Code** button: search for a project and select it to open its
+repository. Running instances appear below it, each with **Stop**. Task output
+and Stop are also available on its settings page. It adds nothing to the CEO tab.
+First-use progress completes in the tab reserved by that
 same click; the editor has no separate sign-in. OpenVSCode path forwards retain
 the advertised non-root prefix; subdomain launches omit `--server-base-path`
 to use its root default. An explicit `/` flag breaks the pinned publisher's
@@ -933,10 +936,12 @@ The stable facade methods are:
 |---|---|
 | `signal` | Read-only `AbortSignal`, aborted when this enabled code lifetime ends or fails. Use it to cancel polling/fetches. |
 | `initialize(setup)` | Calls `setup(omo)` once; setup may be async and return a cleanup function. Rejection removes partial controls and offers Retry. A late cleanup runs immediately if the plugin has already ended. |
-| `addButton(spec)` | Adds or replaces this plugin's button by `id`; returns a disposer for that registration. Spec: `{id,label,place,per_worktree?,action?,run?}`. `place` is `ticket`, `sidebar` or `project`; `per_worktree` belongs only to ticket. Supply exactly one manual `action` name or `run(context)` callback. Callbacks may return a structured hook result, synchronously or by Promise; void means no message/navigation. |
+| `addButton(spec)` | Adds or replaces this plugin's button by `id`; returns a disposer for that registration. Spec: `{id,label,place,per_worktree?,tab?,pick_project?,action?,run?}`. `place` is `ticket`, `sidebar` or `project`; `per_worktree` belongs only to ticket. For sidebar buttons, `tab` names a previously registered own sidebar tab; `pick_project: true` opens the project search before running the button, passing the selected project in context (no ticket). Supply exactly one manual `action` name or `run(context)` callback. Callbacks may return a structured hook result, synchronously or by Promise; void means no message/navigation. |
 | `removeButton(id)` | Removes only this plugin's button. |
-| `addPanel(spec)` | Adds or replaces `{id,place,title,text,image?}`; returns its registration's disposer. Place is `ticket` or `sidebar`. Text is plain text with hidden characters escaped. Optional image must use this plugin's versioned asset URL. |
+| `addPanel(spec)` | Adds or replaces `{id,place,title,text,image?,tab?}`; returns its registration's disposer. Place is `ticket` or `sidebar`; sidebar panels may target a previously registered own `tab`. Text is plain text with hidden characters escaped. Optional image must use this plugin's versioned asset URL. |
 | `removePanel(id)` | Removes only this plugin's panel. |
+| `addSidebarTab(spec)` | Adds or replaces `{id,label,tasks?}` for this plugin and returns its registration's disposer. The tab appears beside CEO, Agents and Terminals on desktop and in the mobile sheet. With `tasks: true`, it lists this plugin's running tasks below its controls, each with Stop; task events/reconnects refresh the list. |
+| `removeSidebarTab(id)` | Removes only this plugin's tab. Its controls remain registered but hidden until the tab is added again. |
 | `context()` | Returns a detached copy of the current route context. |
 | `onRouteChange(callback)` | Immediately supplies current context, then each route/context change; returns unsubscribe. Identical context replacements are ignored. Suspended under the lock screen, then delivers changed context on unlock. A failing listener removes that plugin's frontend without affecting others. |
 | `runHook(action, context?)` | Runs only this plugin's own named manual hook; resolves `{message,url?,forward_id?}`. Explicit context is `{ticket?,project?}`. Without it, ticket hooks use the current ticket/project; global hooks use the selected project only. No automatic retries, including on a lost response. |
@@ -944,8 +949,27 @@ The stable facade methods are:
 | `openForward(id)` | From a user gesture, reserves a detached tab and opens a forward through the authenticated proxy Open API. Resolves void; rejects and closes the unused tab on failure or expired plugin lifetime. |
 | `open(callback)` | From a user gesture outside a registered button callback, reserves a tab before calling the async callback, then processes its final structured result. Returns that result. |
 
+For example, an editor can register a tab and one searchable project action:
+
+```js
+omo.addSidebarTab({ id: 'editor', label: 'Editor', tasks: true })
+omo.addButton({
+  id: 'open', label: 'Open editor', place: 'sidebar', tab: 'editor',
+  pick_project: true, action: 'open-project'
+})
+```
+
+Tabs and their controls are scoped to their plugin, so two plugins can use the
+same local tab id. Controls with `tab` never appear in the shared sidebar area.
+Without `tab`, sidebar/project controls keep their shared placement. Disabling,
+removing, replacing or failing a frontend removes its tabs with its controls.
+The selected tab is remembered in this browser; if it disappears, Agents shows.
+Project search includes enabled projects present on disk, ordered by name;
+it searches names and folders. Choosing a project reserves the editor window
+in that gesture and then runs the callback/hook through the ordinary result flow.
+
 IDs are 1–64 ASCII letters/digits/underscore/dot/hyphen (unlike manifest names,
-they may start with punctuation). At most 64 buttons and 64 panels per plugin;
+they may start with punctuation). At most 8 sidebar tabs, 64 buttons and 64 panels per plugin;
 frontend titles/labels are nonblank, visible, one-line strings of at most 200
 UTF-16 code units, and panel text is at most 16,000 UTF-16 code units. Manifest
 labels instead count Unicode characters. A disposer removes only its own

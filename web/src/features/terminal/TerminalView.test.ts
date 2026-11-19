@@ -750,6 +750,8 @@ describe('agent terminals', () => {
   test('starts read-only: keys and text input do nothing, and it says so', async () => {
     const w = agent()
     const toggle = w.find('[data-terminal-mode]')
+    expect(toggle.attributes('role')).toBe('switch')
+    expect(toggle.attributes('aria-checked')).toBe('true')
     expect(toggle.text()).toBe('Read only')
     expect(toggle.attributes('data-writable')).toBeUndefined()
     expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(false)
@@ -800,6 +802,7 @@ describe('agent terminals', () => {
   test('the toggle makes it writable, with the state in words, and back', async () => {
     const w = agent()
     await w.find('[data-terminal-mode]').trigger('click')
+    expect(w.find('[data-terminal-mode]').attributes('aria-checked')).toBe('false')
     expect(w.find('[data-terminal-mode]').text()).toBe('Writable')
     expect(w.find('[data-terminal-mode]').attributes('data-writable')).toBeDefined()
     expect(term().keyHandler!(keyEv({ key: 'a' }))).toBe(true)

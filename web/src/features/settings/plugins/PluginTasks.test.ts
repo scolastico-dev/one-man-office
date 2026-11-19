@@ -2,7 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import type { PluginTask } from '../../../api/types'
 import { harness, mountWith, ok, refuse } from '../../create/dialogTesting'
-import PluginTasks from './PluginTasks.vue'
+import PluginTasks from '../../plugins/PluginTasks.vue'
 let mounted: VueWrapper | null = null
 afterEach(() => { mounted?.unmount(); mounted = null })
 const task = (o: Partial<PluginTask> = {}): PluginTask => ({ id: 'run-1', name: 'editor', ticket: 7, started_at: '2026-11-18T10:00:00Z', state: 'running', output: ['hello <script>‮'], ...o })

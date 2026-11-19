@@ -1,5 +1,5 @@
 import type { PluginButton, PluginsResponse, TicketSummary } from '../../api/types'
-import { enabledPlugins, type OwnedButton } from './frontendRuntime'
+import { enabledPlugins, type OwnedButton, type OwnedSidebarTab } from './frontendRuntime'
 
 export interface PluginControl {
   id: string
@@ -12,12 +12,12 @@ export interface PluginControl {
   scripted?: OwnedButton
 }
 /** Pure expansion shared by ticket panel/page, sidebar and project rows. */
-export function controlsOf(list: PluginsResponse | null, scripted: OwnedButton[], place: PluginButton['place'], ticket?: TicketSummary, project?: string): PluginControl[] {
+export function controlsOf(list: PluginsResponse | null, scripted: OwnedButton[], place: PluginButton['place'], ticket?: TicketSummary, project?: string, tab?: Pick<OwnedSidebarTab, 'plugin' | 'id'>): PluginControl[] {
   const all: (PluginButton & { id: string; plugin: string; scripted?: OwnedButton })[] = []
-  for (const plugin of enabledPlugins(list)) {
+  for (const plugin of tab ? [] : enabledPlugins(list)) {
     for (const button of plugin.buttons ?? []) if (button.place === place) all.push({ ...button, id: `${plugin.name}:${place}:${button.action}`, plugin: plugin.name })
   }
-  for (const button of scripted) if (button.place === place && button.active()) all.push({ ...button, action: button.action ?? '', id: `${button.plugin}:script:${button.id}`, scripted: button })
+  for (const button of scripted) if (button.place === place && button.active() && (tab ? button.plugin === tab.plugin && button.tab === tab.id : button.tab === undefined)) all.push({ ...button, action: button.action ?? '', id: `${button.plugin}:script:${button.id}`, scripted: button })
   return all.flatMap((b): PluginControl[] => {
     const base: PluginControl = { id: b.id, plugin: b.plugin, label: b.label, action: b.action, ...(b.scripted ? { scripted: b.scripted } : {}), ...(place === 'ticket' ? { ticket: ticket?.number } : {}), ...(project ? { project } : {}) }
     if (!b.per_worktree || place !== 'ticket' || !ticket) return [base]

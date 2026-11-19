@@ -202,13 +202,12 @@ const view = computed<'live' | 'starting' | 'failed' | 'stopped' | 'ended' | 'id
   <div class="ceo" data-ceo-tab :data-ceo-view="view">
     <template v-if="view === 'live'">
       <div class="ceo__bar">
-        <p class="ceo__note">Write to the CEO in the box below the terminal.</p>
         <div class="ceo__actions">
           <UiButton size="sm" data-ceo-new @click="((askNew = true), (newError = ''))">New session…</UiButton>
           <UiButton size="sm" data-ceo-stop @click="((askStop = true), (stopError = ''))">Stop…</UiButton>
         </div>
+        <CeoModel :live="current" :busy="busy" compact @restart="restart" />
       </div>
-      <CeoModel :live="current" :busy="busy" @restart="restart" />
       <div class="ceo__live" data-ceo-live>
         <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." window-kind="ceo" fill />
       </div>
@@ -280,16 +279,18 @@ const view = computed<'live' | 'starting' | 'failed' | 'stopped' | 'ended' | 'id
 }
 .ceo__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-shrink: 0;
   gap: calc(var(--omo-space) * 2);
 }
 .ceo__bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--omo-space) * 2);
 }
+.ceo__bar > :deep(.ceo-model) { flex: 1; }
+.ceo__bar :deep(.pick) { min-width: 0; max-width: 100%; }
+.ceo__bar :deep(.pick > button) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ceo__note,
 .ceo__error {
   margin: 0;

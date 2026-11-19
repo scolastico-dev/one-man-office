@@ -2,6 +2,7 @@
   'use strict';
   const omo = document.currentScript.omo;
   omo.initialize(() => {
+    omo.addSidebarTab({ id: 'editor', label: 'VS Code', tasks: true });
     const pending = new Map();
     let sequence = 0;
     function active() {
@@ -49,6 +50,7 @@
           while (result.message?.startsWith('VS Code pending:')) {
             active();
             omo.addPanel({ id: panel, place: place === 'ticket' ? 'ticket' : 'sidebar', title: 'Opening VS Code',
+              ...(place === 'ticket' ? {} : { tab: 'editor' }),
               text: `${payload.project ?? 'Selected folder'}: ${result.message.slice(17).trim()}` });
             checkDeadline(started);
             await pause();
@@ -67,7 +69,7 @@
     }
     omo.addButton({ id: 'open-ticket', label: 'Open in VS Code', place: 'ticket', per_worktree: true,
       run: context => open(context, 'ticket') });
-    omo.addButton({ id: 'open-project', label: 'Open in VS Code', place: 'project',
+    omo.addButton({ id: 'open-project', label: 'Open in VS Code', place: 'sidebar', tab: 'editor', pick_project: true,
       run: context => open(context, 'project') });
     return () => pending.clear();
   });
