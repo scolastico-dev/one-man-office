@@ -46,6 +46,18 @@ impl Delivery {
         {
             return Err("Invalid notification page progress.".into());
         }
+        // Recovery can rewind past earlier pages. Retain submissions beyond this
+        // page's cursor until their own part of the replay has been scanned.
+        let mut pending = Vec::new();
+        for id in &self.accepted {
+            let value = cursor(
+                id.strip_prefix("event:")
+                    .ok_or("Invalid accepted notification ID.")?,
+            )?;
+            if value > next {
+                pending.push(id.clone());
+            }
+        }
         let mut last = previous;
         for item in &page.notifications {
             let id = cursor(
@@ -71,7 +83,7 @@ impl Delivery {
         }
         let update = Delivery {
             cursor: Some(page.next_cursor),
-            accepted: Vec::new(),
+            accepted: pending,
         };
         persist(&update)?;
         *self = update;

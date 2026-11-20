@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Opt-in Linux native smoke: isolated X server, D-Bus service and remote page.
 
-Requires python-gobject, dbus-python, Xvfb and xdotool. Run inside
+Requires python-gobject, dbus-python, python-xlib, Xvfb and xdotool. Run inside
 `dbus-run-session -- python3 ui/tests/native_smoke.py`. No real omo home is used.
 """
 
 import argparse
 import base64
+from contextlib import closing
 import http.server
 import json
 import os
@@ -139,6 +140,7 @@ def main():
 
     gi.require_version("Atspi", "2.0")
     from gi.repository import GLib, Atspi
+    from Xlib import X, display, protocol
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server_thread = threading.Thread(target=server.serve_forever)
@@ -396,23 +398,22 @@ def main():
                 if predicate(item):
                     return item
 
+        def find(predicate):
+            while True:
+                for node in tree(Atspi.get_desktop(0)):
+                    if matches(
+                        node,
+                        lambda n: "The workbench failed to connect to the server"
+                        in n.get_name(),
+                    ):
+                        raise RuntimeError("Editor WebSocket connection failed")
+                    if matches(node, predicate):
+                        return node
+                if app.poll() is not None:
+                    raise RuntimeError("Native app exited while waiting for an accessible control")
+                changed.wait(0.02)
+
         if args.board_fixture:
-
-            def find(predicate):
-                while True:
-                    for node in tree(Atspi.get_desktop(0)):
-                        if matches(
-                            node,
-                            lambda n: "The workbench failed to connect to the server"
-                            in n.get_name(),
-                        ):
-                            raise RuntimeError("Editor WebSocket connection failed")
-                        if matches(node, predicate):
-                            return node
-                    if app.poll() is not None:
-                        raise RuntimeError("Native app exited while waiting for board/editor")
-                    changed.wait(0.02)
-
             find(lambda n: n.get_name().startswith("Planning"))
             print("Actual board loaded.", flush=True)
             assert publisher_origin
@@ -528,6 +529,79 @@ def main():
         x("windowfocus", "--sync", child)
         x("key", "ctrl+shift+p")
         wait_for(lambda e: e.get("commandPalette") and e.get("page") == "/editor")
+        # Both connection entry points must survive repeatedly closing their window.
+        for entry in ["board button", "native menu", "board button"]:
+            print(f"Reopening Connection through {entry}.", flush=True)
+            x("windowfocus", "--sync", board)
+            if entry == "native menu":
+                find(
+                    lambda n: n.get_name() == "omo ui"
+                    and n.get_role() == Atspi.Role.MENU
+                ).get_action_iface().do_action(0)
+                find(
+                    lambda n: n.get_name() == "Connection…"
+                    and n.get_role() == Atspi.Role.MENU_ITEM
+                    and n.get_state_set().contains(Atspi.StateType.SHOWING)
+                ).get_action_iface().do_action(0)
+            else:
+                find(
+                    lambda n: n.get_name() == "Configure omo ui connection"
+                    and n.get_role() == Atspi.Role.PUSH_BUTTON
+                    and n.get_state_set().contains(Atspi.StateType.SHOWING)
+                ).get_action_iface().do_action(0)
+            connection = x(
+                "search", "--onlyvisible", "--sync", "--name", "^omo ui · Connection$"
+            ).splitlines()[0]
+            find(
+                lambda n: n.get_name() == "Connect"
+                and n.get_role() == Atspi.Role.PUSH_BUTTON
+                and n.get_state_set().contains(Atspi.StateType.SHOWING)
+                and n.get_state_set().contains(Atspi.StateType.ENABLED)
+            )
+            find(
+                lambda n: n.get_name() == "Disconnect"
+                and n.get_role() == Atspi.Role.PUSH_BUTTON
+                and n.get_state_set().contains(Atspi.StateType.SHOWING)
+                and n.get_state_set().contains(Atspi.StateType.ENABLED)
+            )
+            address = find(
+                lambda n: n.get_name() == "Board address"
+                and n.get_role() == Atspi.Role.ENTRY
+                and n.get_state_set().contains(Atspi.StateType.SHOWING)
+            )
+            assert Atspi.Text.get_text(address.get_text_iface(), 0, -1) == board_origin
+            # WM_DELETE_WINDOW is the same close request used by a titlebar button.
+            # Send it directly: bare Xvfb has no window manager to translate EWMH requests.
+            with closing(display.Display(env["DISPLAY"])) as screen:
+                screen.send_event(
+                    int(connection),
+                    protocol.event.ClientMessage(
+                        window=int(connection),
+                        client_type=screen.intern_atom("WM_PROTOCOLS"),
+                        data=(
+                            32,
+                            [screen.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0],
+                        ),
+                    ),
+                    event_mask=0,
+                )
+                screen.sync()
+            while subprocess.run(
+                [
+                    args.xdotool,
+                    "search",
+                    "--onlyvisible",
+                    "--name",
+                    "^omo ui · Connection$",
+                ],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                check=False,
+            ).returncode == 0:
+                if app.poll() is not None:
+                    raise RuntimeError("Closing Connection exited the connected app")
+                changed.wait(0.02)
+        evidence.append({"connectionReopenedAfterClose": True})
         print(
             json.dumps(
                 {

@@ -7,7 +7,11 @@ use tauri::{
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 pub fn show_setup(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("setup") {
+    // Closing Connection destroys its WebView; every entry point must recreate it.
+    if let Some(window) = app
+        .get_webview_window("setup")
+        .or_else(|| create_setup(app).ok())
+    {
         #[cfg(target_os = "android")]
         {
             let _ = window.navigate(tauri::Url::parse("http://tauri.localhost/").expect("app URL"));

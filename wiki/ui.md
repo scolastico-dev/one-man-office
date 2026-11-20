@@ -24,6 +24,7 @@ start. Basic authentication uses the native WebView's authentication challenge.
 
 Use **Connection…** in the native menu or the board's Connection button to
 change hosts or credentials, reconnect, disconnect or change notifications.
+Closing Connection leaves the board open; the menu/button recreates it when needed.
 Reconnect preserves notification history for the same origin, auth mode and
 username. **Treat as a new server** creates a fresh history when its database
 was replaced. Switching connections closes its board/forward windows. Closing
@@ -132,10 +133,12 @@ marker and a configure action, not a general native API.
 ## Focused native smoke
 
 `ui/tests/native_smoke.py` is an opt-in Linux probe. It needs Python GObject
-(including Atspi), dbus-python, Xvfb, xdotool and the built native app. It uses
-an isolated X server, configuration/cache/temp roots, a standalone HTTP fixture
+(including Atspi), dbus-python, python-xlib, Xvfb, xdotool and the built native app.
+It uses an isolated X server, configuration/cache/temp roots, a standalone HTTP fixture
 and a private D-Bus notification service. Readiness is observed from actual
 accessible controls, HTTP events and native notification signals.
+It also closes and reopens Connection repeatedly through both the menu and board
+button, checking that the active connection and saved address remain available.
 
 ```sh
 dbus-run-session -- python3 ui/tests/native_smoke.py --auth token

@@ -381,6 +381,63 @@ fn replay_recovery_retains_ids_already_submitted_from_an_incomplete_page() {
     assert_eq!(delivered, vec!["event:102"]);
 }
 #[test]
+fn replay_preserves_later_accepted_ids_across_empty_and_nonempty_pages_and_restart() {
+    let mut d = Delivery {
+        cursor: Some("300".into()),
+        accepted: vec!["event:450".into(), "event:490".into()],
+    };
+    Recovery {
+        reset_cursor: "99".into(),
+        latest_cursor: "500".into(),
+    }
+    .apply(&mut d, true, |_| Ok(()))
+    .unwrap();
+    let mut delivered = vec![];
+    for (ids, next, more, retained) in [
+        (vec![], "299", true, vec!["event:450", "event:490"]),
+        (
+            vec!["event:350"],
+            "399",
+            true,
+            vec!["event:450", "event:490"],
+        ),
+        (
+            vec!["event:450", "event:451"],
+            "475",
+            true,
+            vec!["event:490"],
+        ),
+        (vec!["event:490", "event:500"], "500", false, vec![]),
+    ] {
+        let mut saved = None;
+        assert_eq!(
+            d.accept(
+                &config(),
+                Page {
+                    notifications: ids.into_iter().map(notice).collect(),
+                    next_cursor: next.into(),
+                    has_more: more,
+                },
+                |n| {
+                    delivered.push(n.id.clone());
+                    Ok(())
+                },
+                |update| {
+                    saved = Some(serde_json::to_vec(update).unwrap());
+                    Ok(())
+                },
+            )
+            .unwrap(),
+            more
+        );
+        // Each page must leave durable dedup state usable by a restarted process.
+        d = serde_json::from_slice(&saved.unwrap()).unwrap();
+        assert_eq!(d.cursor.as_deref(), Some(next));
+        assert_eq!(d.accepted, retained);
+    }
+    assert_eq!(delivered, vec!["event:350", "event:451", "event:500"]);
+}
+#[test]
 fn basic_challenges_match_ipv6_hosts_without_url_brackets() {
     let mut c = config();
     c.auth = Auth::Basic;
