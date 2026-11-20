@@ -259,7 +259,22 @@ const (
 	AssignmentRandom     = "random"
 	AssignmentFailover   = "failover"
 	AssignmentSmart      = "smart"
+	AssignmentSuperSmart = "super_smart"
 )
+
+// DefaultAssignment is the assignment mode of a role without an explicit choice.
+func DefaultAssignment(role string) string {
+	switch role {
+	case "ceo":
+		return AssignmentFailover
+	case "pm", "developer":
+		return AssignmentSuperSmart
+	case "reviewer":
+		return AssignmentRandom
+	default:
+		return AssignmentRoundRobin
+	}
+}
 
 // Profile is a CLI with its account: the payload of PUT /api/profiles/{name}
 // and an item of GET /api/profiles. Its JSON names equal the keys of

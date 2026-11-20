@@ -67,7 +67,7 @@ const readModels = () => reader.reload()
 <template>
   <SettingsPage :title="def.label" :description="def.description">
     <Callout tone="info" data-roles-note>
-      <p>With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.</p>
+      <p>With round robin and random, a model listed twice is picked twice as often; with failover, smart and super smart it counts once.</p>
     </Callout>
     <SetupReport />
     <Callout v-if="failure" tone="danger" live="assertive" data-models-error>

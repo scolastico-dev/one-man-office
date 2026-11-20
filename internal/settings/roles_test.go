@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -19,8 +20,9 @@ func TestRoleFilesCreatedAtOpen(t *testing.T) {
 	if len(roles) != 4 {
 		t.Fatalf("roles = %+v", roles)
 	}
+	wantAssignments := []string{"failover", "super_smart", "super_smart", "random"}
 	for i, r := range roles {
-		if r.Name != RoleNames[i] || r.Models == nil || len(r.Models) != 0 || r.Assignment != api.AssignmentRoundRobin {
+		if r.Name != RoleNames[i] || r.Models == nil || len(r.Models) != 0 || r.Assignment != wantAssignments[i] {
 			t.Errorf("role %d = %+v", i, r)
 		}
 	}
@@ -72,7 +74,7 @@ func TestRoleHandEditKeepsLastValid(t *testing.T) {
 	writeFile(t, path, "models: [claude/opus]\n")
 	writeFile(t, filepath.Join(home, "roles", "janitor.yaml"), "models: []\n")
 	s.Reload()
-	if r, _ := s.Role("ceo"); r.Assignment != api.AssignmentRoundRobin || r.Models[0] != "claude/opus" {
+	if r, _ := s.Role("ceo"); r.Assignment != api.AssignmentFailover || r.Models[0] != "claude/opus" {
 		t.Fatalf("role = %+v", r)
 	}
 	if errs := s.Errors(); len(errs) != 1 || filepath.Base(errs[0].File) != "janitor.yaml" {
@@ -80,5 +82,43 @@ func TestRoleHandEditKeepsLastValid(t *testing.T) {
 	}
 	if len(s.Roles()) != 4 {
 		t.Fatalf("roles = %+v", s.Roles())
+	}
+}
+
+func TestRoleAssignmentDefaultsAndRoundTrip(t *testing.T) {
+	s, home, _ := openTest(t)
+	if err := s.PutProfileIf("", claudeProfile()); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"ceo": "failover", "pm": "super_smart", "developer": "super_smart", "reviewer": "random"} {
+		t.Run(name, func(t *testing.T) {
+			// API omission and a models-only YAML file use the same role default.
+			if err := s.PutRoleIf("", Role{Name: name, Models: []string{"claude/opus"}}); err != nil {
+				t.Fatal(err)
+			}
+			if r, _ := s.Role(name); r.Assignment != want {
+				t.Fatalf("API default: %+v", r)
+			}
+			path := filepath.Join(home, "roles", name+".yaml")
+			writeFile(t, path, "models: [claude/opus]\n")
+			s.Reload()
+			if r, _ := s.Role(name); r.Assignment != want {
+				t.Fatalf("YAML default: %+v", r)
+			}
+			for _, mode := range []string{"super_smart", "round_robin", "smart", "random", "failover"} {
+				if err := s.PutRoleIf("", Role{Name: name, Models: []string{"claude/opus"}, Assignment: mode}); err != nil {
+					t.Fatal(err)
+				}
+				// Force a disk reload from hand-written YAML, independent of the API cache.
+				writeFile(t, path, fmt.Sprintf("assignment: %s\nmodels: [claude/opus]\n", mode))
+				s.Reload()
+				if r, _ := s.Role(name); r.Assignment != mode {
+					t.Fatalf("round trip %s: %+v", mode, r)
+				}
+			}
+		})
+	}
+	if errs := s.Errors(); len(errs) != 0 {
+		t.Fatalf("errors: %+v", errs)
 	}
 }

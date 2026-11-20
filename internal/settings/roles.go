@@ -34,7 +34,7 @@ func (s *Store) roleKind() *kind {
 			if !slices.Contains(RoleNames, name) {
 				return fmt.Errorf("%s is not a role; the roles are %s", name, strings.Join(RoleNames, ", "))
 			}
-			r := Role{Assignment: api.AssignmentRoundRobin}
+			r := emptyRole(name)
 			if err := decodeYAML(data, &r); err != nil {
 				return err
 			}
@@ -64,23 +64,23 @@ func (s *Store) roleKind() *kind {
 }
 
 func emptyRole(name string) Role {
-	return Role{Name: name, Models: []string{}, Assignment: api.AssignmentRoundRobin}
+	return Role{Name: name, Models: []string{}, Assignment: api.DefaultAssignment(name)}
 }
 
 func normalizeRole(r Role) Role {
 	r.Models = cloneStrings(r.Models)
 	if r.Assignment == "" {
-		r.Assignment = api.AssignmentRoundRobin
+		r.Assignment = api.DefaultAssignment(r.Name)
 	}
 	return r
 }
 
 func validateAssignment(a string) error {
 	switch a {
-	case api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart:
+	case api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart, api.AssignmentSuperSmart:
 		return nil
 	}
-	return fieldErr("assignment", "assignment must be round_robin, random, failover or smart")
+	return fieldErr("assignment", "assignment must be round_robin, random, failover, smart or super_smart")
 }
 
 // validateRoleModels checks that every entry has the form of a model id.

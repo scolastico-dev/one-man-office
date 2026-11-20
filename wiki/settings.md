@@ -76,7 +76,7 @@ missing models** are described in [Agents](agents.md#profiles-and-models).
 *Which models each role works with.* Files: `roles/<role>.yaml` for `ceo`,
 `pm`, `developer` and `reviewer`. Per role: **Models of the <role>** (an
 ordered list; **Add model**) and **Assignment** (Round robin, Random,
-Failover, Smart). See [Roles and assignment](agents.md#roles-and-assignment).
+Failover, Smart, Super smart). See [Roles and assignment](agents.md#roles-and-assignment).
 
 ## Usage
 

@@ -107,6 +107,7 @@ const MODE_OPTIONS = [
   { value: 'random', label: 'Random: a model at random' },
   { value: 'failover', label: 'Failover: the first that can start' },
   { value: 'smart', label: 'Smart: the most capacity left' },
+  { value: 'super_smart', label: 'Super smart: capacity left and time to reset' },
 ]
 const MODEL_OPTIONS = [
   { value: 'claude/opus', label: 'claude/opus' },
@@ -333,7 +334,7 @@ const save = computed(() => {
                 <UiButton class="sample-path__browse">Add</UiButton>
               </div>
               <SelectField v-model="developerMode" label="Assignment" :options="MODE_OPTIONS" />
-              <Callout tone="info"><p>With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.</p></Callout>
+              <Callout tone="info"><p>With round robin and random, a model listed twice is picked twice as often; with failover, smart and super smart it counts once.</p></Callout>
             </FormSection>
             <FormSection legend="Reviewer">
               <ReorderList

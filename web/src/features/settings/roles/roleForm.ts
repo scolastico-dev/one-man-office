@@ -17,10 +17,11 @@ const ASSIGNMENT_LABELS: Record<string, string> = {
   random: 'Random: a model at random',
   failover: 'Failover: the first that can start',
   smart: 'Smart: the most capacity left',
+  super_smart: 'Super smart: capacity left and time to reset',
 }
 
 /** The assignment modes in the order they are offered. */
-export const ASSIGNMENT_ORDER = ['round_robin', 'random', 'failover', 'smart'] as const
+export const ASSIGNMENT_ORDER = ['round_robin', 'random', 'failover', 'smart', 'super_smart'] as const
 
 /** The options of the assignment field; a mode written by hand that is not known is kept as it is. */
 export function assignmentOptions(current: string): SelectOption[] {
@@ -30,6 +31,7 @@ export function assignmentOptions(current: string): SelectOption[] {
 
 /** What the mode does, in words. */
 export function assignmentMeaning(mode: string): string {
+  if (mode === 'super_smart') return 'Like smart, with increasing preference for remaining capacity whose usage window resets soon; without reset times like smart.'
   if (mode === 'smart') return 'Picks the model with the most capacity left when its profile reports usage; otherwise like round robin.'
   const text = MODES[mode]
   return text === undefined ? '' : `How it picks: ${text}.`

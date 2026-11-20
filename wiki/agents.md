@@ -63,9 +63,9 @@ them, and writes a profile for each one found. It also gives models to the
 roles that have none:
 
 - CEO: the strongest model of each new profile (failover).
-- Product manager and reviewer: the strongest model agents may choose (round
-  robin).
-- Developer: a middle model (round robin).
+- Product manager: the strongest model agents may choose (super smart).
+- Developer: a middle model (super smart).
+- Reviewer: the strongest model agents may choose (random).
 
 **Settings → Agents → Detect agent programs** does the same later, for programs
 that have no profile yet, and lists what it wrote. It never changes an
@@ -130,13 +130,28 @@ one:
 
 | Assignment | Picks |
 |---|---|
-| **Round robin** | each model in turn (the default) |
+| **Round robin** | each model in turn |
 | **Random** | a model at random |
 | **Failover** | the first that can start; the next only when it cannot |
 | **Smart** | the model with the most capacity left, by the usage readings; without readings like round robin |
+| **Super smart** (`super_smart`) | like smart, with increasing preference for capacity whose usage window resets soon |
+
+The default assignment is super smart for the product manager and developer,
+random for the reviewer, and failover for the CEO. Existing explicit assignments
+are kept.
+
+Super smart scores each eligible metered model by remaining percentage ×
+(1 + 24 hours ÷ time until reset), using the window reported for that model
+(the fullest window below its limits). Time until reset has a one-second floor.
+Missing or elapsed reset times add no bonus; without reset times this is smart.
+For example, 80% used with 24 hours left scores 40, while 20% used with 7 days
+left scores about 91. After 20 hours, those scores become 140 and about 93,
+so the first profile is preferred before its allowance resets. Soft and hard
+usage limits still apply. Ties keep the role's order, and unknown or unmetered
+models take turns with the best metered model, just as in smart.
 
 With round robin and random, a model listed twice is picked twice as often;
-with failover and smart it counts once. Export
+with failover, smart and super smart it counts once. Export
 jobs use the developer's models. A ticket can name a model of its own
 (**Model** in its details, or `--model`); otherwise its role's list applies.
 The top of the Roles page says whether every role has a usable model. The

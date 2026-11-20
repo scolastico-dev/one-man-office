@@ -156,9 +156,9 @@ func TestPlanClaudeOnly(t *testing.T) {
 		assignment string
 	}{
 		"ceo":       {[]string{"claude/fable"}, api.AssignmentFailover},
-		"pm":        {[]string{"claude/opus"}, api.AssignmentRoundRobin},
-		"developer": {[]string{"claude/sonnet"}, api.AssignmentRoundRobin},
-		"reviewer":  {[]string{"claude/opus"}, api.AssignmentRoundRobin},
+		"pm":        {[]string{"claude/opus"}, "super_smart"},
+		"developer": {[]string{"claude/sonnet"}, "super_smart"},
+		"reviewer":  {[]string{"claude/opus"}, api.AssignmentRandom},
 	}
 	if len(p.Roles) != len(want) {
 		t.Fatalf("roles = %+v", p.Roles)

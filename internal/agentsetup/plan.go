@@ -27,7 +27,7 @@ var roleOrder = []string{"ceo", "pm", "developer", "reviewer"}
 // roles that have none: the CEO gets the strongest model of each new profile
 // (failover); the PM and the reviewer the strongest selectable one and the
 // developer the middle one of the selectable models, the stronger of two in
-// the middle (round robin). A role that
+// the middle. PM/developer use super_smart and reviewer uses random. A role that
 // has models is never in the plan. Roles missing from roles count as empty.
 // It never runs a program it finds.
 func Detect(lookPath func(string) (string, error), existing []api.Profile, roles []api.RoleSettings) Plan {
@@ -61,10 +61,7 @@ func Detect(lookPath func(string) (string, error), existing []api.Profile, roles
 		if roleHasModels(roles, name) {
 			continue
 		}
-		r := api.RoleSettings{Name: name, Assignment: api.AssignmentRoundRobin}
-		if name == "ceo" {
-			r.Assignment = api.AssignmentFailover
-		}
+		r := api.RoleSettings{Name: name, Assignment: api.DefaultAssignment(name)}
 		for _, p := range plan.Profiles {
 			if id, ok := pick(p, name); ok {
 				r.Models = append(r.Models, id)

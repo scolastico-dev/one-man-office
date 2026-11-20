@@ -19,7 +19,7 @@ export function roleResourceOptions(client: ApiClient, role: string): SettingsRe
     load: async () => {
       const [roles, settings] = await Promise.all([getRoles(client), getSettings(client)])
       const found = roles.data.find((x) => x.name === role)
-      const value = found === undefined ? { name: role, models: [], assignment: 'round_robin' } : plain(found)
+      const value = found === undefined ? { name: role, models: [], assignment: role === 'ceo' ? 'failover' : role === 'reviewer' ? 'random' : 'super_smart' } : plain(found)
       const errors: FileError[] = (settings.data.errors ?? []).filter((e) => isRoleFile(role, e.file))
       return { value, revision: found?.revision ?? NO_REVISION, errors }
     },
