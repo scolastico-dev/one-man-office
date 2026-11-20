@@ -34,6 +34,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/proxy"
+	"github.com/scolastico-dev/one-man-office/internal/relayhost"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/usage"
@@ -90,6 +91,7 @@ type Server struct {
 	// it before the server is ready. Agents receive it as OMO_SOCKET.
 	SocketEndpoint string
 
+	relay    *relayhost.Manager
 	opts     Options
 	log      *log.Logger
 	db       *sql.DB
@@ -283,6 +285,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if firstStart && o.DetectAgents != nil {
 		s.detectAtFirstStart()
 	}
+	if err = s.initRelay(); err != nil {
+		return nil, fmt.Errorf("open relay: %w", err)
+	}
 	s.proxyTransport = proxy.NewTransport()
 	s.mux = s.routes()
 	s.startMCPRelay()
@@ -329,6 +334,9 @@ func (s *Server) Close() error {
 		}
 		s.Shutdown(ended)
 		s.cancel()
+		if s.relay != nil {
+			_ = s.relay.Close()
+		}
 		s.wg.Wait()
 		s.stopPlugins()
 		s.stopSkillSets()

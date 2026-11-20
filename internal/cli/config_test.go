@@ -14,7 +14,7 @@ func TestConfigSetGetList(t *testing.T) {
 		t.Fatalf("get port = %q", out)
 	}
 	list := mustExecute(t, "config", "list")
-	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 10 {
+	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 12 {
 		t.Fatalf("list has %d lines:\n%s", n, list)
 	}
 	mustExecute(t, "config", "set", "basic_auth", "me:secret")

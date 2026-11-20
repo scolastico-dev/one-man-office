@@ -275,7 +275,7 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 		t.Fatal("an agent started a scan")
 	}
 
-	// The user is never refused: through the browser listener and on the
+	// User routes admit browser callers; localHumanOnly routes require the
 	// socket without a session header. GET rows first, so the writes do not
 	// change what they read.
 	rows := slices.Clone(s.routeTable)
@@ -292,7 +292,12 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 	b := newBrowser(t, s)
 	for _, row := range rows {
 		method, path, body := f.request(row)
-		if resp := asUser(b, s, method, path, body); resp.StatusCode == http.StatusForbidden {
+		resp := asUser(b, s, method, path, body)
+		if row.access == localHumanOnly {
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("%s through browser: %d, want 403 for local-only administration", row.pattern, resp.StatusCode)
+			}
+		} else if resp.StatusCode == http.StatusForbidden {
 			t.Errorf("%s through the browser: 403 for the user", row.pattern)
 		}
 		if method == http.MethodGet {
@@ -351,8 +356,18 @@ func TestSettingsRoutesInTable(t *testing.T) {
 	// scope; agents may write through the image upload, which follows the
 	// board's rule for comments (TestImageRoutesInTable), and the removal of
 	// a project from a ticket.
-	agentRows := map[string]routeAccess{
-		"GET /api/projects": agentRead, "GET /api/models": agentRead,
+	nonUserRows := map[string]routeAccess{
+		// These exact administration routes additionally require local provenance.
+		"GET /api/relay/status":          localHumanOnly,
+		"POST /api/relay/connect":        localHumanOnly,
+		"POST /api/relay/disconnect":     localHumanOnly,
+		"POST /api/relay/pair/begin":     localHumanOnly,
+		"GET /api/relay/pair/pending":    localHumanOnly,
+		"POST /api/relay/pair/accept":    localHumanOnly,
+		"POST /api/relay/pair/cancel":    localHumanOnly,
+		"GET /api/relay/devices":         localHumanOnly,
+		"DELETE /api/relay/devices/{id}": localHumanOnly,
+		"GET /api/projects":              agentRead, "GET /api/models": agentRead,
 		"GET /api/tickets/{n}/images": agentRead, "GET /api/images/{id}": agentRead, "GET /api/images/{id}/content": agentRead,
 		"POST /api/tickets/{n}/images": agentWrite,
 		// Removing a project from a ticket: the user and the CEO, by the
@@ -364,7 +379,7 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"DELETE /api/proxy/forwards/{id}": agentWrite,
 	}
 	for pattern, access := range got {
-		if access != userOnly && agentRows[pattern] != access {
+		if access != userOnly && nonUserRows[pattern] != access {
 			t.Errorf("%s is %s", pattern, access)
 		}
 	}

@@ -91,7 +91,7 @@ func TestRegisterRoutesRefusesRowsWithoutRule(t *testing.T) {
 // guardedPrefixes are the API paths whose routes may only be registered
 // through the route table, where each row states who may call it.
 var guardedPrefixes = []string{
-	"/api/proxy/forwards",
+	"/api/proxy/forwards", "/api/relay",
 	"/api/settings", "/api/profiles", "/api/models", "/api/roles", "/api/prompts",
 	"/api/projects", "/api/folders", "/api/agent-setup",
 	"/api/usage", "/api/skillsets", "/api/plugins", "/api/images", "/api/terminal-images",
