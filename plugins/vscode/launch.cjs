@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
+const {detectLocal, prepareProfile, incompatibleExtensions} = require('./profile.cjs');
 
 function canonical(folder) {
   const real = fs.realpathSync.native(folder);
@@ -28,6 +29,7 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   // User preferences/extensions belong to the editor, not a folder or release.
   // Runtime/socket state stays private to each simultaneously running folder.
   const profile = path.join(data, 'profiles', editor);
+  const local = detectLocal();
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
     // Editor connection/config selectors cannot override the explicit flags.
@@ -49,11 +51,10 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   }
   // Align portable-mode defaults (argv.json, policy/shared data) with the
   // explicit user-data flag, including upstream Windows APPDATA precedence.
-  const user = path.join(env.VSCODE_PORTABLE, 'user-data'), extensions = path.join(profile, 'extensions');
+  const user = path.join(env.VSCODE_PORTABLE, 'user-data');
   const server = env.VSCODE_AGENT_FOLDER, logs = path.join(state, 'logs'), downloads = path.join(profile, 'cache', 'extension-downloads');
   fs.mkdirSync(path.join(user, 'User'), { recursive: true, mode: 0o700 });
   fs.mkdirSync(path.join(user, 'Machine'), { recursive: true, mode: 0o700 });
-  fs.mkdirSync(extensions, { recursive: true, mode: 0o700 });
   fs.mkdirSync(logs, { recursive: true, mode: 0o700 });
   fs.mkdirSync(downloads, { recursive: true, mode: 0o700 });
   const settingsFile = path.join(user, 'User', 'settings.json');
@@ -63,6 +64,7 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   // creation also prevents concurrent first launches from replacing user edits.
   const initialSettings = JSON.stringify({
     'update.mode': 'none', 'telemetry.telemetryLevel': 'off',
+    ...(local ? {} : {'workbench.colorTheme': 'Default Dark Modern', 'chat.disableAIFeatures': true}),
     'terminal.integrated.env.linux': { XDG_RUNTIME_DIR: '${env:EDITOR_HOST_XDG_RUNTIME_DIR}' },
     'terminal.integrated.env.osx': { XDG_RUNTIME_DIR: '${env:EDITOR_HOST_XDG_RUNTIME_DIR}' },
   });
@@ -70,6 +72,7 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   catch (error) { if (error.code !== 'EEXIST') throw error; }
   try { fs.copyFileSync(settingsFile, path.join(user, 'Machine', 'settings.json'), fs.constants.COPYFILE_EXCL); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const {extensions, builtins, preload: fileRootPreload} = prepareProfile({editor, root, profile, state, data, user, local});
   let args;
   if (editor === 'code-server') {
     const config = path.join(state, 'config.yaml');
@@ -81,24 +84,29 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
     const publisherPaths = { data: path.join(state, 'data'), config: path.join(state, 'config'), runtime };
     for (const dir of Object.values(publisherPaths)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const preload = path.join(state, 'paths.cjs');
-    fs.writeFileSync(preload, 'Object.assign(require(' + JSON.stringify(path.join(root, 'out', 'node', 'util.js')) + ').paths,' + JSON.stringify(publisherPaths) + ');\n', { mode: 0o600 });
+    fs.writeFileSync(preload, 'require(' + JSON.stringify(path.join(__dirname, 'preference-history.cjs')) + ').installNativeHistory(' +
+      JSON.stringify(path.join(user, 'User')) + ',' + JSON.stringify(path.join(profile, 'preference-history')) + ');\n' +
+      'Object.assign(require(' + JSON.stringify(path.join(root, 'out', 'node', 'util.js')) + ').paths,' + JSON.stringify(publisherPaths) + ');\n', { mode: 0o600 });
     const socket = process.platform === 'win32' ? '\\\\.\\pipe\\omo-editor-' + createHash('sha256').update(runtime).digest('hex').slice(0, 24) : path.join(runtime, 'ipc');
     args = ['--require', preload, path.join(root, 'out', 'node', 'entry.js'), '--bind-addr', '127.0.0.1:' + port,
-      '--auth', 'none', '--config', config, '--user-data-dir', user, '--extensions-dir', extensions,
+      '--auth', 'none', '--enable-remote-storage', '--config', config, '--user-data-dir', user, '--extensions-dir', extensions, '--builtin-extensions-dir', builtins,
       '--session-socket', socket, '--vscode-option', 'server-data-dir=' + server, '--vscode-option', 'logsPath=' + logs,
       '--vscode-option', 'extensions-download-dir=' + downloads,
-      '--disable-telemetry', '--disable-update-check', '--ignore-last-opened',
+      '--disable-telemetry', '--disable-update-check', '--disable-workspace-trust', '--ignore-last-opened',
       '--trusted-origins', '127.0.0.1:' + port, '--', folder];
   } else {
-    args = [path.join(root, 'out', 'server-main.js'), '--host', '127.0.0.1', '--port', port,
-      '--without-connection-token',
+    args = ['--require', fileRootPreload, path.join(root, 'out', 'server-main.js'), '--host', '127.0.0.1', '--port', port,
+      '--without-connection-token', '--disable-workspace-trust',
       // The pinned publisher turns an explicit '/' into an empty client base,
       // breaking WebSocket URLs. Omission keeps its '/' default for subdomains.
       ...(base === '/' ? [] : ['--server-base-path', base]), '--server-data-dir', server,
-      '--user-data-dir', user, '--extensions-dir', extensions, '--extensions-download-dir', downloads, '--logsPath', logs,
+      '--user-data-dir', user, '--extensions-dir', extensions, '--builtin-extensions-dir', builtins, '--extensions-download-dir', downloads, '--logsPath', logs,
       '--default-folder', folder, '--telemetry-level', 'off'];
   }
-  return { folder, args, env };
+  const skipped = local ? incompatibleExtensions(extensions) : [];
+  const skippedPath = path.join(profile, 'incompatible-extensions.json');
+  fs.writeFileSync(skippedPath, JSON.stringify(skipped, null, 2) + '\n', {mode: 0o600});
+  return { folder, args, env, local, skipped, skippedPath };
 }
 function run(args) {
   const [editor, root, folder, data, id, port, base, runtime] = args;
@@ -106,6 +114,9 @@ function run(args) {
   console.log('Workspace: ' + JSON.stringify(options.folder));
   console.log('Editor: ' + editor + '; loopback 127.0.0.1:' + port + '; state ' + JSON.stringify(path.join(data, 'sessions', id)));
   console.log('Runtime: ' + JSON.stringify(runtime));
+  console.log(options.local ? 'Shared desktop profile: ' + JSON.stringify(options.local) : 'Persistent private browser profile (no desktop installation found).');
+  if (options.skipped.length) console.log('Incompatible desktop extension list: ' + JSON.stringify(options.skippedPath));
+  for (const id of options.skipped) console.log('Skipped incompatible desktop extension (UI only, no web entry point): ' + JSON.stringify(id));
   const child = spawn(process.execPath, options.args, { env: options.env, cwd: options.folder, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let bound = false, ready = false, ended = false, buffer = '', collision = false, probe;
   function check(chunk, stream) {

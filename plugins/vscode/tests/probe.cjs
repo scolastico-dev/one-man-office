@@ -3,10 +3,21 @@
 // test: run only by the explicit command documented in ../README.md.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawn,execFileSync}=require('node:child_process');const net=require('node:net');const assert=require('node:assert/strict');
-const {pinInstance,isRunning,stopChild}=require('./probe-state.cjs');
+const {pinInstance,isRunning,stopChild,freshSnapshot}=require('./probe-state.cjs');
+const {setup:setupProfileFixture}=require('./profile-fixture.cjs');
+const {installGate,runRaces}=require('./probe-race.cjs');
+const jsonc=require('../vendor/jsonc-parser/main.js');
 const {chromium}=require(path.resolve(__dirname,'../../../web/node_modules/playwright'));
 const editor=process.argv[2];if(!['code-server','openvscode'].includes(editor))throw new Error('Choose code-server or openvscode. Microsoft mode is unavailable.');
+const sharing=process.argv.includes('--profile-sharing'),localIndex=process.argv.indexOf('--local-product'),localProduct=localIndex<0?null:process.argv[localIndex+1];
+const races=process.argv.includes('--preference-races');
+if(races&&!sharing)throw new Error('--preference-races requires --profile-sharing');
+if(localProduct&&!['Code','VSCodium','Code - OSS'].includes(localProduct))throw new Error('Unknown local fixture product');
+let sharedFixture;
+let preferenceRaces;
 const subdomain=process.argv.includes('--subdomain'),crossSite=process.argv.includes('--cross-site'),smoke=process.argv.includes('--smoke');
+const cacheIndex=process.argv.indexOf('--cache-dir'),cache=cacheIndex<0?null:path.resolve(process.argv[cacheIndex+1]);
+let cacheLease=false;
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'omo-editor-probe-')),home=path.join(root,'omo'),project=path.join(root,'-- workspace " 世界');
 const otherProject=path.join(root,'second workspace');
 const binary=path.resolve(__dirname,'../../../bin/omo'),plugin=path.join(home,'plugins','vscode');
@@ -31,21 +42,27 @@ async function checkpoint(stage){const tasks=(await api('GET','/api/plugins/vsco
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,ms=30000){const until=performance.now()+ms;for(;;){const v=await fn();if(v)return v;if(performance.now()>until)throw new Error('probe condition timed out');await pause(150)}}
 async function api(method,route,body){const r=await fetch(base+route,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();if(!r.ok)throw new Error(route+' '+r.status+' '+text);return text?JSON.parse(text):undefined}
-async function command(page,name){await page.keyboard.press('F1');await page.locator('.quick-input-widget input').fill('>'+name);await page.locator('.quick-input-widget .monaco-list-row').filter({hasText:name}).first().click();}
+async function command(page,name){await page.bringToFront();await page.keyboard.press('F1');await page.locator('.quick-input-widget input').fill('>'+name);await page.locator('.quick-input-widget .monaco-list-row').filter({hasText:name}).first().click();}
 async function trustWorkspace(page){
- const initial=page.getByRole('button',{name:/Yes, I trust the authors/});
- if(await initial.waitFor({state:'visible',timeout:15000}).then(()=>true,()=>false)){await initial.click();return}
- await command(page,'Workspaces: Manage Workspace Trust');
- await wait(async()=>{if(await page.getByText('You trust this folder',{exact:true}).isVisible())return true;const trust=page.getByRole('button',{name:/^Trust/}).first();if(await trust.count()){await trust.click();return true}return false});
- const confirm=page.getByRole('button',{name:/Yes, I trust the authors/});if(await confirm.count())await confirm.click();
+ const config=JSON.parse(await page.locator('#vscode-workbench-web-configuration').getAttribute('data-settings'));
+ assert.equal(config.enableWorkspaceTrust,false,'omo folders must open trusted without accepting a prompt');
+ assert.equal(await page.getByRole('button',{name:/Yes, I trust the authors/}).count(),0);
 }
 async function terminalCheck(page,folder,shared=false){
- await trustWorkspace(page);await page.keyboard.press('Escape');await command(page,'Terminal: Create New Terminal');
+ await trustWorkspace(page);await wait(()=>fs.existsSync(path.join(folder,'.omo-fixture-active')));await page.keyboard.press('Escape');await command(page,'Terminal: Create New Terminal');
  const input=page.locator('.terminal-wrapper .xterm-helper-textarea').last();await input.waitFor({state:'attached',timeout:30000});await input.focus();
  await page.keyboard.type('git config --global --get user.name > .omo-probe-terminal; printf %s "$XDG_RUNTIME_DIR" > .omo-probe-runtime; printf %s "$EDITOR_PROBE_SETTING" > .omo-probe-setting');await page.keyboard.press('Enter');
  await wait(()=>fs.existsSync(path.join(folder,'.omo-probe-terminal'))&&fs.readFileSync(path.join(folder,'.omo-probe-terminal'),'utf8').trim()==='OmoProbe',30000);
  await wait(()=>fs.existsSync(path.join(folder,'.omo-probe-runtime'))&&fs.readFileSync(path.join(folder,'.omo-probe-runtime'),'utf8')===env.XDG_RUNTIME_DIR,30000);
  if(shared)await wait(()=>fs.existsSync(path.join(folder,'.omo-probe-setting'))&&fs.readFileSync(path.join(folder,'.omo-probe-setting'),'utf8')==='retained',30000);
+}
+async function inspectPreferences(page,folder,expected){
+ await wait(async()=>{
+  const file=path.join(folder,'.omo-fixture-settings.json'),before=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):null;
+  await command(page,'omo fixture: Inspect preferences');
+  await wait(()=>fs.existsSync(file)&&freshSnapshot(before,JSON.parse(fs.readFileSync(file,'utf8'))));
+  const actual=JSON.parse(fs.readFileSync(file,'utf8'));return Object.entries(expected).every(([key,value])=>actual[key]===value);
+ });
 }
 async function editCheck(page,folder){
  await page.keyboard.press('Control+P');await page.locator('.quick-input-widget input').fill('probe.txt');
@@ -56,8 +73,9 @@ async function editCheck(page,folder){
  const content='Saved directly through the browser editor.\n';await page.keyboard.type(content);await page.keyboard.press('Control+S');
  await wait(()=>fs.readFileSync(path.join(folder,'probe.txt'),'utf8')===content);
 }
-function runtime(task){const line=task.output.find(s=>s.startsWith('Runtime: '));assert.ok(line,'missing runtime path');const dir=JSON.parse(line.slice(9));assert.equal(fs.statSync(dir).mode&0o777,0o700);assert.ok(Buffer.byteLength(path.join(dir,'vscode-ipc-'+ 'a'.repeat(36)+'.sock'))<=103);return dir}
+function runtime(instance){const dir=instance.runtimePath;assert.ok(dir,'missing observed runtime path');assert.equal(fs.statSync(dir).mode&0o777,0o700);assert.ok(Buffer.byteLength(path.join(dir,'vscode-ipc-'+ 'a'.repeat(36)+'.sock'))<=103);return dir}
 async function main(){
+ if(cache){fs.mkdirSync(path.dirname(cache),{recursive:true});fs.mkdirSync(cache+'.in-use');cacheLease=true;}
  fs.writeFileSync(path.join(root,'.gitconfig'),'[user]\n name = OmoProbe\n');
  fs.mkdirSync(env.XDG_RUNTIME_DIR,{mode:0o700});
  const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));port=s.address().port;await new Promise(r=>s.close(r));assert.notEqual(port,8090);base='http://127.0.0.1:'+port;
@@ -68,9 +86,13 @@ async function main(){
   execFileSync('git',['-c','user.name=Probe','-c','user.email=probe@example.invalid','commit','-qm','test: initialize disposable editor workspace'],{cwd:folder,env});
  }
  execFileSync(binary,['config','set','port',String(port)],{env});
+ if(cache){const destination=path.join(home,'plugins','.data','vscode','.artifacts-v1');fs.mkdirSync(path.dirname(destination),{recursive:true});if(fs.existsSync(cache))fs.renameSync(cache,destination);}
  if(subdomain)execFileSync(binary,['config','set','proxy_base_host','apps.localhost'],{env});
  fs.writeFileSync(path.join(home,'settings.yaml'),'# isolated probe: no agent program detection\n');
- fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
+ fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','profile.cjs','profile-bridge.cjs','preference-sync.cjs','preference-history.cjs','browser-history.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
+ fs.cpSync(path.resolve(__dirname,'../vendor'),path.join(plugin,'vendor'),{recursive:true});
+ if(races)installGate(plugin,path.join(root,'race-control'));
+ sharedFixture=setupProfileFixture(root,env,editor,localProduct);
  fs.writeFileSync(path.join(home,'plugins','vscode.yaml'),'source: '+JSON.stringify(plugin)+'\nenabled: true\nconfig:\n  editor: '+editor+'\n  idle_minutes: 1\n');
  server=spawn(binary,[],{env,stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>log+=b);server.stderr.on('data',b=>log+=b);
  await wait(()=>{const m=log.match(/omo: http:\/\/omo\.localhost:\d+\/#([a-f0-9]{64})/);if(!isRunning(server))throw new Error('test server exited before ready');if(m)token=m[1];return !!token});
@@ -100,7 +122,7 @@ async function main(){
  await page.waitForURL(url=>url.pathname.includes('/proxy/')||url.hostname.endsWith('.apps.localhost'),{timeout:35*60000});
  const failed=[];page.on('response',r=>{if(r.status()>=400){const u=new URL(r.url()),item={status:r.status(),path:u.pathname};if(u.pathname.endsWith('/vscode-remote-resource')){item.resource=u.searchParams.get('path');r.text().then(body=>item.body=body.slice(0,500),()=>{});}failed.push(item)}});
  await page.locator('.monaco-workbench').waitFor({timeout:90000});
- // Accept the normal workspace trust prompt in this disposable project only.
+ // The server must disable the trust prompt; the probe never accepts it.
  await terminalCheck(page,project);
  await editCheck(page,project);
  await wait(async()=>{const task=await api('GET','/api/plugins/vscode/tasks');return task.tasks.some(t=>t.state==='running')});
@@ -124,10 +146,10 @@ async function main(){
  const routing={publisher:true,version:editor==='code-server'?'4.145.2':'1.109.5',platform:process.platform+'-'+process.arch,mode:subdomain?'subdomain':'path',boardOutsideProxyDomain:subdomain&&crossSite,authenticatedBootstrap:true,unauthenticatedDenied:true,clientBase,assets:assets.length,websockets:traffic.sockets};
  // Second click must reuse exactly the same process and forward.
  const secondPage=context.waitForEvent('page');await openProject();const page2=await secondPage;await page2.locator('.monaco-workbench').waitFor({timeout:90000});
- const second=await api('GET','/api/plugins/vscode/tasks');assert.equal(second.tasks.filter(t=>t.state==='running').length,1);assert.deepEqual(pinInstance(second.tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
+ const second=await api('GET','/api/plugins/vscode/tasks');assert.equal(second.tasks.filter(t=>t.state==='running').length,1);assert.deepEqual(pinInstance(second.tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder,firstInstance),firstInstance);
  const profile=path.join(home,'plugins','.data','vscode','profiles',editor),settingsFile=path.join(profile,'portable','user-data','Machine','settings.json');
  const retained=JSON.parse(fs.readFileSync(settingsFile));retained['files.autoSave']='off';retained['terminal.integrated.env.linux'].EDITOR_PROBE_SETTING='retained';fs.writeFileSync(settingsFile,JSON.stringify(retained));
- const extensionMarker=path.join(profile,'extensions','.omo-probe-preserved');fs.writeFileSync(extensionMarker,'retained across folders');
+ const extensionMarker=path.join(sharedFixture.extensions,'.omo-probe-preserved');fs.writeFileSync(extensionMarker,'retained across folders');
  // Keep two different folders active with the shared editor profile. Closing
  // one must reap only that stable identity while the other remains usable.
  const otherPopup=context.waitForEvent('page');await openProject('Second editor probe');const otherPage=await otherPopup;
@@ -137,13 +159,37 @@ async function main(){
  const both=(await api('GET','/api/plugins/vscode/tasks')).tasks.filter(t=>t.state==='running');assert.equal(both.length,2);
  assert.equal(JSON.parse(fs.readFileSync(settingsFile))['files.autoSave'],'off');assert.equal(fs.readFileSync(extensionMarker,'utf8'),'retained across folders');
  const otherInstance=pinInstance(both,(await api('GET','/api/proxy/forwards')).forwards,fs.realpathSync(otherProject));instances.push(otherInstance);
- const firstRuntime=runtime(both.find(t=>t.id===firstInstance.taskID)),otherRuntime=runtime(both.find(t=>t.id===otherInstance.taskID));assert.notEqual(firstRuntime,otherRuntime);
+ const firstRuntime=runtime(firstInstance),otherRuntime=runtime(otherInstance);assert.notEqual(firstRuntime,otherRuntime);
  captureChildren();await checkpoint('both-active');
  assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,2);
+ if(sharing){
+  await inspectPreferences(page,project,{theme:localProduct?(editor==='code-server'?'Light Modern':'Default Light Modern'):(editor==='code-server'?'Dark Modern':'Default Dark Modern'),chatDisabled:true,chatKnown:true});
+  await command(page,'omo fixture: Set font size');
+  const preferences=path.join(sharedFixture.sharedUser,'settings.json');
+  await wait(()=>jsonc.parse(fs.readFileSync(preferences,'utf8'))['editor.fontSize']===22);
+  fs.writeFileSync(preferences,jsonc.applyEdits(fs.readFileSync(preferences,'utf8'),jsonc.modify(fs.readFileSync(preferences,'utf8'),['editor.fontSize'],20,{formattingOptions:{insertSpaces:true,tabSize:2}})));
+  await inspectPreferences(page,project,{font:20});
+  await command(page,'omo fixture: Install extension');
+  await wait(()=>fs.existsSync(path.join(project,'.omo-installed-active')));
+  const installed=JSON.parse(fs.readFileSync(path.join(sharedFixture.extensions,'extensions.json'),'utf8')).find(e=>e.identifier.id==='omo.browser-installed');
+  assert.ok(installed,'browser installation must update the shared desktop extension inventory');assert.equal(installed.location.scheme,'file');
+  if(races)preferenceRaces=await runRaces({page,folder:project,sharedUser:sharedFixture.sharedUser,profile,control:path.join(root,'race-control'),command,wait});
+ }
  if(smoke){
   for(const task of both)await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(task.name)+'/stop',{});
   await wait(()=>!fs.existsSync(firstRuntime)&&!fs.existsSync(otherRuntime));await wait(()=>remainingChildren().length===0);assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,0);
-  const report={editor,...routing,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
+  if(sharing){
+   await page.close();await page2.close();await otherPage.close();
+   fs.unlinkSync(path.join(project,'.omo-fixture-active'));fs.unlinkSync(path.join(project,'.omo-installed-active'));
+   const restartedPopup=context.waitForEvent('page');await openProject();const restarted=await restartedPopup;await restarted.locator('.monaco-workbench').waitFor({timeout:90000});
+   const records=(await api('GET','/api/plugins/vscode/tasks')).tasks;
+   const instance=pinInstance(records,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder);instances.push(instance);
+   assert.notEqual(instance.taskID,firstInstance.taskID);assert.notEqual(instance.forwardID,firstInstance.forwardID);if(subdomain)assert.notEqual(new URL(restarted.url()).origin,appURL.origin,'restart must recover preferences on a fresh browser origin');
+   await wait(()=>fs.existsSync(path.join(project,'.omo-fixture-active'))&&fs.existsSync(path.join(project,'.omo-installed-active')));
+   await inspectPreferences(restarted,project,{font:20,theme:localProduct?(editor==='code-server'?'Light Modern':'Default Light Modern'):(editor==='code-server'?'Dark Modern':'Default Dark Modern'),chatDisabled:true,chatKnown:true});
+   const dir=runtime(instance);captureChildren();await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(instance.taskName)+'/stop',{});await wait(()=>!fs.existsSync(dir));await wait(()=>remainingChildren().length===0);
+  }
+  const report={editor,...routing,profileSharing:sharing,localProduct,preferenceRaces,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));return;
  }
  // Last-disconnect idle: active sockets must survive > 1 minute, then expire.
@@ -151,10 +197,10 @@ async function main(){
  await pause(65000);assert.equal((await api('GET','/api/plugins/vscode/tasks')).tasks.filter(t=>t.state==='running').length,2);
  await page.close();await page2.close();await pause(5000);
  const reopened=context.waitForEvent('page');await openProject();const page3=await reopened;await page3.locator('.monaco-workbench').waitFor({timeout:90000});
- assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
- await pause(65000);assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder),firstInstance);
+ assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder,firstInstance),firstInstance);
+ await pause(65000);assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,firstInstance.folder,firstInstance),firstInstance);
  captureChildren();const firstClosed=performance.now();await page3.close();await checkpoint('first-folder-disconnected');await wait(async()=>(await api('GET','/api/plugins/vscode/tasks')).tasks.some(t=>t.id===firstInstance.taskID&&t.state==='exited'&&t.reason==='idle'),90000);const firstIdleMs=Math.round(performance.now()-firstClosed);
- assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,otherInstance.folder),otherInstance);
+ assert.deepEqual(pinInstance((await api('GET','/api/plugins/vscode/tasks')).tasks,(await api('GET','/api/proxy/forwards')).forwards,otherInstance.folder,otherInstance),otherInstance);
  await wait(()=>!fs.existsSync(firstRuntime));assert.equal(fs.existsSync(otherRuntime),true);
  assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,1);await checkpoint('before-second-folder-reload');await otherPage.reload();await otherPage.locator('.monaco-workbench').waitFor({timeout:90000});
  captureChildren();const otherClosed=performance.now();await otherPage.close();await checkpoint('second-folder-reload-disconnected');await wait(async()=>(await api('GET','/api/plugins/vscode/tasks')).tasks.some(t=>t.id===otherInstance.taskID&&t.state==='exited'&&t.reason==='idle'),90000);const secondIdleMs=Math.round(performance.now()-otherClosed);assert.equal((await api('GET','/api/plugins/vscode/tasks')).tasks.filter(t=>t.state==='running').length,0);
@@ -169,4 +215,5 @@ main().catch(async error=>{
  console.error(String(error.stack||error).replaceAll(token||'no-token','[test-token]'));process.exitCode=1;
 }).finally(async()=>{if(server?.pid&&isRunning(server))captureChildren();await browser?.close();await stopChild(server);
  await wait(()=>remainingChildren().length===0).catch(error=>{console.error(error.message);process.exitCode=1});fs.writeFileSync(path.join(root,'shutdown.json'),JSON.stringify({serverExit:server?.exitCode,serverSignal:server?.signalCode,browserConnected:browser?.isConnected()??false,trackedChildren:[...children.values()],remainingChildren:remainingChildren()},null,2));
+ if(cacheLease){const source=path.join(home,'plugins','.data','vscode','.artifacts-v1');if(fs.existsSync(source))fs.renameSync(source,cache);fs.rmdirSync(cache+'.in-use');}
  console.log('Isolated probe files retained at '+root);});

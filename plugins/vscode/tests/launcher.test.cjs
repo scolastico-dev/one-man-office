@@ -41,11 +41,12 @@ const fs=require('node:fs'),http=require('node:http'),path=require('node:path'),
 const args=process.argv.slice(2), find=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;
 const toolConfig={git:cp.execFileSync('git',['config','--global','--get','omo.launcherFixture'],{encoding:'utf8'}).trim(),ssh:fs.readFileSync(path.join(process.env.HOME,'.ssh/config'),'utf8')};
 for(const key of ['USERPROFILE','XDG_CONFIG_HOME','APPDATA','LOCALAPPDATA'])toolConfig[key]=fs.readFileSync(path.join(process.env[key],'tool-config'),'utf8');
-let publisherPaths;
+let publisherPaths,effectiveBuiltins;
+if(!find('--bind-addr')){globalThis._VSCODE_FILE_ROOT=path.dirname(process.argv[1]);effectiveBuiltins=path.join(path.dirname(globalThis._VSCODE_FILE_ROOT),'extensions');}
 if(find('--bind-addr')){publisherPaths=require('./util.js').paths;for(const name of ['data','config','runtime']){fs.mkdirSync(publisherPaths[name],{recursive:true});fs.writeFileSync(path.join(publisherPaths[name],'publisher-'+name),'fixture');}}
 let ipcPath;
 if(process.env.EDITOR_FIXTURE_IPC_PROBE){const net=require('node:net');ipcPath=path.join(process.env.XDG_RUNTIME_DIR,'vscode-ipc-11111111-1111-4111-8111-111111111111.sock');const ipc=net.createServer(socket=>socket.end(toolConfig.git));ipc.on('error',error=>{console.error(error.code);process.exit(24)});ipc.listen(ipcPath);}
-fs.writeFileSync(process.env.CAPTURE_FILE,JSON.stringify({args,env:process.env,cwd:process.cwd(),toolConfig,publisherPaths,ipcPath}));
+fs.writeFileSync(process.env.CAPTURE_FILE,JSON.stringify({args,env:process.env,cwd:process.cwd(),toolConfig,publisherPaths,effectiveBuiltins,ipcPath}));
 const addr=find('--bind-addr'),port=addr?Number(addr.split(':')[1]):Number(find('--port'));
 const server=http.createServer((q,s)=>s.end('fixture editor'));
 server.on('error',e=>{console.error(e.code);process.exit(1)});
@@ -89,8 +90,9 @@ for(const editor of ['code-server','openvscode']) test(editor+' preserves fake h
   for(const dir of [user,extensions,vscodeFlag(capture,'--server-data-dir',editor),vscodeFlag(capture,'--logsPath',editor),vscodeFlag(capture,'--extensions-download-dir',editor)])assert.ok(dir?.startsWith(f.data+path.sep),String(dir));
   assert.equal(user,path.join(capture.env.VSCODE_PORTABLE,'user-data'));
   assert.ok(capture.args.includes(f.folder));assert.equal(capture.cwd,f.folder);
+  assert.ok(capture.args.includes('--disable-workspace-trust'),'omo folders must open trusted without a prompt');
   if(editor==='code-server'){
-    assert.equal(flag(capture,'--auth'),'none');assert.ok(capture.args.includes('--disable-update-check'));assert.ok(capture.args.includes('--trusted-origins'));
+    assert.equal(flag(capture,'--auth'),'none');assert.ok(capture.args.includes('--enable-remote-storage'),'workbench state must survive a new browser origin after restart');assert.ok(capture.args.includes('--disable-update-check'));assert.ok(capture.args.includes('--trusted-origins'));
     assert.equal(flag(capture,'--bind-addr'),'127.0.0.1:'+p);
     assert.ok(flag(capture,'--session-socket').startsWith(r.runtime+path.sep)||flag(capture,'--session-socket').startsWith('\\\\.\\pipe\\omo-editor-'));
     assert.ok(flag(capture,'--config').startsWith(f.data+path.sep));
@@ -100,8 +102,14 @@ for(const editor of ['code-server','openvscode']) test(editor+' preserves fake h
   }else{
     assert.ok(capture.args.includes('--without-connection-token'));assert.equal(flag(capture,'--server-base-path'),'/proxy/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/');
     assert.equal(flag(capture,'--default-folder'),f.folder);assert.equal(flag(capture,'--host'),'127.0.0.1');
+    assert.equal(fs.existsSync(path.join(capture.effectiveBuiltins,'omo.profile-bridge','package.json')),true,'the upstream bootstrap must actually resolve the private builtin overlay');
   }
   assert.equal(JSON.parse(fs.readFileSync(path.join(user,'Machine','settings.json')))['update.mode'],'none');
+  for(const scope of ['User','Machine']){
+    const defaults=JSON.parse(fs.readFileSync(path.join(user,scope,'settings.json')));
+    assert.equal(defaults['workbench.colorTheme'],'Default Dark Modern');
+    assert.equal(defaults['chat.disableAIFeatures'],true);
+  }
   const response=await fetch('http://127.0.0.1:'+p);assert.equal(await response.text(),'fixture editor');
 });
 for(const editor of ['code-server','openvscode'])test(editor+' shares edited profile/extensions across concurrent folders and artifact versions but separates runtime',async t=>{
@@ -127,6 +135,7 @@ for(const editor of ['code-server','openvscode'])test(editor+' applies Windows s
   // Exercise the launcher's native Windows branch using an isolated startup
   // module. This is a flag/environment fixture, not a native Windows claim.
   fs.writeFileSync(platform,"Object.defineProperty(process,'platform',{value:'win32'});");
+  if(editor==='openvscode')fs.writeFileSync(path.join(f.cache,'publisher-file'),'verified publisher file');
   const r=run(t,f,editor,await port(),'c'.repeat(32),{NODE_OPTIONS:'--require '+JSON.stringify(platform)});
   await until(()=>r.output().includes('OMO_EDITOR_READY'));
   const capture=JSON.parse(fs.readFileSync(r.capture));
@@ -134,6 +143,7 @@ for(const editor of ['code-server','openvscode'])test(editor+' applies Windows s
   for(const key of ['tmp','TmpDir','code_server_config','vscode_appdata','CODE_SERVER_HOST','NODE_OPTIONS'])assert.equal(capture.env[key],undefined,key);
   assert.equal(capture.env.TMP,r.runtime);assert.equal(capture.env.TEMP,capture.env.TMP);
   assert.equal(capture.toolConfig.git,'host-config-readable');
+  if(editor==='openvscode'){const alias=path.join(path.dirname(flag(capture,'--builtin-extensions-dir')),'publisher','publisher-file');assert.equal(fs.readFileSync(alias,'utf8'),'verified publisher file');assert.equal(fs.lstatSync(alias).isSymbolicLink(),false,'Windows file aliases must not require symlink privileges');}
   if(editor==='code-server')assert.match(flag(capture,'--session-socket'),/^\\\\\.\\pipe\\omo-editor-[a-f0-9]{24}$/);
 });
 test('Windows pipes preserve case-sensitive roots and change with each runtime lease',async t=>{
@@ -236,4 +246,22 @@ test('identity has one unambiguous hex marker despite Node startup warnings and 
 test('Microsoft cannot be selected through launcher entry or legacy consent',async t=>{
  const f=setup(t,"process.exit(0)");const r=await run(t,f,'microsoft',await port()).end;
  assert.notEqual(r.code,0);assert.match(r.output,/unavailable/);
+});
+for(const editor of ['code-server','openvscode'])for(const product of ['Code','VSCodium'])test(editor+' shares '+product+' extensions and bridges its user profile without opening its native database',async t=>{
+ const f=setup(t,editorScript,editor),home=process.platform==='win32'?f.host.USERPROFILE:f.host.HOME;
+ const config=process.platform==='darwin'?path.join(home,'Library','Application Support'):process.platform==='win32'?f.host.APPDATA:f.host.XDG_CONFIG_HOME;
+ const desktop=path.join(config,product,'User'),extensions=path.join(home,product==='Code'?'.vscode':'.vscode-oss','extensions');
+ fs.mkdirSync(path.join(desktop,'globalStorage'),{recursive:true});fs.mkdirSync(extensions,{recursive:true});
+ const settings='// Desktop JSONC\n{"workbench.colorTheme":"Fixture Light","chat.disableAIFeatures":false,}\n';
+ fs.writeFileSync(path.join(desktop,'settings.json'),settings);fs.writeFileSync(path.join(desktop,'globalStorage','state.vscdb'),'encrypted native secrets');
+ fs.writeFileSync(path.join(extensions,'desktop-extension'),'desktop extension');
+ fs.mkdirSync(path.join(extensions,'fixture.desktop-ui'));fs.writeFileSync(path.join(extensions,'fixture.desktop-ui','package.json'),JSON.stringify({publisher:'fixture',name:'desktop-ui',version:'1.0.0',engines:{vscode:'^1.109.0'},main:'./index.js',extensionKind:['ui']}));fs.writeFileSync(path.join(extensions,'fixture.desktop-ui','index.js'),'exports.activate=()=>{};');
+ const r=run(t,f,editor,await port());await until(()=>r.output().includes('OMO_EDITOR_READY'));const capture=JSON.parse(fs.readFileSync(r.capture));
+ assert.equal(flag(capture,'--extensions-dir'),extensions);
+ const user=flag(capture,'--user-data-dir');assert.ok(user.startsWith(f.data+path.sep));assert.notEqual(user,path.dirname(desktop));
+ const builtin=flag(capture,'--builtin-extensions-dir'),bridge=path.join(builtin,'omo.profile-bridge');
+ assert.ok(builtin.startsWith(f.data+path.sep));assert.equal(JSON.parse(fs.readFileSync(path.join(bridge,'profile.json'))).sharedUser,desktop);
+ assert.equal(fs.readFileSync(path.join(desktop,'settings.json'),'utf8'),settings);assert.equal(fs.readFileSync(path.join(desktop,'globalStorage','state.vscdb'),'utf8'),'encrypted native secrets');
+ fs.writeFileSync(path.join(flag(capture,'--extensions-dir'),'browser-extension'),'browser extension');assert.equal(fs.readFileSync(path.join(extensions,'browser-extension'),'utf8'),'browser extension');
+ assert.match(r.output(),/Shared desktop profile:/);assert.match(r.output(),/Skipped incompatible desktop extension.*fixture.desktop-ui/);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.data,'profiles',editor,'incompatible-extensions.json'))),['fixture.desktop-ui']);
 });

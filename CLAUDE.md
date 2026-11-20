@@ -792,6 +792,51 @@ long-lived child and on a shell option. The e2e
 process is closed. omo's own agent containment on Windows is product work, not
 covered here.
 
+## VS Code plugin profiles and launch
+
+`plugins/vscode/launch.cjs` passes `--disable-workspace-trust` to both pinned
+publishers. Without a local desktop profile, fresh settings initialize
+`workbench.colorTheme=Default Dark Modern` and `chat.disableAIFeatures=true`,
+preserving existing JSONC verbatim.
+code-server enables its supported `--enable-remote-storage` for on-disk
+workbench state. `profile.cjs` detects standard desktop default profiles and
+shares the selected extension inventory. `profile-bridge.cjs` mirrors user-scoped
+settings/keybindings/tasks/snippets through the actual browser user-data provider
+into the desktop User folder or private persistent preferences.
+`preference-sync.cjs` serializes clients through a native SQLite transaction,
+merges disjoint JSONC setting edits and preserves conflicts privately; native
+storage databases are outside its file allowlist. jsonc-parser 3.3.1 is vendored
+with its MIT licence. `preference-history.cjs` records code-server's native
+preference payloads through its inherited Node preload, preserving fs.write's
+promisify metadata and covering `.vsctmp` disk-provider saves. OpenVSCode's
+private renderer overlay prepends `browser-history.cjs` to
+`out/vs/code/browser/workbench/workbench.js`: preference put/delete history is
+committed in the same IndexedDB transaction in `vscode-web-db` /
+`vscode-userdata-store`. The bridge verifies a fresh recording challenge before
+mutating browser preferences, archives intervening versions privately, then
+acknowledges only those records. Publisher updates must recheck these internals.
+Native-profile clients issue their own provider operation on a shared version
+change, even when another client already wrote the bytes, to refresh each UI.
+The shared `nativeFiles` adapter atomically displaces and archives the actual
+desktop file before writes/deletions, then publishes/restores with exclusive
+creation. A desktop save during the final async read or after displacement is
+left live or preserved privately. Failed archive/restore retains and reports an
+`.omo-displaced-<uuid>` sibling; native staging/recovery files are not snippets.
+Archives publish from complete staging files and verify existing copies before
+reuse, retaining a new complete copy beside interrupted or edited archives.
+Native archives retain inode references as well as byte copies, protecting
+in-place saves through descriptors opened before displacement, even after the
+commit returns. If the inode cannot be linked into private archives, keep and
+report its native recovery sibling instead; do not clean it up as a temporary.
+`--preference-races --smoke --profile-sharing` exercises all four file categories
+and both mutation paths against the real pinned publishers without sleeps.
+The pinned OpenVSCode bootstrap overrides builtin paths,
+so a FileAccess preload uses a private publisher-root overlay; artifacts stay
+unchanged. The opt-in publisher probe asserts the served trust option
+and never accepts a trust prompt. Routine coverage: `node --test
+plugins/vscode/tests/*.test.cjs`, `lua5.1 plugins/vscode/tests/hooks.lua`, and
+`go test ./internal/plugins ./internal/pluginmanager`.
+
 ## Web UI workflow verification
 
 Developer/reviewer/PM defaults teach register → configure returned base →

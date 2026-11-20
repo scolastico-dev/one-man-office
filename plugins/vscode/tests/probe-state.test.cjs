@@ -44,6 +44,22 @@ test('publisher probe cleanup completes when its server was already closed by a 
  child.kill('SIGTERM');await closed;
  assert.equal(child.exitCode,null);assert.notEqual(child.signalCode,null);
  assert.equal(isRunning(child),false);
- const complete=await Promise.race([stopChild(child,20).then(()=>true),new Promise(r=>setTimeout(()=>r(false),100))]);
- assert.equal(complete,true,'cleanup waited for a close event that already happened');
+ await stopChild(child,20);
+ assert.equal(isRunning(child),false,'cleanup observes the completed process without waiting for another close event');
+});
+test('publisher probe retains observed runtime and stable ownership after the task output tail rolls over',()=>{
+ const folder='/fixture/workspace',original={...task('one',folder),output:['Workspace: '+JSON.stringify(folder),'Runtime: '+JSON.stringify('/fixture/runtime')]};
+ const forwards=[forward('owned','one')],known=pinInstance([original],forwards,folder);
+ assert.equal(known.runtimePath,'/fixture/runtime');
+ const quiet={...original,output:Array.from({length:100},(_,i)=>'later editor output '+i)};
+ assert.deepEqual(pinInstance([quiet],forwards,folder,known),known);
+ assert.throws(()=>pinInstance([quiet],[forward('replacement','one')],folder,known),/forward identity/);
+ assert.throws(()=>pinInstance([quiet],forwards,'/different/folder',known),/workspace identity/);
+});
+test('fresh probe responses recognize a new extension host even when its counter restarts',()=>{
+ const {freshSnapshot}=require('./probe-state.cjs'),previous={instance:'first',sequence:51};
+ assert.equal(freshSnapshot(previous,{instance:'second',sequence:1}),true);
+ assert.equal(freshSnapshot(previous,{instance:'first',sequence:52}),true);
+ assert.equal(freshSnapshot(previous,previous),false);
+ assert.equal(freshSnapshot(previous,null),false);
 });
