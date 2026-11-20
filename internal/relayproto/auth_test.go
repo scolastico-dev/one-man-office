@@ -2,6 +2,9 @@ package relayproto
 
 import (
 	"bytes"
+	"crypto/mlkem"
+	"crypto/mlkem/mlkemtest"
+	"errors"
 	"testing"
 	"time"
 )
@@ -281,5 +284,100 @@ func TestProvedPairRejectsWrongOrReusedAcceptance(t *testing.T) {
 				t.Fatal("failed attempt not spent")
 			}
 		})
+	}
+}
+
+// An attacker can encapsulate to the UI public key, but cannot recover ssH
+// from the UI's challenge to the pinned host key. Dropping ssH from the PRK
+// would turn this correctly shaped forged proof into a successful handshake.
+func TestHostPublicKeyWithoutPrivatePossessionFails(t *testing.T) {
+	c := authContext(t, "reconnect")
+	u, init, e := NewUIHandshake(c, identityFor(t, 2), fixedRandom(10))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer u.Close()
+	wrongSS, e := identityFor(t, 9).key.Decapsulate(init.CTH)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(wrongSS)
+	uiKey, e := mlkem.NewEncapsulationKey768(c.PKU)
+	if e != nil {
+		t.Fatal(e)
+	}
+	knownSS, ctU, e := mlkemtest.Encapsulate768(uiKey, bytes.Repeat([]byte{12}, 32))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(knownSS)
+	challenge := Inner{V: Version, Type: "auth.challenge", NH: bytes.Repeat([]byte{11}, 32), CTU: ctU}
+	forged := deriveAuth(c, init, challenge, wrongSS, knownSS, "host")
+	defer forged.Close()
+	challenge.ProofH = hostProof(forged.prk, forged.transcript)
+	wire, e := EncodeInner(challenge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	challenge, e = DecodeInner(wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	finish, result, e := u.Finish(challenge)
+	if !errors.Is(e, ErrAuthentication) || result != nil || finish.Type != "" {
+		t.Fatal("host without pinned private key authenticated", e)
+	}
+}
+
+// The mirror attacker knows ssH from its own encapsulation to the host, but
+// cannot recover ssU from the host challenge to the pinned UI key. Dropping
+// ssU from the PRK would let it produce an accepted, well-formed UI proof.
+func TestUIPublicKeyWithoutPrivatePossessionFails(t *testing.T) {
+	c := authContext(t, "reconnect")
+	hostKey, e := mlkem.NewEncapsulationKey768(c.PKH)
+	if e != nil {
+		t.Fatal(e)
+	}
+	knownSS, ctH, e := mlkemtest.Encapsulate768(hostKey, bytes.Repeat([]byte{10}, 32))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(knownSS)
+	hf, e := Fingerprint("host", c.PKH)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ui, e := Fingerprint("ui", c.PKU)
+	if e != nil {
+		t.Fatal(e)
+	}
+	init := Inner{V: Version, Type: "auth.init", HostFP: hf, UIID: ui, PairEpoch: c.PairEpoch, NU: bytes.Repeat([]byte{9}, 32), CTH: ctH}
+	h, e := NewHostHandshake(c, identityFor(t, 1), fixedRandom(11))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer h.Close()
+	challenge, e := h.Challenge(init)
+	if e != nil {
+		t.Fatal(e)
+	}
+	wrongSS, e := identityFor(t, 9).key.Decapsulate(challenge.CTU)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(wrongSS)
+	forged := deriveAuth(c, init, challenge, knownSS, wrongSS, "ui")
+	defer forged.Close()
+	finish := Inner{V: Version, Type: "auth.finish", ProofU: uiProof(forged.prk, forged.transcript, challenge.ProofH)}
+	wire, e := EncodeInner(finish)
+	if e != nil {
+		t.Fatal(e)
+	}
+	finish, e = DecodeInner(wire)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if result, e := h.Finish(finish); !errors.Is(e, ErrAuthentication) || result != nil {
+		t.Fatal("UI without pinned private key authenticated", e)
 	}
 }

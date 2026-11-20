@@ -131,6 +131,25 @@ func validFingerprint(s string) bool {
 	return true
 }
 
+// Require ASCII DNS labels, including preconverted IDNA A-labels. Silently
+// punycoding a Unicode origin would change the transcript used by native peers.
+func validDNSHost(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	for _, part := range strings.Split(host, ".") {
+		if len(part) == 0 || len(part) > 63 || part[0] == '-' || part[len(part)-1] == '-' {
+			return false
+		}
+		for _, c := range part {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Route binds cryptographic operations to a canonical configured relay and host.
 // Construct it through NewRoute; all cryptographic entry points validate it.
 type Route struct {
@@ -144,6 +163,9 @@ func NewRoute(origin, hostID string, allowLoopbackHTTP bool) (Route, error) {
 		return Route{}, ErrProtocol
 	}
 	host := strings.ToLower(u.Hostname())
+	if net.ParseIP(host) == nil && !validDNSHost(host) {
+		return Route{}, ErrProtocol
+	}
 	port := u.Port()
 	if host == "" || strings.ContainsAny(host, "% \\\t\r\n") || strings.HasSuffix(host, ".") {
 		return Route{}, ErrProtocol

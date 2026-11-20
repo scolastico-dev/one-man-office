@@ -130,7 +130,7 @@ If a reply/disconnect occurs after local acceptance, the pending pair survives r
 
 Encrypted inner object is `record {session,seq,ciphertext}`. `seq` starts at zero independently in each direction; nonce is `0x00000000 || u64be(seq)`, 12 bytes. AES-256-GCM uses a 16-byte tag; ciphertext is sealed bytes including the tag. AAD is `E("omo-relay-v1/record",v,suite,T,direction,u64be(seq))` where direction is `ui-host` or `host-ui`. Use `aes.NewCipher(32-byte-key)` and `cipher.NewGCM`, never optional tag/nonce lengths. Increment a single direction counter in the session writer for **all** control and stream records, not per stream. [Go GCM API](https://pkg.go.dev/crypto/cipher@go1.26.2#NewGCM), [HKDF](https://www.rfc-editor.org/rfc/rfc5869).
 
-Authenticate before parsing plaintext or changing receive state. Require seq to equal the next expected value, so duplicate, gap, reflection or reordering aborts that session. Endpoints redo the handshake before 2^24 records or 2^36 plaintext bytes per direction, whichever comes first; drain/cancel streams and establish a new session instead of resetting a nonce counter. No session/counters survive a socket loss. The relay cannot splice another session or device's ciphertext undetectably. GCM does not prevent deletion, delay or denial of service.
+Authenticate before parsing plaintext or changing receive state. Require seq to equal the next expected value, so duplicate, gap, reflection or reordering aborts that session. Endpoints allow at most 2^24 records and 2^36 plaintext bytes per direction, redoing the handshake before the next record would exceed either bound; drain/cancel streams and establish a new session instead of resetting a nonce counter. No session/counters survive a socket loss. The relay cannot splice another session or device's ciphertext undetectably. GCM does not prevent deletion, delay or denial of service.
 
 Record plaintext is strict JSON with `v,type` and the following fields. Handshake ready/confirm records above use the same sequence space. Application data becomes a multiplexed byte transport, allowing the existing HTTP and WebSocket protocols to operate unchanged inside encryption:
 
@@ -231,8 +231,10 @@ member ordering and insignificant whitespace are not cryptographic encodings.
 `type` is a literal string; suite is implicit in v and cannot be negotiated.
 Unsigned decimal strings fit uint64 and contain only `0` or a nonzero digit
 followed by digits; no leading zeros, signs, decimal points or escaped digits.
-Base64url has no padding/whitespace, uses only the URL alphabet and has zero
-unused pad bits. Byte lengths below refer to decoded values.
+Base64url decoded JSON string values have no padding/whitespace, use only
+the URL alphabet and have zero unused pad bits. JSON string escapes are allowed
+when the resulting value is canonical; canonical decimal counter strings
+additionally require literal digits as stated above. Byte lengths below refer to decoded values.
 
 | Fields | Representation |
 | --- | --- |
@@ -304,10 +306,14 @@ The following are exported by `internal/relayproto`; use these codecs rather
 than marshaling the union structs directly. Every codec returns an error on
 invalid wire values. All cryptographic entry points validate canonical Route,
 key, nonce, epoch and mode lengths. `NewRoute(origin, hostID, allowLoopbackHTTP)`
-canonicalizes hostname case and removes the default port; it rejects userinfo,
+canonicalizes ASCII hostname case and removes the default port; it rejects userinfo,
 path (including `/`), query and fragment. Insecure HTTP is accepted only with
 explicit opt-in for localhost or a literal loopback IP. Call it at configuration
-time; never silently accept an endpoint-provided replacement route.
+time; never silently accept an endpoint-provided replacement route. DNS hosts
+must use ASCII labels (letters, digits, interior hyphens, 1..63 characters
+per label, 253 total), including preconverted IDNA A-labels. Unicode, underscores,
+empty labels and leading/trailing hyphens are rejected. Do not independently
+IDNA-convert a configured origin when building a transcript.
 
 ```go
 const Version uint16 = 1
@@ -350,6 +356,15 @@ and all streams, under one send lock. Do not seal concurrently and then write
 in completion order: ciphertext order must match seq order. A failed or
 uncertain send closes the session; never discard a sealed record and continue.
 Exactly one consumer calls Receive and demultiplexes stream/control records.
+
+Exported sentinel errors are `ErrProtocol` and `ErrAuthentication`; callers
+may use `errors.Is`. Exported limits are `MaxControlSize` (1048576),
+`MaxInnerSize` (65536), `MaxNotificationSize` (524288),
+`MaxNotificationPlaintext` (262144), `MaxStreamData` (16384), `MaxStreams` (64),
+`InitialCredit` (65536), `MaxRecords` (16777216) and `MaxRecordBytes`
+(68719476736). PairPhase constants are `PairClosed`, `PairArmed`,
+`PairCommitted`, `PairRevealed`, `PairProved`, `PairAccepted`, `PairSpent`, with
+the lowercase string values shown in section 4.
 
 Pairing interfaces:
 

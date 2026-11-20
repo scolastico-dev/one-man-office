@@ -105,3 +105,16 @@ func TestZeroIdentityRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteHostUsesInteroperableASCIIEncoding(t *testing.T) {
+	for _, origin := range []string{"https://bücher.example", "https://relay_office.example", "https://a..example", "https://-relay.example", "https://relay-.example", "https://[example.com]"} {
+		if _, e := NewRoute(origin, "office", false); e == nil {
+			t.Errorf("noncanonical hostname accepted: %s", origin)
+		}
+	}
+	for _, origin := range []string{"https://xn--bcher-kva.example", "https://relay-office.example", "https://127.0.0.1", "https://[::1]"} {
+		if r, e := NewRoute(origin, "office", false); e != nil || r.Origin != origin {
+			t.Errorf("canonical route %s: %v %v", origin, r, e)
+		}
+	}
+}
