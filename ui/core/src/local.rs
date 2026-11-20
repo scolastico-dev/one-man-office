@@ -628,7 +628,7 @@ impl LocalControl {
         match self.backend.control(&self.runtime, false) {
             Ok(204) => Ok(true),
             result => {
-                if !self.still_current()? {
+                if !self.still_current()? || !lifecycle_held(&self.home)? {
                     return Ok(false);
                 }
                 match result {
@@ -653,7 +653,7 @@ impl LocalControl {
         match self.backend.control(&self.runtime, true) {
             Ok(202) => (),
             reply => {
-                if !self.still_current()? {
+                if !self.still_current()? || !lifecycle_held(&self.home)? {
                     return Ok(());
                 }
                 return Err(match reply {
@@ -668,6 +668,9 @@ impl LocalControl {
             if state.as_ref().is_none_or(|r| {
                 r.token != self.runtime.token || r.endpoint != self.runtime.endpoint
             }) {
+                return Ok(());
+            }
+            if !lifecycle_held(&self.home)? {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -701,9 +704,39 @@ fn read_runtime(home: &Path) -> Result<Option<LocalRuntime>> {
         })
         .transpose()
 }
+// The normal service owns this lock for its entire lifecycle. A failed HTTP
+// request alone cannot prove death; an unlocked lifecycle can, even after a
+// crash left the same runtime.json on disk. Rust's exclusive file lock uses
+// flock on Unix and LockFileEx on Windows, matching internal/filelock.
+fn lifecycle_held(home: &Path) -> Result<bool> {
+    let Some(file) = guarded_file(&home.join("run/run.lock"), true)? else {
+        return Ok(false);
+    };
+    match file.try_lock() {
+        Ok(()) => Ok(false), // Dropping the handle releases only our probe lock.
+        Err(fs::TryLockError::WouldBlock) => Ok(true),
+        Err(fs::TryLockError::Error(_)) => {
+            Err("Cannot inspect the local omo lifecycle lock.".into())
+        }
+    }
+}
 fn guarded_read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
+    let Some(file) = guarded_file(path, false)? else {
+        return Ok(None);
+    };
+    if file
+        .metadata()
+        .map_err(|_| "Cannot inspect local omo metadata.")?
+        .len()
+        > limit as u64
+    {
+        return Err("Local metadata must be a bounded regular file.".into());
+    }
+    bounded(file, limit, "Local metadata is too large.").map(Some)
+}
+fn guarded_file(path: &Path, writable: bool) -> Result<Option<fs::File>> {
     let mut options = fs::OpenOptions::new();
-    options.read(true);
+    options.read(true).write(writable);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -717,7 +750,7 @@ fn guarded_read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
     let file = match options.open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("Cannot safely read local omo metadata.".into()),
+        Err(_) => return Err("Cannot safely open local omo metadata.".into()),
     };
     let metadata = file
         .metadata()
@@ -729,10 +762,10 @@ fn guarded_read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
             return Err("Local metadata cannot be a reparse point.".into());
         }
     }
-    if !metadata.is_file() || metadata.len() > limit as u64 {
-        return Err("Local metadata must be a bounded regular file.".into());
+    if !metadata.is_file() {
+        return Err("Local metadata must be a regular file.".into());
     }
-    bounded(file, limit, "Local metadata is too large.").map(Some)
+    Ok(Some(file))
 }
 fn bounded(reader: impl Read, limit: usize, message: &str) -> Result<Vec<u8>> {
     let mut data = Vec::new();

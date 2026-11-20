@@ -546,6 +546,8 @@ for its newly ready child. `local.rs` captures the random control capability;
 `desktop.rs` serializes native operations and applies owned-only tray/close/Exit
 behavior (`stop_with_window`, default false). Attached/direct servers never gain
 ownership; replacement instances cannot be stopped by an earlier capability.
+After control failure, native lifecycle probes the normal run.lock before
+retiring stale crash metadata; a still-held lock preserves ownership on error.
 Android refuses local mode; notification scheduling is not advertised.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its

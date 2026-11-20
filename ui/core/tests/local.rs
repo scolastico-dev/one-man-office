@@ -333,6 +333,9 @@ fn unreachable_captured_runtime_keeps_ownership_and_surfaces_error() {
         .connect()
         .unwrap();
     write_runtime(&options, &first);
+    // A transient control failure still belongs to a live service, which
+    // retains the normal lifecycle lock until its process finishes.
+    let _lifecycle = held_lifecycle(&options);
     *backend.live.lock().unwrap() = false;
     assert!(connection.is_alive().is_err());
     assert!(connection.stop_owned().is_err());
@@ -340,6 +343,189 @@ fn unreachable_captured_runtime_keeps_ownership_and_surfaces_error() {
     assert!(!connection.is_alive().unwrap());
     connection.stop_owned().unwrap();
     assert!(backend.stopped.lock().unwrap().is_empty());
+}
+
+fn held_lifecycle(options: &LocalOptions) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(options.home.join("run/run.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    lock
+}
+
+#[test]
+fn terminated_control_with_stale_runtime_retires_only_after_lifecycle_unlocks() {
+    use omo_ui_core::SystemLocalBackend;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::{TcpListener, TcpStream},
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    let (_dir, options, _backend) = fixture();
+    executable(&options.install_dir.join("omo"));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop_worker = stopped.clone();
+    let worker = std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            if stop_worker.load(Ordering::SeqCst) {
+                break;
+            }
+            let mut request = BufReader::new(stream.try_clone().unwrap());
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                assert_ne!(
+                    request.read_line(&mut line).unwrap(),
+                    0,
+                    "control request ended before its headers"
+                );
+                if line == "\r\n" {
+                    break;
+                }
+                lines.push(line);
+            }
+            assert_eq!(lines[0], "GET /status HTTP/1.1\r\n");
+            assert!(lines.iter().any(|line| {
+                line.trim_end()
+                    .eq_ignore_ascii_case(&format!("authorization: Bearer {}", "b".repeat(48)))
+            }));
+            stream
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        }
+    });
+    struct ControlServer {
+        endpoint: std::net::SocketAddr,
+        stopped: Arc<AtomicBool>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+    impl ControlServer {
+        fn close(&mut self) {
+            if let Some(worker) = self.worker.take() {
+                self.stopped.store(true, Ordering::SeqCst);
+                // Wake accept deterministically; close joins before any dead-instance assertion.
+                let _ = TcpStream::connect(self.endpoint);
+                let result = worker.join();
+                if !std::thread::panicking() {
+                    result.unwrap();
+                }
+            }
+        }
+    }
+    impl Drop for ControlServer {
+        fn drop(&mut self) {
+            self.close();
+        }
+    }
+    let mut server = ControlServer {
+        endpoint,
+        stopped,
+        worker: Some(worker),
+    };
+    struct Launch {
+        home: std::path::PathBuf,
+        state: LocalRuntime,
+    }
+    impl LocalBackend for Launch {
+        fn download(&self, _: &str, _: usize) -> Result<Vec<u8>> {
+            panic!("existing install must be reused")
+        }
+        fn start(&self, _: &Path, home: &Path) -> Result<Vec<u8>> {
+            assert_eq!(home, self.home);
+            fs::write(
+                home.join("run/runtime.json"),
+                serde_json::to_vec(&self.state).unwrap(),
+            )
+            .unwrap();
+            let mut output = serde_json::to_value(&self.state).unwrap();
+            output["owned"] = true.into();
+            Ok(serde_json::to_vec(&output).unwrap())
+        }
+        fn control(&self, state: &LocalRuntime, stop: bool) -> Result<u16> {
+            SystemLocalBackend.control(state, stop)
+        }
+    }
+    let mut state = runtime(&"b".repeat(48));
+    state.endpoint = endpoint.to_string();
+    let lifecycle = held_lifecycle(&options);
+    let connection = LocalManager::new(
+        options.clone(),
+        Arc::new(Launch {
+            home: options.home.clone(),
+            state: state.clone(),
+        }),
+    )
+    .unwrap()
+    .connect()
+    .unwrap();
+    assert!(connection.is_alive().unwrap());
+    // Joining proves the endpoint is gone; the held lock still proves that
+    // the lifecycle has not finished, so a failed request alone loses no proof.
+    server.close();
+    assert!(connection.is_alive().is_err());
+    assert!(connection.stop_owned().is_err());
+    drop(lifecycle);
+    assert!(!connection.is_alive().unwrap());
+    connection.stop_owned().unwrap();
+    assert_eq!(
+        serde_json::from_slice::<LocalRuntime>(
+            &fs::read(options.home.join("run/runtime.json")).unwrap()
+        )
+        .unwrap(),
+        state
+    );
+}
+
+#[test]
+fn stop_failure_after_lifecycle_exit_does_not_keep_dead_ownership() {
+    let (_dir, options, backend) = fixture();
+    executable(&options.install_dir.join("omo"));
+    let state = runtime(&"b".repeat(48));
+    let mut output = serde_json::to_value(&state).unwrap();
+    output["owned"] = true.into();
+    *backend.output.lock().unwrap() = serde_json::to_vec(&output).unwrap();
+    let connection = LocalManager::new(options.clone(), backend.clone())
+        .unwrap()
+        .connect()
+        .unwrap();
+    write_runtime(&options, &state);
+    // The status request wins the race, but the captured endpoint is gone by
+    // the stop request. The unlocked lifecycle proves normal omo has exited.
+    *backend.stop_status.lock().unwrap() = Some(410);
+    connection.stop_owned().unwrap();
+    assert_eq!(*backend.stopped.lock().unwrap(), vec!["b".repeat(48)]);
+    assert!(options.home.join("run/runtime.json").exists());
+}
+
+#[test]
+fn accepted_stop_followed_by_crash_does_not_wait_for_stale_metadata() {
+    let (_dir, options, backend) = fixture();
+    executable(&options.install_dir.join("omo"));
+    let state = runtime(&"b".repeat(48));
+    let mut output = serde_json::to_value(&state).unwrap();
+    output["owned"] = true.into();
+    *backend.output.lock().unwrap() = serde_json::to_vec(&output).unwrap();
+    let connection = LocalManager::new(options.clone(), backend.clone())
+        .unwrap()
+        .connect()
+        .unwrap();
+    write_runtime(&options, &state);
+    fs::write(
+        options.home.join("settings.yaml"),
+        "stop:\n  handoff_timeout: 5s\n",
+    )
+    .unwrap();
+    connection.stop_owned().unwrap();
+    assert!(options.home.join("run/runtime.json").exists());
 }
 #[test]
 fn discovers_binary_in_registered_autostart_path_without_shell_path() {

@@ -68,7 +68,10 @@ owned host, disconnect first, then start omo independently. A stop waits for
 normal agent handoff/cleanup; failures leave the app and its ownership proof
 available for retry. Closing Connection while the board is visible leaves
 the board open. Ownership loss removes the tray and restores Connection if
-all windows were hidden.
+all windows were hidden. If a crash leaves runtime metadata behind, an unlocked
+normal service lifecycle proves the old instance is gone and allows close,
+Exit or Disconnect to finish. A failed control request while that lock is held
+keeps ownership and reports the error for retry.
 
 Android exposes only direct connection. Native validation and the local
 runtime refuse local start/install there.
@@ -238,5 +241,7 @@ dbus-run-session -- python3 ui/tests/local_smoke.py --app ui/target/debug/omo-ui
 It covers attachment with and without an executable, fresh-home startup,
 actual window close, tray reopen/Exit, stop-with-window, direct external close,
 owned Disconnect, replacement-safe stop, and owned cleanup after authentication
-preparation fails. `--host <prefix>` can use an extracted Arch dependency tree through a read-only Bubblewrap overlay; this
+preparation fails. It also terminates an owned control endpoint, joins its
+worker while retaining stale metadata, then checks both close settings and
+explicit native Exit. `--host <prefix>` can use an extracted Arch dependency tree through a read-only Bubblewrap overlay; this
 keeps WebKit helper paths intact without installing system packages.

@@ -100,6 +100,7 @@ class Fixture:
         self.requests = []
         self.start_error = None
         self.invalid_auth = False
+        self.closed = False
         self.lock = threading.Lock()
         self.control_token = uuid.uuid4().hex + uuid.uuid4().hex[:16]
         fixture = self
@@ -178,9 +179,12 @@ class Fixture:
             assert reply.status == 204
 
     def close(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
+        if not self.closed:
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join()
+            self.closed = True
+            CHANGED.set()
 
 
 def run(args):
@@ -296,12 +300,12 @@ def run(args):
                 if child is not None:
                     yield from tree(child)
 
-        def action_button(app, name):
+        def accessible_action(app, name, role=Atspi.Role.PUSH_BUTTON):
             def find():
                 for node in tree(Atspi.get_desktop(0)):
                     try:
                         states = node.get_state_set()
-                        if (node.get_name() == name and node.get_role() == Atspi.Role.PUSH_BUTTON
+                        if (node.get_name() == name and node.get_role() == role
                                 and states.contains(Atspi.StateType.ENABLED) and states.contains(Atspi.StateType.SHOWING)):
                             return node
                     except GLib.GError:
@@ -392,6 +396,9 @@ def run(args):
             ("owned-disconnect", "local", False, False, True),
             ("owned-auth-preparation-error", "local", False, False, True),
             ("direct", "direct", True, True, False),
+            ("owned-crash-default-close", "local", False, False, True),
+            ("owned-crash-stop-with-window", "local", False, True, True),
+            ("owned-crash-explicit-exit", "local", False, False, True),
         ]:
             print(f"Checking {name}.", flush=True)
             case_env = env.copy()
@@ -422,7 +429,7 @@ def run(args):
             }))
             before = tray_items()
             app = launch(app_command, case_env)
-            assert action_button(app, "Connect").get_action_iface().do_action(0)
+            assert accessible_action(app, "Connect").get_action_iface().do_action(0)
             if fixture.invalid_auth:
                 connection_error(app)
                 item = wait_for("owned tray after connection preparation error", lambda: next((i for i in tray_items() if i not in before), None), app)
@@ -441,14 +448,36 @@ def run(args):
             board = wait_for("visible board window", lambda: windows(fixture.label, True), app)[0]
             if not attached:
                 item = wait_for("owned tray registration", lambda: next((i for i in tray_items() if i not in before), None), app)
+            if name.startswith("owned-crash-"):
+                path = fixture.home / "run/runtime.json"
+                stale_runtime = path.read_bytes()
+                # A crashed server cannot remove its metadata. End its actual
+                # listener and join the serving worker before requesting exit.
+                fixture.close()
+                assert not fixture.thread.is_alive()
+                if name == "owned-crash-explicit-exit":
+                    # A dead server legitimately loses its tray on refresh.
+                    # Native Exit invokes the same Quit path without racing
+                    # tray removal; live tray Exit is covered above.
+                    assert accessible_action(app, "omo ui", Atspi.Role.MENU).get_action_iface().do_action(0)
+                    assert accessible_action(app, "Exit omo", Atspi.Role.MENU_ITEM).get_action_iface().do_action(0)
+                else:
+                    close_window(board)
+                assert app.wait(timeout=60) == 0
+                assert not fixture.stopped.is_set(), "Crashed server was sent a stop request"
+                assert fixture.requests.count("/stop") == 0
+                assert path.read_bytes() == stale_runtime, "Exit rewrote stale runtime metadata"
+                results.append({"case": name, "result": "passed"})
+                fixtures.remove(fixture)
+                continue
             replacement = None
             if name == "owned-replacement":
                 replacement = Fixture(fixture.home, "Replacement fixture")
                 fixtures.append(replacement)
                 replacement.publish()
             if name == "owned-disconnect":
-                assert action_button(app, "Configure omo ui connection").get_action_iface().do_action(0)
-                assert action_button(app, "Disconnect").get_action_iface().do_action(0)
+                assert accessible_action(app, "Configure omo ui connection").get_action_iface().do_action(0)
+                assert accessible_action(app, "Disconnect").get_action_iface().do_action(0)
                 wait_for("Disconnect stops the captured owned server", fixture.stopped.is_set, app)
                 wait_for("Disconnect removes the board window", lambda: not windows(fixture.label), app)
                 setup = wait_for("visible disconnected Connection window", lambda: windows("omo ui · Connection", True, False), app)[0]
