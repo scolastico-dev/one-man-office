@@ -752,6 +752,12 @@ func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
 	other := pluginRepo(t, recordManifest("rec", plugins.EventTicketMoved))
 
 	afterPluginInstall = func(name string) {
+		// Settings can trigger a reload here. No reader may open the new
+		// tree before the settings write either commits or rolls it back.
+		if s.plugins.treeMu.TryRLock() {
+			s.plugins.treeMu.RUnlock()
+			t.Error("reinstall exposed its uncommitted tree to readers")
+		}
 		cur, _ := s.settings.Plugin(name)
 		cur.Config = maps.Clone(cur.Config)
 		cur.Config["greeting"] = "edited by hand"

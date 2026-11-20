@@ -1,14 +1,14 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const vm=require('node:vm');
 function load(responses, now=()=>Date.now()){
- const buttons=[],panels=[],calls=[],removed=[];const controller=new AbortController();let cleanup;
- const facade={signal:controller.signal,initialize:fn=>{cleanup=fn()},addButton:b=>buttons.push(b),addPanel:p=>panels.push(p),removePanel:id=>removed.push(id),
+ const buttons=[],panels=[],calls=[],removed=[],tabs=[];const controller=new AbortController();let cleanup;
+ const facade={signal:controller.signal,initialize:fn=>{cleanup=fn()},addSidebarTab:t=>tabs.push(t),addButton:b=>buttons.push(b),addPanel:p=>panels.push(p),removePanel:id=>removed.push(id),
    runHook:async(action,context)=>{calls.push({action,context});const value=typeof responses==='function'?responses(action,context):responses.shift();if(value instanceof Error)throw value;return value},
    openForward:()=>assert.fail('button callback must return final result to reserved tab')};
  const timers=new Map();let sequence=0;
  const ctx=vm.createContext({document:{currentScript:{omo:facade}},DOMException,Error,Promise,Map,Date:class extends Date {static now(){return now()}},
    setTimeout:(fn)=>{const id=++sequence;timers.set(id,fn);return id},clearTimeout:id=>timers.delete(id)});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend.js'),'utf8'),ctx);
- return {buttons,panels,calls,removed,controller,cleanup:()=>cleanup?.(),tick:async()=>{await new Promise(r=>setImmediate(r));for(const [id,fn]of timers){timers.delete(id);fn();break}await new Promise(r=>setImmediate(r))}};
+ return {buttons,panels,calls,removed,tabs,controller,cleanup:()=>cleanup?.(),tick:async()=>{await new Promise(r=>setImmediate(r));for(const [id,fn]of timers){timers.delete(id);fn();break}await new Promise(r=>setImmediate(r))}};
 }
 test('first click waits through install and startup and returns final forward for reserved tab',async()=>{
  const f=load([{message:'VS Code pending: downloading 25%'},{message:'VS Code pending: starting'},{message:'Ready',forward_id:'a'.repeat(32)}]);
@@ -18,7 +18,11 @@ test('first click waits through install and startup and returns final forward fo
  assert.equal(f.calls[0].context.ticket,7);assert.equal(f.calls[0].context.project,'second');assert.ok(f.panels.some(p=>p.text.includes('25%')));assert.ok(f.removed.length);
 });
 test('project context never inherits an open ticket and message failures stop polling',async()=>{
- const f=load([{message:'Microsoft terms have not been confirmed'}]);const r=await f.buttons.find(b=>b.place==='project').run({ticket:{number:9},project:'alpha'});
+ const f=load([{message:'Microsoft terms have not been confirmed'}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.tabs)),[{id:'editor',label:'VS Code',tasks:true}]);
+ assert.equal(f.buttons.filter(b=>b.place==='project').length,0);
+ const button=f.buttons.find(b=>b.place==='sidebar');assert.equal(button.tab,'editor');assert.equal(button.pick_project,true);
+ const r=await button.run({ticket:{number:9},project:'alpha'});
  assert.match(r.message,/terms/);assert.equal(f.calls[0].action,'open-project');assert.equal(f.calls[0].context.ticket,undefined);assert.equal(f.calls.length,1);
 });
 test('lost start response is surfaced without automatic retry',async()=>{
@@ -52,6 +56,7 @@ test('a busy status keeps polling without reissuing open or losing install progr
  const f=load([{message:'VS Code pending: downloading 35%'},busy(),{message:'Ready',forward_id:'d'.repeat(32)}]);
  const result=f.buttons[1].run({project:'alpha'}).then(value=>({value}),error=>({error}));
  await f.tick();assert.equal(f.removed.length,0);assert.ok(f.panels.some(p=>p.text.includes('35%')));
+ assert.ok(f.panels.every(p=>p.place==='sidebar'&&p.tab==='editor'));
  await f.tick();const outcome=await result;
  assert.equal(outcome.error,undefined);assert.equal(outcome.value.forward_id,'d'.repeat(32));
  assert.deepEqual(f.calls.map(c=>c.action),['open-project','status-project','status-project']);

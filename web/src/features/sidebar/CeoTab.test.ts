@@ -73,6 +73,14 @@ async function open(how: 'user' | 'restored', live: AgentSession[] = [], stopped
   return { hn, w: wrapper, sent, answers, remount }
 }
 
+test('the live CEO keeps session actions and model in one toolbar without the redundant hint', async () => {
+  const { w } = await open('restored', [ceo()])
+  expect(w.text()).not.toContain('Write to the CEO in the box below the terminal.')
+  expect(w.get('.ceo__bar').find('[data-ceo-model]').exists()).toBe(true)
+  expect(w.get('.ceo__bar').find('[data-ceo-new]').exists()).toBe(true)
+  expect(w.get('.ceo__bar').find('[data-ceo-stop]').exists()).toBe(true)
+})
+
 test('a restored CEO tab sends no request; a click sends POST /api/ceo once', async () => {
   const { w, sent } = await open('restored')
   expect(sent).toEqual([])
@@ -83,7 +91,8 @@ test('a restored CEO tab sends no request; a click sends POST /api/ceo once', as
   await flushPromises()
   expect(sent).toEqual([{ method: 'POST', path: '/api/ceo', body: {} }])
   expect(w.find('[data-ceo-live]').exists()).toBe(true)
-  expect(w.text()).toContain('Write to the CEO in the box below the terminal.')
+  expect(w.find('[data-ceo-new]').exists()).toBe(true)
+  expect(w.find('[data-ceo-stop]').exists()).toBe(true)
 })
 
 test('a tab the user opened starts the CEO by itself, once the live agents are known', async () => {
@@ -271,7 +280,7 @@ test('choosing a model saves it as the CEO role’s only model; a running CEO of
   expect(sent).toEqual([{ method: 'PUT', path: '/api/roles/ceo', body: { name: 'ceo', models: ['fake/strong'], assignment: 'round_robin' } }])
   expect(w.get('[data-ceo-model] button').text()).toBe('Model: fake/strong')
   expect(w.get('[data-ceo-model-next]').text()).toContain('The CEO runs fake/default; fake/strong takes effect at its next start.')
-  await button(w, 'Restart now').trigger('click')
+  await w.get('[data-ceo-restart]').trigger('click')
   await flushPromises()
   expect(sent.map((s) => s.path)).toEqual(['/api/roles/ceo', '/api/ceo/new-session'])
 })

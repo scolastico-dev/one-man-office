@@ -679,6 +679,21 @@ func TestPackageStartsNoProcessAndReadsThroughHomefile(t *testing.T) {
 
 func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	e := newEnv(t)
+	e.o.TreeMu = &sync.RWMutex{}
+	assertExclusive := func() {
+		t.Helper()
+		if e.o.TreeMu.TryRLock() {
+			e.o.TreeMu.RUnlock()
+			t.Error("uncommitted tree is available to readers")
+		}
+	}
+	assertReleased := func() {
+		t.Helper()
+		if !e.o.TreeMu.TryLock() {
+			t.Fatal("completed tree change left readers blocked")
+		}
+		e.o.TreeMu.Unlock()
+	}
 	plugin := shipped(shippedRepo(t), "p", "pushover")
 	marker := filepath.Join(e.root, "p", "mine.txt")
 
@@ -687,9 +702,12 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(prev.Discard)
+	assertExclusive()
 	if err := prev.Restore(); err != nil {
 		t.Fatal(err)
 	}
+	assertReleased()
 	if _, err := os.Lstat(filepath.Join(e.root, "p")); !os.IsNotExist(err) {
 		t.Fatalf("the new tree stayed: %v", err)
 	}
@@ -705,12 +723,15 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(prev.Discard)
+	assertExclusive()
 	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
 		t.Fatal("the new tree holds the earlier tree's file")
 	}
 	if err := prev.Restore(); err != nil {
 		t.Fatal(err)
 	}
+	assertReleased()
 	if _, err := os.Lstat(marker); err != nil {
 		t.Fatalf("the earlier tree was not put back: %v", err)
 	}
@@ -718,7 +739,10 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(prev.Discard)
+	assertExclusive()
 	prev.Discard()
+	assertReleased()
 	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
 		t.Fatal("the earlier tree came back after Discard")
 	}

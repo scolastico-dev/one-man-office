@@ -13,7 +13,13 @@ import { initRepo } from './support/git'
 // command line built from web/e2e/omoca (support/omo.ts, tlsCA). No test of this file is conditional.
 test.setTimeout(90_000)
 test.use({ launchOptions: { args: ['--host-resolver-rules=MAP board.example.test 127.0.0.1', '--no-proxy-server'] } })
-const projectButton = (page: Page, name = 'demo') => page.locator(`.sidebar-plugins > section[aria-label="${name}"]`).getByRole('button', { name: 'Open in VS Code', exact: true })
+async function projectButton(page: Page, name = 'demo'): Promise<Locator> {
+  await page.getByRole('tab', { name: 'VS Code', exact: true }).click()
+  const tab = page.locator('[data-plugin-tab="vscode:editor"]')
+  await tab.getByRole('button', { name: 'Open in VS Code', exact: true }).click()
+  await tab.getByRole('combobox', { name: 'Search projects' }).fill(name)
+  return tab.getByRole('option').filter({ has: page.locator('[data-pick-label]', { hasText: new RegExp(`^${name}$`) }) })
+}
 async function openEditor(page: Page, button: Locator): Promise<Page> {
   const popup = page.context().waitForEvent('page')
   await button.click()
@@ -59,7 +65,7 @@ for (const editorName of ['code-server', 'openvscode']) {
       await page.locator('[data-sidebar-toggle]').click()
       editor.hold()
       const popup = page.context().waitForEvent('page')
-      await projectButton(page).click()
+      await (await projectButton(page)).click()
       const first = await popup
       await expect(page.locator('[data-plugin-panel^="vscode:opening-"]')).toContainText('download', { timeout: 15_000 })
       expect(first.url()).toBe('about:blank')
@@ -81,7 +87,7 @@ for (const editorName of ['code-server', 'openvscode']) {
       expect(f.host).toBe('127.0.0.1')
       expect(f.strip_prefix).toBe(editorName === 'code-server')
       const tree = await runningTree(omo)
-      const second = await openEditor(page, projectButton(page))
+      const second = await openEditor(page, await projectButton(page))
       expect((await tasks(omo)).filter(t => t.state === 'running').map(t => t.id)).toEqual([initial.id])
       expect((await forwards(omo)).map(f => f.id)).toEqual([f.id])
       expect(editor.requests).toHaveLength(1)
@@ -101,7 +107,7 @@ for (const editorName of ['code-server', 'openvscode']) {
       await first.close()
       await second.close()
       // Reconnect before deadline; the stable task and forward must survive.
-      const third = await openEditor(page, projectButton(page))
+      const third = await openEditor(page, await projectButton(page))
       expect((await tasks(omo)).find(t => t.id === initial.id)?.state).toBe('running')
       const runtime = JSON.parse(initial.output.find(line => line.startsWith('Runtime: '))!.slice(9)) as string
       expect(existsSync(runtime)).toBe(true)
@@ -119,7 +125,7 @@ for (const editorName of ['code-server', 'openvscode']) {
       await expectTreeGone(tree)
       expect(existsSync(runtime)).toBe(false)
       // A fresh instance checks disk cache, without another HTTPS request.
-      const cached = await openEditor(page, projectButton(page))
+      const cached = await openEditor(page, await projectButton(page))
       expect(editor.requests).toHaveLength(1)
       expect((await tasks(omo)).find(t => t.state === 'running')?.id).not.toBe(initial.id)
       const detail = await details(page)
@@ -135,9 +141,9 @@ test('checksum mismatch never extracts or starts an editor and closes its reserv
   await openBoard(page, omo)
   await page.locator('[data-sidebar-toggle]').click()
   const popup = page.context().waitForEvent('page')
-  await projectButton(page).click()
+  await (await projectButton(page)).click()
   const blank = await popup
-  await expect(page.locator('[data-plugin-controls="project"] [data-plugin-control-answer]')).toContainText(/installation failed.*SHA-256.*digest/i, { timeout: 20_000 })
+  await expect(page.locator('[data-plugin-tab="vscode:editor"] [data-plugin-control-answer]')).toContainText(/installation failed.*SHA-256.*digest/i, { timeout: 20_000 })
   await expect.poll(() => blank.isClosed()).toBe(true)
   await expectClean(omo)
   expect(editor.requests).toHaveLength(1)
@@ -150,7 +156,7 @@ for (const action of ['disable', 'shutdown']) {
     await page.locator('[data-sidebar-toggle]').click()
     editor.hold()
     const popup = page.context().waitForEvent('page')
-    await projectButton(page).click()
+    await (await projectButton(page)).click()
     const blank = await popup
     await expect.poll(() => editor.activeDownloads).toBe(1)
     if (action === 'disable') {
@@ -184,11 +190,11 @@ test('Microsoft is visible and unavailable despite old consent; unsupported plat
   expect(refused.message).toContain('terms have not been confirmed')
   await page.goto(omo.url('/'))
   await page.locator('[data-sidebar-toggle]').click()
-  await projectButton(page).click()
-  await expect(page.locator('[data-plugin-controls="project"] [data-plugin-control-answer]')).toContainText('terms have not been confirmed')
+  await (await projectButton(page)).click()
+  await expect(page.locator('[data-plugin-tab="vscode:editor"] [data-plugin-control-answer]')).toContainText('terms have not been confirmed')
   await configure(omo, 'vscode', { config: { editor: 'openvscode' } })
-  await projectButton(page).click()
-  await expect(page.locator('[data-plugin-controls="project"] [data-plugin-control-answer]')).toContainText('unavailable on windows-arm64')
+  await (await projectButton(page)).click()
+  await expect(page.locator('[data-plugin-tab="vscode:editor"] [data-plugin-control-answer]')).toContainText('unavailable on windows-arm64')
   expect(editor.requests).toEqual([])
   await expectClean(omo)
 })
@@ -228,7 +234,12 @@ test.describe('worktree context', () => {
     expect(await forwards(omo)).toHaveLength(2)
     const selected = (await tasks(omo)).find(t => t.state === 'running' && t.output.some(line => line.includes(JSON.stringify(firstFolder))))!
     const stoppedTree = processTree(selected)
-    await omo.api('POST', `/api/plugins/vscode/tasks/${selected.name}/stop`, {})
+    await page.getByRole('tab', { name: 'VS Code', exact: true }).click()
+    const instances = page.locator('[data-plugin-tab="vscode:editor"]')
+    await expect(instances.locator('[data-task-stop]')).toHaveCount(2)
+    await instances.getByRole('article', { name: selected.name, exact: true }).getByRole('button', { name: /^Stop/ }).click()
+    await expect(instances.locator('[data-task-stop]')).toHaveCount(1)
+    expect((await tasks(omo)).filter(t => t.state === 'running')).toHaveLength(1)
     await expectTreeGone(stoppedTree)
     const changed = await openEditor(page, page.locator('[data-plugin-controls="ticket"]').getByRole('button', { name: /Open in VS Code/ }).nth(0))
     await expect(changed.locator('#folder')).toHaveText(firstFolder!)

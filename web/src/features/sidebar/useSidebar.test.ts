@@ -43,6 +43,12 @@ test('sidebar state survives a reload and broken storage', () => {
   expect(createSidebar(() => null).tab.value).toBe('agents')
 })
 
+test('a plugin sidebar tab is remembered across reloads', () => {
+  const storage = new MemoryStorage()
+  createSidebar(() => storage).setTab('plugin:vscode:editor', 'user')
+  expect(createSidebar(() => storage).tab.value).toBe('plugin:vscode:editor')
+})
+
 test('stored values that make no sense are replaced by the defaults', () => {
   const storage = new MemoryStorage()
   storage.setItem(SIDEBAR_KEY, JSON.stringify({ open: 'yes', width: 12, tab: '<b>' }))

@@ -60,8 +60,8 @@ lines into the terminal above.
 ## Read-only agent terminals
 
 An agent's terminal starts **read-only**, so a stray key or paste cannot reach
-the agent. The toggle above the terminal, next to the pop-out button, shows the
-state (**Read only** or **Writable**) and switches it. Switch to **Writable**
+the agent. The **Read only** switch above the terminal, next to the pop-out
+button, is on while read-only and off while **Writable**. Switch to **Writable**
 for what the message box cannot do: answering an interactive prompt with single
 keys, arrow keys or Escape.
 

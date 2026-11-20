@@ -74,6 +74,9 @@ type pluginFeature struct {
 	mu     sync.Mutex
 	loaded []string
 	valid  bool
+	// treeMu excludes installed-tree readers throughout activation and any
+	// settings rollback. Fetching a replacement does not block readers.
+	treeMu sync.RWMutex
 
 	// busy names the plugins an install, update, change or removal works
 	// on; a second one for the same plugin is refused.
@@ -150,13 +153,14 @@ func (s *Server) startPlugins(ctx context.Context) error {
 	if err := s.clearStalePluginForwards(); err != nil {
 		return fmt.Errorf("clear stale plugin forwards: %w", err)
 	}
-	f.o = pluginmanager.Options{Root: s.opts.Layout.Plugins, Git: s.git}
+	f.o = pluginmanager.Options{Root: s.opts.Layout.Plugins, Git: s.git, TreeMu: &f.treeMu}
 	f.reload = make(chan struct{}, 1)
 	f.changed = make(chan struct{}, 1)
 	f.busy = map[string]bool{}
 	f.pending = map[string]api.PluginInfo{}
 	f.m = plugins.New(plugins.Options{
 		Root:              s.opts.Layout.Plugins,
+		TreeMu:            &f.treeMu,
 		DB:                s.db,
 		Socket:            s.socketEndpoint,
 		Log:               s.log,

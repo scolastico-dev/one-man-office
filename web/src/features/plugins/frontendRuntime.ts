@@ -18,6 +18,10 @@ export interface ScriptButton {
   label: string
   place: 'ticket' | 'sidebar' | 'project'
   per_worktree?: boolean
+  /** Own sidebar tab id; omitted for the shared sidebar area. */
+  tab?: string
+  /** Search registered projects before invoking this sidebar button. */
+  pick_project?: boolean
   action?: string
   run?: (context: PluginContext) => PluginRunResult | void | Promise<PluginRunResult | void>
 }
@@ -27,7 +31,10 @@ export interface ScriptPanel {
   title: string
   text: string
   image?: string
+  tab?: string
 }
+export interface ScriptSidebarTab { id: string; label: string; tasks?: boolean }
+export interface OwnedSidebarTab extends ScriptSidebarTab { plugin: string }
 export interface PluginFacade {
   readonly signal: AbortSignal
   initialize(setup: (omo: PluginFacade) => void | (() => void) | Promise<void | (() => void)>): void
@@ -35,6 +42,8 @@ export interface PluginFacade {
   removeButton(id: string): void
   addPanel(panel: ScriptPanel): () => void
   removePanel(id: string): void
+  addSidebarTab(tab: ScriptSidebarTab): () => void
+  removeSidebarTab(id: string): void
   context(): PluginContext
   onRouteChange(callback: (context: PluginContext) => void | Promise<void>): () => void
   runHook(action: string, context?: HookContext): Promise<PluginRunResult>
@@ -73,6 +82,7 @@ const labelValid = (text: string) => typeof text === 'string' && text.trim() !==
 export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse | null>>; context: Readonly<Ref<PluginContext>>; suspended: Readonly<Ref<boolean>>; client: ApiClient }) {
   const buttons = shallowRef<OwnedButton[]>([])
   const panels = shallowRef<OwnedPanel[]>([])
+  const tabs = shallowRef<OwnedSidebarTab[]>([])
   const errors = shallowRef<{ plugin: string; message: string }[]>([])
   const lives = new Map<string, Lifetime>()
   const scope = effectScope(true)
@@ -87,6 +97,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     life.subscriptions.clear()
     buttons.value = buttons.value.filter((b) => b.plugin !== name)
     panels.value = panels.value.filter((p) => p.plugin !== name)
+    tabs.value = tabs.value.filter((t) => t.plugin !== name)
     try { life.cleanup?.() } catch { /* Cleanup cannot prevent other plugins from being removed. */ }
     life.cleanup = undefined
   }
@@ -114,6 +125,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     const active = () => !disposed && lives.get(name) === life && !life.controller.signal.aborted
     const check = () => { if (!active()) throw new Error('The plugin is no longer active.') }
     const actionable = () => { check(); if (deps.suspended.value) throw new Error('The board is locked.') }
+    const validTab = (tab: string | undefined) => tab === undefined || tabs.value.some((t) => t.plugin === name && t.id === tab)
     const notify = (callback: (c: PluginContext) => void | Promise<void>) => notifyRoute(name, life, callback)
     const runHook = async (action: string, context?: HookContext) => {
       actionable()
@@ -140,6 +152,9 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
       addButton(button: ScriptButton) {
         check()
         if (!/^[\w.-]{1,64}$/.test(button.id) || !labelValid(button.label) || !['ticket', 'sidebar', 'project'].includes(button.place) || (!!button.action === (typeof button.run === 'function')) || (button.per_worktree && button.place !== 'ticket')) throw new Error('Invalid plugin button.')
+        if ((button.tab !== undefined || button.pick_project !== undefined) && button.place !== 'sidebar') throw new Error('Invalid plugin button placement.')
+        if (!validTab(button.tab)) throw new Error('Unknown plugin sidebar tab.')
+        if (button.pick_project !== undefined && typeof button.pick_project !== 'boolean') throw new Error('Invalid project picker.')
         if (buttons.value.filter((b) => b.plugin === name && b.id !== button.id).length >= 64) throw new Error('Too many plugin buttons.')
         const registered: OwnedButton = { ...button, plugin: name, active, async invoke(context) {
           actionable()
@@ -154,12 +169,22 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
       addPanel(panel: ScriptPanel) {
         check()
         if (!/^[\w.-]{1,64}$/.test(panel.id) || !labelValid(panel.title) || typeof panel.text !== 'string' || panel.text.length > 16000 || !['ticket', 'sidebar'].includes(panel.place) || (panel.image && !panel.image.startsWith(`/plugin-assets/${encodeURIComponent(name)}/${info.content_id}/`))) throw new Error('Invalid plugin panel.')
+        if ((panel.tab !== undefined && panel.place !== 'sidebar') || !validTab(panel.tab)) throw new Error('Invalid plugin panel tab.')
         if (panels.value.filter((p) => p.plugin === name && p.id !== panel.id).length >= 64) throw new Error('Too many plugin panels.')
         const registered: OwnedPanel = { ...panel, plugin: name }
         panels.value = [...panels.value.filter((p) => p.plugin !== name || p.id !== panel.id), registered]
         return () => { panels.value = panels.value.filter((p) => p !== registered) }
       },
       removePanel(id: string) { check(); panels.value = panels.value.filter((p) => p.plugin !== name || p.id !== id) },
+      addSidebarTab(tab: ScriptSidebarTab) {
+        check()
+        if (!/^[\w.-]{1,64}$/.test(tab.id) || !labelValid(tab.label) || (tab.tasks !== undefined && typeof tab.tasks !== 'boolean')) throw new Error('Invalid plugin sidebar tab.')
+        if (tabs.value.filter((t) => t.plugin === name && t.id !== tab.id).length >= 8) throw new Error('Too many plugin sidebar tabs.')
+        const registered = { ...tab, plugin: name }
+        tabs.value = [...tabs.value.filter((t) => t.plugin !== name || t.id !== tab.id), registered]
+        return () => { tabs.value = tabs.value.filter((t) => t !== registered) }
+      },
+      removeSidebarTab(id: string) { check(); tabs.value = tabs.value.filter((t) => t.plugin !== name || t.id !== id) },
       context() { check(); return copyContext(deps.context.value) },
       onRouteChange(callback: (context: PluginContext) => void | Promise<void>) { check(); life.subscriptions.set(callback, ''); notify(callback); return () => life.subscriptions.delete(callback) },
       runHook,
@@ -205,7 +230,7 @@ export function createFrontendRuntime(deps: { list: Readonly<Ref<PluginsResponse
     })
   })
   return {
-    buttons, panels, errors,
+    buttons, panels, tabs, errors,
     retry(name: string) {
       const life = lives.get(name)
       if (!life?.failed) return

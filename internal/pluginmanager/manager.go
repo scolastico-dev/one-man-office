@@ -58,6 +58,10 @@ type Options struct {
 	Root string
 	// Git fetches repository sources.
 	Git *gitops.Git
+	// TreeMu is shared with the runtime. Readers finish before a tree is
+	// replaced; a kept install excludes readers until Restore or Discard.
+	// Fetching and validating the staging tree do not hold it.
+	TreeMu *sync.RWMutex
 }
 
 // Bounds of an installed tree.
@@ -154,11 +158,20 @@ func Check(s api.PluginSettings) error {
 type Previous struct {
 	root, name string
 	// old is the kept tree; "" when there was none.
-	old string
+	old    string
+	unlock func()
+}
+
+func (p *Previous) release() {
+	if p != nil && p.unlock != nil {
+		p.unlock()
+		p.unlock = nil
+	}
 }
 
 // Discard deletes the kept tree.
 func (p *Previous) Discard() {
+	defer p.release()
 	if p != nil && p.old != "" {
 		_ = os.RemoveAll(p.old)
 		p.old = ""
@@ -169,6 +182,7 @@ func (p *Previous) Discard() {
 // earlier tree, the new one is removed). The caller makes sure no other
 // install of the plugin runs meanwhile.
 func (p *Previous) Restore() error {
+	defer p.release()
 	if p == nil || p.name == "" {
 		return nil
 	}
@@ -256,14 +270,22 @@ func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.P
 	if err := os.WriteFile(filepath.Join(stage, MarkerFile), append(marker, '\n'), 0o600); err != nil {
 		return s, "", nil, errors.New("the install record cannot be written")
 	}
+	var release func()
+	if o.TreeMu != nil {
+		o.TreeMu.Lock()
+		release = o.TreeMu.Unlock
+	}
 	old, err := activate(root, s.Name, stage)
 	if err != nil {
+		if release != nil {
+			release()
+		}
 		return s, "", nil, err
 	}
 	out := s
 	out.Subpath = subpath
 	out.Config = mergeConfig(man.DefaultConfig, s.Config)
-	return out, inst.Commit, &Previous{root: root, name: s.Name, old: old}, nil
+	return out, inst.Commit, &Previous{root: root, name: s.Name, old: old, unlock: release}, nil
 }
 
 // Remove deletes plugin name's installed tree (moved aside first, so no half
@@ -286,6 +308,10 @@ func Remove(o Options, name string) error {
 		return err
 	}
 	defer unlock()
+	if o.TreeMu != nil {
+		o.TreeMu.Lock()
+		defer o.TreeMu.Unlock()
+	}
 	var errs []error
 	target := filepath.Join(root, name)
 	if _, err := os.Lstat(target); err == nil {
@@ -313,6 +339,10 @@ func Remove(o Options, name string) error {
 // in a folder agents can write to: its texts are for display only, and a
 // commit that is not a full commit id reads as "".
 func Installed(o Options, name string) (Installation, error) {
+	if o.TreeMu != nil {
+		o.TreeMu.RLock()
+		defer o.TreeMu.RUnlock()
+	}
 	if !plugins.ValidName(name) {
 		return Installation{}, ErrNotInstalled
 	}

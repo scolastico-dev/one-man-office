@@ -79,7 +79,7 @@ function load(storage: () => Storage | null): { open: boolean; width: number; ta
     if (v === null || typeof v !== 'object') return out
     if (typeof v.open === 'boolean') out.open = v.open
     if (typeof v.width === 'number' && Number.isFinite(v.width) && v.width >= MIN_WIDTH && v.width <= 4096) out.width = Math.round(v.width)
-    if (typeof v.tab === 'string' && /^[a-z]{1,16}$/.test(v.tab)) out.tab = v.tab
+    if (typeof v.tab === 'string' && (/^[a-z]{1,16}$/.test(v.tab) || /^plugin:[\w.-]{1,64}:[\w.-]{1,64}$/.test(v.tab))) out.tab = v.tab
   } catch {
     // Unreadable storage or text: the defaults.
   }

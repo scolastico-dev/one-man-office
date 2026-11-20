@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
+import Toggle from '../../components/ui/Toggle.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
@@ -630,16 +631,18 @@ defineExpose({
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
       <span class="tv__tools">
-        <UiButton
+        <Toggle
           v-if="agentTerminal && state !== 'ended'"
           size="sm"
           class="tv__mode"
+          :model-value="!writable"
+          label="Read only"
+          :states="{ on: 'Read only', off: 'Writable' }"
           :data-writable="writable ? '' : undefined"
           :title="writable ? 'Typing goes into the terminal. Switch back to read-only.' : 'Read-only. Switch on to type into the terminal, for single keys, arrow keys or Escape.'"
           data-terminal-mode
-          @click="toggleWritable"
-          >{{ writable ? 'Writable' : 'Read only' }}</UiButton
-        >
+          @update:model-value="toggleWritable"
+        />
         <IconButton v-if="target && state !== 'ended'" class="tv__popout" size="sm" variant="default" :label="popoutLabel" data-terminal-popout @click="popOut">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.3">
             <path d="M5 1.5H1.5v9h9V7" />

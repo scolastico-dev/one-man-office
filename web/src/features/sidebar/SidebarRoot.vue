@@ -13,6 +13,8 @@ import UiDialog from '../../components/ui/UiDialog.vue'
 import UiTabs, { type UiTab } from '../../components/ui/UiTabs.vue'
 import { useBoard } from '../../store'
 import SidebarPlugins from '../plugins/SidebarPlugins.vue'
+import PluginSidebarTab from '../plugins/PluginSidebarTab.vue'
+import { usePluginExtensions } from '../plugins/usePluginExtensions'
 import { registerSidebarActions } from './sidebarActions'
 import { sidebarTabs, visibleTabs } from './sidebarTabs'
 import { MAX_SHARE, MIN_WIDTH, NARROW_QUERY, useSidebar } from './useSidebar'
@@ -24,12 +26,15 @@ const store = useBoard()
 const route = useRoute()
 const agents = useAgents()
 const terminals = useTerminals()
+const { runtime } = usePluginExtensions()
+const pluginTabId = (t: { plugin: string; id: string }) => `plugin:${t.plugin}:${t.id}`
+const pluginTab = (id: string) => runtime.tabs.value.find(t => pluginTabId(t) === id)
 
 const tabs = computed<UiTab[]>(() =>
-  visibleTabs({ ceoEnabled: store.state.general?.ceo.enabled ?? false }).map((t) => {
+  [...visibleTabs({ ceoEnabled: store.state.general?.ceo.enabled ?? false }).map((t) => {
     const count = t.id === 'agents' ? agents.sessions.value.length : t.id === 'terminals' ? terminals.count.value : undefined
     return { id: t.id, label: t.label, ...(t.hint ? { hint: t.hint } : {}), ...(count === undefined ? {} : { count }) }
-  }),
+  }), ...runtime.tabs.value.map(t => ({ id: pluginTabId(t), label: t.label }))],
 )
 const content = (id: string) => sidebarTabs.find((t) => t.id === id) ?? sidebarTabs[1]!
 /** The remembered tab, unless it is hidden now (the CEO tab while the CEO is off). */
@@ -140,7 +145,8 @@ watch(
       <div v-if="sidebar.open.value" class="side__body">
         <UiTabs :model-value="tab" class="side__tabs" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
           <template #panel="{ active }">
-            <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
+            <PluginSidebarTab v-if="pluginTab(active)" :key="active" :tab="pluginTab(active)!" />
+            <component v-else :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
           </template>
         </UiTabs>
         <SidebarPlugins />
@@ -155,7 +161,8 @@ watch(
     <!-- Only while shown: a hidden sheet keeps no terminal or socket open. -->
     <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" class="side-sheet__tabs" :model-value="tab" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
       <template #panel="{ active }">
-        <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
+        <PluginSidebarTab v-if="pluginTab(active)" :key="active" :tab="pluginTab(active)!" />
+        <component v-else :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
       </template>
     </UiTabs>
     <SidebarPlugins v-if="sidebar.sheet.value" />

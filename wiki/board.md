@@ -226,17 +226,20 @@ file**. Large diffs are cut and say so.
 
 ## The sidebar
 
-The sidebar next to the board has three tabs. On a narrow screen it opens as a
+The sidebar next to the board has three built-in tabs; plugins may add their own tabs. On a narrow screen it opens as a
 sheet from the top bar.
 
-**CEO**: the CEO's terminal (read-only; "Write to the CEO in the box below the terminal."). Choosing the
+**CEO**: the CEO's terminal, read-only by default, with a message box below.
+Its compact toolbar groups session actions and the model picker; the **Read only**
+switch beside the pop-out button controls direct typing. Choosing the
 tab starts the CEO when it is not running, unless you stopped it. **Stop…**
 stops it until you press **Start the CEO**: mentions and questions for it wait
 until then, also across a restart of omo. **New session…** ends its session
 and starts a fresh one, which reads the open tickets it supervises.
 **Model: …** picks the CEO's model (it writes the CEO's model list under
 Settings → Roles); a running CEO keeps its model until it starts again, or
-until **Restart now**. The tab is hidden when the CEO is switched off
+until **Restart now** (the restart icon beside the model; its tooltip explains
+the pending change). The tab is hidden when the CEO is switched off
 (Settings → General). What the CEO does is in
 [Concepts](concepts.md#the-ceo).
 
@@ -247,6 +250,9 @@ terminal. An agent that used omo's MCP tools carries the chip **MCP**.
 
 **Terminals**: your own shells (see [Terminals](terminals.md)). They keep
 running when the browser closes.
+
+**VS Code** (when the plugin is enabled): **Open in VS Code** searches projects;
+select one to open its repository. Running instances below it each have **Stop**.
 
 ## Notifications
 

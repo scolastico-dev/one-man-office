@@ -4,18 +4,23 @@ import { runPluginAction } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
 import type { PluginButton, TicketSummary } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
+import SearchPicker from '../../components/ui/SearchPicker.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { useSession } from '../../session'
 import { navigatePluginResult } from '../proxy/pluginNavigation'
 import { controlsOf, type PluginControl } from './controls'
-import { enabledPlugins, pluginCodeIdentity } from './frontendRuntime'
+import { enabledPlugins, pluginCodeIdentity, type OwnedSidebarTab } from './frontendRuntime'
 import { ticketContext, usePluginExtensions } from './usePluginExtensions'
 
-const props = defineProps<{ place: PluginButton['place']; ticket?: TicketSummary; project?: string }>()
+const props = defineProps<{ place: PluginButton['place']; ticket?: TicketSummary; project?: string; tab?: Pick<OwnedSidebarTab, 'plugin' | 'id'> }>()
 const session = useSession()
 const { list, runtime, context, suspended } = usePluginExtensions()
-const buttons = computed(() => controlsOf(list.data.value, runtime.buttons.value, props.place, props.ticket, props.project))
-const panels = computed(() => runtime.panels.value.filter((p) => p.place === props.place))
+const buttons = computed(() => controlsOf(list.data.value, runtime.buttons.value, props.place, props.ticket, props.project, props.tab))
+const panels = computed(() => runtime.panels.value.filter((p) => p.place === props.place && (props.tab ? p.plugin === props.tab.plugin && p.tab === props.tab.id : p.tab === undefined)))
+const projects = computed(() => [...session.store.state.projects.values()]
+  .filter(p => p.enabled && !p.missing)
+  .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+  .map(p => ({ id: p.id, label: visibleText(p.name), detail: visibleText(p.path) })))
 const running = ref<string | null>(null)
 const answer = ref('')
 const error = ref('')
@@ -38,7 +43,8 @@ async function run(button: PluginControl) {
 <template>
   <div v-if="buttons.length || panels.length" class="plugin-controls" :data-plugin-controls="place">
     <div v-for="b in buttons" :key="b.id" class="plugin-controls__button">
-      <UiButton size="sm" :disabled="!!b.why || !!running || suspended" :aria-busy="running === b.id ? 'true' : undefined" :title="b.why" :data-plugin-control="b.id" @click="run(b)">{{ visibleText(b.label) }}{{ running === b.id ? '…' : '' }}</UiButton>
+      <SearchPicker v-if="b.scripted?.pick_project" :label="visibleText(b.label)" search-label="Search projects" placeholder="Project name or folder" :items="projects" empty="No project matches." size="sm" :disabled="!!running || suspended" :data-plugin-control="b.id" @select="run({ ...b, project: $event })" />
+      <UiButton v-else size="sm" :disabled="!!b.why || !!running || suspended" :aria-busy="running === b.id ? 'true' : undefined" :title="b.why" :data-plugin-control="b.id" @click="run(b)">{{ visibleText(b.label) }}{{ running === b.id ? '…' : '' }}</UiButton>
       <p v-if="b.why" class="plugin-controls__text">{{ b.why }}</p>
     </div>
     <section v-for="p in panels" :key="`${p.plugin}:${p.id}`" class="plugin-controls__panel" :aria-label="visibleText(p.title)" :data-plugin-panel="`${p.plugin}:${p.id}`">

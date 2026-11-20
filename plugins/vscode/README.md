@@ -1,7 +1,9 @@
 # Browser VS Code
 
 Install **vscode** from omo's official plugin list and enable it. **Open in VS
-Code** on each sidebar project opens its repository; on a ticket it opens the
+Code** in the **VS Code** sidebar tab opens a project search; selecting a
+project opens its repository. The tab lists running instances below the button,
+each with **Stop**. It adds no controls to the CEO tab. On a ticket it opens the
 selected project's worktree (one button per worktree), or the recorded working
 directory of a task without a project. Start ticket work to create its folder.
 Missing, removed or replaced folders are reported as unavailable; the plugin
@@ -150,7 +152,7 @@ keeps its side open; the no-browser interval starts when the final tunnel ends.
 Tasks are named `cs-t<TICKET>-<folder hash>-<run>`, `ovs-t<TICKET>-<folder hash>-<run>` or
 `cs-project-<folder hash>-<run>` / `ovs-project-<folder hash>-<run>`. Names are unique
 per run so delayed cleanup cannot stop a replacement. Their first output lines
-identify the folder and private state directory. **Stop** in plugin settings,
+identify the folder and private state directory. **Stop** in the VS Code sidebar tab or plugin settings,
 ticket completion/cancellation, idle expiry, removing a watched forward,
 disable/remove and omo shutdown stop the process tree and remove its forward.
 No editor restarts automatically. omo startup leaves old references inert and
