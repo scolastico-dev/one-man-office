@@ -181,8 +181,12 @@ test('an archive failure plus a newer desktop file retains a recovery snapshot o
 });
 test('native publication works on filesystems without hard links',async t=>{
  const f=fixture(t);f.put(f.source,'settings.json','{"a":1}');const sync=f.make();await sync.tick();f.put(f.browser,'settings.json','{"a":2}');
+ const recovery=[];sync.onRecovery=filename=>recovery.push(filename);
  t.mock.method(fs,'linkSync',()=>{throw Object.assign(new Error('hard links unsupported'),{code:'ENOTSUP'});});
- await sync.tick();assert.equal(f.get(f.source,'settings.json'),'{"a":2}');assert.equal(f.get(f.browser,'settings.json'),'{"a":2}');assert.deepEqual(fs.readdirSync(f.source),['settings.json']);
+ await sync.tick();assert.equal(f.get(f.source,'settings.json'),'{"a":2}');assert.equal(f.get(f.browser,'settings.json'),'{"a":2}');
+ assert.equal(recovery.length,1);assert.equal(fs.readFileSync(recovery[0],'utf8'),'{"a":1}');
+ assert.deepEqual(fs.readdirSync(f.source).sort(),['settings.json',path.basename(recovery[0])].sort(),'only the intentional inode snapshot may remain');
+ assert.deepEqual(await nativeFiles(f.source).list(),['settings.json']);
 });
 test('exclusive fallback creation cannot replace a newly saved desktop file',async t=>{
  const f=fixture(t),name='settings.json',file=path.join(f.source,name),saved='{"a":3}';f.put(f.source,name,'{"a":1}');const sync=f.make();await sync.tick();f.put(f.browser,name,'{"a":2}');
@@ -214,4 +218,25 @@ test('an incomplete pre-existing archive cannot stand in for the displaced deskt
  t.mock.method(fs.promises,'open',async(filename,...args)=>{const handle=await open(filename,...args);if(filename===path.join(f.source,name)&&++reads===3){const close=handle.close.bind(handle);handle.close=async()=>{await close();f.put(f.source,name,saved);};}return handle;});
  await sync.tick();await sync.tick();
  assert.ok(fs.readdirSync(backups).some(file=>f.get(backups,file)===saved),'the complete desktop version must be archived before its live file is replaced');
+});
+for(const name of ['settings.json','keybindings.json','tasks.json','snippets/race.json','snippets/linked.json'])for(const mutation of ['write','delete'])for(const when of ['during','after'])test(`${name}: an open desktop descriptor saved ${when} ${mutation} remains recoverable`,async t=>{
+ const f=fixture(t),text=(a,b)=>JSON.stringify(name==='keybindings.json'?[{key:'ctrl+k',command:{a,b}}]:{a,b}),original=text(1,1),browser=text(2,1),saved=text(1,2);
+ if(name==='snippets/linked.json'){const external=path.join(f.root,'dotfile.json');fs.writeFileSync(external,original);fs.mkdirSync(path.join(f.source,'snippets'));fs.symlinkSync(external,path.join(f.source,name),'file');}else f.put(f.source,name,original);
+ const sync=f.make();await sync.tick();if(mutation==='write')f.put(f.browser,name,browser);else fs.unlinkSync(path.join(f.browser,name));
+ const fd=fs.openSync(path.join(f.source,name),'r+');let injected=false;
+ const save=()=>{const bytes=Buffer.from(saved);fs.ftruncateSync(fd,0);fs.writeSync(fd,bytes,0,bytes.length,0);injected=true;};
+ try{
+  const preserve=sync.preserve.bind(sync);t.mock.method(sync,'preserve',async(file,...values)=>{await preserve(file,...values);if(!injected&&file===name&&when==='during')save();});
+  await sync.tick();if(when==='after')save();await sync.tick();assert.equal(injected,true);
+ }finally{fs.closeSync(fd);}
+ const copies=path.join(f.root,'conflicts');assert.ok(fs.readdirSync(copies).some(file=>f.get(copies,file)===saved),'retain the displaced inode, not only bytes copied before the descriptor save');
+});
+for(const name of ['settings.json','keybindings.json','tasks.json','snippets/race.json','snippets/linked.json'])for(const mutation of ['write','delete'])test(`${name}: a native inode on a different filesystem survives a descriptor save after ${mutation}`,async t=>{
+ const f=fixture(t),text=(a,b)=>JSON.stringify(name==='keybindings.json'?[{key:'ctrl+k',command:{a,b}}]:{a,b}),saved=text(1,2);
+ if(name==='snippets/linked.json'){const external=path.join(f.root,'dotfile.json');fs.writeFileSync(external,text(1,1));fs.mkdirSync(path.join(f.source,'snippets'));fs.symlinkSync(external,path.join(f.source,name),'file');}else f.put(f.source,name,text(1,1));
+ const sync=f.make();await sync.tick();if(mutation==='write')f.put(f.browser,name,text(2,1));else fs.unlinkSync(path.join(f.browser,name));
+ const link=fs.linkSync.bind(fs);t.mock.method(fs,'linkSync',(from,to)=>{if(String(to).includes('-native-')&&String(to).startsWith(path.join(f.root,'conflicts')))throw Object.assign(new Error('different filesystems'),{code:'EXDEV'});return link(from,to);});
+ const recovery=[];sync.onRecovery=filename=>recovery.push(filename);const fd=fs.openSync(path.join(f.source,name),'r+');
+ try{await sync.tick();const bytes=Buffer.from(saved);fs.ftruncateSync(fd,0);fs.writeSync(fd,bytes,0,bytes.length,0);assert.equal(recovery.length,1);assert.equal(fs.readFileSync(recovery[0],'utf8'),saved);}finally{fs.closeSync(fd);}
+ assert.equal((await nativeFiles(f.source).list()).some(file=>file.includes('.omo-displaced-')),false);
 });

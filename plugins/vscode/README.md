@@ -151,6 +151,12 @@ and the extension output reports its recovery path. Native staging/recovery
 siblings are excluded from the shared snippet inventory.
 Existing conflict copies are verified before reuse; an incomplete or edited
 copy is retained alongside a new complete archive.
+Native snapshots also keep a link to the displaced inode, so an already-open
+desktop descriptor can finish an in-place save during or after synchronization
+without losing its bytes. Such `-native-` archives can change until that writer
+closes its descriptor. If a private inode link is unavailable, for example
+across filesystems, the managed recovery sibling stays on the native filesystem
+and its path is reported even after a successful commit.
 
 Without a desktop profile, extensions remain in `profiles/<editor>/extensions/`
 and shared preference files in `profiles/<editor>/preferences/User/`. Fresh

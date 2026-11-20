@@ -824,6 +824,10 @@ left live or preserved privately. Failed archive/restore retains and reports an
 `.omo-displaced-<uuid>` sibling; native staging/recovery files are not snippets.
 Archives publish from complete staging files and verify existing copies before
 reuse, retaining a new complete copy beside interrupted or edited archives.
+Native archives retain inode references as well as byte copies, protecting
+in-place saves through descriptors opened before displacement, even after the
+commit returns. If the inode cannot be linked into private archives, keep and
+report its native recovery sibling instead; do not clean it up as a temporary.
 `--preference-races --smoke --profile-sharing` exercises all four file categories
 and both mutation paths against the real pinned publishers without sleeps.
 The pinned OpenVSCode bootstrap overrides builtin paths,

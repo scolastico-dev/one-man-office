@@ -126,6 +126,7 @@ async function activate(context) {
     source: nativeFiles(config.sharedUser), target: browserFiles(vscode, browser, config.nativeHistory ? nativeHistory(config.nativeHistory) : undefined), lock: config.lock,
     backups: config.backups, adoptBrowserOnce: config.adoptBrowserOnce,
     onConflict: () => output.appendLine('Different preference versions were preserved in ' + JSON.stringify(config.backups) + '.'),
+    onRecovery: filename => output.appendLine('A native preference inode is retained at ' + JSON.stringify(filename) + '.'),
   });
   let pending = false, draining, disposed = false, failed = false;
   function request() {

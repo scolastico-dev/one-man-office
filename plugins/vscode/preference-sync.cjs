@@ -102,7 +102,7 @@ function nativeFiles(root) {
       }
       const temporary = target + '.omo-' + randomUUID();
       const displaced = target + '.omo-displaced-' + randomUUID();
-      let moved = false, archived = false, committed = false;
+      let moved = false, archived = false, committed = false, retained = false;
       function restore() {
         try { fs.linkSync(displaced, target); return true; }
         catch (error) {
@@ -125,7 +125,10 @@ function nativeFiles(root) {
         try { fs.renameSync(target, displaced); moved = true; }
         catch (error) { if (!missing(error)) throw error; }
         const current = moved ? nativeSnapshot(displaced) : null;
-        if (moved && preserve) { await preserve(name, current); archived = true; }
+        if (moved && preserve) {
+          const archive = await preserve(name, current, displaced);
+          retained = archive?.retain === true; archived = true;
+        }
         if (expected !== undefined && !same(current, expected)) return false;
         if (value !== null) {
           // Never replace a newer desktop file created after displacement.
@@ -143,7 +146,7 @@ function nativeFiles(root) {
               try { restored = restore(); }
               catch (error) { if (!archived) throw Object.assign(error, {recoveryPath: displaced}); }
             }
-            if (committed || archived || restored) fs.unlinkSync(displaced);
+            if (committed || archived || restored) { if (!retained) fs.unlinkSync(displaced); }
             else throw Object.assign(new Error('native preference snapshot retained for recovery'), {recoveryPath: displaced});
           }
         } finally { try { fs.unlinkSync(temporary); } catch (error) { if (!missing(error)) throw error; } }
@@ -194,9 +197,10 @@ function mergeSettings(base, desktop, browser) {
   return {value: Buffer.from(result), conflict};
 }
 class PreferenceSync {
-  constructor({source, target, lock, backups, adoptBrowserOnce, onConflict = () => {}}) {
+  constructor({source, target, lock, backups, adoptBrowserOnce, onConflict = () => {}, onRecovery = () => {}}) {
     this.adoptBrowserOnce = adoptBrowserOnce;
     this.source = source; this.target = target; this.backups = backups; this.onConflict = onConflict; this.previous = new Map(); this.initialized = false;
+    this.onRecovery = onRecovery;
     fs.mkdirSync(path.dirname(lock), {recursive: true, mode: 0o700});
     this.database = new DatabaseSync(lock); this.database.exec('PRAGMA busy_timeout=0');
   }
@@ -224,6 +228,24 @@ class PreferenceSync {
       } finally { try { fs.unlinkSync(temporary); } catch (error) { if (!missing(error)) throw error; } }
     }
     this.onConflict();
+  }
+  async preserveNative(name, value, displaced) {
+    await this.preserve(name, value);
+    // A desktop editor may still hold the displaced inode open. Preserve an
+    // inode reference as well as the completed byte copy, so its later in-place
+    // saves remain recoverable even after our commit has returned.
+    const destination = path.join(this.backups, createHash('sha256').update(name).update(value).digest('hex') + '-native-' + randomUUID() + '.jsonc');
+    try {
+      const inode = fs.lstatSync(displaced).isSymbolicLink() ? fs.realpathSync(displaced) : displaced;
+      fs.linkSync(inode, destination);
+      return {retain: false};
+    } catch (error) {
+      if (!['EXDEV', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EACCES', 'EMLINK'].includes(error.code)) throw error;
+      // Across filesystems, a byte copy cannot follow future descriptor writes.
+      // Keep the original native inode at its managed recovery sibling instead.
+      this.onRecovery(displaced);
+      return {retain: true};
+    }
   }
   async tick() {
     try { this.database.exec('BEGIN IMMEDIATE'); }
@@ -268,9 +290,9 @@ class PreferenceSync {
         // defer changed files without advancing their baseline or migration.
         expectedVersions.set(name, [result]);
         if (!same(await this.source.read(name), rawDesktop) || !same(await this.target.read(name), rawBrowser)) { incomplete = true; continue; }
-        if (!same(desktop, result) && await this.source.write(name, name === 'settings.json' ? themeSettings(result, rawDesktop) : result, rawDesktop, (file, value) => this.preserve(file, value)) === false) { incomplete = true; continue; }
+        if (!same(desktop, result) && await this.source.write(name, name === 'settings.json' ? themeSettings(result, rawDesktop) : result, rawDesktop, (file, value, displaced) => this.preserveNative(file, value, displaced)) === false) { incomplete = true; continue; }
         if (!same(browser, result) || (this.target.refreshOnSharedChanges && (old === undefined || !same(old, result)))) {
-          if (!same(await this.target.read(name), rawBrowser) || await this.target.write(name, result, rawBrowser, (file, value) => this.preserve(file, value)) === false) { incomplete = true; continue; }
+          if (!same(await this.target.read(name), rawBrowser) || await this.target.write(name, result, rawBrowser, (file, value, displaced) => this.preserveNative(file, value, displaced)) === false) { incomplete = true; continue; }
         }
         this.previous.set(name, result);
       }
