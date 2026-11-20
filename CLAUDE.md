@@ -530,6 +530,26 @@ mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
+## Native UI protocol
+
+`internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
+exchanges each side's `features` list; unknown/absent client flags are harmless and
+no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`.
+`GET /api/ui/notifications?cursor=<decimal-event-id>&limit=<0..200>` scans committed
+events in a board read transaction (`board/ui.go`), returning
+`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. Both routes
+are registered as `userOnly` in `server/ui.go` and use existing auth/Host/Origin
+checks; native HTTP clients omit Origin, with no CORS exception. Each UI retains
+its own cursor; the bell routes and mentions seen marker stay independent.
+The scan limit counts events, so an empty page can have `has_more=true`.
+Notification IDs are stable event IDs; comment payloads and category transitions
+between committed ticket summaries generate mentions, questions, attention and
+review notices on demand, without a new queue or delivery state. Invalid syntax
+is 400; unavailable history is 409 with `reset_cursor` and `latest_cursor`.
+The existing SQLite AUTOINCREMENT sequence preserves recovery information even
+when all events have been removed. The exact protocol, examples, initial
+baselining and retry rules are in [Native UI API](wiki/ui-api.md).
+
 ## Invariants
 
 - A change is committed to SQLite before it is acknowledged, and every committed change appends an `events` row. The event stream tails that table, so clients get every event once, or an explicit `resync`.

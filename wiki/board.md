@@ -261,7 +261,9 @@ select one to open its repository. Running instances below it each have **Stop**
 The bell lists what waits for you (questions, reviews, flagged tickets) and
 mentions of you, with **Mark all as read**. **Desktop notifications** switches
 on browser notifications in that browser. To get them on your phone, install
-the pushover or discord plugin ([Plugins](plugins.md)).
+the pushover or discord plugin ([Plugins](plugins.md)). Native UI clients can
+also use the [incremental notification API](ui-api.md); its delivery cursors
+are independent of the bell's read marker.
 
 ## Keys
 

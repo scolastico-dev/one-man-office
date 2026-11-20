@@ -22,6 +22,7 @@ const maxLogBytes = 2 << 20
 const maxLogSegments = 64
 
 func (s *Server) registerThread(mux *http.ServeMux) {
+	s.registerUI(mux)
 	mux.HandleFunc("GET /api/tickets/{n}/thread", s.getThread)
 	mux.HandleFunc("GET /api/notifications", s.getNotifications)
 	mux.HandleFunc("PUT /api/notifications/seen", s.putNotificationsSeen)
