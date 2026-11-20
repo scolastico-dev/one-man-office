@@ -1,0 +1,15 @@
+services:
+  relay:
+    image: omo-relay:local
+    build:
+      context: ..
+      dockerfile: docker/relay.Dockerfile
+    command: ["-listen", ":8091", "-password-file", "${RELAY_PASSWORD_FILE:-}"]
+    ports:
+      - "${RELAY_BIND:-127.0.0.1}:${RELAY_PORT:-8091}:8091"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
