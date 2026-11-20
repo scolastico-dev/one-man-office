@@ -53,6 +53,28 @@ server.on('error',e=>{console.error(e.code);process.exit(1)});
 server.listen(port,'127.0.0.1',()=>console.log(addr?'HTTP server listening on http://127.0.0.1:'+port:'Server bound to 127.0.0.1:'+port+' (IPv4)'));
 `;
 function flag(capture,key){return capture.args[capture.args.indexOf(key)+1];}
+for(const editor of ['code-server','openvscode']) test(editor+' imports a desktop GitHub secret before the editor starts',async t=>{
+  const f=setup(t,editorScript,editor),user=path.join(f.host.XDG_CONFIG_HOME,'Code','User');
+  const {DatabaseSync}=require('node:sqlite'),{createCipheriv,pbkdf2Sync}=require('node:crypto');
+  fs.mkdirSync(path.join(user,'globalStorage'),{recursive:true});
+  const db=new DatabaseSync(path.join(user,'globalStorage','state.vscdb'));
+  db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value BLOB)');
+  const cipher=createCipheriv('aes-128-cbc',pbkdf2Sync('peanuts','saltysalt',1,16,'sha1'),Buffer.alloc(16,32));
+  const key='{"extensionId":"vscode.github-authentication","key":"github.auth"}',value='fixture-session';
+  db.prepare('INSERT INTO ItemTable VALUES (?,?)').run('secret://'+key,JSON.stringify(Buffer.concat([Buffer.from('v10'),cipher.update(value),cipher.final()])));db.close();
+  // This is a synthetic Linux v10 fixture on every host. Select Linux only
+  // at the discovery/decryption boundaries; keep native process, filesystem
+  // and runtime checks intact, and never consult the host user's keyring.
+  const platformFixture=path.join(f.root,'linux-secret-fixture.cjs');
+  fs.writeFileSync(platformFixture,'const profile=require('+JSON.stringify(path.resolve(__dirname,'../profile.cjs'))+'),detect=profile.detectLocal;'+
+    'profile.detectLocal=()=>detect({platform:"linux",home:'+JSON.stringify(f.host.HOME)+'});'+
+    'const secrets=require('+JSON.stringify(path.resolve(__dirname,'../desktop-secrets.cjs'))+'),read=secrets.readDesktopSecrets;'+
+    'secrets.readDesktopSecrets=local=>read(local,{platform:"linux"});');
+  const r=run(t,f,editor,await port(),'a'.repeat(32),{NODE_OPTIONS:'--require '+JSON.stringify(platformFixture)});await until(()=>r.output().includes('OMO_EDITOR_READY'));
+  const {SecretStore}=require('../secret-provider.cjs'),store=new SecretStore(path.join(f.data,'profiles',editor,'secrets'));
+  try{assert.equal(store.get(key),value);}finally{store.close();}
+  assert.doesNotMatch(r.output(),/fixture-session/);
+});
 function vscodeFlag(capture,key,editor){
   if(editor==='openvscode')return flag(capture,key);
   const prefix=key.replace(/^--/,'')+'=';
@@ -247,13 +269,17 @@ test('Microsoft cannot be selected through launcher entry or legacy consent',asy
  const f=setup(t,"process.exit(0)");const r=await run(t,f,'microsoft',await port()).end;
  assert.notEqual(r.code,0);assert.match(r.output,/unavailable/);
 });
-for(const editor of ['code-server','openvscode'])for(const product of ['Code','VSCodium'])test(editor+' shares '+product+' extensions and bridges its user profile without opening its native database',async t=>{
+for(const editor of ['code-server','openvscode'])for(const product of ['Code','VSCodium'])test(editor+' shares '+product+' extensions and bridges its user profile without modifying its native database',async t=>{
  const f=setup(t,editorScript,editor),home=process.platform==='win32'?f.host.USERPROFILE:f.host.HOME;
  const config=process.platform==='darwin'?path.join(home,'Library','Application Support'):process.platform==='win32'?f.host.APPDATA:f.host.XDG_CONFIG_HOME;
  const desktop=path.join(config,product,'User'),extensions=path.join(home,product==='Code'?'.vscode':'.vscode-oss','extensions');
  fs.mkdirSync(path.join(desktop,'globalStorage'),{recursive:true});fs.mkdirSync(extensions,{recursive:true});
  const settings='// Desktop JSONC\n{"workbench.colorTheme":"Fixture Light","chat.disableAIFeatures":false,}\n';
- fs.writeFileSync(path.join(desktop,'settings.json'),settings);fs.writeFileSync(path.join(desktop,'globalStorage','state.vscdb'),'encrypted native secrets');
+ fs.writeFileSync(path.join(desktop,'settings.json'),settings);
+ const nativeDatabase=path.join(desktop,'globalStorage','state.vscdb'),db=new(require('node:sqlite').DatabaseSync)(nativeDatabase);
+ db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value BLOB)');
+ db.prepare('INSERT INTO ItemTable VALUES (?,?)').run('unrelated-setting','native state must remain unchanged');db.close();
+ const originalDatabase=fs.readFileSync(nativeDatabase);
  fs.writeFileSync(path.join(extensions,'desktop-extension'),'desktop extension');
  fs.mkdirSync(path.join(extensions,'fixture.desktop-ui'));fs.writeFileSync(path.join(extensions,'fixture.desktop-ui','package.json'),JSON.stringify({publisher:'fixture',name:'desktop-ui',version:'1.0.0',engines:{vscode:'^1.109.0'},main:'./index.js',extensionKind:['ui']}));fs.writeFileSync(path.join(extensions,'fixture.desktop-ui','index.js'),'exports.activate=()=>{};');
  const r=run(t,f,editor,await port());await until(()=>r.output().includes('OMO_EDITOR_READY'));const capture=JSON.parse(fs.readFileSync(r.capture));
@@ -261,7 +287,7 @@ for(const editor of ['code-server','openvscode'])for(const product of ['Code','V
  const user=flag(capture,'--user-data-dir');assert.ok(user.startsWith(f.data+path.sep));assert.notEqual(user,path.dirname(desktop));
  const builtin=flag(capture,'--builtin-extensions-dir'),bridge=path.join(builtin,'omo.profile-bridge');
  assert.ok(builtin.startsWith(f.data+path.sep));assert.equal(JSON.parse(fs.readFileSync(path.join(bridge,'profile.json'))).sharedUser,desktop);
- assert.equal(fs.readFileSync(path.join(desktop,'settings.json'),'utf8'),settings);assert.equal(fs.readFileSync(path.join(desktop,'globalStorage','state.vscdb'),'utf8'),'encrypted native secrets');
+ assert.equal(fs.readFileSync(path.join(desktop,'settings.json'),'utf8'),settings);assert.deepEqual(fs.readFileSync(nativeDatabase),originalDatabase);
  fs.writeFileSync(path.join(flag(capture,'--extensions-dir'),'browser-extension'),'browser extension');assert.equal(fs.readFileSync(path.join(extensions,'browser-extension'),'utf8'),'browser extension');
  assert.match(r.output(),/Shared desktop profile:/);assert.match(r.output(),/Skipped incompatible desktop extension.*fixture.desktop-ui/);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.data,'profiles',editor,'incompatible-extensions.json'))),['fixture.desktop-ui']);
 });

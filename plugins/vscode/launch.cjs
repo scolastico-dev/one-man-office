@@ -3,9 +3,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
-const { createHash } = require('node:crypto');
+const { createHash, randomBytes } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const {detectLocal, prepareProfile, incompatibleExtensions} = require('./profile.cjs');
+const {readDesktopSecrets} = require('./desktop-secrets.cjs');
+const {SecretStore} = require('./secret-provider.cjs');
 
 function canonical(folder) {
   const real = fs.realpathSync.native(folder);
@@ -72,7 +74,11 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   catch (error) { if (error.code !== 'EEXIST') throw error; }
   try { fs.copyFileSync(settingsFile, path.join(user, 'Machine', 'settings.json'), fs.constants.COPYFILE_EXCL); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
-  const {extensions, builtins, preload: fileRootPreload} = prepareProfile({editor, root, profile, state, data, user, local});
+  const secretCapability = randomBytes(32).toString('hex'), secrets = path.join(profile, 'secrets');
+  const {extensions, builtins, preload: fileRootPreload} = prepareProfile({editor, root, profile, state, data, user, local, secretCapability});
+  const secretPreload = path.join(state, 'secret-endpoint.cjs');
+  fs.writeFileSync(secretPreload, 'require(' + JSON.stringify(path.join(__dirname, 'secret-provider.cjs')) + ').installHTTP(' +
+    JSON.stringify({directory: secrets, capability: secretCapability, route: (editor === 'code-server' ? '/' : base) + '_omo/secrets'}) + ');\n', {mode: 0o600});
   let args;
   if (editor === 'code-server') {
     const config = path.join(state, 'config.yaml');
@@ -106,11 +112,17 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   const skipped = local ? incompatibleExtensions(extensions) : [];
   const skippedPath = path.join(profile, 'incompatible-extensions.json');
   fs.writeFileSync(skippedPath, JSON.stringify(skipped, null, 2) + '\n', {mode: 0o600});
-  return { folder, args, env, local, skipped, skippedPath };
+  args.unshift('--require', secretPreload);
+  if (editor === 'code-server') args.unshift('--require', fileRootPreload);
+  return { folder, args, env, local, skipped, skippedPath, secrets };
 }
-function run(args) {
+async function run(args) {
   const [editor, root, folder, data, id, port, base, runtime] = args;
-  const options = prepare(editor, root, folder, data, id, port, base, runtime);
+  let options;
+  try {options = prepare(editor, root, folder, data, id, port, base, runtime);}
+  catch (error) {error.launchPreparation = true; throw error;}
+  const records = await readDesktopSecrets(options.local), store = new SecretStore(options.secrets);
+  try {store.import(records, options.local?.user || 'private');} finally {store.close();}
   console.log('Workspace: ' + JSON.stringify(options.folder));
   console.log('Editor: ' + editor + '; loopback 127.0.0.1:' + port + '; state ' + JSON.stringify(path.join(data, 'sessions', id)));
   console.log('Runtime: ' + JSON.stringify(runtime));
@@ -163,7 +175,10 @@ function run(args) {
 }
 try {
   if (process.argv[2] === 'identity') process.stdout.write('\nOMO_EDITOR_IDENTITY:' + Buffer.from(canonical(process.argv[3]), 'utf8').toString('hex') + '\n');
-  else if (process.argv[2] === 'run') run(process.argv.slice(3));
+  else if (process.argv[2] === 'run') run(process.argv.slice(3)).catch(error => {
+    console.error('Editor unavailable: ' + (error.launchPreparation || error.message.startsWith('desktop ') ? error.message : 'editor preparation failed; check profile permissions and publisher compatibility'));
+    process.exitCode = 1;
+  });
   else throw new Error('unknown editor launcher operation');
 } catch (error) {
   console.error('Editor unavailable: ' + error.message);

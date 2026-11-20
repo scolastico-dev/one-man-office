@@ -91,6 +91,16 @@ are detected automatically; the first matching product supplies the shared
 settings, keybindings, tasks, snippets and extensions. Browser/desktop changes
 use those shared files in both directions. Without a desktop profile, private
 preferences and extensions remain in plugin data across restarts.
+New editor processes also import the selected desktop profile's encrypted
+SecretStorage read-only, so existing sessions such as GitHub are available in
+the browser. Linux needs `secret-tool`, or `dbus-send` for KWallet;
+macOS uses Keychain through `security`, Windows uses DPAPI through PowerShell.
+An unavailable/locked keyring reports an error before editor startup. Imported
+secrets persist privately under `profiles/<editor>/secrets/` across folders and
+proxy origins. Browser secret edits and sign-outs survive repeat imports;
+secrets never sync back to the desktop. Stop/reopen to import later desktop
+sign-ins. Details and platform verification limits are in the
+[plugin README](../plugins/vscode/README.md#desktop-sign-ins-and-secrets).
 Intervening browser saves are recorded at the publisher's storage boundary;
 versions raced by a sync write or deletion are retained in the editor's private
 `preference-conflicts/` folder before their journal records are acknowledged.

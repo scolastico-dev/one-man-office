@@ -83,3 +83,15 @@ test('OpenVSCode renderer history lives in a private overlay without changing pu
  assert.match(fs.readFileSync(overlay,'utf8'),/installBrowserHistory/);
  assert.equal(fs.readFileSync(path.join(path.dirname(overlay),'workbench.html'),'utf8'),'publisher html');
 });
+for (const editor of ['code-server', 'openvscode']) test(editor + ' supplies desktop secrets through a private renderer overlay before extension startup', t => {
+ const f=fixture(t),artifact=path.join(f.root,'artifact'),profile=path.join(f.root,'profile'),state=path.join(f.root,'session');
+ const publisher=editor==='code-server'?path.join(artifact,'lib','vscode'):artifact;
+ const relative=path.join('out','vs','code','browser','workbench','workbench.js'),original=path.join(publisher,relative);
+ const content='// vscode-web-db vscode-userdata-store\ncreate({secretStorageProvider:e.remoteAuthority&&!t?void 0:new gjo(i)});';
+ fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,content);
+ const result=prepareProfile({editor,root:artifact,profile,state,data:f.root,user:path.join(profile,'portable','user-data'),local:null,secretCapability:'fixture-capability'});
+ const overlaid=fs.readFileSync(path.join(state,'publisher',relative),'utf8');
+ assert.match(overlaid,/fixture-capability/);assert.match(overlaid,/createSecretProvider/);
+ assert.equal(fs.readFileSync(original,'utf8'),content);
+ assert.ok(result.preload,'both editors must receive the overlay root preload');
+});

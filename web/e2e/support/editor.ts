@@ -90,7 +90,7 @@ export const test = base.extend<{ editor: EditorFixture }>({
         if (options.unsupported) lua = 'event.host.os="windows";event.host.arch="arm64"\n' + lua
         else lua = lua.replace(guard, 'if false and not checksums[editor][platform] then')
         const backend: Record<string, string> = {}
-        for (const file of ['profile.cjs', 'profile-bridge.cjs', 'preference-sync.cjs', 'preference-history.cjs', 'browser-history.cjs']) backend[file] = readFileSync(join(folder, file), 'utf8')
+        for (const file of ['profile.cjs', 'profile-bridge.cjs', 'preference-sync.cjs', 'preference-history.cjs', 'browser-history.cjs', 'desktop-secrets.cjs', 'secret-provider.cjs', 'browser-secrets.cjs']) backend[file] = readFileSync(join(folder, file), 'utf8')
         for (const file of readdirSync(join(folder, 'vendor'), { recursive: true }) as string[]) {
           const full = join(folder, 'vendor', file)
           if (statSync(full).isFile()) backend[join('vendor', file)] = readFileSync(full, 'utf8')
