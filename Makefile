@@ -15,7 +15,7 @@ export CGO_ENABLED := 0
 
 # NO_WEB=1 builds the Go binary without the browser app (no Node.js needed).
 WEB_DEPS := $(if $(NO_WEB),,web)
-.PHONY: build notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e stress stress-check readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
+.PHONY: build relay relay-image notices cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e stress stress-check readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
 
 ## web: build the browser app into web/dist (needs Node.js 24 and npm)
 web:
@@ -63,6 +63,22 @@ build: $(WEB_DEPS)
 notices: $(WEB_DEPS)
 	@mkdir -p $(BUILD_DIR)
 	go run ./tools/notices -o $(BUILD_DIR)/THIRD_PARTY_NOTICES $(if $(NO_WEB),-web '')
+
+## relay: build standalone bin/omo-relay and its linked-code notices (no Node.js)
+relay:
+	@mkdir -p $(BUILD_DIR)
+	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/omo-relay$(if $(filter windows,$(GOOS)),.exe) ./cmd/omo-relay
+	@set -eu; { \
+		printf 'omo-relay includes the Go standard library and github.com/coder/websocket.\nSee LICENSE and NOTICE for omo-relay itself.\n\nGo standard library %s\n' "$$(go env GOVERSION)"; \
+		cat "$$(go env GOROOT)/LICENSE" "$$(go env GOROOT)/PATENTS"; \
+		printf '\n\n%s\n' "$$(go list -m github.com/coder/websocket)"; \
+		cat "$$(go list -m -f '{{.Dir}}' github.com/coder/websocket)/LICENSE.txt"; \
+	} > $(BUILD_DIR)/RELAY_THIRD_PARTY_NOTICES
+
+## relay-image: build the separate standalone relay image (RELAY_IMAGE overrides tag)
+RELAY_IMAGE ?= omo-relay:local
+relay-image:
+	docker build -f docker/relay.Dockerfile --build-arg VERSION='$(VERSION)' -t $(RELAY_IMAGE) .
 
 ## cross: build Linux, macOS and Windows for amd64 and arm64 (NO_WEB=1 skips the browser app)
 cross: cross-guard cross-linux cross-darwin cross-windows
