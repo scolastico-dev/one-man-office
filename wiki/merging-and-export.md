@@ -120,6 +120,8 @@ be found by checking that the exported content is present. If the original
 commit does not prove inclusion, omo also checks the current local tip of the
 recorded exported branch. This detects work rebased with conflict resolutions
 or extended by follow-up commits before merging, including squash merges.
+The fallback excludes upstream changes brought in by a rebase; discarding the
+feature's changes during conflict resolution does not count as a merge.
 The original export and diff records stay intact, and remain usable if the
 branch is deleted. Changes made only in another clone must also be available
 on the local exported branch for this fallback. These content checks use Git's

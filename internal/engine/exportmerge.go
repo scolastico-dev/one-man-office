@@ -203,9 +203,10 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 // changedExportContained checks the current tip of the recorded export branch
 // when the original exported patch could not prove inclusion. A rebase may
 // resolve a conflict differently, and a follow-up may replace exported lines.
-// Compare that tip with the saved target baseline, never the local base branch:
-// the local checkout need not have pulled the remote merge. Keep all saved
-// export and diff commits intact for the round guard and the historical diff.
+// Measure its patch from the newest commit on the fetched target's first-parent
+// chain that the tip contains. This excludes upstream changes brought in by a
+// rebase, even after a merge makes the tip itself an ancestor of the target.
+// Keep all saved export and diff commits intact for the round guard and diff.
 func (e *Engine) changedExportContained(repo string, p board.EngineProject, target string) (bool, error) {
 	if p.ExportBranch == "" {
 		return false, nil
@@ -217,7 +218,13 @@ func (e *Engine) changedExportContained(repo string, p board.EngineProject, targ
 	if err != nil || tip == p.ExportCommit {
 		return false, err
 	}
-	start, err := e.git.MergeBase(repo, p.ExportTargetCommit, tip)
+	// The target's first-parent commits not reachable from tip form a prefix
+	// of that chain. Walking past them reaches the shared upstream commit.
+	_, distance, err := e.git.FirstParentLog(repo, target, tip, 0)
+	if err != nil {
+		return false, err
+	}
+	start, err := e.git.RevParse(repo, fmt.Sprintf("%s~%d", target, distance))
 	if err != nil {
 		return false, err
 	}

@@ -55,6 +55,7 @@ func TestExportMergeAfterBranchChanges(t *testing.T) {
 				if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
 					t.Fatalf("unmerged changed branch completed: %+v", got.TicketSummary)
 				}
+				commit(t, landed, "before-merge.txt", "upstream work after the branch changed\n")
 				gitRun(t, landed, "fetch", "-q", "origin", "refs/heads/"+branch)
 				if style == "merge" {
 					gitRun(t, landed, "merge", "-q", "--no-ff", "-m", "merge changed export", "FETCH_HEAD")
@@ -77,6 +78,56 @@ func TestExportMergeAfterBranchChanges(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestExportCheckRejectsUpstreamOnlyRebase(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	for _, advancement := range []string{"at target", "behind target", "empty commit"} {
+		t.Run(advancement, func(t *testing.T) {
+			h := gitHarness(t)
+			commit(t, h.repo, "b.txt", "base\n")
+			n, job, dir, branch := h.exportedTask("Discarded export")
+			if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
+				t.Fatal(err)
+			}
+			h.steps(2)
+			recorded := h.ticket(n).Projects[0]
+			remote := h.origin(h.project)
+			landed := filepath.Join(t.TempDir(), "landed")
+			gitRun(t, h.repo, "clone", "-q", "-b", "main", remote, landed)
+			target := commit(t, landed, "b.txt", "unrelated target edit\n")
+			gitRun(t, landed, "push", "-q", "origin", "main")
+			gitRun(t, dir, "fetch", "-q", "origin", "main")
+			cmd := exec.Command("git", "rebase", "FETCH_HEAD")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+				t.Fatalf("rebase did not conflict: %v\n%s", err, out)
+			}
+			// Resolve by keeping upstream, discarding the exported change.
+			gitRun(t, dir, "checkout", "--ours", "b.txt")
+			gitRun(t, dir, "add", "b.txt")
+			gitRun(t, dir, "rebase", "--continue")
+			if tip := gitRun(t, dir, "rev-parse", "HEAD"); tip != target {
+				t.Fatalf("discarded rebase tip = %s, want upstream %s", tip, target)
+			}
+			if advancement == "empty commit" {
+				gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "empty feature patch")
+			}
+			gitRun(t, dir, "push", "-q", "--force-with-lease=refs/heads/"+branch+":"+recorded.ExportCommit, "origin", "HEAD:refs/heads/"+branch)
+			if advancement == "behind target" {
+				commit(t, landed, "later.txt", "later upstream change\n")
+				gitRun(t, landed, "push", "-q", "origin", "main")
+			}
+			h.e.checkExportsMerged(h.ctx)
+			if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
+				t.Fatalf("upstream-only changes completed unmerged export: %+v", got.TicketSummary)
+			}
+			h.steps(2)
+			if !pathExists(dir) {
+				t.Fatal("unmerged export lost its worktree")
+			}
+		})
 	}
 }
 
