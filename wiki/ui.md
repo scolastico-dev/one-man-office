@@ -174,10 +174,12 @@ cd src-tauri/gen/android
 ./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest
 ```
 
-The Android tests use Robolectric SDK 35, controlled WorkManager/executors,
+The Android tests use Robolectric SDK 35 (plus SDK 27/35 crash-backup recovery),
+controlled WorkManager/executors,
 private stores and Rust local HTTP fixtures. They cover scheduler exclusivity,
 interval/constraints, permission and channel blocking, cold worker execution,
-foreground notification/timeout, encrypted work storage, delivery persistence,
+foreground notification/timeout, encrypted work storage and AtomicFile backup
+recovery after interrupted writes, delivery persistence,
 GET authentication and tap destinations. A development arm64 APK was built on
 Linux. No emulator or device was available for this work: actual device Keystore,
 JNI delivery, permission prompts, notification taps and background/foreground

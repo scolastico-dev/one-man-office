@@ -19,7 +19,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], shadows = [PollingTest.FileStatShadow::class])
 class PollingTest {
     private lateinit var context: Context
     private lateinit var store: MemoryStore
@@ -165,6 +165,37 @@ class PollingTest {
         restarted.save(null)
         assertNull(encrypted.load())
     }
+    @Test @Config(sdk = [27, 35])
+    fun committed_atomic_backup_is_recovered_when_process_died_before_base_recreation() {
+        val key=javax.crypto.spec.SecretKeySpec(ByteArray(32) {9},"AES")
+        val encrypted=EncryptedWorkStore(context) {key}
+        val work=WorkConfig(args().getJSONObject("config"),"private-token","/private/config","saved-generation")
+        encrypted.save(work)
+        val base=java.io.File(context.noBackupFilesDir,"notification-work")
+        val backup=java.io.File(context.noBackupFilesDir,"notification-work.bak")
+        // Android's legacy AtomicFile.startWrite has exactly this committed state
+        // between renaming the previous base and opening its replacement.
+        assertTrue(base.renameTo(backup))
+        assertFalse(base.exists())
+        val restarted=EncryptedWorkStore(context) {key}
+        val recovered=restarted.load()
+        assertNotNull(recovered)
+        assertEquals("saved-generation",recovered!!.generation)
+        assertEquals("private-token",recovered.secret)
+        assertTrue(base.exists())
+        assertFalse(backup.exists())
+        restarted.save(null)
+        assertNull(restarted.load())
+    }
+    @Test fun corrupt_work_is_an_error_rather_than_an_absent_connection() {
+        val key=javax.crypto.spec.SecretKeySpec(ByteArray(32) {11},"AES")
+        val encrypted=EncryptedWorkStore(context) {key}
+        encrypted.save(WorkConfig(args().getJSONObject("config"),"private-token","/private/config","generation"))
+        val base=java.io.File(context.noBackupFilesDir,"notification-work")
+        val bytes=base.readBytes();bytes[bytes.lastIndex]=(bytes.last().toInt() xor 1).toByte();base.writeBytes(bytes)
+        assertThrows(javax.crypto.AEADBadTagException::class.java) {encrypted.load()}
+        assertTrue(base.exists())
+    }
     @Test fun mode_changes_keep_taps_for_the_same_connection_usable() {
         engine.configure(args())
         val work=store.load()!!
@@ -275,6 +306,24 @@ class PollingTest {
         override fun isShutdown()=stopped
         override fun isTerminated()=stopped && tasks.isEmpty()
         override fun awaitTermination(n:Long,u:java.util.concurrent.TimeUnit)=isTerminated
+    }
+    // Robolectric 4.16.1 ShadowLinux.stat returns a zero StructStat even for
+    // missing files. Android throws ENOENT. Keep the real platform error contract
+    // at that native boundary; AtomicFile and the encrypted store remain real.
+    @org.robolectric.annotation.Implements(className="libcore.io.Linux",minSdk=26,isInAndroidSdk=false)
+    class FileStatShadow: org.robolectric.shadows.ShadowLinux() {
+        @org.robolectric.annotation.Implementation
+        public override fun stat(path:String):android.system.StructStat {
+            if(!java.io.File(path).exists()) throw android.system.ErrnoException("stat",android.system.OsConstants.ENOENT)
+            return super.stat(path)
+        }
+    }
+    @Test fun invalid_existing_work_path_preserves_the_io_error() {
+        val key=javax.crypto.spec.SecretKeySpec(ByteArray(32) {13},"AES")
+        val base=java.io.File(context.noBackupFilesDir,"notification-work")
+        assertTrue(base.mkdir())
+        assertThrows(java.io.IOException::class.java) {EncryptedWorkStore(context) {key}.load()}
+        assertTrue(base.isDirectory)
     }
     private class MemoryStore: WorkStore {
         private var value: WorkConfig?=null

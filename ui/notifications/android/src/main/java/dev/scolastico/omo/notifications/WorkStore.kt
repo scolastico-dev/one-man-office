@@ -4,8 +4,12 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -42,8 +46,21 @@ class EncryptedWorkStore(context: Context, private val encryptionKey: (() -> Sec
         }.generateKey()
     }
     override fun load(): WorkConfig? {
-        if(!file.baseFile.exists()) return null
-        val bytes=file.readFully()
+        val bytes=try { file.readFully() } catch(missing:FileNotFoundException) {
+            // openRead recovers a committed .bak before opening the base. Never
+            // short-circuit that recovery, including on Android's legacy writer.
+            // FileNotFoundException also represents denied access: only ENOENT
+            // for both committed paths means the connection is actually absent.
+            for(candidate in listOf(file.baseFile,File(file.baseFile.path + ".bak"))) {
+                try {
+                    Os.stat(candidate.path)
+                    throw missing
+                } catch(stat:ErrnoException) {
+                    if(stat.errno!=OsConstants.ENOENT) throw missing
+                }
+            }
+            return null
+        }
         require(bytes.size>12)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,bytes.copyOfRange(0,12)))
