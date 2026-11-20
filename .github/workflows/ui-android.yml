@@ -1,0 +1,90 @@
+name: Native UI Android APK
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      publish:
+        default: false
+        type: boolean
+    secrets:
+      OMO_UI_ANDROID_KEYSTORE_BASE64:
+        required: false
+      OMO_UI_ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      OMO_UI_ANDROID_KEY_ALIAS:
+        required: false
+      OMO_UI_ANDROID_KEY_PASSWORD:
+        required: false
+      OMO_UI_ANDROID_CERT_SHA256:
+        required: false
+
+jobs:
+  android:
+    name: UI APK (Android arm64)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: ui
+    env:
+      RELEASE_TAG: ${{ inputs.version }}
+      GRADLE_OPTS: -Dorg.gradle.daemon=false
+    steps:
+      - name: Check out build source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.publish && github.event.release.tag_name || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android toolchain
+        run: |
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.14206865'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - name: Install UI build tools
+        run: npm ci
+
+      - name: Build and verify installation-signed release APK
+        if: inputs.publish
+        env:
+          OMO_UI_ANDROID_KEYSTORE_BASE64: ${{ secrets.OMO_UI_ANDROID_KEYSTORE_BASE64 }}
+          OMO_UI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OMO_UI_ANDROID_KEYSTORE_PASSWORD }}
+          OMO_UI_ANDROID_KEY_ALIAS: ${{ secrets.OMO_UI_ANDROID_KEY_ALIAS }}
+          OMO_UI_ANDROID_KEY_PASSWORD: ${{ secrets.OMO_UI_ANDROID_KEY_PASSWORD }}
+          OMO_UI_ANDROID_CERT_SHA256: ${{ secrets.OMO_UI_ANDROID_CERT_SHA256 }}
+        run: node scripts/release.mjs android "$RELEASE_TAG"
+
+      - name: Build development APK without release secrets
+        if: ${{ !inputs.publish }}
+        run: npm run android:build -- --ci --debug --target aarch64 --apk --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
+
+      - name: Test native notification plugin
+        run: ./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest
+        working-directory: ui/src-tauri/gen/android
+
+      - name: Attach signed APK to release
+        if: inputs.publish && github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
