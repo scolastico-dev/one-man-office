@@ -250,6 +250,8 @@ type TicketList struct {
 	Tickets        []TicketSummary `json:"tickets"`
 	EventID        int64           `json:"event_id"`
 	NextDoneBefore int             `json:"next_done_before,omitempty"`
+	// DoneTotal counts matching, readable Done tickets before paging.
+	DoneTotal int `json:"done_total"`
 }
 
 // TicketFilter holds the query parameters of GET /api/tickets.

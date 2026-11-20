@@ -20,7 +20,9 @@ by part. What the columns and roles mean is in [Concepts](concepts.md).
 
 The columns are **Planning**, **Ready For Dev**, **In Progress**, **Review** and
 **Done**. Stories come before tasks in a column. Done is ordered by closing
-time and shows older tickets with **Load older**. Below 768 px the board shows
+time and shows older tickets with **Load older**. Column headings show the full
+ticket total, including older tickets that have not been loaded. Loading older
+tickets does not change that total. Below 768 px the board shows
 one column at a time, with tabs to switch; a tab with "!" holds something that
 waits for you.
 

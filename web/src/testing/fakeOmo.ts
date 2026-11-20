@@ -384,10 +384,10 @@ export class FakeOmo {
         const done = this.done()
         if (query?.done_before !== undefined) {
           const i = done.findIndex((t) => t.number === Number(query.done_before))
-          return { ...this.page(done.slice(i + 1)), event_id: this.eventId } satisfies TicketList
+          return { ...this.page(done.slice(i + 1)), event_id: this.eventId, done_total: done.length } satisfies TicketList
         }
         const p = this.page(done)
-        return { ...p, tickets: [...this.tickets.filter((t) => t.column !== 'done'), ...p.tickets], event_id: this.eventId } satisfies TicketList
+        return { ...p, tickets: [...this.tickets.filter((t) => t.column !== 'done'), ...p.tickets], event_id: this.eventId, done_total: done.length } satisfies TicketList
       }
       case '/api/proxy/forwards':
         return { forwards: this.forwards.filter((f) => query?.ticket === undefined || f.ticket === Number(query.ticket)) }

@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"testing"
@@ -25,6 +26,26 @@ func numbers(ts []api.TicketSummary) []int {
 		out[i] = t.Number
 	}
 	return out
+}
+
+func wantDoneTotal(t *testing.T, list api.TicketList, want int) {
+	t.Helper()
+	raw, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		DoneTotal *int `json:"done_total"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.DoneTotal == nil {
+		t.Fatal("list response is missing done_total")
+	}
+	if *wire.DoneTotal != want {
+		t.Fatalf("done_total = %d, want %d", *wire.DoneTotal, want)
+	}
 }
 
 func TestListDefaultsAndDonePaging(t *testing.T) {
@@ -52,6 +73,7 @@ func TestListDefaultsAndDonePaging(t *testing.T) {
 	if first.NextDoneBefore != 12 {
 		t.Fatalf("NextDoneBefore = %d", first.NextDoneBefore)
 	}
+	wantDoneTotal(t, first, 60)
 	second, err := b.List(ctx, User, api.TicketFilter{DoneBefore: first.NextDoneBefore})
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +90,44 @@ func TestListDefaultsAndDonePaging(t *testing.T) {
 	if second.NextDoneBefore != 0 {
 		t.Fatalf("second NextDoneBefore = %d", second.NextDoneBefore)
 	}
+	wantDoneTotal(t, second, 60)
 	small, err := b.List(ctx, User, api.TicketFilter{Column: api.ColumnDone, DoneLimit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(small.Tickets) != 5 || small.NextDoneBefore != 57 {
 		t.Fatalf("limited page = %v next %d", numbers(small.Tickets), small.NextDoneBefore)
+	}
+	wantDoneTotal(t, small, 60)
+}
+
+func TestListDoneTotalRespectsFiltersAndReadScope(t *testing.T) {
+	b, _ := newTestBoard(t)
+	a := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "API", Projects: []string{"api"}})
+	c := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "UI", Projects: []string{"ui"}})
+	dev := agent(t, b, api.RoleDeveloper, int64(a.Number))
+	forceDone(t, b, a.Number, api.ResolutionCompleted)
+	forceDone(t, b, c.Number, api.ResolutionCancelled)
+	for _, tc := range []struct {
+		name   string
+		actor  Actor
+		filter api.TicketFilter
+		want   int
+	}{
+		{"all", User, api.TicketFilter{}, 2},
+		{"project", User, api.TicketFilter{Project: "ui"}, 1},
+		{"search", User, api.TicketFilter{Search: "API"}, 1},
+		{"open column", User, api.TicketFilter{Column: api.ColumnPlanning}, 0},
+		{"empty", User, api.TicketFilter{Search: "missing"}, 0},
+		{"scoped", dev, api.TicketFilter{}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list, err := b.List(context.Background(), tc.actor, tc.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantDoneTotal(t, list, tc.want)
+		})
 	}
 }
 

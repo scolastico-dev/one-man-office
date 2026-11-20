@@ -44,7 +44,7 @@ export interface ColumnModel {
   /** Cards in display order: stories first, then tasks. */
   cards: CardModel[]
   count: number
-  /** Cards the column holds before filters; shown next to `count` when filters hide some. */
+  /** All tickets in the column, including unloaded pages; shown next to `count` when filters are active. */
   total?: number
   dropState: DropState
   /** Why the column refuses the dragged card, in words. */

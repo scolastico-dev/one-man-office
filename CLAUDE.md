@@ -115,6 +115,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 ```
 
 - `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
+- Column headings and mobile tabs show full ticket totals. `TicketList.done_total` counts matching, readable Done tickets before paging in the snapshot transaction; `boardState` keeps that total current from `ticket.moved` events, independently of page/search merges. `useBoardColumns` uses it without filters and keeps visible-count/total when filtered.
 - `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
 - Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` and `/plugin-assets` are proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
 - Which columns accept a drag is computed in the browser (`web/src/board/moveRules.ts`) and checked against `internal/board/testdata/user_drag_targets.json`, which the Go test `TestUserDragTargetsGolden` generates from the real board. A change to the transition rules regenerates it in the same commit: `go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1`.

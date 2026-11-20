@@ -80,7 +80,7 @@ class FakeServer {
     const open = all.filter((t) => t.column !== 'done')
     const done = all.filter((t) => t.column === 'done').sort(compareDone)
     const page = done.slice(0, this.doneLimit)
-    const out: TicketList = { tickets: [...open, ...page], event_id: eventId }
+    const out: TicketList = { tickets: [...open, ...page], event_id: eventId, done_total: done.length }
     if (done.length > this.doneLimit) out.next_done_before = page[page.length - 1]!.number
     return out
   }
@@ -89,7 +89,7 @@ class FakeServer {
     const done = [...this.tickets.values()].filter((t) => t.column === 'done').sort(compareDone)
     const at = done.findIndex((t) => t.number === before)
     const page = done.slice(at + 1, at + 1 + this.doneLimit).map((t) => structuredClone(t))
-    const out: TicketList = { tickets: page, event_id: eventId }
+    const out: TicketList = { tickets: page, event_id: eventId, done_total: done.length }
     if (at + 1 + this.doneLimit < done.length) out.next_done_before = page[page.length - 1]!.number
     return out
   }
@@ -209,7 +209,7 @@ function recorded(): FakeServer {
 function stateAt(server: FakeServer, k: number): BoardState {
   const s = emptyState()
   if (k === 0) {
-    installSnapshot(s, { tickets: [], event_id: 0 })
+    installSnapshot(s, { tickets: [], event_id: 0, done_total: 0 })
     return s
   }
   const snap = server.snapshots[k]!
@@ -225,6 +225,7 @@ function normalize(s: BoardState) {
     tickets: [...s.tickets.values()].map((e) => e.t).sort((a, b) => a.number - b.number),
     lastEventId: s.lastEventId,
     doneBefore: s.doneBefore,
+    doneTotal: s.doneTotal,
     projects: [...s.projects.values()].sort((a, b) => a.id.localeCompare(b.id)),
     paused: s.paused,
     loaded: s.loaded,
@@ -401,6 +402,42 @@ describe('Done paging', () => {
     const s = stateAt(server, server.events.length)
     expect([...s.tickets.keys()].sort()).toEqual([3, 4, 5])
     expect(s.doneBefore).toBe(3)
+    expect(s.doneTotal).toBe(5)
+  })
+
+  test('the Done total follows closes and reopens, including unloaded tickets, once per event', () => {
+    const server = closedServer(5)
+    const s = stateAt(server, server.events.length)
+    server.update(1, { title: 'Updated older ticket' })
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(5)
+    server.move(1, 'planning', 'reopen')
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(4)
+    server.create(6)
+    server.move(6, 'done', 'cancel', '', 'cancelled')
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(5)
+    server.move(6, 'done', 'merged', '', 'completed')
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(5)
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(5)
+    server.move(6, 'planning', 'reopen')
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(4)
+    installSnapshot(s, server.list())
+    expect(s.doneTotal).toBe(4)
+  })
+
+  test('a fetched page does not replace the total belonging to the stream snapshot', () => {
+    const server = closedServer(5)
+    const s = stateAt(server, server.events.length)
+    server.move(1, 'planning', 'reopen')
+    mergeTickets(s, server.donePage(3))
+    expect(s.doneTotal).toBe(5)
+    applyAll(s, server.events)
+    expect(s.doneTotal).toBe(4)
   })
 
   test('an event about a Done ticket beyond the loaded pages is left for its page', () => {

@@ -173,6 +173,8 @@ export interface TicketList {
   tickets: TicketSummary[]
   event_id: number
   next_done_before?: number
+  /** Matching, readable Done tickets before paging; absent on older servers. */
+  done_total?: number
 }
 
 export interface TicketFilter {
