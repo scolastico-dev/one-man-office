@@ -792,6 +792,18 @@ long-lived child and on a shell option. The e2e
 process is closed. omo's own agent containment on Windows is product work, not
 covered here.
 
+## VS Code plugin launch defaults
+
+`plugins/vscode/launch.cjs` passes `--disable-workspace-trust` to both pinned
+publishers. Fresh settings files initialize `workbench.colorTheme=Default Dark
+Modern` and `chat.disableAIFeatures=true`, preserving existing JSONC verbatim.
+code-server enables its supported `--enable-remote-storage` for on-disk
+workbench state; OpenVSCode still uses upstream browser storage for user-scoped
+preferences/state. The opt-in publisher probe asserts the served trust option
+and never accepts a trust prompt. Routine coverage: `node --test
+plugins/vscode/tests/*.test.cjs`, `lua5.1 plugins/vscode/tests/hooks.lua`, and
+`go test ./internal/plugins ./internal/pluginmanager`.
+
 ## Web UI workflow verification
 
 Developer/reviewer/PM defaults teach register → configure returned base →

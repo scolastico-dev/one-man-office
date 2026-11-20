@@ -89,8 +89,9 @@ for(const editor of ['code-server','openvscode']) test(editor+' preserves fake h
   for(const dir of [user,extensions,vscodeFlag(capture,'--server-data-dir',editor),vscodeFlag(capture,'--logsPath',editor),vscodeFlag(capture,'--extensions-download-dir',editor)])assert.ok(dir?.startsWith(f.data+path.sep),String(dir));
   assert.equal(user,path.join(capture.env.VSCODE_PORTABLE,'user-data'));
   assert.ok(capture.args.includes(f.folder));assert.equal(capture.cwd,f.folder);
+  assert.ok(capture.args.includes('--disable-workspace-trust'),'omo folders must open trusted without a prompt');
   if(editor==='code-server'){
-    assert.equal(flag(capture,'--auth'),'none');assert.ok(capture.args.includes('--disable-update-check'));assert.ok(capture.args.includes('--trusted-origins'));
+    assert.equal(flag(capture,'--auth'),'none');assert.ok(capture.args.includes('--enable-remote-storage'),'workbench state must survive a new browser origin after restart');assert.ok(capture.args.includes('--disable-update-check'));assert.ok(capture.args.includes('--trusted-origins'));
     assert.equal(flag(capture,'--bind-addr'),'127.0.0.1:'+p);
     assert.ok(flag(capture,'--session-socket').startsWith(r.runtime+path.sep)||flag(capture,'--session-socket').startsWith('\\\\.\\pipe\\omo-editor-'));
     assert.ok(flag(capture,'--config').startsWith(f.data+path.sep));
@@ -102,6 +103,11 @@ for(const editor of ['code-server','openvscode']) test(editor+' preserves fake h
     assert.equal(flag(capture,'--default-folder'),f.folder);assert.equal(flag(capture,'--host'),'127.0.0.1');
   }
   assert.equal(JSON.parse(fs.readFileSync(path.join(user,'Machine','settings.json')))['update.mode'],'none');
+  for(const scope of ['User','Machine']){
+    const defaults=JSON.parse(fs.readFileSync(path.join(user,scope,'settings.json')));
+    assert.equal(defaults['workbench.colorTheme'],'Default Dark Modern');
+    assert.equal(defaults['chat.disableAIFeatures'],true);
+  }
   const response=await fetch('http://127.0.0.1:'+p);assert.equal(await response.text(),'fixture editor');
 });
 for(const editor of ['code-server','openvscode'])test(editor+' shares edited profile/extensions across concurrent folders and artifact versions but separates runtime',async t=>{

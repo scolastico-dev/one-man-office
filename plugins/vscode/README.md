@@ -93,8 +93,13 @@ downloads, shared across folders and pinned versions of that editor. The two
 editors have separate profiles. Shared Remote settings live in
 `profiles/<editor>/portable/user-data/Machine/settings.json`; edit the Remote
 settings scope in the editor. `User/settings.json` is retained and seeds a missing
-Machine file without replacing existing JSONC. Browser-local preferences follow
-the editor's normal origin/profile behavior. `sessions/<folder/editor/version hash>/` holds
+Machine file without replacing existing JSONC. New settings files initialize
+`workbench.colorTheme` to `Default Dark Modern` and `chat.disableAIFeatures` to
+`true`; existing files remain unchanged. code-server uses its supported
+`--enable-remote-storage` mode for workbench state on disk, across browser
+origins and restarts. OpenVSCode's user preferences/state still follow its
+normal browser origin/profile storage; its remote settings file alone cannot
+configure every user-scoped setting. `sessions/<folder/editor/version hash>/` holds
 server data, logs and cache for each instance. Completed
 artifact generations, profiles and session directories survive restart and idle
 cleanup; session directories are not automatically pruned. Stop the editor before
@@ -125,7 +130,9 @@ setting explicitly if they predate it or override it. This runtime distinction
 does not change host HOME or configuration/data roots. Core releases the private
 directory after reaping its stable task, including failed startup, Stop, idle,
 disable/remove/replacement and shutdown; normal host temporary files are untouched.
-Editor flags disable the editor's own
+Both editors launch with `--disable-workspace-trust`, so omo folders open as
+trusted without a prompt. This applies to the launched editor process, without
+writing a workspace-trust setting into the project. Editor flags disable the editor's own
 password/token and bind exclusively to IPv4 `127.0.0.1`. Inherited `PORT`,
 `CODE_SERVER_*`, `VSCODE_*`, password and Node selectors cannot override the
 editor launch. code-server uses prefix stripping plus the exact loopback trusted

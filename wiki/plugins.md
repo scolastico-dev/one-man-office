@@ -82,6 +82,11 @@ it). The plugin's log keeps its last 500 lines, newest last.
 | [pull-base](../plugins/pull-base/README.md) | Before a story or a task without a story starts, checks whether the branch checked out in each project folder is behind its upstream and asks to pull it first, or pulls it by itself. It gates the move to Ready For Dev or to In Progress (your choice), fast-forwards only, and **changes the checked-out branch of the project folder when it pulls**. Settings: mode, automatic pull, fetch timeout. |
 
 The VS Code plugin edits folders directly alongside agents, with no locking.
+Its launched folders open as trusted without a prompt. New on-disk settings
+files initialize Dark Modern and disable VS Code AI features; existing settings
+are preserved. code-server also persists workbench state on the server across
+browser origins and restarts. OpenVSCode retains its upstream browser storage
+for user-scoped preferences and state.
 It permits one running editor per canonical folder. Repeated clicks reuse it
 only when editor, pinned version and ticket/global binding all match. To change
 any of those for an open folder, use **Stop** in the **VS Code** sidebar tab first;

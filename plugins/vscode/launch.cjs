@@ -63,6 +63,7 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
   // creation also prevents concurrent first launches from replacing user edits.
   const initialSettings = JSON.stringify({
     'update.mode': 'none', 'telemetry.telemetryLevel': 'off',
+    'workbench.colorTheme': 'Default Dark Modern', 'chat.disableAIFeatures': true,
     'terminal.integrated.env.linux': { XDG_RUNTIME_DIR: '${env:EDITOR_HOST_XDG_RUNTIME_DIR}' },
     'terminal.integrated.env.osx': { XDG_RUNTIME_DIR: '${env:EDITOR_HOST_XDG_RUNTIME_DIR}' },
   });
@@ -84,14 +85,14 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
     fs.writeFileSync(preload, 'Object.assign(require(' + JSON.stringify(path.join(root, 'out', 'node', 'util.js')) + ').paths,' + JSON.stringify(publisherPaths) + ');\n', { mode: 0o600 });
     const socket = process.platform === 'win32' ? '\\\\.\\pipe\\omo-editor-' + createHash('sha256').update(runtime).digest('hex').slice(0, 24) : path.join(runtime, 'ipc');
     args = ['--require', preload, path.join(root, 'out', 'node', 'entry.js'), '--bind-addr', '127.0.0.1:' + port,
-      '--auth', 'none', '--config', config, '--user-data-dir', user, '--extensions-dir', extensions,
+      '--auth', 'none', '--enable-remote-storage', '--config', config, '--user-data-dir', user, '--extensions-dir', extensions,
       '--session-socket', socket, '--vscode-option', 'server-data-dir=' + server, '--vscode-option', 'logsPath=' + logs,
       '--vscode-option', 'extensions-download-dir=' + downloads,
-      '--disable-telemetry', '--disable-update-check', '--ignore-last-opened',
+      '--disable-telemetry', '--disable-update-check', '--disable-workspace-trust', '--ignore-last-opened',
       '--trusted-origins', '127.0.0.1:' + port, '--', folder];
   } else {
     args = [path.join(root, 'out', 'server-main.js'), '--host', '127.0.0.1', '--port', port,
-      '--without-connection-token',
+      '--without-connection-token', '--disable-workspace-trust',
       // The pinned publisher turns an explicit '/' into an empty client base,
       // breaking WebSocket URLs. Omission keeps its '/' default for subdomains.
       ...(base === '/' ? [] : ['--server-base-path', base]), '--server-data-dir', server,

@@ -33,11 +33,9 @@ async function wait(fn,ms=30000){const until=performance.now()+ms;for(;;){const 
 async function api(method,route,body){const r=await fetch(base+route,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();if(!r.ok)throw new Error(route+' '+r.status+' '+text);return text?JSON.parse(text):undefined}
 async function command(page,name){await page.keyboard.press('F1');await page.locator('.quick-input-widget input').fill('>'+name);await page.locator('.quick-input-widget .monaco-list-row').filter({hasText:name}).first().click();}
 async function trustWorkspace(page){
- const initial=page.getByRole('button',{name:/Yes, I trust the authors/});
- if(await initial.waitFor({state:'visible',timeout:15000}).then(()=>true,()=>false)){await initial.click();return}
- await command(page,'Workspaces: Manage Workspace Trust');
- await wait(async()=>{if(await page.getByText('You trust this folder',{exact:true}).isVisible())return true;const trust=page.getByRole('button',{name:/^Trust/}).first();if(await trust.count()){await trust.click();return true}return false});
- const confirm=page.getByRole('button',{name:/Yes, I trust the authors/});if(await confirm.count())await confirm.click();
+ const config=JSON.parse(await page.locator('#vscode-workbench-web-configuration').getAttribute('data-settings'));
+ assert.equal(config.enableWorkspaceTrust,false,'omo folders must open trusted without accepting a prompt');
+ assert.equal(await page.getByRole('button',{name:/Yes, I trust the authors/}).count(),0);
 }
 async function terminalCheck(page,folder,shared=false){
  await trustWorkspace(page);await page.keyboard.press('Escape');await command(page,'Terminal: Create New Terminal');
@@ -100,7 +98,7 @@ async function main(){
  await page.waitForURL(url=>url.pathname.includes('/proxy/')||url.hostname.endsWith('.apps.localhost'),{timeout:35*60000});
  const failed=[];page.on('response',r=>{if(r.status()>=400){const u=new URL(r.url()),item={status:r.status(),path:u.pathname};if(u.pathname.endsWith('/vscode-remote-resource')){item.resource=u.searchParams.get('path');r.text().then(body=>item.body=body.slice(0,500),()=>{});}failed.push(item)}});
  await page.locator('.monaco-workbench').waitFor({timeout:90000});
- // Accept the normal workspace trust prompt in this disposable project only.
+ // The server must disable the trust prompt; the probe never accepts it.
  await terminalCheck(page,project);
  await editCheck(page,project);
  await wait(async()=>{const task=await api('GET','/api/plugins/vscode/tasks');return task.tasks.some(t=>t.state==='running')});
