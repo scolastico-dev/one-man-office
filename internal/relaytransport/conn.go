@@ -151,6 +151,14 @@ func (c *Conn) Write(b []byte) (int, error) {
 		m.mu.Unlock()
 		for {
 			m.mu.Lock()
+			if c.failure != nil || c.closed {
+				e := c.failure
+				if e == nil {
+					e = net.ErrClosed
+				}
+				m.mu.Unlock()
+				return written, e
+			}
 			d, ch := c.writeDeadline, m.changed
 			m.mu.Unlock()
 			select {

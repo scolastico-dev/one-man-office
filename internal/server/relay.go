@@ -30,6 +30,9 @@ func (s *Server) initRelay() error {
 		return e
 	}
 	s.relay = manager
+	if s.opts.beforeRelayStart != nil {
+		s.opts.beforeRelayStart(s)
+	}
 	s.background(manager.Run)
 	return nil
 }

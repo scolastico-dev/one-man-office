@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -51,7 +54,11 @@ func (s *Server) RelayHandler() http.Handler {
 			writeError(w, r, api.Errorf(api.CodeForbidden, "route unavailable through relay"))
 			return
 		}
+		original := r
 		r = r.Clone(r.Context())
+		if !prepareRelayBody(w, r, original) {
+			return
+		}
 		for key := range r.Header {
 			if relayUntrustedHeader(strings.ToLower(key)) {
 				delete(r.Header, key)
@@ -70,6 +77,13 @@ func (s *Server) RelayHandler() http.Handler {
 }
 
 func relayPrivatePath(p string) bool {
+	if rest, ok := strings.CutPrefix(p, "/api/mcp/servers/"); ok {
+		parts := strings.Split(rest, "/")
+		if len(parts) == 2 && (parts[1] == "connect" || parts[1] == "disconnect") {
+			return true
+		}
+	}
+
 	for _, prefix := range []string{"/api/relay", "/mcp", "/oauth", "/api/oauth", "/.well-known", "/api/mcp/tokens", "/proxy"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
@@ -159,4 +173,50 @@ func validRelayRequest(r *http.Request) bool {
 }
 func relayUntrustedHeader(k string) bool {
 	return k == "authorization" || k == "cookie" || k == "forwarded" || k == "x-real-ip" || k == "remote-user" || strings.HasPrefix(k, "x-forwarded-") || strings.HasPrefix(k, "x-auth-") || strings.HasPrefix(k, "x-authenticated-") || strings.HasPrefix(k, "x-remote-") || strings.HasPrefix(k, "x-original-") || strings.HasPrefix(k, "x-rewrite-")
+}
+
+// Go discovers undeclared trailers only when the parsed body reaches EOF.
+// Keep the original request: Clone deliberately isolates its Trailer map.
+type relayBody struct {
+	io.ReadCloser
+	original *http.Request
+}
+
+func (b relayBody) Read(p []byte) (int, error) {
+	n, e := b.ReadCloser.Read(p)
+	if errors.Is(e, io.EOF) && len(b.original.Trailer) != 0 {
+		return n, api.Errorf(api.CodeBadRequest, "relay request trailers rejected")
+	}
+	return n, e
+}
+func prepareRelayBody(w http.ResponseWriter, r, original *http.Request) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || !isAPI(r.URL.Path) {
+		if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
+			writeError(w, r, api.Errorf(api.CodeBadRequest, "unexpected relay request body"))
+			return false
+		}
+		return true
+	}
+	if len(r.TransferEncoding) == 0 {
+		return true
+	}
+	r.Body = relayBody{ReadCloser: r.Body, original: original}
+	if rawUpload(r) {
+		return true
+	} // upload handlers validate EOF before committing
+	// JSON is already limited to maxBody. Validate chunked framing/trailers even
+	// for mutation handlers that otherwise ignore their bodies, then replay the
+	// exact original bytes to the normal decoder. Raw uploads stay streaming.
+	data, e := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if e != nil {
+		writeError(w, r, decodeError(e))
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	r.ContentLength = int64(len(data))
+	r.TransferEncoding = nil
+	return true
 }

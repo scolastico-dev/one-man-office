@@ -277,8 +277,8 @@ routes QID cancellation and joins the callback before unregister returns.
 
 ## Encrypted application transport
 
-The host installs the application callback at startup after its application
-routes exist. Authenticated devices can load the board APIs, assets, logs,
+The host installs the application callback at startup after application routes
+and their services, including MCP settings, are initialized. Authenticated devices can load the board APIs, assets, logs,
 images and raw uploads, event streams and terminal WebSockets through the
 relay. No additional host port is bound and no arbitrary upstream is dialed.
 Each allocated relay stream becomes a virtual connection on a private
@@ -300,7 +300,8 @@ records carry at most 16,384 data bytes. Reading bytes grants credit, so a slow
 consumer cannot create an unbounded receive queue. One demultiplexer and a
 round-robin writer keep a stalled stream from blocking other streams. Each
 session has 64 slots, including streams cancelling while their reciprocal
-reset is still pending. FIN half-closes a direction. For an allocated stream,
+reset is still pending. FIN half-closes a direction. A cancelled pending open waits for opened/refused
+before sending reset; it grants no premature data authority. For an allocated stream,
 reset cancels both directions and is reciprocated once with reset code
 `closed` (or the reset already being sent). Both resets establish when
 in-flight data/credit have drained and the slot can be freed. No payloads are
@@ -324,11 +325,15 @@ The tunnel rejects CONNECT, absolute/authority targets, another Host or Origin,
 ambiguous paths (including encoded separators and nested escaping), identity
 headers under `X-Omo-*`, Proxy-Authorization, relay admission/notification
 credentials and `omo-token.*` WebSocket subprotocols. Presence counts even for
-empty or repeated headers. Request trailers are refused. Authorization, Cookie
+empty or repeated headers. Declared and undeclared request trailers are refused.
+Chunked ordinary API bodies are validated within the existing 1 MiB JSON bound
+before dispatch, including methods whose handlers do not read a body; exact
+bytes then reach the normal decoder. Raw uploads retain streaming reads and
+validate trailer-free EOF before committing. GET/HEAD/OPTIONS carry no body. Authorization, Cookie
 and forwarded identity headers are removed before dispatch.
 
 Local `/api/relay/*` administration, `/mcp`, OAuth/admission endpoints and MCP
-client token creation are unavailable remotely. Existing browser `/proxy/`
+client token creation and upstream OAuth connect/disconnect are unavailable remotely. Existing browser `/proxy/`
 routing and subdomains remain separate; this transport adds no forwarded-site
 support. Application requests retain the normal JSON requirement and raw
 image/zip upload exceptions. Security headers and committed event ids follow

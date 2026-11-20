@@ -554,3 +554,71 @@ func TestUncertainSendClosesSessionWithoutReplay(t *testing.T) {
 		t.Fatal("failed open admitted")
 	}
 }
+
+type gatedRecordIO struct {
+	*recordPeer
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (g *gatedRecordIO) Send(ctx context.Context, r relayproto.PlainRecord) error {
+	if r.Type == "stream.data" {
+		g.once.Do(func() { close(g.entered) })
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return g.recordPeer.Send(ctx, r)
+}
+func TestCloseAndResetInterruptInFlightWrite(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "close", true: "reset"}[remote], func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := &recordPeer{in: make(chan relayproto.PlainRecord), out: make(chan relayproto.PlainRecord), done: make(chan struct{})}
+				gate := &gatedRecordIO{recordPeer: p, entered: make(chan struct{}), release: make(chan struct{})}
+				m := New(context.Background(), gate, func() error { return nil })
+				defer func() { m.Close(); m.Wait() }()
+				c := openPeer(t, m, p, 1)
+				written := make(chan error, 1)
+				go func() { _, e := c.Write([]byte("blocked")); written <- e }()
+				<-gate.entered
+				if remote {
+					p.in <- record("stream.reset", 1)
+					awaitReset(c.(*Conn))
+				} else {
+					c.Close()
+				}
+				if e := <-written; e == nil {
+					t.Fatal("closed connection write succeeded")
+				}
+				// Completion must precede release of the shared sender.
+				close(gate.release)
+			})
+		})
+	}
+}
+func TestGracefulCloseCrossingDataReclaimsSlots(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, p := newPeer(t)
+		c := openPeer(t, m, p, 1)
+		for id := uint64(1); id <= 199; id += 2 {
+			c.Close()
+			if r := <-p.out; r.Type != "stream.fin" {
+				t.Fatal(r.Type)
+			}
+			r := record("stream.data", id)
+			r.Data = []byte("crossed close")
+			p.in <- r
+			p.in <- record("stream.fin", id)
+			c = openPeer(t, m, p, id+2) // ordered dispatch barrier
+			m.mu.Lock()
+			slots := len(m.streams)
+			m.mu.Unlock()
+			if slots != 1 {
+				t.Fatal("FIN-completed stream retained", slots)
+			}
+		}
+	})
+}

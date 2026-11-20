@@ -194,13 +194,15 @@ func (m *Mux) removeLocked(c *Conn) {
 func (m *Mux) retireLocked(c *Conn) {
 	// Retain the final credit exchange: in-flight grants remain valid until all
 	// bytes in both directions were consumed, even when FIN already arrived.
+	// Full Close may discard crossed input without granting consumption credit;
+	// the ordered peer FIN still proves that no further input can arrive.
 	if c.resetting {
 		if c.resetSent && c.peerReset {
 			m.removeLocked(c)
 		}
 		return
 	}
-	if c.localFin && c.remoteFin && c.sendCredit == relayproto.InitialCredit && len(c.input) == 0 && c.credit == 0 && c.recvCredit == relayproto.InitialCredit {
+	if c.localFin && c.remoteFin && c.sendCredit == relayproto.InitialCredit && len(c.input) == 0 && c.credit == 0 && (c.closed || c.recvCredit == relayproto.InitialCredit) {
 		m.removeLocked(c)
 	}
 }
