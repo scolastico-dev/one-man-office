@@ -30,6 +30,7 @@ func (s *Server) initRelay() error {
 		return e
 	}
 	s.relay = manager
+	manager.SetCallbacks(relayhost.Callbacks{PollNotifications: s.pollRelayNotifications})
 	s.background(manager.Run)
 	return nil
 }
