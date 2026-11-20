@@ -1,0 +1,16 @@
+# Supported Wry Android class extension. Preserve its existing WebViewClient
+# navigation/resource handlers and add only the otherwise missing Basic callback.
+[env]
+WRY_RUSTWEBVIEWCLIENT_CLASS_EXTENSION = """
+    private var omoAuthGeneration: String? = null
+    private external fun omoUiCredentials(url: String, host: String, realm: String): Array<String>?
+    override fun onReceivedHttpAuthRequest(view: WebView, handler: HttpAuthHandler, host: String, realm: String) {
+        val credentials = omoUiCredentials(currentUrl, host, realm)
+        if (credentials != null && credentials.size == 3 && credentials[0] != omoAuthGeneration) {
+            omoAuthGeneration = credentials[0]
+            handler.proceed(credentials[1], credentials[2])
+        } else {
+            handler.cancel()
+        }
+    }
+"""

@@ -9,3 +9,8 @@ web/test-results/
 web/playwright-report/
 web/screenshots/
 web/e2e/.bin/
+
+ui/node_modules/
+ui/target/
+ui/src-tauri/gen/schemas/
+ui/tests/__pycache__/

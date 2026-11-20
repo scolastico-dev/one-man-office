@@ -1,0 +1,27 @@
+:root { color-scheme: light dark; --bg: #f8fafc; --panel: #fff; --text: #101828; --muted: #475467; --line: #d0d5dd; --accent: #3857d6; --error: #b42318; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+@media (prefers-color-scheme: dark) { :root { --bg: #12171e; --panel: #1c232d; --text: #f2f4f7; --muted: #aab4c4; --line: #475467; --accent: #8ea7ff; --error: #fda29b; } }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 540px; margin: auto; padding: 28px 24px; }
+header { margin-bottom: 24px; }
+.mark { font-size: 24px; font-weight: 750; letter-spacing: -1px; color: var(--accent); }
+h1 { font-size: 26px; line-height: 1.2; margin-bottom: 8px; }
+p { margin: 8px 0 16px; }
+header p, .hint { color: var(--muted); }
+.hint { font-size: 13px; }
+label { display: block; font-weight: 600; margin: 16px 0 8px; }
+input:not([type=checkbox]), select, button { font: inherit; border: 1px solid var(--line); border-radius: 6px; min-height: 40px; background: var(--panel); color: var(--text); }
+input:not([type=checkbox]), select { display: block; width: 100%; padding: 8px 10px; margin-top: 6px; }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; }
+input[type=checkbox] { accent-color: var(--accent); margin-top: 4px; }
+button { padding: 8px 14px; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+#connect { color: var(--panel); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+#problem { color: var(--error); }
+#status { font-size: 13px; color: var(--muted); }
+footer { display: flex; gap: 10px; margin: 20px 0; }
+details { margin-top: 16px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+[hidden] { display: none !important; }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-local-connect"
+description = "Enables the local_connect command without any pre-configured scope."
+commands.allow = ["local_connect"]
+
+[[permission]]
+identifier = "deny-local-connect"
+description = "Denies the local_connect command without any pre-configured scope."
+commands.deny = ["local_connect"]

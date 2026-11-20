@@ -185,3 +185,18 @@ test('plainText cuts a long text before it escapes it', () => {
   expect(plainText('a  b\n c', 40)).toBe('a b c')
   expect(plainText('🐌'.repeat(10), 5)).toBe('🐌🐌🐌🐌…')
 })
+
+test('native shell delivery suppresses browser duplicates without changing the browser preference', () => {
+  const f = setup({ permission: 'granted', stored: 'on' })
+  vi.stubGlobal('__OMO_NATIVE_UI__', { notifications: true })
+  try {
+    expect(f.n.canShow()).toBe(false)
+    expect(f.n.notify(item('native'))).toBe(false)
+    expect(f.fake.shown).toEqual([])
+    expect(f.storage.getItem(DESKTOP_KEY)).toBe('on')
+    vi.stubGlobal('__OMO_NATIVE_UI__', { notifications: false })
+    expect(f.n.notify(item('browser-fallback'))).toBe(true)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})

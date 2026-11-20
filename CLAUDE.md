@@ -530,6 +530,23 @@ mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
+## Native UI application
+
+`ui/` is the Tauri 2 direct-host shell; only `ui/setup/` is bundled, never
+`web/dist`. The Rust workspace separates `core` (configuration/auth validation,
+native HTTP, capabilities and notification cursor/dedup persistence) from
+`src-tauri` (setup-only command ACL, OS credentials, remote WebViews, native
+notifications and platform keyboard/auth settings). Run `npm ci`, `npm run dev`,
+`npm run build` and `npm run check` from `ui/`; that directory's Cargo config
+also supplies the Android Wry auth extension. Desktop local lifecycle is an
+explicit unavailable hook; Android notification scheduling is not advertised.
+Remote pages have no native command capabilities. The board's browser notifier
+honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
+configured board documents while native polling is enabled. Tests: core Rust,
+Node bridge tests, affected board notification tests, and the opt-in isolated
+Linux native probe. Build/extension details and verified platform limits:
+[omo ui](wiki/ui.md).
+
 ## Native UI protocol
 
 `internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
