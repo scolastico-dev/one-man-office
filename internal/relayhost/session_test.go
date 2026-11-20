@@ -3,6 +3,7 @@ package relayhost
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -524,5 +525,173 @@ func TestFailedStateSaveCancelsActiveAuthority(t *testing.T) {
 	}
 	if f.m.Status().State != "state_error" {
 		t.Fatal(f.m.Status())
+	}
+}
+
+func TestEndpointOverloadAndDuplicateHandlePreserveOtherAuthenticatedPeers(t *testing.T) {
+	entered := make(chan Capability, 2)
+	f := newHostFixture(t, Callbacks{ServeSession: func(ctx context.Context, cap Capability, io relayproto.RecordIO) error {
+		entered <- cap
+		for {
+			record, e := io.Receive(ctx)
+			if e != nil {
+				return e
+			}
+			if e = io.Send(ctx, relayproto.PlainRecord{V: 1, Type: "stream.opened", ID: record.ID}); e != nil {
+				return e
+			}
+		}
+	}})
+	a := bytes.Repeat([]byte{81}, 16)
+	b := bytes.Repeat([]byte{82}, 16)
+	_, _, sa := f.pair(a, false)
+	defer sa.Close()
+	capA := <-entered
+	_, _, sb := f.pair(b, false)
+	defer sb.Close()
+	capB := <-entered
+	f.m.mu.Lock()
+	original := f.m.current
+	f.m.mu.Unlock()
+	for i := 0; i < 160; i++ {
+		handle := make([]byte, 16)
+		binary.BigEndian.PutUint64(handle, uint64(i+1))
+		f.write(relayproto.Control{V: 1, Type: "ui.open", Connection: handle})
+	}
+	exchange := func(id relayproto.Counter) {
+		request, e := sb.Seal(relayproto.PlainRecord{V: 1, Type: "stream.open", ID: id})
+		if e != nil {
+			t.Fatal(e)
+		}
+		f.inner(b, request)
+		for {
+			r := f.read()
+			if r.Type == "ui.close" {
+				continue
+			}
+			if r.Type != "forward" || !bytes.Equal(r.Connection, b) {
+				t.Fatal("unexpected response", r.Type)
+			}
+			in, e := relayproto.DecodeInner(r.Payload)
+			if e != nil {
+				t.Fatal(e)
+			}
+			opened, e := sb.Open(in)
+			if e != nil || opened.Type != "stream.opened" || opened.ID != id {
+				t.Fatal("authenticated peer lost", e)
+			}
+			break
+		}
+	}
+	// Frames from the refused last handle cannot reach any peer or alter the
+	// registration. No refusal tombstone/backlog is needed to ignore them.
+	refused := make([]byte, 16)
+	binary.BigEndian.PutUint64(refused, 160)
+	late, e := sa.Seal(relayproto.PlainRecord{V: 1, Type: "stream.open", ID: 1})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.inner(refused, late)
+	f.write(relayproto.Control{V: 1, Type: "ui.closed", Connection: refused})
+	exchange(1)
+	f.m.mu.Lock()
+	admitted := original.peers[base64Key(refused)] != nil
+	f.m.mu.Unlock()
+	if admitted {
+		t.Fatal("refused endpoint was admitted")
+	}
+	if e := f.m.Validate(capA); e != nil {
+		t.Fatal("unrelated active peer lost", e)
+	}
+	f.write(relayproto.Control{V: 1, Type: "ui.open", Connection: a})
+	exchange(3)
+	f.m.mu.Lock()
+	unchanged := f.m.current == original && original.ctx.Err() == nil && original.registered
+	count := len(original.peers)
+	f.m.mu.Unlock()
+	if !unchanged || count > 128 || f.m.Validate(capB) != nil {
+		t.Fatal("overload replaced registration or active peer")
+	}
+}
+
+func TestPollOverloadAndDuplicateQIDPreserveAuthenticatedPeer(t *testing.T) {
+	entered := make(chan Capability, 1)
+	pollEntered := make(chan struct{}, 128)
+	f := newHostFixture(t, Callbacks{ServeSession: func(ctx context.Context, cap Capability, io relayproto.RecordIO) error {
+		entered <- cap
+		for {
+			r, e := io.Receive(ctx)
+			if e != nil {
+				return e
+			}
+			if e = io.Send(ctx, relayproto.PlainRecord{V: 1, Type: "stream.opened", ID: r.ID}); e != nil {
+				return e
+			}
+		}
+	}, PollNotifications: func(ctx context.Context, _ Device, _ relayproto.Poll) (relayproto.NotificationEnvelope, error) {
+		pollEntered <- struct{}{}
+		<-ctx.Done()
+		return relayproto.NotificationEnvelope{}, ctx.Err()
+	}})
+	conn := bytes.Repeat([]byte{91}, 16)
+	d, _, session := f.pair(conn, false)
+	defer session.Close()
+	cap := <-entered
+	v, _ := f.store.Snapshot()
+	nc := relayproto.NotificationContext{Route: relayproto.Route{Origin: v.Origin, HostID: v.HostID}, HostFP: v.HostFP, UIID: d.UIID, PairEpoch: d.PairEpoch}
+	poll, e := relayproto.NewPoll(nc, d.NotificationRoot, bytes.Repeat([]byte{92}, 32), nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.m.mu.Lock()
+	original := f.m.current
+	f.m.mu.Unlock()
+	sendPoll := func(n int) {
+		qid := make([]byte, 16)
+		binary.BigEndian.PutUint64(qid, uint64(n))
+		f.write(relayproto.Control{V: 1, Type: "notification.get", QID: qid, HostID: v.HostID, UIID: d.UIID, RequestHeader: poll.RequestHeader, RequestMAC: poll.RequestMAC})
+	}
+	sendPoll(1)
+	<-pollEntered
+	for i := 2; i <= 160; i++ {
+		sendPoll(i)
+	}
+	first := f.read()
+	if first.Type != "notification.empty" {
+		t.Fatal("excess poll not refused", first.Type)
+	}
+	sendPoll(1) // A duplicate is refused without allocating another callback.
+	request, e := session.Seal(relayproto.PlainRecord{V: 1, Type: "stream.open", ID: 1})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.inner(conn, request)
+	for {
+		r := f.read()
+		if r.Type == "notification.empty" {
+			continue
+		}
+		if r.Type != "forward" || !bytes.Equal(r.Connection, conn) {
+			t.Fatal("registration lost", r.Type)
+		}
+		in, e := relayproto.DecodeInner(r.Payload)
+		if e != nil {
+			t.Fatal(e)
+		}
+		opened, e := session.Open(in)
+		if e != nil || opened.Type != "stream.opened" {
+			t.Fatal(e)
+		}
+		break
+	}
+	f.m.mu.Lock()
+	unchanged := f.m.current == original && original.ctx.Err() == nil && original.registered
+	count := len(original.polls)
+	refusedQID := make([]byte, 16)
+	binary.BigEndian.PutUint64(refusedQID, 160)
+	admitted := original.polls[base64Key(refusedQID)] != nil
+	f.m.mu.Unlock()
+	if admitted || !unchanged || count > 128 || f.m.Validate(cap) != nil {
+		t.Fatal("poll overload replaced registration or authority")
 	}
 }

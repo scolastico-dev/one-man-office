@@ -41,12 +41,23 @@ func (l *pipeListener) Close() error {
 }
 func (l *pipeListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
+// The dial context bounds only the upgrade; a successful socket has its own
+// lifetime. Mirror net/http's hijacked-connection ownership in the pipe fixture.
+type cancelOnCloseConn struct {
+	net.Conn
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseConn) Close() error { c.cancel(); return c.Conn.Close() }
+
 // pipeDial keeps WebSocket/network behavior real while all blocking is in-memory
 // and visible to synctest. Every created server and pipe is joined by cleanup.
 func pipeDial(t *testing.T, handle func(context.Context, *websocket.Conn, net.Conn)) func(context.Context, string, http.Header) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
 	return func(ctx context.Context, address string, headers http.Header) (*websocket.Conn, *http.Response, error) {
 		client, server := net.Pipe()
+		socketCtx, endSocket := context.WithCancel(context.Background())
+		client = &cancelOnCloseConn{Conn: client, cancel: endSocket}
 		listener := &pipeListener{conn: server, closed: make(chan struct{})}
 		handlerDone := make(chan struct{})
 		serveDone := make(chan struct{})
@@ -57,7 +68,7 @@ func pipeDial(t *testing.T, handle func(context.Context, *websocket.Conn, net.Co
 				return
 			}
 			defer ws.CloseNow()
-			handle(ctx, ws, server)
+			handle(socketCtx, ws, server)
 		})}
 		go func() { defer close(serveDone); _ = srv.Serve(listener) }()
 		tr := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }}
@@ -250,4 +261,83 @@ func TestRevocationWaitsForAdmittedWriteCompletion(t *testing.T) {
 			t.Fatal(e)
 		}
 	})
+}
+
+func TestStalledDialHasDeadlineAndRedials(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := managerForTest(t)
+		calls := 0
+		entered := make(chan struct{}, 2)
+		m.opts.Dial = func(ctx context.Context, _ string, _ http.Header) (*websocket.Conn, *http.Response, error) {
+			calls++
+			entered <- struct{}{}
+			<-ctx.Done()
+			return nil, nil, ctx.Err()
+		}
+		if e := m.Connect(ConnectOptions{Origin: "https://relay.example", ClientID: "office"}); e != nil {
+			t.Fatal(e)
+		}
+		done := make(chan struct{})
+		go func() { defer close(done); m.Run(context.Background()) }()
+		defer func() { m.Close(); <-done }()
+		<-entered
+		time.Sleep(30 * time.Second)
+		synctest.Wait()
+		if calls != 1 || m.Status().RetrySeconds != 1 {
+			t.Fatal("stalled dial was not ended", calls, m.Status())
+		}
+		time.Sleep(time.Second)
+		<-entered
+		if calls != 2 {
+			t.Fatal("did not redial", calls)
+		}
+	})
+}
+func TestStalledRegistrationHasDeadlineAndRedials(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := managerForTest(t)
+		calls := 0
+		entered := make(chan struct{}, 2)
+		m.opts.Dial = pipeDial(t, func(ctx context.Context, ws *websocket.Conn, _ net.Conn) {
+			r := pipeRead(t, ctx, ws)
+			if r.Type != "host.register" {
+				t.Error("wrong registration")
+			}
+			calls++
+			entered <- struct{}{}
+			<-ctx.Done()
+		})
+		if e := m.Connect(ConnectOptions{Origin: "https://relay.example", ClientID: "office"}); e != nil {
+			t.Fatal(e)
+		}
+		done := make(chan struct{})
+		go func() { defer close(done); m.Run(context.Background()) }()
+		defer func() { m.Close(); <-done }()
+		<-entered
+		time.Sleep(30 * time.Second)
+		synctest.Wait()
+		if calls != 1 || m.Status().RetrySeconds != 1 {
+			t.Fatal("stalled registration was not ended", calls, m.Status())
+		}
+		time.Sleep(time.Second)
+		<-entered
+		if calls != 2 {
+			t.Fatal("did not redial", calls)
+		}
+	})
+}
+
+func TestRefusalQueueSaturationNeverCancelsSharedConnection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &connection{ctx: ctx, cancel: cancel, sendq: make(chan outbound, endpointQueue)}
+	for i := 0; i < 1000; i++ {
+		c.offer(relayproto.Control{V: 1, Type: "ui.close", Connection: bytes.Repeat([]byte{1}, 16)})
+	}
+	if ctx.Err() != nil {
+		t.Fatal("refusal burst cancelled shared connection")
+	}
+	if len(c.sendq) != endpointQueue {
+		t.Fatal("refusal memory not bounded")
+	}
 }

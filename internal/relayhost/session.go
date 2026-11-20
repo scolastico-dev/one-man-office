@@ -13,7 +13,13 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/relayproto"
 )
 
-const endpointQueue = 32
+const (
+	endpointQueue       = 32
+	maxEndpoints        = 128
+	maxPendingPolls     = 128
+	dialTimeout         = 30 * time.Second
+	registrationTimeout = 30 * time.Second
+)
 
 func base64Key(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 func retryDelay(attempt int) time.Duration {
@@ -144,7 +150,9 @@ func (c *connection) run() string {
 			return websocket.Dial(ctx, address, &websocket.DialOptions{HTTPHeader: header})
 		}
 	}
-	ws, response, e := dial(c.ctx, address, headers)
+	dialCtx, endDial := context.WithTimeout(c.ctx, dialTimeout)
+	ws, response, e := dial(dialCtx, address, headers)
+	endDial()
 	if e != nil {
 		if response != nil && response.StatusCode == http.StatusUnauthorized {
 			return "admission_denied"
@@ -175,12 +183,15 @@ func (c *connection) run() string {
 		}
 		c.m.mu.Unlock()
 	}()
-	if e = c.send(c.ctx, relayproto.Control{V: 1, Type: "host.register", HostID: c.state.HostID}); e != nil {
+	registrationCtx, endRegistration := context.WithTimeout(c.ctx, registrationTimeout)
+	defer endRegistration()
+	if e = c.send(registrationCtx, relayproto.Control{V: 1, Type: "host.register", HostID: c.state.HostID}); e != nil {
 		return "retrying"
 	}
 	// One read loop continuously handles pings/control, independently of every
 	// endpoint and callback. Registration is its first and only role transition.
-	first, e := c.read()
+	first, e := c.readContext(registrationCtx)
+	endRegistration()
 	if e != nil {
 		return "retrying"
 	}
@@ -209,8 +220,9 @@ func (c *connection) run() string {
 		}
 	}
 }
-func (c *connection) read() (relayproto.Control, error) {
-	kind, raw, e := c.ws.Read(c.ctx)
+func (c *connection) read() (relayproto.Control, error) { return c.readContext(c.ctx) }
+func (c *connection) readContext(ctx context.Context) (relayproto.Control, error) {
+	kind, raw, e := c.ws.Read(ctx)
 	if e != nil {
 		return relayproto.Control{}, e
 	}
@@ -271,11 +283,17 @@ func (c *connection) send(ctx context.Context, message relayproto.Control) error
 		return context.Canceled
 	}
 }
+
+// offer sends a best-effort refusal/close without blocking the control reader.
+// A saturated queue may lose that one availability reply, never the shared
+// registration. Refused endpoints/polls have no admitted work or growing backlog.
 func (c *connection) offer(message relayproto.Control) {
+	if c.ctx.Err() != nil {
+		return
+	}
 	select {
 	case c.sendq <- outbound{message: message, ctx: c.ctx}:
 	default:
-		c.cancel()
 	}
 }
 func (c *connection) keepalive() {
@@ -308,8 +326,14 @@ func (c *connection) dispatch(control relayproto.Control) error {
 	key := base64Key(control.Connection)
 	switch control.Type {
 	case "ui.open":
-		if c.peers[key] != nil || len(c.peers) >= 128 {
-			return relayproto.ErrProtocol
+		if p := c.peers[key]; p != nil {
+			p.cancel()
+			c.offer(relayproto.Control{V: 1, Type: "ui.close", Connection: control.Connection})
+			return nil
+		}
+		if len(c.peers) >= maxEndpoints {
+			c.offer(relayproto.Control{V: 1, Type: "ui.close", Connection: control.Connection})
+			return nil
 		}
 		ctx, cancel := context.WithCancel(c.ctx)
 		p := &peer{conn: c, key: key, handle: bytes.Clone(control.Connection), ctx: ctx, cancel: cancel, done: make(chan struct{}), input: make(chan relayproto.Inner, endpointQueue), accepted: make(chan Device, 1)}
@@ -631,11 +655,14 @@ func (r *recordIO) Close() error { r.peer.cancel(); return r.crypto.Close() }
 
 func (c *connection) startNotificationLocked(control relayproto.Control) error {
 	key := base64Key(control.QID)
-	if c.polls[key] != nil || len(c.polls) >= 128 {
-		return relayproto.ErrProtocol
+	if existing := c.polls[key]; existing != nil {
+		existing.cancel()
+		c.offer(relayproto.Control{V: 1, Type: "notification.empty", QID: control.QID})
+		return nil
 	}
-	if control.HostID != c.state.HostID {
-		return relayproto.ErrProtocol
+	if len(c.polls) >= maxPendingPolls || control.HostID != c.state.HostID {
+		c.offer(relayproto.Control{V: 1, Type: "notification.empty", QID: control.QID})
+		return nil
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
 	work := &notificationWork{ui: control.UIID, cancel: cancel, done: make(chan struct{})}

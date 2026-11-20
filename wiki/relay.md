@@ -45,6 +45,12 @@ IDNA A-labels. Name collisions keep the saved id: status reports collision and
 retries after 1, 2, 4, 8, 16 and then 30 seconds, capped. Admission denial is
 shown separately. The host Pings every 20 seconds and closes/redials when its
 Pong is missing within 10 seconds, independently of application traffic.
+Dial/upgrade and registration each have a 30-second deadline, so a silent peer
+also triggers reconnection. At most 128 UI endpoints and 128 polls are admitted
+on one host connection. Excess or duplicate items are refused individually.
+Refusal/close replies are bounded and best effort: a full send queue may drop
+that one reply while the control reader and other devices continue; a dropped
+notification.empty leaves the relay's ordinary GET timeout to finish that poll.
 
 Disconnect durably disables reconnection, closes live relay work and spends the
 unfinished slot. It retains the host identity and paired devices. Enabled hosts
