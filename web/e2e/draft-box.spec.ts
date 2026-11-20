@@ -175,3 +175,21 @@ for (const width of [1440, 390]) {
     }
   })
 }
+
+test('a real click returns focus to a Writable agent terminal and Escape reaches its socket', async ({ page, omo }) => {
+  let escapeSent!: () => void
+  const escaped = new Promise<void>((resolve) => { escapeSent = resolve })
+  page.on('websocket', (socket) => {
+    if (!socket.url().includes('/api/agents/') || !socket.url().endsWith('/terminal')) return
+    socket.on('framesent', ({ payload }) => {
+      if (payload.toString() === '\x1b') escapeSent()
+    })
+  })
+  const { box, term } = await openAgent(page, omo)
+  await makeWritable(panel(page))
+  await box.locator('[data-draft-field]').click()
+  await term.locator('.xterm-screen').click({ position: { x: 8, y: 6 } })
+  await expect(term.locator('.xterm-helper-textarea')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await escaped
+})

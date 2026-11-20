@@ -920,3 +920,17 @@ test('draft sending blocks direct typing and pasting until the message finishes'
   release()
   await vi.waitFor(() => expect(term().keyHandler!(key)).toBe(true))
 })
+
+test('clicking a Writable agent screen leaves focus with the terminal', async () => {
+  const w = view({ src: '/api/agents/a1/terminal' })
+  await w.find('[data-terminal-mode]').trigger('click')
+  const field = w.find('[data-draft-field]').element as HTMLTextAreaElement
+  field.focus()
+  const screen = w.find('.tv__screen')
+  await screen.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+  // The xterm test double does not handle pointers; simulate its normal focus.
+  term().textarea.focus()
+  await screen.trigger('pointerup', { button: 0, clientX: 10, clientY: 10 })
+  await screen.trigger('click', { button: 0, detail: 1 })
+  expect(document.activeElement).toBe(term().textarea)
+})

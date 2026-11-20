@@ -95,7 +95,7 @@ function screenMove(ev: PointerEvent): void {
 function screenClick(ev: MouseEvent): void {
   const click = press
   press = null
-  if (!showDraft.value || !click || click.dragged || ev.button !== 0 || ev.detail !== 1 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return
+  if (!showDraft.value || writable.value || !click || click.dragged || ev.button !== 0 || ev.detail !== 1 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return
   // Controls and the native scrollbar keep their own focus behavior.
   if ((ev.target as Element).closest('button, a, .xterm-viewport')) return
   // The emulator finishes handling this click first, including its focus work.
