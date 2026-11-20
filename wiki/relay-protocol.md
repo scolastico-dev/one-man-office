@@ -143,6 +143,20 @@ Record plaintext is strict JSON with `v,type` and the following fields. Handshak
 | `stream.fin` | `{id}` is ordered write EOF after preceding data; opposite direction may continue. No later data in that direction. |
 | `stream.reset` | `{id,code}` cancels both directions and releases resources; only fixed codes, no reflected sensitive text. |
 
+For an allocated/opened stream, each direction sends at most one `stream.reset`.
+The receiver stops enqueueing data/credit/FIN, discards buffered payloads, and
+reciprocates with `stream.reset {id,code:"closed"}` unless its own reset is
+already queued/sent. These reciprocal resets acknowledge cancellation without
+a new message schema. Until both its reset has been serialized and the peer
+reset received, an endpoint retains only bounded credit/direction/FIN state
+and validates/discards traffic that crossed its reset in flight. Oversend,
+credit overflow and data after that direction's FIN remain protocol errors.
+No further traffic may follow an endpoint's reset for that stream. The ordered
+peer reset proves its previous traffic has drained; then the slot is released.
+A refusal before `stream.opened` allocates no credit and needs no reciprocal
+reset. Never evict a still-valid reset snapshot by age/FIFO: resetting streams
+count toward the 64 slots, bounding state while preserving unrelated streams.
+
 Cap at 64 simultaneous streams per authenticated session. A fair writer handles ready streams and controls without letting a full SSE/terminal queue block another stream or another UI. Streams have bounded receive queues; readers grant credit only on consumption. Unknown ids, repeated opens, premature data and invalid state transitions are protocol errors. Session closure cancels all stream contexts and waits for their goroutines to exit.
 
 The host supplies virtual `net.Conn`s from those streams to a private in-memory `net.Listener`, served by an HTTP/1.1-only `http.Server` with `RelayHandler` and connection-bound device capability. It binds no OS port and dials no untrusted destination. Use real `net/http` parsing, flushing and Hijacker; do not invent a buffered ResponseRecorder. This supports raw/large request bodies, ordinary JSON responses, streamed responses, SSE flushes and terminal WebSocket upgrades, text/binary messages, control frames and close codes. UI sends one HTTP request per non-upgraded stream (`Connection: close`, no pipelining); keep the stream until response EOF. WebSocket streams remain bidirectional until close. [Go Server.Serve and Hijacker](https://pkg.go.dev/net/http@go1.26.2#Server.Serve), [existing WebSocket implementation](https://pkg.go.dev/github.com/coder/websocket@v1.8.15).

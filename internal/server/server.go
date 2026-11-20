@@ -285,11 +285,11 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if firstStart && o.DetectAgents != nil {
 		s.detectAtFirstStart()
 	}
+	s.proxyTransport = proxy.NewTransport()
+	s.mux = s.routes()
 	if err = s.initRelay(); err != nil {
 		return nil, fmt.Errorf("open relay: %w", err)
 	}
-	s.proxyTransport = proxy.NewTransport()
-	s.mux = s.routes()
 	s.startMCPRelay()
 	s.background(s.settings.Run)
 	s.background(s.runEvents)

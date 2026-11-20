@@ -118,8 +118,8 @@ only the individual read-only test secret is mounted from the host.
 omo can keep one outbound encrypted relay connection, preserving its host key,
 routing name and paired devices across restarts. It opens no additional inbound
 port and needs no host TLS certificate. The following sections describe host commands and
-private state. The native UI and the application/notification consumers are
-separate integrations; absent consumer callbacks grant no application access.
+private state. The native UI is separate work. The host installs application and notification
+consumers; absent consumer callbacks grant no access.
 The exact wire and crypto contract is [Relay protocol](relay-protocol.md).
 
 ## Local human commands
@@ -241,7 +241,9 @@ traffic. Server lifecycle calls `Manager.Run(ctx)` once and `Close()` on
 shutdown. Local operations are Connect, Disconnect, Status, PairBegin,
 PairPending, PairAccept, PairCancel, Devices and Unregister.
 `Server.RelayManager()` exposes that manager for the downstream integrations.
-Install `relayhost.Callbacks` with `Manager.SetCallbacks`:
+Startup installs both `relayhost.Callbacks` before `Manager.Run`.
+`Manager.SetCallbacks` replaces the complete struct; callers must retain both
+hooks when replacing it:
 
 ```go
 ServeSession func(context.Context, relayhost.Capability, relayproto.RecordIO) error
@@ -272,3 +274,76 @@ Persist the exact full tuple; use Receipt.Equal for validated receipt comparison
 The callback implements the protocol's receipt transitions and seals its reply.
 The manager rechecks authorization and socket scope before sending that response,
 routes QID cancellation and joins the callback before unregister returns.
+
+## Encrypted application transport
+
+The host installs the application callback at startup after its application
+routes exist. Authenticated devices can load the board APIs, assets, logs,
+images and raw uploads, event streams and terminal WebSockets through the
+relay. No additional host port is bound and no arbitrary upstream is dialed.
+Each allocated relay stream becomes a virtual connection on a private
+in-memory HTTP/1.1 listener. A real HTTP server preserves response flushing,
+chunked request bodies and WebSocket Hijacker behavior; responses and
+application JSON are not buffered or rewritten.
+
+A native UI opens fresh sequential odd stream ids, starting at 1. It sends one
+origin-form HTTP/1.1 request per stream, with Host `omo-relay.invalid` and either
+no Origin or `http://omo-relay.invalid`. Connections do not persist for another
+request. Upgraded connections remain bidirectional for terminal frames,
+subprotocol `omo`, replay markers, input/message acknowledgments and close
+frames. SSE reconnects in a new stream using the ordinary Last-Event-ID/resync
+contract. Uncertain writes, including terminal input, are never automatically
+replayed by this transport. The native UI itself is separate work.
+
+Streams have at most 65,536 bytes of outstanding credit in each direction;
+records carry at most 16,384 data bytes. Reading bytes grants credit, so a slow
+consumer cannot create an unbounded receive queue. One demultiplexer and a
+round-robin writer keep a stalled stream from blocking other streams. Each
+session has 64 slots, including streams cancelling while their reciprocal
+reset is still pending. FIN half-closes a direction. For an allocated stream,
+reset cancels both directions and is reciprocated once with reset code
+`closed` (or the reset already being sent). Both resets establish when
+in-flight data/credit have drained and the slot can be freed. No payloads are
+retained during cancellation and no old ids are arbitrarily evicted. A refusal
+before stream.opened grants no byte credit and needs no reciprocal reset.
+A peer that withholds reset completion can exhaust its own session's slots;
+it cannot grow host memory or consume another device's slots.
+
+## Remote application trust
+
+Application authority comes only from a manager-created active device
+capability with its exact pairing epoch, generation and cancellation context.
+The host validates it at stream and HTTP-request admission, then explicitly
+uses the human board actor and normal board/resource rules. Missing, foreign
+or revoked authority is refused. Socket identity headers and browser login
+credentials cannot supply this authority. Unregister closes and joins that
+device's idle connections, event subscriptions and terminal viewers before
+returning. It leaves other devices, underlying shells and agents running.
+
+The tunnel rejects CONNECT, absolute/authority targets, another Host or Origin,
+ambiguous paths (including encoded separators and nested escaping), identity
+headers under `X-Omo-*`, Proxy-Authorization, relay admission/notification
+credentials and `omo-token.*` WebSocket subprotocols. Presence counts even for
+empty or repeated headers. Request trailers are refused. Authorization, Cookie
+and forwarded identity headers are removed before dispatch.
+
+Local `/api/relay/*` administration, `/mcp`, OAuth/admission endpoints and MCP
+client token creation are unavailable remotely. Existing browser `/proxy/`
+routing and subdomains remain separate; this transport adds no forwarded-site
+support. Application requests retain the normal JSON requirement and raw
+image/zip upload exceptions. Security headers and committed event ids follow
+the ordinary application behavior.
+
+Focused application verification:
+
+```sh
+go test ./internal/relaytransport -count=1
+go test ./internal/server -run TestRelay -count=1
+CGO_ENABLED=1 go test -race ./internal/relaytransport ./internal/server -run 'TestRelay|TestStream|TestHTTP|TestReset|TestBackpressure|TestProtocol|TestConnection|TestPartialCredit|TestRemoteReset|TestWriter' -count=1
+```
+
+These tests include the actual standalone relay, production host callback
+wiring, local pairing, authenticated reconnect/restart, application HTTP,
+chunked images, SSE replay/resync, terminal frames/acknowledgments and device
+revocation. In-memory protocol peers cover quota violations, half-close,
+deadlines, reset crossings/churn and bounded backpressure deterministically.
