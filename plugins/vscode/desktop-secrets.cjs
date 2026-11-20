@@ -54,11 +54,32 @@ async function readDesktopSecrets(local, {platform = process.platform, env = pro
     const versions = /^kwallet[56]?$/.test(selectedBackend || '') ? [selectedBackend.slice('kwallet'.length)] : ['6', '5', ''];
     for (const version of versions) {
       try {
-        const reply = await run('gdbus', ['call', '--session', '--dest', 'org.kde.kwalletd' + version,
-          '--object-path', '/modules/kwalletd' + version, '--method', 'org.kde.KWallet.networkWallet']);
-        const match = /^\('([^'\r\n]+)',\)\s*$/.exec(reply);
-        if (!match) throw new Error();
-        return await run('kwallet-query', ['--read-password', 'Chromium Safe Storage', '--folder', 'Chromium Keys', match[1]]);
+        // kwallet-query is linked to one KF daemon version, independently of
+        // argv.json. Use explicitly addressed, typed D-Bus calls throughout.
+        // Literal replies preserve wallet/password strings without GVariant
+        // unescaping. Typed arguments also disambiguate the close overloads.
+        const call = (method, ...args) => run('dbus-send', ['--session', '--print-reply=literal', '--reply-timeout=15000',
+          '--dest=org.kde.kwalletd' + version, '/modules/kwalletd' + version, 'org.kde.KWallet.' + method, ...args]);
+        const stringReply = reply => {
+          // dbus-send indents every body value by three spaces, including
+          // literal strings. Remove that prefix only, preserving value bytes.
+          if (!reply.startsWith('   ')) throw new Error();
+          return reply.slice(3);
+        };
+        const wallet = stringReply(await call('networkWallet'));
+        if (!wallet) throw new Error();
+        const reply = await call('open', 'string:' + wallet, 'int64:0', 'string:one-man-office');
+        const handle = /^\s*int32 ([1-9]\d*)\s*$/.exec(reply)?.[1];
+        if (!handle || Number(handle) > 2147483647) throw new Error();
+        try {
+          const value = stringReply(await call('readPassword', 'int32:' + handle, 'string:Chromium Keys', 'string:Chromium Safe Storage', 'string:one-man-office'));
+          if (!value) throw new Error();
+          return value;
+        } finally {
+          // Release our application reference; never force-close another
+          // desktop application's wallet. Cleanup errors contain no secrets.
+          await call('close', 'int32:' + handle, 'boolean:false', 'string:one-man-office');
+        }
       } catch { /* Try the preceding KWallet service version. */ }
     }
     throw new Error('desktop keyring unavailable');

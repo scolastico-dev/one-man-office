@@ -53,15 +53,22 @@ test('a failed keyring lookup exposes no helper output or encrypted record and l
   });
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
-test('KWallet uses the product safe-storage entry in the configured network wallet', async t => {
-  const f = fixture(t, 'linux'), calls = [];
-  assert.deepEqual(await readDesktopSecrets(f.local, {platform: 'linux', env: {XDG_CURRENT_DESKTOP: 'KDE'}, run: async (program, args) => {
-    calls.push([program, args]); return program === 'gdbus' ? "('custom-wallet',)\n" : 'fixture-keyring-password\n';
-  }}), [{key: f.key, value: f.value}]);
-  assert.deepEqual(calls, [
-    ['gdbus', ['call', '--session', '--dest', 'org.kde.kwalletd6', '--object-path', '/modules/kwalletd6', '--method', 'org.kde.KWallet.networkWallet']],
-    ['kwallet-query', ['--read-password', 'Chromium Safe Storage', '--folder', 'Chromium Keys', 'custom-wallet']],
-  ]);
+function walletCall(version,method,...args){return ['dbus-send',['--session','--print-reply=literal','--reply-timeout=15000','--dest=org.kde.kwalletd'+version,'/modules/kwalletd'+version,'org.kde.KWallet.'+method,...args]];}
+for(const version of ['6','5',''])test('KWallet '+(version||'legacy')+' keeps wallet discovery, opening, reading and release on its selected daemon',async t=>{
+ const f=fixture(t,'linux'),calls=[];f.local.extensions=path.join(f.root,'.vscode','extensions');fs.mkdirSync(path.dirname(f.local.extensions));
+ fs.writeFileSync(path.join(f.root,'.vscode','argv.json'),JSON.stringify({'password-store':'kwallet'+version}));
+ const records=await readDesktopSecrets(f.local,{platform:'linux',env:{XDG_CURRENT_DESKTOP:'KDE'},run:async(program,args)=>{
+  calls.push([program,args]);
+  if(program!=='dbus-send')return 'fixture-keyring-password\n'; // The old mixed-helper implementation must fail.
+  if(args[5]==='org.kde.KWallet.networkWallet')return '   custom-wallet';
+  if(args[5]==='org.kde.KWallet.open')return '   int32 42\n';
+  if(args[5]==='org.kde.KWallet.readPassword')return '   fixture-keyring-password';
+  return '   int32 0\n';
+ }});
+ assert.deepEqual(records,[{key:f.key,value:f.value}]);
+ assert.deepEqual(calls,[walletCall(version,'networkWallet'),walletCall(version,'open','string:custom-wallet','int64:0','string:one-man-office'),
+  walletCall(version,'readPassword','int32:42','string:Chromium Keys','string:Chromium Safe Storage','string:one-man-office'),
+  walletCall(version,'close','int32:42','boolean:false','string:one-man-office')]);
 });
 test('an explicit desktop password-store setting takes precedence over the current desktop environment',async t=>{
  const f=fixture(t,'linux');f.local.extensions=path.join(f.root,'.vscode','extensions');
@@ -76,10 +83,35 @@ for(const [backend,version]of [['kwallet5','5'],['kwallet','']])test('explicit '
  fs.writeFileSync(path.join(f.root,'.vscode','argv.json'),JSON.stringify({'password-store':backend}));
  const services=[];
  assert.deepEqual(await readDesktopSecrets(f.local,{platform:'linux',env:{XDG_CURRENT_DESKTOP:'KDE'},run:async(program,args)=>{
-   if(program==='gdbus'){services.push(args[3]);return args[3]==='org.kde.kwalletd'+version?"('configured-wallet',)\n":"('other-wallet',)\n";}
-   return args.at(-1)==='configured-wallet'?'fixture-keyring-password\n':'different-native-key\n';
+  if(program!=='dbus-send')return 'different-native-key';
+  services.push(args[3]);const selected=args[3]==='--dest=org.kde.kwalletd'+version;
+  if(args[5].endsWith('.networkWallet'))return '   same-wallet-name';
+  if(args[5].endsWith('.open'))return '   int32 7\n';
+  if(args[5].endsWith('.readPassword'))return selected?'   fixture-keyring-password':'   different-native-key';
+  return '   int32 0\n';
  }}),[{key:f.key,value:f.value}]);
- assert.deepEqual(services,['org.kde.kwalletd'+version]);
+ assert.deepEqual(services,Array(4).fill('--dest=org.kde.kwalletd'+version));
+});
+test('a failed KWallet read still releases its own handle without force-closing the desktop wallet',async t=>{
+ const f=fixture(t,'linux'),calls=[];
+ await assert.rejects(readDesktopSecrets(f.local,{platform:'linux',env:{XDG_CURRENT_DESKTOP:'KDE'},run:async(program,args)=>{
+  calls.push([program,args]);if(program!=='dbus-send')throw new Error('old helper');
+  if(args[5].endsWith('.networkWallet'))return '   configured-wallet';if(args[5].endsWith('.open'))return '   int32 42\n';
+  if(args[5].endsWith('.readPassword'))throw new Error('fixture-sensitive-error');return '   int32 0\n';
+ }}),error=>!String(error).includes('fixture-sensitive-error'));
+ assert.deepEqual(calls.filter(([,args])=>args[5]?.endsWith('.close')),[walletCall('6','close','int32:42','boolean:false','string:one-man-office'),walletCall('5','close','int32:42','boolean:false','string:one-man-office'),walletCall('','close','int32:42','boolean:false','string:one-man-office')]);
+});
+test('automatic KWallet fallback repeats the entire sequence on the next daemon after an empty key',async t=>{
+ const f=fixture(t,'linux'),calls=[];
+ assert.deepEqual(await readDesktopSecrets(f.local,{platform:'linux',env:{XDG_CURRENT_DESKTOP:'KDE'},run:async(program,args)=>{
+  calls.push([program,args]);const v=args[3].endsWith('6')?'6':'5';
+  if(args[5].endsWith('.networkWallet'))return '   same-wallet-name';
+  if(args[5].endsWith('.open'))return v==='6'?'   int32 6\n':'   int32 5\n';
+  if(args[5].endsWith('.readPassword'))return v==='6'?'   ':'   fixture-keyring-password';
+  return '   int32 0\n';
+ }}),[{key:f.key,value:f.value}]);
+ assert.deepEqual(calls,[...['6','5'].flatMap(v=>[walletCall(v,'networkWallet'),walletCall(v,'open','string:same-wallet-name','int64:0','string:one-man-office'),
+  walletCall(v,'readPassword','int32:'+v,'string:Chromium Keys','string:Chromium Safe Storage','string:one-man-office'),walletCall(v,'close','int32:'+v,'boolean:false','string:one-man-office')])]);
 });
 test('native source enables bounded SQLite lock waiting before reading a live desktop store',async t=>{
  const f=fixture(t,'linux','v10'),prepare=DatabaseSync.prototype.prepare;let inspected=false;

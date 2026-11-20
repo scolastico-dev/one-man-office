@@ -93,7 +93,7 @@ use those shared files in both directions. Without a desktop profile, private
 preferences and extensions remain in plugin data across restarts.
 New editor processes also import the selected desktop profile's encrypted
 SecretStorage read-only, so existing sessions such as GitHub are available in
-the browser. Linux needs `secret-tool`, or `gdbus` and `kwallet-query` for KWallet;
+the browser. Linux needs `secret-tool`, or `dbus-send` for KWallet;
 macOS uses Keychain through `security`, Windows uses DPAPI through PowerShell.
 An unavailable/locked keyring reports an error before editor startup. Imported
 secrets persist privately under `profiles/<editor>/secrets/` across folders and

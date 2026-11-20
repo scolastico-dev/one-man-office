@@ -231,11 +231,13 @@ authentication extension without signing in again. Expired or revoked tokens
 still need the provider's normal sign-in flow. Reusing an already running editor
 does not import again; Stop and reopen it after signing in on the desktop.
 
-Linux uses `secret-tool` for Secret Service, or `gdbus` plus `kwallet-query` for
-KWallet (including its configured network wallet). These host utilities must be
+Linux uses `secret-tool` for Secret Service, or `dbus-send` for KWallet
+(including its configured network wallet). These host utilities must be
 installed for keyring-encrypted records. Desktop `argv.json` password-store
 selection takes precedence over desktop-environment detection, including explicit
-KWallet service versions. Existing Linux basic-text (`v10`) records need no
+KWallet service versions. KWallet discovery, synchronous open, password read and
+non-forced handle release all address that same daemon; an unversioned KF wallet
+client cannot redirect the read to another version. Existing Linux basic-text (`v10`) records need no
 keyring helper. macOS uses `/usr/bin/security`; Windows uses built-in Windows
 PowerShell and DPAPI, including the profile key in `Local State` when present.
 The OS may request permission to unlock/access its keyring. Missing helpers,
@@ -270,8 +272,10 @@ Linux amd64 publisher probes use synthetic encrypted GitHub sessions and assert
 account discovery through the real GitHub authentication extension plus extension
 SecretStorage access before and after restart. They do not use a real GitHub
 token or certify a live GitHub API request. Linux Secret Service decryption has
-also been exercised against an isolated native keyring; native macOS, Windows
-and KWallet execution remains fixture-covered.
+also been exercised against an isolated native keyring. Real `dbus-send` calls
+against simultaneous synthetic KWallet 5/6 services verify the selected daemon
+throughout the sequence, even when wallet names match, including handle release.
+Native macOS, Windows and KWallet daemon execution remains fixture-covered.
 
 ```sh
 node plugins/vscode/tests/probe.cjs openvscode --smoke --profile-sharing --local-product VSCodium --secrets
