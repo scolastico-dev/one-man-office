@@ -77,6 +77,12 @@ type ticketIn struct {
 	Ticket int `json:"ticket" arg:"0" jsonschema:"the ticket number"`
 }
 
+type ticketFollowUpIn struct {
+	Ticket    int    `json:"ticket" arg:"0" jsonschema:"the ticket number"`
+	Recipient string `json:"recipient" flag:"role" required:"true" help:"developer or reviewer (required)" jsonschema:"the recipient of the follow-up task: developer or reviewer"`
+	Comment   string `json:"comment" text:"comment-file" help:"read the follow-up task from FILE, or from standard input with -" jsonschema:"the follow-up task (Markdown)"`
+}
+
 type ticketGateIn struct {
 	Ticket int    `json:"ticket" arg:"0" jsonschema:"the ticket number"`
 	Plugin string `json:"plugin,omitempty" flag:"plugin" help:"the plugin that acts (default: OMO_PLUGIN_NAME, set in a plugin's hooks)" jsonschema:"the plugin that acts"`
@@ -158,6 +164,9 @@ its story.`,
 		Def("ticket check-export", "Check now whether exported work has merged (user only)", nil, ticketCheckExport).help("check-export N",
 			`Check the remote targets of all waiting exports now, sharing one fetch per target with any check already running. N must be waiting for its export to merge. Periodic checks may be off; omo must be running and unpaused. Only the user requests a check.`,
 			"  omo ai ticket check-export 12").commandLineOnly(),
+		Def("ticket follow-up", "Assign follow-up work on an exported ticket (user only)", nil, ticketFollowUp).help("follow-up N --role developer|reviewer --comment-file FILE|-",
+			`Give an exported ticket a further task, returning it to its developer or starting a fresh review round. The existing export remains in its history. Read the task from a file, or from standard input with --comment-file -. Only the user assigns follow-up work. Prints the ticket as #N type column title.`,
+			"  omo ai ticket follow-up 12 --role developer --comment-file rebase.md").commandLineOnly(),
 		Def("ticket gate-release", "Give the go-ahead of a plugin to the move it holds on ticket N (plugin hooks)", nil, ticketGateRelease).help("gate-release N [--plugin NAME]",
 			`A plugin that holds a ticket's move (a gate that answered "hold") lets it go
 with this command, from a hook of its own: omo then carries the move out once
@@ -228,6 +237,14 @@ func ticketCheckExport(ctx context.Context, c *apiclient.Client, in ticketIn) (R
 		return Result{}, err
 	}
 	return last(c, fmt.Sprintf("Merge check requested for #%d and the other waiting exports.\n", in.Ticket)), nil
+}
+
+func ticketFollowUp(ctx context.Context, c *apiclient.Client, in ticketFollowUpIn) (Result, error) {
+	var out api.Ticket
+	if err := c.Do(ctx, "POST", fmt.Sprintf("/api/tickets/%d/follow-up", in.Ticket), api.FollowUpRequest{Comment: in.Comment, Role: in.Recipient}, &out); err != nil {
+		return Result{}, err
+	}
+	return summaryLine(c, out), nil
 }
 
 // summaryLine answers a ticket as its one-line form.

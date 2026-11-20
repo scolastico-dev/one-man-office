@@ -92,6 +92,8 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 			e.log.Printf("engine: read the branches #%d hands in: %v", t.ID, err)
 		} else if err := e.pins.setReviewed(t.ID, t.ReviewRound+1, heads); err != nil {
 			e.log.Printf("engine: record the commits #%d hands in: %v", t.ID, err)
+		} else if err := e.b.RecordReviewCommits(ctx, t.ID, t.ReviewRound+1, heads); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -170,6 +172,17 @@ func (e *Engine) pinHandIns(snap board.EngineSnapshot) {
 			return
 		}
 		if pins != nil {
+			// Pins and board metadata are separate durable writes. Recover
+			// the board side after an interrupted hand-in or an upgrade,
+			// using the original pin even if the branch has since moved.
+			for _, p := range t.Projects {
+				if commit := pins[p.ID]; commit != "" && p.ReviewCommit != commit {
+					if err := e.b.RecordReviewCommits(context.Background(), t.ID, t.ReviewRound, pins); err != nil {
+						e.log.Printf("engine: recover the reviewed commits of #%d: %v", t.ID, err)
+					}
+					break
+				}
+			}
 			continue
 		}
 		heads, err := e.headsOf(t)
@@ -179,6 +192,8 @@ func (e *Engine) pinHandIns(snap board.EngineSnapshot) {
 		}
 		if err := e.pins.setReviewed(t.ID, t.ReviewRound, heads); err != nil {
 			e.log.Printf("engine: record the commits of #%d in review: %v", t.ID, err)
+		} else if err := e.b.RecordReviewCommits(context.Background(), t.ID, t.ReviewRound, heads); err != nil {
+			e.log.Printf("engine: record the reviewed commits of #%d: %v", t.ID, err)
 		}
 	}
 	if err := e.pins.prune(snap); err != nil {

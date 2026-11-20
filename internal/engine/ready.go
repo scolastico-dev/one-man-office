@@ -88,6 +88,9 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 	d.Ticket, d.Type, d.Title, d.ReviewRound = int(t.Number), string(t.Type), t.Title, t.ReviewRound
 	if a.Role == api.RoleReviewer {
 		d.ReviewRound = a.ReviewRound
+		if current, ok := e.ticketNow(ctx, a.Ticket); ok {
+			d.FollowUpReview = current.FollowUpReview && current.ReviewRound == a.ReviewRound
+		}
 	}
 	supervisor := t.Supervisor
 	if supervisor == api.RoleCEO && !g.CEO.Enabled {

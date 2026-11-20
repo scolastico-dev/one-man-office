@@ -77,6 +77,9 @@ func recordApprovals(t board.EngineTicket, pins map[string]string, approved map[
 // their integration branch has no commits of its own (noOwn). Projects
 // without a pinned commit get a reviewer.
 func carryOver(t board.EngineTicket, pins map[string]string, approved map[string]approval, noOwn func(project, commit string) bool) []carried {
+	if t.FollowUpReview {
+		return nil
+	}
 	if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent {
 		return nil
 	}

@@ -50,7 +50,7 @@ func (b *Board) RecordExportWatch(ctx context.Context, n int64, project, remote,
 		if oldRemote == remote && oldBranch == branch && oldBase == base && oldCommit == commit && oldTarget == target {
 			return nil
 		}
-		if _, err := tx.Exec(`UPDATE ticket_projects SET export_remote=?,export_branch=?,export_base=?,export_commit=?,export_target_commit=? WHERE ticket_id=? AND project_id=?`, remote, branch, base, commit, target, n, project); err != nil {
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_remote=?,export_branch=?,export_base=?,export_commit=?,export_target_commit=?,last_export_commit=? WHERE ticket_id=? AND project_id=?`, remote, branch, base, commit, target, commit, n, project); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE tickets SET updated_at=? WHERE id=?`, b.stamp(), n); err != nil {

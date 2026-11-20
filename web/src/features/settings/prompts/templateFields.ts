@@ -22,6 +22,7 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   { name: 'Ticket', text: "The ticket's number." },
   { name: 'Story', text: "The number of the task's story; 0 for none." },
   { name: 'ReviewRound', text: 'The number of the review round.' },
+  { name: 'FollowUpReview', text: 'For a reviewer: true when the user assigned a follow-up verification task on an exported ticket.' },
   { name: 'Timeouts', text: 'How many waits in a row ran out.' },
   { name: 'Question', text: "The question's number." },
   { name: 'Projects', text: "The ticket's projects; walk them with range." },

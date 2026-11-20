@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +12,136 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 )
+
+func TestExportMergeAfterBranchChanges(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	for _, change := range []string{"rebase", "extend"} {
+		styles := []string{"merge", "squash"}
+		if change == "rebase" {
+			styles = append(styles, "fast-forward")
+		}
+		for _, style := range styles {
+			t.Run(change+"/"+style, func(t *testing.T) {
+				h := gitHarness(t)
+				commit(t, h.repo, "b.txt", "base\n")
+				n, job, dir, branch := h.exportedTask("Changed export")
+				if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
+					t.Fatal(err)
+				}
+				h.steps(2)
+				recorded := h.ticket(n).Projects[0]
+				remote := h.origin(h.project)
+				landed := filepath.Join(t.TempDir(), "landed")
+				gitRun(t, h.repo, "clone", "-q", "-b", "main", remote, landed)
+				if change == "rebase" {
+					commit(t, landed, "b.txt", "target edit\n")
+				} else {
+					commit(t, landed, "other.txt", "target edit\n")
+				}
+				gitRun(t, landed, "push", "-q", "origin", "main")
+				gitRun(t, dir, "fetch", "-q", "origin", "main")
+				if change == "rebase" {
+					cmd := exec.Command("git", "rebase", "FETCH_HEAD")
+					cmd.Dir = dir
+					if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+						t.Fatalf("rebase did not conflict: %v\n%s", err, out)
+					}
+					write(t, dir, "b.txt", "resolved export\n")
+					gitRun(t, dir, "add", "b.txt")
+					gitRun(t, dir, "commit", "-q", "--no-edit")
+					gitRun(t, dir, "rebase", "--continue")
+				} else {
+					commit(t, dir, "b.txt", "extended export\n")
+				}
+				gitRun(t, dir, "push", "-q", "--force-with-lease=refs/heads/"+branch+":"+recorded.ExportCommit, "origin", "HEAD:refs/heads/"+branch)
+				// A changed branch and an advanced target alone prove no merge.
+				h.e.checkExportsMerged(h.ctx)
+				if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
+					t.Fatalf("unmerged changed branch completed: %+v", got.TicketSummary)
+				}
+				if style == "fast-forward" {
+					// A later round must recover pre-merge evidence from disk.
+					h.e.pins = &pinStore{path: h.e.pins.path}
+				}
+				if style != "fast-forward" {
+					commit(t, landed, "before-merge.txt", "upstream work after the branch changed\n")
+				}
+				gitRun(t, landed, "fetch", "-q", "origin", "refs/heads/"+branch)
+				if style == "merge" {
+					gitRun(t, landed, "merge", "-q", "--no-ff", "-m", "merge changed export", "FETCH_HEAD")
+				} else if style == "fast-forward" {
+					gitRun(t, landed, "merge", "-q", "--ff-only", "FETCH_HEAD")
+				} else {
+					gitRun(t, landed, "merge", "--squash", "FETCH_HEAD")
+					gitRun(t, landed, "commit", "-q", "-m", "squash changed export")
+				}
+				commit(t, landed, "later.txt", "later target work\n")
+				gitRun(t, landed, "push", "-q", "origin", "main", ":refs/heads/"+branch)
+				before := gitRun(t, h.repo, "show-ref", "--heads")
+				h.e.checkExportsMerged(h.ctx)
+				if got := h.ticket(n); got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported || !got.ExportMerged {
+					t.Fatalf("changed export merge not detected: %+v", got.TicketSummary)
+				}
+				if got := h.ticket(n).Projects[0]; got.ExportCommit != recorded.ExportCommit || got.StartCommit != recorded.StartCommit || got.EndCommit != recorded.EndCommit {
+					t.Fatal("merge check rewrote the recorded export or diff")
+				}
+				if got := gitRun(t, h.repo, "show-ref", "--heads"); got != before {
+					t.Fatal("merge check moved local branches")
+				}
+			})
+		}
+	}
+}
+
+func TestExportCheckRejectsUpstreamOnlyRebase(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	for _, advancement := range []string{"at target", "behind target", "empty commit"} {
+		t.Run(advancement, func(t *testing.T) {
+			h := gitHarness(t)
+			commit(t, h.repo, "b.txt", "base\n")
+			n, job, dir, branch := h.exportedTask("Discarded export")
+			if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
+				t.Fatal(err)
+			}
+			h.steps(2)
+			recorded := h.ticket(n).Projects[0]
+			remote := h.origin(h.project)
+			landed := filepath.Join(t.TempDir(), "landed")
+			gitRun(t, h.repo, "clone", "-q", "-b", "main", remote, landed)
+			target := commit(t, landed, "b.txt", "unrelated target edit\n")
+			gitRun(t, landed, "push", "-q", "origin", "main")
+			gitRun(t, dir, "fetch", "-q", "origin", "main")
+			cmd := exec.Command("git", "rebase", "FETCH_HEAD")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+				t.Fatalf("rebase did not conflict: %v\n%s", err, out)
+			}
+			// Resolve by keeping upstream, discarding the exported change.
+			gitRun(t, dir, "checkout", "--ours", "b.txt")
+			gitRun(t, dir, "add", "b.txt")
+			gitRun(t, dir, "rebase", "--continue")
+			if tip := gitRun(t, dir, "rev-parse", "HEAD"); tip != target {
+				t.Fatalf("discarded rebase tip = %s, want upstream %s", tip, target)
+			}
+			if advancement == "empty commit" {
+				gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "empty feature patch")
+			}
+			gitRun(t, dir, "push", "-q", "--force-with-lease=refs/heads/"+branch+":"+recorded.ExportCommit, "origin", "HEAD:refs/heads/"+branch)
+			if advancement == "behind target" {
+				commit(t, landed, "later.txt", "later upstream change\n")
+				gitRun(t, landed, "push", "-q", "origin", "main")
+			}
+			h.e.checkExportsMerged(h.ctx)
+			if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
+				t.Fatalf("upstream-only changes completed unmerged export: %+v", got.TicketSummary)
+			}
+			h.steps(2)
+			if !pathExists(dir) {
+				t.Fatal("unmerged export lost its worktree")
+			}
+		})
+	}
+}
 
 // A check must use remote target content, including rewritten commits, and
 // retain the pushed commit after the remote removes the feature branch.

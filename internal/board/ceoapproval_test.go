@@ -159,6 +159,7 @@ var columnWriters = map[string]string{
 	"endRound":        "Review to In Progress on a rejecting review round",
 	"passReview":      "Review to Done, or In Progress to Review on hand-in",
 	"Reject":          "Review to In Progress, by the user",
+	"RequestFollowUp": "Review to In Progress or a new review round, by the user and only for previously exported work",
 	"setColumn":       "the writer itself",
 }
 

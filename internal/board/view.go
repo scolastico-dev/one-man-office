@@ -40,6 +40,8 @@ type ticketRow struct {
 	StartBlocked       api.StartBlocked
 	ExportURL          string
 	ExportMerged       bool
+	FollowUpReview     bool
+	ReexportPending    bool
 	// Workdir is the working folder omo made for a task without a
 	// project, "" before work started and after it was removed.
 	Workdir   string
@@ -60,7 +62,7 @@ const ticketSelect = `SELECT t.id, t.type, t.title, t.col, t.resolution, t.rank,
 	t.supervisor, t.created_by_role, COALESCE(t.created_by_session, ''), COALESCE(cs.name, ''),
 	t.description_version, t.model, t.review, t.when_approved, t.task_release, t.max_parallel,
 	t.review_stage, t.review_round, t.attention, t.attention_owner, t.busy, t.failed_step, t.start_blocked,
-	t.export_url, t.export_merged, t.workdir, t.created_at, t.updated_at, t.closed_at
+	t.export_url, t.export_merged, t.workdir, t.created_at, t.updated_at, t.closed_at, t.followup_review, t.reexport_pending
 	FROM tickets t LEFT JOIN agent_sessions cs ON cs.id = t.created_by_session`
 
 func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
@@ -71,7 +73,7 @@ func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
 		&r.DescriptionVersion, &r.Model, &r.Review, &r.WhenApproved, &r.TaskRelease, &maxParallel,
 		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.AttentionOwner, &r.Busy, &r.FailedStep, &r.StartBlocked,
 		&r.ExportURL, &r.ExportMerged, &r.Workdir,
-		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt)
+		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.FollowUpReview, &r.ReexportPending)
 	if maxParallel.Valid {
 		v := int(maxParallel.Int64)
 		r.MaxParallel = &v
@@ -107,6 +109,9 @@ func effectiveReview(p Policy, r ticketRow) api.Review {
 // merged into the story and never exported, whatever the defaults say (the
 // settings allow nothing else for when_approved_defaults.story_task).
 func effectiveWhenApproved(p Policy, r ticketRow) api.WhenApproved {
+	if r.ReexportPending {
+		return api.WhenApprovedExport
+	}
 	if r.inStory() {
 		return api.WhenApprovedMerge
 	}
@@ -230,12 +235,12 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 
 	// Projects in their stored order.
 	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, export_state, export_error,
-		start_commit, end_commit, export_remote, export_branch, export_base, export_commit, export_target_commit FROM ticket_projects
+		start_commit, end_commit, export_remote, export_branch, export_base, export_commit, export_target_commit, last_export_commit, last_export_url, review_commit FROM ticket_projects
 		WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var tp api.TicketProject
 		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL, &tp.ExportState, &tp.ExportError,
-			&tp.StartCommit, &tp.EndCommit, &tp.ExportRemote, &tp.ExportBranch, &tp.ExportBase, &tp.ExportCommit, &tp.ExportTargetCommit); err != nil {
+			&tp.StartCommit, &tp.EndCommit, &tp.ExportRemote, &tp.ExportBranch, &tp.ExportBase, &tp.ExportCommit, &tp.ExportTargetCommit, &tp.LastExportCommit, &tp.LastExportURL, &tp.ReviewCommit); err != nil {
 			return err
 		}
 		tp.ExportState = exportStateOf(byID[id], tp)

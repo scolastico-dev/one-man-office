@@ -46,6 +46,7 @@ import type {
   BranchPreviewRequest,
   PromptUpdate,
   RejectRequest,
+  FollowUpRequest,
   RemoveProjectRequest,
   RemovedProjects,
   RoleSettings,
@@ -144,6 +145,10 @@ export function approveTicket(c: ApiClient, n: number, opts: { export?: boolean;
 export function rejectTicket(c: ApiClient, n: number, comment: string): R<Ticket> {
   const body: RejectRequest = { comment }
   return c.send('POST', `${ticketPath(n)}/reject`, body)
+}
+
+export function followUpTicket(c: ApiClient, n: number, body: FollowUpRequest): R<Ticket> {
+  return c.send('POST', `${ticketPath(n)}/follow-up`, body)
 }
 
 /** Requests a shared asynchronous merge check; ticket updates arrive on the event stream. */

@@ -104,14 +104,15 @@ func newAccessFixture(t *testing.T) *accessFixture {
 			"DELETE /api/prompts/{name}":  "/api/prompts/pm",
 		},
 		bodies: map[string]any{
-			"POST /api/projects":       api.CreateProject{Path: newRepo(t), Name: "evil"},
-			"PATCH /api/projects/{id}": map[string]any{"enabled": false},
-			"POST /api/projects/batch": api.ProjectBatch{IDs: []string{free.ID}, Action: api.ProjectBatchDisable},
-			"PUT /api/settings":        g,
-			"PATCH /api/settings":      map[string]any{"limits": map[string]any{"tasks": 9}},
-			"PUT /api/profiles/{name}": api.Profile{CLI: "custom", Command: "evil", Models: map[string]api.ProfileModel{"m": {}}},
-			"PUT /api/roles/{role}":    api.RoleSettings{Models: []string{"keep/m"}, Assignment: "random"},
-			"PUT /api/prompts/{name}":  api.PromptUpdate{Text: "evil"},
+			"POST /api/tickets/{n}/follow-up": api.FollowUpRequest{Role: "developer", Comment: "Rebase onto main"},
+			"POST /api/projects":              api.CreateProject{Path: newRepo(t), Name: "evil"},
+			"PATCH /api/projects/{id}":        map[string]any{"enabled": false},
+			"POST /api/projects/batch":        api.ProjectBatch{IDs: []string{free.ID}, Action: api.ProjectBatchDisable},
+			"PUT /api/settings":               g,
+			"PATCH /api/settings":             map[string]any{"limits": map[string]any{"tasks": 9}},
+			"PUT /api/profiles/{name}":        api.Profile{CLI: "custom", Command: "evil", Models: map[string]api.ProfileModel{"m": {}}},
+			"PUT /api/roles/{role}":           api.RoleSettings{Models: []string{"keep/m"}, Assignment: "random"},
+			"PUT /api/prompts/{name}":         api.PromptUpdate{Text: "evil"},
 		},
 	}
 }
@@ -180,6 +181,7 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 			"POST /api/tickets/{n}/remove-project": "/api/tickets/" + strconv.Itoa(n) + "/remove-project",
 			"POST /api/tickets/{n}/remove-workdir": "/api/tickets/" + strconv.Itoa(n) + "/remove-workdir",
 			"POST /api/tickets/{n}/check-export":   "/api/tickets/" + strconv.Itoa(n) + "/check-export",
+			"POST /api/tickets/{n}/follow-up":      "/api/tickets/" + strconv.Itoa(n) + "/follow-up",
 		}
 		forward := socketDo(t, s, "POST", "/api/proxy/forwards", api.CreateProxyForward{Ticket: sess.Ticket, Port: 5173, Name: "access fixture"}, "")
 		wantStatus(t, forward.Code, http.StatusCreated)
@@ -334,6 +336,7 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		// The working folder of a done task without a project.
 		"POST /api/tickets/{n}/remove-workdir": userOnly,
 		"POST /api/tickets/{n}/check-export":   userOnly,
+		"POST /api/tickets/{n}/follow-up":      userOnly,
 		"GET /api/proxy/forwards":              agentRead,
 		"POST /api/proxy/forwards":             agentWrite,
 		"DELETE /api/proxy/forwards/{id}":      agentWrite,

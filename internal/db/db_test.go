@@ -32,8 +32,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 12 || SchemaVersion != 12 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 12", v, SchemaVersion)
+	if v := userVersion(t, d); v != 13 || SchemaVersion != 13 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 13", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
@@ -530,6 +530,49 @@ func TestMigrationNinePreservesTicketsAndAddsExportWatch(t *testing.T) {
 	}
 	if _, err := d.Exec(`INSERT INTO ticket_projects(ticket_id,project_id,position) VALUES(999,'missing',0)`); err == nil {
 		t.Fatal("foreign keys disabled after migration")
+	}
+}
+
+func TestMigrationThirteenRetainsExistingExports(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	old, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations[:12] {
+		if _, err := old.Exec(migration); err != nil {
+			old.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := old.Exec(`PRAGMA user_version=12;
+INSERT INTO tickets (id,type,title,col,review_stage,rank,supervisor,created_by_role,created_at,updated_at) VALUES (1,'task','existing export','review','awaiting_merge',1,'user','user','x','x');
+INSERT INTO ticket_projects (ticket_id,project_id,position,export_commit,export_url,export_target_commit) VALUES (1,'api',0,'saved-source','https://example.test/pull/1','saved-target');
+INSERT INTO ticket_projects (ticket_id,project_id,position) VALUES (1,'web',1);`); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var commit, url, target, lastCommit, lastURL, review, stage string
+	var followup, pending int
+	if err := d.QueryRow(`SELECT p.export_commit,p.export_url,p.export_target_commit,p.last_export_commit,p.last_export_url,p.review_commit,t.review_stage,t.followup_review,t.reexport_pending FROM ticket_projects p JOIN tickets t ON t.id=p.ticket_id WHERE p.project_id='api'`).Scan(&commit, &url, &target, &lastCommit, &lastURL, &review, &stage, &followup, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if commit != "saved-source" || lastCommit != commit || url != "https://example.test/pull/1" || lastURL != url || target != "saved-target" || review != "" || stage != "awaiting_merge" || followup != 0 || pending != 0 {
+		t.Fatalf("existing export changed during upgrade: %q %q %q %q %q %q %q %d %d", commit, url, target, lastCommit, lastURL, review, stage, followup, pending)
+	}
+	if err := d.QueryRow(`SELECT last_export_commit,last_export_url,review_commit FROM ticket_projects WHERE project_id='web'`).Scan(&lastCommit, &lastURL, &review); err != nil || lastCommit != "" || lastURL != "" || review != "" {
+		t.Fatalf("unexported project gained history: %q %q %q, %v", lastCommit, lastURL, review, err)
+	}
+	if fresh := schemaOf(t, open(t)); fresh != schemaOf(t, d) {
+		t.Fatal("upgraded schema differs from fresh schema")
 	}
 }
 

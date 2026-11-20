@@ -163,7 +163,9 @@ func TestPluginForwardWebSocketActivity(t *testing.T) {
 			if err == nil || resp == nil || resp.StatusCode != 403 {
 				t.Fatalf("upstream refusal %v %+v", err, resp)
 			}
-			if got := activity(); got != initial {
+			// Reading a streamed refusal does not wait for the handler's
+			// deferred accounting; assert after the request has finished.
+			if got := wait(0); got != initial {
 				t.Fatalf("refusal counted %+v", got)
 			}
 			a, bconn := open(), open()

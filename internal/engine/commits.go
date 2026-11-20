@@ -62,6 +62,13 @@ func (e *Engine) keepCommits(ctx context.Context, n int64, repos ...string) erro
 				if p.ExportTargetCommit != "" {
 					commits = append(commits, p.ExportTargetCommit)
 				}
+				rec, found, err := e.pins.pushed(t.ID, p.ID)
+				if err != nil {
+					return err
+				}
+				if found && rec.Commit == p.ExportCommit && rec.Round == t.ReviewRound && rec.ObservedCommit != "" && rec.ObservedStart != "" {
+					commits = append(commits, rec.ObservedCommit, rec.ObservedStart)
+				}
 			}
 		}
 		if err := e.git.KeepCommits(repo, n, commits); err != nil {

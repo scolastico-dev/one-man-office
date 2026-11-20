@@ -74,6 +74,10 @@ type pushRecord struct {
 	// SSHUser preserves the SSH login identity when Address's display
 	// redaction removed URI userinfo. Passwords are never retained.
 	SSHUser string `json:"ssh_user,omitempty"`
+	// A nonempty changed branch patch observed before landing can later be
+	// recognized through a fast-forward, without guessing from upstream work.
+	ObservedCommit string `json:"observed_commit,omitempty"`
+	ObservedStart  string `json:"observed_start,omitempty"`
 }
 
 func reviewKey(ticket int64, round int) string { return fmt.Sprintf("%d/%d", ticket, round) }
@@ -254,6 +258,28 @@ func (s *pinStore) setPushed(ticket int64, project string, r pushRecord) error {
 		return err
 	}
 	s.data.Pushed[squashKey(ticket, project)] = r
+	return s.save()
+}
+
+// observeExport updates only evidence for the same push. A check that raced
+// a later export cannot overwrite its destination or reviewed commit.
+func (s *pinStore) observeExport(ticket int64, project string, expected pushRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	key := squashKey(ticket, project)
+	current, ok := s.data.Pushed[key]
+	// exact: these fields identify a single recorded push, not branch matching.
+	if !ok || current.Commit != expected.Commit || current.Round != expected.Round || current.Target != expected.Target || current.Address != expected.Address || current.Branch != expected.Branch || current.Base != expected.Base || current.SSHUser != expected.SSHUser {
+		return nil
+	}
+	if current.ObservedCommit == expected.ObservedCommit && current.ObservedStart == expected.ObservedStart {
+		return nil
+	}
+	current.ObservedCommit, current.ObservedStart = expected.ObservedCommit, expected.ObservedStart
+	s.data.Pushed[key] = current
 	return s.save()
 }
 

@@ -65,9 +65,10 @@ repository:
 2. For every other project omo pushes the commit that was reviewed to the
    repository's push remote (`branch.<base>.pushRemote`, `remote.pushDefault`,
    `branch.<base>.remote`, then `origin`), as the ticket's branch. It never
-   force-pushes and never pushes onto a remote branch of that name that it did
-   not push itself, and runs no hooks. Your credentials for that remote are
-   used as git finds them. After a rejection, a later export of the ticket
+   replaces a foreign remote branch and runs no hooks. A reviewed re-export
+   can replace omo's own earlier push after a rebase; it proceeds only while
+   the remote branch still matches that recorded push. Your credentials for
+   that remote are used as git finds them. After a rejection, a later export of the ticket
    moves the same remote branch on and edits the pull request that exists.
 3. An export agent runs per project in a folder under `OMO_HOME/run/export/`.
    omo gives it `material.md` (the ticket, a story's tasks, this repository's
@@ -110,16 +111,62 @@ export fails; give it a real remote (`git remote add origin <address>`).
 Images are not uploaded: a pull request names each as "[image: <name>, not
 exported]".
 
+### Follow-up work after export
+
+Use **Send follow-up task…** while an exported ticket waits for its merge or
+for human review. Write the requested work and choose **Developer** (the
+product manager for a story) or **Reviewer**. The developer resumes work on
+the existing branch; a reviewer gets a fresh round for the requested
+verification and can send code changes back to the developer.
+
+The previous pull request link stays available. Its old merge watch is
+invalidated, so an old result cannot close the new work. After the developer
+commits and hands in, the usual review policy applies: agent review, human
+review, or automatic re-export. A requested reviewer task also returns to
+human review when that is the ticket's policy.
+
+At human review, **Re-export…** replaces **Export…**. If the reviewed local
+commit differs from the last exported commit, the approval dialog warns that
+the remote branch still contains the previous version. Approval asks omo to
+push the reviewed commit and update the existing pull request. A rebase can
+require replacing the earlier history; omo uses an exact lease against its
+last recorded push and refuses if somebody else moved or deleted that remote
+branch. Commits added after the hand-in are not included.
+
+omo records the new exported commit and remote target baseline. Merge checks
+then recognize that revision through a merge commit, squash, or fast-forward.
+Give rebase and follow-up requests through this workflow so omo can keep an
+exact record of what was reviewed and pushed.
+
+The user CLI offers the same action:
+
+```bash
+omo ai ticket follow-up N --role developer --comment-file - <<'EOF'
+Rebase onto origin/main and resolve the conflicts. Hand in the result for review.
+EOF
+```
+
 **Checking for a merge**: omo checks the remote target branches with Git,
 without calling a forge API. It uses the remote, target branch and reviewed
-commit recorded when the work was exported, so later configuration or local
-branch changes do not change what is checked. Fetching the recorded target
-keeps the checkout, index, local branches and remote-tracking branches intact.
-A normal merge can be found by
-commit ancestry; squash and rebase merges can be found by checking that the
-exported content is present. These content checks use Git's built-in text
-merge independently of the project's merge-driver policies. Content checks
-are conservative: later rewrites,
+commit recorded when the work was exported, so later configuration changes
+do not redirect the check. Fetching the recorded target keeps the checkout,
+index, local branches and remote-tracking branches intact.
+A normal merge can be found by commit ancestry; squash and rebase merges can
+be found by checking that the exported content is present. If the original
+commit does not prove inclusion, omo also checks the current local tip of the
+recorded exported branch. This detects work rebased with conflict resolutions
+or extended by follow-up commits before merging, including squash merges.
+The fallback excludes upstream changes brought in by a rebase; discarding the
+feature's changes during conflict resolution does not count as a merge.
+A nonempty changed patch observed before landing is retained across restarts,
+so a subsequent fast-forward can also be recognized. A rewritten branch that
+was already fast-forwarded before omo observed or re-exported it can remain
+inconclusive; the managed follow-up workflow avoids this ambiguity.
+The original export and diff records stay intact, and remain usable if the
+branch is deleted. Changes made only in another clone must also be available
+on the local exported branch for this fallback. These content checks use Git's
+built-in text merge independently of the project's merge-driver policies.
+Content checks are conservative: later rewrites,
 reverts or conflicts can leave a merged ticket waiting. A failed or unavailable
 remote also leaves the ticket waiting.
 

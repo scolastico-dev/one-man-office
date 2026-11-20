@@ -192,6 +192,9 @@ func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneReque
 		url, t.ID, a.Project); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`UPDATE ticket_projects SET last_export_url = ? WHERE ticket_id = ? AND project_id = ?`, url, t.ID, a.Project); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`UPDATE tickets SET updated_at = ? WHERE id = ?`, b.stamp(), t.ID); err != nil {
 		return err
 	}
@@ -474,7 +477,7 @@ func (b *Board) endRound(tx *sql.Tx, p Policy, a Actor, t ticketRow, keys []stri
 		return b.systemComment(tx, t.ID, roundText(t, keys, round), workingRole(t))
 	}
 	stage := approvedStage(p, t, false, false)
-	if effectiveReview(p, t) == api.ReviewAgentThenHuman {
+	if effectiveReview(p, t) == api.ReviewAgentThenHuman || (t.FollowUpReview && effectiveReview(p, t) == api.ReviewHuman) {
 		stage = api.ReviewStageHuman
 	}
 	return b.passReview(tx, a, t, api.ColumnReview, stage, ActionVerdict)

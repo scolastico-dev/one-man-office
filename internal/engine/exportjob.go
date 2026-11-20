@@ -22,8 +22,10 @@ import (
 // An export publishes exactly the reviewed work. Before an export job
 // starts, omo itself pushes the commit pinned at hand-in for the current
 // review round (never what the branch points at by then: an agent can move
-// the branch) from the project's own repository to the remote its config
-// names, as the ticket's branch, without force or hooks (gitops.PushCommit).
+// the branch) from the project's own repository to its push remote as the
+// ticket's branch, without hooks. Ordinary exports use gitops.PushCommit;
+// an approved later round may replace its own recorded previous push with
+// gitops.PushReviewedUpdate, including after a rebase.
 // The worktree, and with it any .git an agent controls, is not used. Then
 // the job starts in a folder omo made below the run folder, holding the
 // material for the pull request's text and omo's own title and body (see
@@ -118,6 +120,27 @@ func (e *Engine) planExport(ctx context.Context, t board.EngineTicket, project s
 			}
 		}
 	}
+	if t.ReexportPending {
+		previous, found, err := e.pins.pushed(t.ID, project)
+		if err != nil {
+			return exportPlan{}, err
+		}
+		if found {
+			// exact: re-export updates the same recorded branch identity.
+			if previous.Branch != x.branch {
+				return exportPlan{}, fmt.Errorf("the previous export used a different branch")
+			}
+			x.remote = pushRemote(previous)
+			if previous.Base != "" {
+				x.base = previous.Base
+			}
+			if current, err := e.git.RemoteFor(ctx, x.repo, x.base); err == nil && current.Address() == previous.Address && exportSSHUser(current) == previous.SSHUser {
+				x.remote = current
+			}
+			x.forge, x.forgeErr = forge.Parse(x.remote.URL)
+			return x, nil
+		}
+	}
 	x.remote, err = e.git.RemoteFor(ctx, x.repo, p.Base)
 	if err != nil {
 		return exportPlan{}, err
@@ -203,7 +226,11 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 			before = prev.Commit
 		}
 		e.at("export-push")
-		err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch, before)
+		if before != "" && prev.Round < t.ReviewRound {
+			err = e.git.PushReviewedUpdate(ctx, x.repo, x.remote, x.commit, x.branch, before)
+		} else {
+			err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch, before)
+		}
 	}
 	if err == nil {
 		err = e.pins.setPushed(t.ID, project, rec)

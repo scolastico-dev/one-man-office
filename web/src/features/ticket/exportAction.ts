@@ -4,10 +4,11 @@
 // its refusal.
 import { registerTicketAction, type TicketAction } from './actions'
 import { withoutProject } from './fieldRules'
+import { wasExported } from './exportState'
 
 export const exportAction: TicketAction = {
   id: 'export',
-  label: 'Export…',
+  label: (t) => wasExported(t) ? 'Re-export…' : 'Export…',
   // A task inside a story is merged into the story and cannot be exported; a task without a project has nothing to export.
   applies: (t) => t.column === 'review' && t.review_stage === 'human' && t.story === null && !withoutProject(t),
   unavailable: (t, ctx) => {
@@ -15,7 +16,9 @@ export const exportAction: TicketAction = {
     return target.allowed ? undefined : target.reason ?? `#${t.number} cannot be approved right now.`
   },
   describe: (t) =>
-    t.projects.some((p) => p.export_url)
+    wasExported(t)
+      ? 'Approves it and has omo push the reviewed changes and update the existing pull requests.'
+      : t.projects.some((p) => p.export_url)
       ? 'Approves it and has omo export the projects without a pull request; those with one keep it.'
       : 'Approves it and has omo push the branch of each project with changes and open a pull request for it.',
   run: (_t, ctx) => ctx.ask('export'),
