@@ -17,6 +17,10 @@ agents review the result, and merges it into your branch or opens a pull
 request once you approve. It is one program that runs on your machine, as
 you, for all your repositories at once.
 
+> [!NOTE]
+> **Looking for the TUI?** The terminal UI has been temporarily removed in recent versions in favor of the browser-first approach.
+> Maintaining both interfaces while core features are still evolving during pre-release doesn't make sense right now, but bringing the TUI back is already planned before the `1.0` release.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-board-dark.png">
   <img alt="The omo board of an invented invoicing product: tickets in the columns Planning, Ready For Dev, In Progress, Review and Done, with the sidebar listing the agents at work" src=".github/assets/screenshot-board-light.png">
