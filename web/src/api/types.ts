@@ -1014,6 +1014,34 @@ export interface NotificationsSeen {
   through: number
 }
 
+export interface UICapabilities {
+  features: string[]
+}
+
+export interface UINotification {
+  id: string
+  kind: string
+  title: string
+  body: string
+  /** Board-relative path. */
+  destination: string
+}
+
+export interface UINotificationFeed {
+  notifications: UINotification[]
+  /** Decimal string preserving the 64-bit event id. */
+  next_cursor: string
+  /** Unscanned events remain, even if this page contains no notifications. */
+  has_more: boolean
+}
+
+export interface UINotificationCursorReset {
+  /** Replay retained events from this decimal cursor. */
+  reset_cursor: string
+  /** Start after all history from this decimal cursor. */
+  latest_cursor: string
+}
+
 export type UserTerminalState = 'running' | 'exited'
 
 export interface UserTerminal {
