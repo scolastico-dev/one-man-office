@@ -817,6 +817,13 @@ mutating browser preferences, archives intervening versions privately, then
 acknowledges only those records. Publisher updates must recheck these internals.
 Native-profile clients issue their own provider operation on a shared version
 change, even when another client already wrote the bytes, to refresh each UI.
+The shared `nativeFiles` adapter atomically displaces and archives the actual
+desktop file before writes/deletions, then publishes/restores with exclusive
+creation. A desktop save during the final async read or after displacement is
+left live or preserved privately. Failed archive/restore retains and reports an
+`.omo-displaced-<uuid>` sibling; native staging/recovery files are not snippets.
+Archives publish from complete staging files and verify existing copies before
+reuse, retaining a new complete copy beside interrupted or edited archives.
 `--preference-races --smoke --profile-sharing` exercises all four file categories
 and both mutation paths against the real pinned publishers without sleeps.
 The pinned OpenVSCode bootstrap overrides builtin paths,

@@ -94,6 +94,8 @@ preferences and extensions remain in plugin data across restarts.
 Intervening browser saves are recorded at the publisher's storage boundary;
 versions raced by a sync write or deletion are retained in the editor's private
 `preference-conflicts/` folder before their journal records are acknowledged.
+Desktop files are also captured at commit time before replacement or deletion;
+a newer desktop file is left untouched and the displaced version is preserved.
 It permits one running editor per canonical folder. Repeated clicks reuse it
 only when editor, pinned version and ticket/global binding all match. To change
 any of those for an open folder, use **Stop** in the **VS Code** sidebar tab first;

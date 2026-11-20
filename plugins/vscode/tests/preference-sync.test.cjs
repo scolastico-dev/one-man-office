@@ -140,3 +140,78 @@ for(const name of ['settings.json','snippets/race.json']) test(`${name}: desktop
  assert.equal(await sync.tick(),false);assert.equal(injected,true);assert.equal(f.get(f.source,name),'{"a":3}');await sync.tick();
  const preserved=fs.readdirSync(path.join(f.root,'conflicts')).map(file=>f.get(path.join(f.root,'conflicts'),file));assert.ok(preserved.includes('{"a":2}'));assert.ok(preserved.includes('{"a":3}'));
 });
+for(const name of ['settings.json','keybindings.json','tasks.json','snippets/race.json'])for(const mutation of ['write','delete'])test(`${name}: desktop save during the final native read close survives ${mutation}`,async t=>{
+ const f=fixture(t),text=(a,b)=>JSON.stringify(name==='keybindings.json'?[{key:'ctrl+k',command:{a,b}}]:{a,b});
+ const original=text(1,1),changed=text(2,1),saved=text(1,2),file=path.join(f.source,name);
+ f.put(f.source,name,original);const sync=f.make();await sync.tick();
+ if(mutation==='write')f.put(f.browser,name,changed);else fs.unlinkSync(path.join(f.browser,name));
+ const open=fs.promises.open.bind(fs.promises);let reads=0,injected=false;
+ t.mock.method(fs.promises,'open',async(filename,...args)=>{
+  const handle=await open(filename,...args);
+  if(filename===file&&++reads===3){const close=handle.close.bind(handle);handle.close=async()=>{await close();f.put(f.source,name,saved);injected=true;};}
+  return handle;
+ });
+ await sync.tick();await sync.tick();assert.equal(injected,true);
+ const values=[];for(const dir of [f.source,f.browser])if(fs.existsSync(path.join(dir,name)))values.push(f.get(dir,name));
+ const backups=path.join(f.root,'conflicts');if(fs.existsSync(backups))for(const file of fs.readdirSync(backups))values.push(f.get(backups,file));
+ assert.ok(values.includes(saved),'the newer desktop save must remain live or in a private conflict copy');
+});
+for(const name of ['settings.json','keybindings.json','tasks.json','snippets/race.json'])for(const mutation of ['write','delete'])test(`${name}: a desktop file created after displacement is never replaced by ${mutation}`,async t=>{
+ const f=fixture(t),text=(a,b)=>JSON.stringify(name==='keybindings.json'?[{key:'ctrl+k',command:{a,b}}]:{a,b});
+ const original=text(1,1),changed=text(2,1),saved=text(1,2);f.put(f.source,name,original);const sync=f.make();await sync.tick();
+ if(mutation==='write')f.put(f.browser,name,changed);else fs.unlinkSync(path.join(f.browser,name));
+ const preserve=sync.preserve.bind(sync);let injected=false;
+ t.mock.method(sync,'preserve',async(file,...values)=>{await preserve(file,...values);if(!injected&&file===name){injected=true;f.put(f.source,name,saved);}});
+ assert.equal(await sync.tick(),false);assert.equal(injected,true);assert.equal(f.get(f.source,name),saved);
+ await sync.tick();const backups=path.join(f.root,'conflicts'),versions=fs.readdirSync(backups).map(file=>f.get(backups,file));
+ assert.ok(versions.includes(saved)||f.get(f.source,name)===saved);
+});
+test('a failed native snapshot archive restores the original and leaves the browser edit intact',async t=>{
+ const f=fixture(t),original='{"a":1}',changed='{"a":2}';f.put(f.source,'settings.json',original);const sync=f.make();await sync.tick();f.put(f.browser,'settings.json',changed);
+ t.mock.method(sync,'preserve',async()=>{throw new Error('archive unavailable');});
+ await assert.rejects(()=>sync.tick(),/archive unavailable/);assert.equal(f.get(f.source,'settings.json'),original);assert.equal(f.get(f.browser,'settings.json'),changed);
+ assert.deepEqual(fs.readdirSync(f.source),['settings.json']);
+});
+test('an archive failure plus a newer desktop file retains a recovery snapshot outside the preference inventory',async t=>{
+ const f=fixture(t),name='snippets/race.json',original='{"a":1}',browser='{"a":2}',desktop='{"a":3}';f.put(f.source,name,original);const sync=f.make();await sync.tick();f.put(f.browser,name,browser);
+ t.mock.method(sync,'preserve',async()=>{f.put(f.source,name,desktop);throw new Error('archive unavailable');});
+ let failure;try{await sync.tick();}catch(error){failure=error;}
+ assert.ok(failure?.recoveryPath);assert.equal(fs.readFileSync(failure.recoveryPath,'utf8'),original);assert.equal(f.get(f.source,name),desktop);
+ assert.deepEqual(await nativeFiles(f.source).list(),[name]);
+});
+test('native publication works on filesystems without hard links',async t=>{
+ const f=fixture(t);f.put(f.source,'settings.json','{"a":1}');const sync=f.make();await sync.tick();f.put(f.browser,'settings.json','{"a":2}');
+ t.mock.method(fs,'linkSync',()=>{throw Object.assign(new Error('hard links unsupported'),{code:'ENOTSUP'});});
+ await sync.tick();assert.equal(f.get(f.source,'settings.json'),'{"a":2}');assert.equal(f.get(f.browser,'settings.json'),'{"a":2}');assert.deepEqual(fs.readdirSync(f.source),['settings.json']);
+});
+test('exclusive fallback creation cannot replace a newly saved desktop file',async t=>{
+ const f=fixture(t),name='settings.json',file=path.join(f.source,name),saved='{"a":3}';f.put(f.source,name,'{"a":1}');const sync=f.make();await sync.tick();f.put(f.browser,name,'{"a":2}');
+ t.mock.method(fs,'linkSync',()=>{throw Object.assign(new Error('hard links unsupported'),{code:'ENOTSUP'});});
+ const open=fs.openSync.bind(fs);let injected=false;
+ t.mock.method(fs,'openSync',(filename,flags,...args)=>{if(!injected&&filename===file&&flags==='wx'){injected=true;f.put(f.source,name,saved);}return open(filename,flags,...args);});
+ assert.equal(await sync.tick(),false);assert.equal(injected,true);assert.equal(f.get(f.source,name),saved);
+});
+test('an exclusive fallback write failure never unlinks a peer replacement',async t=>{
+ const f=fixture(t),name='settings.json',file=path.join(f.source,name),saved='{"a":3}';f.put(f.source,name,'{"a":1}');const sync=f.make();await sync.tick();f.put(f.browser,name,'{"a":2}');
+ t.mock.method(fs,'linkSync',()=>{throw Object.assign(new Error('hard links unsupported'),{code:'ENOTSUP'});});
+ const open=fs.openSync.bind(fs),write=fs.writeSync.bind(fs);let owned,injected=false;
+ t.mock.method(fs,'openSync',(filename,flags,...args)=>{const fd=open(filename,flags,...args);if(filename===file&&flags==='wx')owned=fd;return fd;});
+ t.mock.method(fs,'writeSync',(fd,...args)=>{if(fd===owned&&!injected){injected=true;f.put(f.source,name,saved);throw Object.assign(new Error('write failed'),{code:'EIO'});}return write(fd,...args);});
+ await assert.rejects(()=>sync.tick(),/write failed/);assert.equal(injected,true);assert.equal(f.get(f.source,name),saved);
+});
+for(const mutation of ['write','delete'])test(`a linked desktop snippet survives a save during the final read before ${mutation}`,async t=>{
+ const f=fixture(t),name='snippets/linked.json',external=path.join(f.root,'dotfile.json');fs.mkdirSync(path.join(f.source,'snippets'));fs.writeFileSync(external,'{"a":1,"b":1}');fs.symlinkSync(external,path.join(f.source,name),'file');
+ const sync=f.make();await sync.tick();if(mutation==='write')f.put(f.browser,name,'{"a":2,"b":1}');else fs.unlinkSync(path.join(f.browser,name));
+ const open=fs.promises.open.bind(fs.promises);let reads=0,injected=false;
+ t.mock.method(fs.promises,'open',async(filename,...args)=>{const handle=await open(filename,...args);if(filename===path.join(f.source,name)&&++reads===3){const close=handle.close.bind(handle);handle.close=async()=>{await close();fs.writeFileSync(external,'{"a":1,"b":2}');injected=true;};}return handle;});
+ assert.equal(await sync.tick(),false);assert.equal(injected,true);assert.equal(fs.lstatSync(path.join(f.source,name)).isSymbolicLink(),true);assert.equal(fs.readFileSync(external,'utf8'),'{"a":1,"b":2}');
+});
+test('an incomplete pre-existing archive cannot stand in for the displaced desktop version',async t=>{
+ const f=fixture(t),name='settings.json',saved='{"a":1,"b":2}';f.put(f.source,name,'{"a":1,"b":1}');const sync=f.make();await sync.tick();
+ await sync.preserve(name,Buffer.from(saved));const backups=path.join(f.root,'conflicts');fs.writeFileSync(path.join(backups,fs.readdirSync(backups)[0]),'interrupted archive');
+ f.put(f.browser,name,'{"a":2,"b":1}');
+ const open=fs.promises.open.bind(fs.promises);let reads=0;
+ t.mock.method(fs.promises,'open',async(filename,...args)=>{const handle=await open(filename,...args);if(filename===path.join(f.source,name)&&++reads===3){const close=handle.close.bind(handle);handle.close=async()=>{await close();f.put(f.source,name,saved);};}return handle;});
+ await sync.tick();await sync.tick();
+ assert.ok(fs.readdirSync(backups).some(file=>f.get(backups,file)===saved),'the complete desktop version must be archived before its live file is replaced');
+});

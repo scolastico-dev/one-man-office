@@ -142,6 +142,15 @@ The bridge archives intervening versions even when they exceed its normal
 1 MiB synchronization limit or repeat the previous file's content.
 Each code-server window also emits its own user-data provider update when a
 peer changed the shared native file, refreshing that window's cached settings.
+Before replacing or deleting a desktop preference, the native adapter atomically
+moves the actual file aside and archives its bytes privately. Publication and
+restoration use exclusive creation, leaving any newer desktop file untouched;
+dotfile links retain their identity. If both archiving and restoration fail, the
+snapshot remains beside the original file with an `.omo-displaced-<uuid>` suffix,
+and the extension output reports its recovery path. Native staging/recovery
+siblings are excluded from the shared snippet inventory.
+Existing conflict copies are verified before reuse; an incomplete or edited
+copy is retained alongside a new complete archive.
 
 Without a desktop profile, extensions remain in `profiles/<editor>/extensions/`
 and shared preference files in `profiles/<editor>/preferences/User/`. Fresh

@@ -12,6 +12,36 @@ function allowed(name) {
 function same(a, b) { return a === b || (a !== null && b !== null && a.equals(b)); }
 function missing(error) { return error.code === 'ENOENT' || error.code === 'FileNotFound'; }
 function checkedName(name) { if (!allowed(name)) throw new Error('unsupported preference file'); return name; }
+function nativeSnapshot(filename) {
+  const fd = fs.openSync(filename, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 32 * 1024 * 1024) throw new Error('unsupported displaced preference size or type');
+    const value = Buffer.alloc(stat.size + 1); let count = 0;
+    while (count < value.length) {
+      const size = fs.readSync(fd, value, count, value.length - count, count);
+      if (!size) return value.subarray(0, count);
+      count += size;
+    }
+    throw new Error('displaced preference grew during its read');
+  } finally { fs.closeSync(fd); }
+}
+function exclusiveNativeWrite(source, target, value) {
+  try { fs.linkSync(source, target); return; }
+  catch (error) { if (error.code === 'EEXIST') throw error; }
+  // Some desktop filesystems do not support hard links. Exclusive creation
+  // still cannot replace a peer's file. Write only through our new descriptor;
+  // unlike copyFile, a failed write never unlinks a subsequently replaced path.
+  const fd = fs.openSync(target, 'wx', 0o600);
+  try {
+    let count = 0;
+    while (count < value.length) {
+      const size = fs.writeSync(fd, value, count, value.length - count, count);
+      if (!size) throw new Error('native preference write made no progress');
+      count += size;
+    }
+  } finally { fs.closeSync(fd); }
+}
 function nativeFiles(root) {
   const file = name => path.join(root, ...checkedName(name).split('/'));
   return {
@@ -27,6 +57,9 @@ function nativeFiles(root) {
         try { real = await fs.promises.realpath(path.join(root, dir)); if (ancestors.has(real)) return; ancestors = new Set([...ancestors, real]); if (++visited > maxFiles) throw new Error('too many preference directories'); entries = await fs.promises.readdir(real, {withFileTypes: true}); }
         catch (error) { if (missing(error)) return; throw error; }
         for (const entry of entries) {
+          // Staging/recovery siblings belong to the native commit protocol,
+          // including snapshots retained after an archive/restore failure.
+          if (/\.omo-(?:displaced-)?[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(entry.name)) continue;
           const name = dir + '/' + entry.name;
           if (!allowed(name)) continue;
           if (files.length >= maxFiles) throw new Error('too many preference files');
@@ -58,24 +91,63 @@ function nativeFiles(root) {
         } finally { await handle.close(); }
       } catch (error) { if (missing(error)) return null; throw error; }
     },
-    async write(name, value, expected) {
+    async write(name, value, expected, preserve) {
       let target = file(name);
-      if (value === null) {
-        if (expected !== undefined && !same(await this.read(name), expected)) return false;
-        try { fs.unlinkSync(target); } catch (error) { if (!missing(error)) throw error; } return true;
-      }
-      if (value.length > maxBytes) throw new Error('preference file is too large');
+      if (value !== null && value.length > maxBytes) throw new Error('preference file is too large');
       // Preserve dotfile-manager symlinks when changing an existing setting.
-      try { target = await fs.promises.realpath(target); } catch (error) { if (!missing(error)) throw error; }
-      await fs.promises.mkdir(path.dirname(target), {recursive: true, mode: 0o700});
+      // Deletion removes the link itself rather than its external target.
+      if (value !== null) {
+        try { target = await fs.promises.realpath(target); } catch (error) { if (!missing(error)) throw error; }
+        await fs.promises.mkdir(path.dirname(target), {recursive: true, mode: 0o700});
+      }
       const temporary = target + '.omo-' + randomUUID();
+      const displaced = target + '.omo-displaced-' + randomUUID();
+      let moved = false, archived = false, committed = false;
+      function restore() {
+        try { fs.linkSync(displaced, target); return true; }
+        catch (error) {
+          if (error.code === 'EEXIST') return false;
+          // Filesystems without hard links still provide exclusive creation. A
+          // symlink must be restored as a link, keeping its original spelling.
+          try {
+            if (fs.lstatSync(displaced).isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(displaced), target, 'file');
+            else exclusiveNativeWrite(displaced, target, nativeSnapshot(displaced));
+            return true;
+          } catch (copyError) { if (copyError.code === 'EEXIST') return false; throw copyError; }
+        }
+      }
       try {
-        await fs.promises.writeFile(temporary, value, {mode: 0o600, flag: 'wx'});
+        if (value !== null) await fs.promises.writeFile(temporary, value, {mode: 0o600, flag: 'wx'});
         if (expected !== undefined && !same(await this.read(name), expected)) return false;
-        fs.renameSync(temporary, target);
+        // The final asynchronous read is advisory. Atomically take the actual
+        // file at commit time, then archive its bytes before replacing/removing
+        // it. A desktop save inside that read's close interval is captured here.
+        try { fs.renameSync(target, displaced); moved = true; }
+        catch (error) { if (!missing(error)) throw error; }
+        const current = moved ? nativeSnapshot(displaced) : null;
+        if (moved && preserve) { await preserve(name, current); archived = true; }
+        if (expected !== undefined && !same(current, expected)) return false;
+        if (value !== null) {
+          // Never replace a newer desktop file created after displacement.
+          try { exclusiveNativeWrite(temporary, target, value); }
+          catch (error) { if (error.code === 'EEXIST') return false; throw error; }
+        } else if (fs.existsSync(target)) return false;
+        committed = true;
         return true;
       }
-      finally { try { await fs.promises.unlink(temporary); } catch (error) { if (!missing(error)) throw error; } }
+      finally {
+        try {
+          if (moved) {
+            let restored = false;
+            if (!committed) {
+              try { restored = restore(); }
+              catch (error) { if (!archived) throw Object.assign(error, {recoveryPath: displaced}); }
+            }
+            if (committed || archived || restored) fs.unlinkSync(displaced);
+            else throw Object.assign(new Error('native preference snapshot retained for recovery'), {recoveryPath: displaced});
+          }
+        } finally { try { fs.unlinkSync(temporary); } catch (error) { if (!missing(error)) throw error; } }
+      }
     },
   };
 }
@@ -133,8 +205,23 @@ class PreferenceSync {
     for (const value of values) {
       if (value === null) continue;
       const hash = createHash('sha256').update(name).update(value).digest('hex');
-      try { fs.writeFileSync(path.join(this.backups, hash + '.jsonc'), value, {mode: 0o600, flag: 'wx'}); }
-      catch (error) { if (error.code !== 'EEXIST') throw error; }
+      const destination = path.join(this.backups, hash + '.jsonc');
+      function complete(filename) {
+        try { const stat = fs.lstatSync(filename); return stat.isFile() && stat.size === value.length && same(nativeSnapshot(filename), value); }
+        catch (error) { if (missing(error)) return false; throw error; }
+      }
+      if (complete(destination)) continue;
+      const temporary = path.join(this.backups, '.snapshot-' + randomUUID());
+      try {
+        fs.writeFileSync(temporary, value, {mode: 0o600, flag: 'wx'});
+        try { exclusiveNativeWrite(temporary, destination, value); }
+        catch (error) {
+          if (error.code !== 'EEXIST') throw error;
+          // A previous interrupted write or a hand-edited copy is not proof
+          // that this complete version was saved. Keep both without replacement.
+          if (!complete(destination)) exclusiveNativeWrite(temporary, path.join(this.backups, hash + '-' + randomUUID() + '.jsonc'), value);
+        }
+      } finally { try { fs.unlinkSync(temporary); } catch (error) { if (!missing(error)) throw error; } }
     }
     this.onConflict();
   }
@@ -181,9 +268,9 @@ class PreferenceSync {
         // defer changed files without advancing their baseline or migration.
         expectedVersions.set(name, [result]);
         if (!same(await this.source.read(name), rawDesktop) || !same(await this.target.read(name), rawBrowser)) { incomplete = true; continue; }
-        if (!same(desktop, result) && await this.source.write(name, name === 'settings.json' ? themeSettings(result, rawDesktop) : result, rawDesktop) === false) { incomplete = true; continue; }
+        if (!same(desktop, result) && await this.source.write(name, name === 'settings.json' ? themeSettings(result, rawDesktop) : result, rawDesktop, (file, value) => this.preserve(file, value)) === false) { incomplete = true; continue; }
         if (!same(browser, result) || (this.target.refreshOnSharedChanges && (old === undefined || !same(old, result)))) {
-          if (!same(await this.target.read(name), rawBrowser) || await this.target.write(name, result, rawBrowser) === false) { incomplete = true; continue; }
+          if (!same(await this.target.read(name), rawBrowser) || await this.target.write(name, result, rawBrowser, (file, value) => this.preserve(file, value)) === false) { incomplete = true; continue; }
         }
         this.previous.set(name, result);
       }

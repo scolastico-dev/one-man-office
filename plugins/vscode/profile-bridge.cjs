@@ -136,6 +136,7 @@ async function activate(context) {
         try { await sync.tick(); failed = false; }
         catch (error) {
           if (!failed) output.appendLine('Preference synchronization failed (' + String(error.code || error.name).replace(/[^A-Za-z0-9_]/g, '') + '). Check profile permissions and the editor version.');
+          if (!failed && error.recoveryPath) output.appendLine('A native preference snapshot is retained at ' + JSON.stringify(error.recoveryPath) + '.');
           failed = true;
         }
       }
