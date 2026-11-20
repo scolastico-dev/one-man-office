@@ -97,10 +97,12 @@ function toggle(s: AgentSession): void {
     <p v-if="error" class="atab__error" role="alert" data-agents-error>{{ error }}</p>
     <ul v-if="sessions.length > 0" class="atab__list" aria-label="Agents of this ticket">
       <li v-for="s in sessions" :key="s.id" class="atab__item" :class="{ 'atab__item--open': onPage && open?.id === s.id }" :data-session="s.id">
-        <AgentRow :session="s" compact :aria-expanded="openId === s.id" @open="toggle" />
-        <div v-if="!isRunning(s)" class="atab__ended">
-          <span class="atab__muted" data-ended>Ended<template v-if="s.end_reason"> ({{ visibleText(s.end_reason) }})</template></span>
-          <UiButton size="sm" data-show-log :aria-expanded="openId === s.id" @click="toggle(s)">{{ openId === s.id ? 'Hide log' : 'Show log' }}</UiButton>
+        <div class="atab__header">
+          <AgentRow class="atab__agent" :session="s" compact :aria-expanded="openId === s.id" @open="toggle" />
+          <div v-if="!isRunning(s)" class="atab__ended">
+            <span class="atab__muted" data-ended>Ended<template v-if="s.end_reason"> ({{ visibleText(s.end_reason) }})</template></span>
+            <UiButton size="sm" data-show-log :aria-expanded="openId === s.id" @click="toggle(s)">{{ openId === s.id ? 'Hide log' : 'Show log' }}</UiButton>
+          </div>
         </div>
         <div v-if="open && open.id === s.id" class="atab__detail">
           <LogView v-if="!isRunning(s)" :session-id="s.id" />
@@ -158,12 +160,28 @@ function toggle(s: AgentSession): void {
 .atab__item {
   min-width: 0;
 }
+.atab__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  border-bottom: var(--omo-border) solid var(--omo-line);
+}
+.atab__agent {
+  flex: 1 1 auto;
+  width: auto;
+  border-bottom: 0;
+}
 .atab__ended {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: calc(var(--omo-space) * 2);
+  min-width: 0;
+  max-width: 100%;
   padding: var(--omo-space) calc(var(--omo-space) * 2.5);
+}
+.atab__ended [data-ended] {
+  overflow-wrap: anywhere;
 }
 .atab__detail {
   display: grid;

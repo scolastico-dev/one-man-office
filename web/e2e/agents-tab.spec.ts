@@ -8,6 +8,54 @@ test.use({ viewport: { width: 1440, height: 900 } })
 
 const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
 
+test.describe('ended agent layout', () => {
+  test.use({
+    omoOptions: {
+      seed: {
+        projects: [{ path: '{{repo}}', name: 'demo' }],
+        tickets: [{ ref: 'ended', type: 'task', title: 'Ended agent', to: 'in_progress', projects: ['demo'], branch: 'omo/ended' }],
+      },
+    },
+  })
+
+  for (const view of ['panel', 'page'] as const) {
+    test(`ended status wraps inside its separator on the ticket ${view}`, async ({ page, omo }) => {
+      const n = omo.refs.ended!
+      await page.goto(omo.accessUrl)
+      await page.goto(omo.url(`${view === 'page' ? '/ticket' : ''}/${n}?tab=agents`))
+      const item = page.locator('[data-ticket-agents] li[data-session]').first()
+      await expect(item.locator('[data-ended]')).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 })
+        const layout = await item.evaluate((el) => {
+          const row = el.querySelector<HTMLElement>('[data-agent-row]')!
+          const ended = el.querySelector<HTMLElement>('[data-ended]')!.getBoundingClientRect()
+          const log = el.querySelector<HTMLElement>('[data-show-log]')!.getBoundingClientRect()
+          const rect = row.getBoundingClientRect()
+          const separators: number[] = []
+          for (let node: HTMLElement | null = row; node && node !== el; node = node.parentElement) {
+            if (parseFloat(getComputedStyle(node).borderBottomWidth) > 0) separators.push(node.getBoundingClientRect().bottom)
+          }
+          return { row: { top: rect.top, bottom: rect.bottom }, ended: { top: ended.top, bottom: ended.bottom }, log: { top: log.top, bottom: log.bottom }, separators }
+        })
+        if (width === 1440) {
+          expect(layout.ended.top).toBeLessThan(layout.row.bottom)
+          expect(layout.log.top).toBeLessThan(layout.row.bottom)
+          expect(layout.log.bottom).toBeGreaterThan(layout.row.top)
+        } else {
+          expect(layout.ended.top).toBeGreaterThanOrEqual(layout.row.bottom)
+          expect(layout.log.top).toBeGreaterThanOrEqual(layout.row.bottom)
+        }
+        expect(layout.separators.length).toBeGreaterThan(0)
+        for (const bottom of layout.separators) {
+          expect(bottom).toBeGreaterThanOrEqual(Math.max(layout.ended.bottom, layout.log.bottom))
+        }
+      }
+    })
+  }
+})
+
 test.describe('a developer that waits for a line, answers it and exits', () => {
   // Keep the reply in a live terminal until the test explicitly lets the agent exit.
   test.use({

@@ -50,6 +50,16 @@ async function open(initial: AgentSession[]) {
 const running = agent({ id: 'r', ticket: 12, name: 'Ada', terminal_id: 't9', started_at: '2026-11-15T11:00:00Z' })
 const ended = agent({ id: 'e', role: 'reviewer', ticket: 12, name: 'Bo', state: 'ended', end_reason: 'finished', started_at: '2026-11-15T09:00:00Z', terminal_id: undefined })
 
+test('ended status and log control share their agent header, separate from the next agent', async () => {
+  const { w } = await open([{ ...ended, started_at: '2026-11-15T12:00:00Z' }, running])
+  const row = w.get('[data-session="e"] [data-agent-row]')
+  const header = row.element.parentElement!
+  expect(header.tagName).not.toBe('LI')
+  expect(header.contains(w.get('[data-ended]').element)).toBe(true)
+  expect(header.contains(w.get('[data-show-log]').element)).toBe(true)
+  expect(header.contains(w.get('[data-session="r"] [data-agent-row]').element)).toBe(false)
+})
+
 test('agents tab: running agents get a terminal, ended ones a log; list follows agent events of this ticket only', async () => {
   const { hn, w, list, count } = await open([ended, running])
   expect(w.findAll('[data-agent-row]').map((r) => r.attributes('data-session'))).toEqual(['r', 'e'])
