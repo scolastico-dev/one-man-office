@@ -54,6 +54,8 @@ other's work, and omo merges the result or opens pull requests. The
 ## Contributing
 
 - [Contributing](contributing.md): building, testing and the map of the code.
+- [Native UI API](ui-api.md): capability flags, authenticated incremental
+  notification polling, delivery cursors and recovery.
 
 Questions and bug reports: the
 [issues page](https://github.com/scolastico-dev/one-man-office/issues).
