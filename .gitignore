@@ -24,3 +24,5 @@ ui/src-tauri/gen/android/local.properties
 ui/src-tauri/gen/android/app/src/main/jniLibs/
 ui/src-tauri/gen/android/tauri.settings.gradle
 ui/src-tauri/gen/android/app/tauri.build.gradle.kts
+
+ui/dist/

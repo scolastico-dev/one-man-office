@@ -205,7 +205,7 @@ The checked-in Gradle wrapper downloads Gradle 9.6.1 and uses AGP 9.3.1 / Kotlin
 the generated template's unavailable SDK 37. The scoped Wry class extension in
 `ui/.cargo/config.toml` adds Basic authentication without replacing navigation or
 resource handlers. Changing the identifier also requires updating that JNI export.
-Release signing and release CI are separate work.
+Release signing and CI use the installation key described below.
 
 Focused checks, after an Android build has generated Tauri's local Gradle wiring:
 
@@ -226,6 +226,143 @@ GET authentication and tap destinations. A development arm64 APK was built on
 Linux. No emulator or device was available for this work: actual device Keystore,
 JNI delivery, permission prompts, notification taps and background/foreground
 execution remain unverified on hardware. JVM tests do not replace that evidence.
+
+## Release installers and CI
+
+Publishing a GitHub release starts the existing CLI release flow and the native
+UI jobs in parallel. All check out that release's tag. UI jobs pass its version
+through `scripts/release.mjs config`; no manifest needs a version bump. Supported
+tags are `MAJOR.MINOR.PATCH` with an optional `v` prefix, matching the existing
+stable tags. Minor/patch components must be at most 999 and the derived Android
+version code (`major * 1000000 + minor * 1000 + patch`) must be 1–2100000000.
+The checked-in `0.1.0` versions are development defaults; PR builds use a fixed
+test version and never upload release assets.
+
+For version `0.9.2`, the additional release assets are:
+
+| Platform | Architecture | Installer |
+| --- | --- | --- |
+| Linux (Debian/Ubuntu, GTK 3/WebKitGTK 4.1) | x64 / arm64 | `omo-ui-0.9.2-linux-amd64.deb` / `omo-ui-0.9.2-linux-arm64.deb` |
+| Windows (WebView2) | x64 / arm64 | `omo-ui-0.9.2-windows-amd64.exe` / `omo-ui-0.9.2-windows-arm64.exe` (NSIS) |
+| macOS | Intel / Apple Silicon | `omo-ui-0.9.2-darwin-amd64.dmg` / `omo-ui-0.9.2-darwin-arm64.dmg` |
+| Android 7+ (API 24+) | arm64-v8a | `omo-ui-0.9.2-android-arm64.apk` |
+
+Desktop installers have no developer certificate, Authenticode signature or
+Apple notarization. The APK alone is signed with the persistent installation
+key. These packages bundle only the native shell, setup/connection assets and
+branding, with no board web files or dedicated omo server executable.
+
+Each target uploads its own `omo-ui-<platform>-<arch>-SHA256SUMS` beside the
+installer. Download both and run `sha256sum -c omo-ui-linux-amd64-SHA256SUMS`
+(or the matching target file). No UI job writes the CLI's `SHA256SUMS`; its six
+archive names, contents and checksums remain the contract used by installers
+and `omo update`. Plugin-branch syncing and container publishing still depend
+on the existing CLI release job.
+
+`.github/workflows/ui-desktop.yml` builds real packages on native Linux,
+Windows and macOS runners for both architectures. `ui-android.yml` installs
+JDK 21, SDK 36/build-tools 36.0.0/NDK 29.0.14206865 and Rust's Android arm64
+target. PRs call the same workflows: all desktop packages, focused core/Node
+checks, an Android debug APK, and the native notification JVM tests. Release
+APK output is zipaligned (including 16 KiB native alignment), signed with
+`apksigner`, verified, and checked against the configured certificate before
+staging. Missing signing inputs fail with the exact secret name; they never
+produce an unsigned release upload. The unsigned intermediate stays in Gradle's
+build folder and is never uploaded.
+
+Normal local packaging commands from `ui/`, after installing the prerequisites:
+
+```sh
+npm ci
+# Choose the tag being packaged; this does not publish anything.
+ui_release_tag=0.9.2
+# Linux; use aarch64-unknown-linux-gnu on a native arm64 host.
+npm run build -- --ci --target x86_64-unknown-linux-gnu --bundles deb --config "$(node scripts/release.mjs config "$ui_release_tag")"
+node scripts/release.mjs desktop target/x86_64-unknown-linux-gnu/release/bundle dist linux amd64 "$ui_release_tag"
+# Windows: x86_64-pc-windows-msvc or aarch64-pc-windows-msvc, --bundles nsis.
+# macOS: x86_64-apple-darwin or aarch64-apple-darwin, --bundles dmg.
+# Stage with platform windows/darwin and architecture amd64/arm64 respectively.
+
+# Android: export the five OMO_UI_ANDROID_* variables listed below first,
+# plus ANDROID_HOME, NDK_HOME and JAVA_HOME from the Android build instructions.
+node scripts/release.mjs android "$ui_release_tag"
+# Only verified signed output and its checksum are placed in ui/dist/.
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/omo-ui-0.9.2-android-arm64.apk
+```
+
+A bare `npm run android:build -- --apk` remains a low-level unsigned release
+build. Use the wrapper above for installation/distribution; use `--debug` for
+the development-key APK described earlier. No CI job publishes an AAB or uses
+Google Play publishing credentials.
+
+### One-time Android installation key setup
+
+The repository owner performs these steps once on a trusted machine. Generate
+a new installation-only key, distinct from any Google Play app-signing or
+upload key. Keep the keystore and both passwords in secure backups: updates
+must retain this identity. CI never generates a replacement key.
+
+```sh
+ui_key_dir="$HOME/.local/share/omo-ui-signing"
+install -d -m 700 "$ui_key_dir"
+keytool -genkeypair -storetype JKS -keystore "$ui_key_dir/installation.jks" \
+  -alias omo-ui-install -keyalg RSA -keysize 3072 -validity 10000
+chmod 600 "$ui_key_dir/installation.jks"
+# keytool prompts for the store password, certificate details and key password.
+# This prints public certificate details, including SHA256:
+keytool -list -v -keystore "$ui_key_dir/installation.jks" -alias omo-ui-install
+```
+
+In GitHub repository **Settings → Secrets and variables → Actions → Repository
+secrets**, set these exact names. Equivalently, from a checkout authenticated
+with `gh`, use the following commands; passwords are read without echo and
+passed on standard input:
+
+```sh
+base64 < "$ui_key_dir/installation.jks" | gh secret set OMO_UI_ANDROID_KEYSTORE_BASE64
+gh secret set OMO_UI_ANDROID_KEY_ALIAS --body omo-ui-install
+read -r -s -p 'Keystore password: ' ui_store_password; printf '\n'
+printf '%s' "$ui_store_password" | gh secret set OMO_UI_ANDROID_KEYSTORE_PASSWORD
+read -r -s -p 'Key password: ' ui_key_password; printf '\n'
+printf '%s' "$ui_key_password" | gh secret set OMO_UI_ANDROID_KEY_PASSWORD
+read -r -p 'Public SHA256 fingerprint from keytool: ' ui_certificate
+printf '%s' "$ui_certificate" | gh secret set OMO_UI_ANDROID_CERT_SHA256
+unset ui_store_password ui_key_password ui_certificate
+```
+
+`OMO_UI_ANDROID_KEYSTORE_BASE64` is the base64-encoded complete JKS file;
+`OMO_UI_ANDROID_KEYSTORE_PASSWORD` unlocks the store;
+`OMO_UI_ANDROID_KEY_ALIAS` selects `omo-ui-install`;
+`OMO_UI_ANDROID_KEY_PASSWORD` unlocks that private key (use the store password
+if identical); `OMO_UI_ANDROID_CERT_SHA256` pins the public certificate, either
+64 hexadecimal digits or keytool's colon-separated form. This pin rejects a
+wrong key even if all passwords are valid. Store none of these values in the
+repository, workflow text or artifacts. The signing helper decodes the private
+key into a mode-0600 file in a private temporary directory and removes it on
+success or failure. Compilation does not receive the signing secrets.
+
+### Register the public certificate
+
+Use the **SHA256 certificate fingerprint**, not SHA1 and not the APK file's
+checksum. Confirm it matches both `keytool -list -v` above and `apksigner verify
+--print-certs` on the signed release APK.
+
+In Play Console, complete developer identity verification, open **Android
+developer verification → Package names**, register/select
+`dev.scolastico.omo.ui`, and add the installation key's SHA256 fingerprint.
+If prompted for ownership proof, follow the console's challenge instructions:
+it supplies a snippet for `assets/adi-registration.properties` in a separately
+prepared verification APK with this same package name and signing key. Upload
+that proof only in the verification flow. This CI does not generate or submit
+such a challenge and does not publish to a Play track. See Google's
+[Play Console key registration instructions](https://support.google.com/googleplay/android-developer/answer/16762301?hl=en).
+
+For distribution exclusively outside Google Play, Google also provides the
+[Android Developer Console](https://developer.android.com/developer-verification/guides/android-developer-console):
+a verified account registers the package and public SHA256 fingerprint there,
+with an ownership challenge when requested. Registration is separate from
+Google Play app signing and does not guarantee that Play Protect will suppress
+all warnings. Never upload the private keystore to either console.
 
 ## Native interfaces
 

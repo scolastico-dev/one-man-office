@@ -1,0 +1,77 @@
+name: Native UI desktop packages
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      publish:
+        default: false
+        type: boolean
+
+jobs:
+  desktop:
+    name: UI installer (${{ matrix.platform }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, platform: linux, arch: amd64, target: x86_64-unknown-linux-gnu, bundle: deb }
+          - { runner: ubuntu-24.04-arm, platform: linux, arch: arm64, target: aarch64-unknown-linux-gnu, bundle: deb }
+          - { runner: windows-latest, platform: windows, arch: amd64, target: x86_64-pc-windows-msvc, bundle: nsis }
+          - { runner: windows-11-arm, platform: windows, arch: arm64, target: aarch64-pc-windows-msvc, bundle: nsis }
+          - { runner: macos-15-intel, platform: darwin, arch: amd64, target: x86_64-apple-darwin, bundle: dmg }
+          - { runner: macos-15, platform: darwin, arch: arm64, target: aarch64-apple-darwin, bundle: dmg }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ui
+    env:
+      RELEASE_TAG: ${{ inputs.version }}
+    steps:
+      - name: Check out build source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.publish && github.event.release.tag_name || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+
+      - name: Install Linux packaging prerequisites
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install UI build tools
+        run: npm ci
+
+      - name: Check native core and setup/release boundaries
+        if: matrix.platform == 'linux' && matrix.arch == 'amd64'
+        run: |
+          cargo fmt --all --check
+          npm run check
+
+      - name: Build unsigned installer from release version
+        run: npm run build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
+
+      - name: Stage installer and its checksum
+        run: node scripts/release.mjs desktop "target/${{ matrix.target }}/release/bundle" dist "${{ matrix.platform }}" "${{ matrix.arch }}" "$RELEASE_TAG"
+
+      - name: Attach installer to release
+        if: inputs.publish && github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
