@@ -7,6 +7,7 @@ fn config() -> Config {
         auth: Auth::Token,
         username: String::new(),
         notifications: true,
+        notification_mode: NotificationMode::Background,
         remember: false,
     }
 }
@@ -78,7 +79,7 @@ fn saves_public_configuration_atomically_without_credentials_and_validates_on_lo
 #[test]
 fn negotiation_is_additive_and_only_missing_endpoint_is_an_older_server() {
     assert!(features(false, true).contains(&"ui.notifications.system.v1".into()));
-    assert!(!features(true, true).contains(&"ui.notifications.system.v1".into()));
+    assert!(features(true, true).contains(&"ui.notifications.system.v1".into()));
     assert!(!features(false, false).contains(&"ui.notifications.system.v1".into()));
     assert!(
         polling_supported(

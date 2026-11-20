@@ -50,6 +50,7 @@ fn fixture(
         auth: Auth::None,
         username: String::new(),
         notifications: true,
+        notification_mode: NotificationMode::Background,
         remember: false,
     };
     (BoardClient::new(c, String::new()).unwrap(), handle)

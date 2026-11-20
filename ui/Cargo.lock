@@ -2764,6 +2764,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
+ "tauri-plugin-omo-notifications",
  "tokio",
  "webkit2gtk",
  "webview2-com",
@@ -4290,6 +4291,16 @@ dependencies = [
  "time",
  "url",
  "zbus 5.19.0",
+]
+
+[[package]]
+name = "tauri-plugin-omo-notifications"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

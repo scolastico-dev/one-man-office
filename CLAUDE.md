@@ -539,7 +539,16 @@ native HTTP, capabilities and notification cursor/dedup persistence) from
 notifications and platform keyboard/auth settings). Run `npm ci`, `npm run dev`,
 `npm run build` and `npm run check` from `ui/`; that directory's Cargo config
 also supplies the Android Wry auth extension. Desktop local lifecycle is an
-explicit unavailable hook; Android notification scheduling is not advertised.
+explicit unavailable hook. Android uses the `ui/notifications` native plugin:
+WorkManager periodic GET polling (15 minutes or later) or a user-started dataSync
+foreground service with an ongoing notification and five-second polls. Android
+15+ dataSync runtime limits apply; timeout stops the service and reports status.
+Authenticated Android polling requires remembered credentials. Work configuration
+is Keystore encrypted; jobs/intents carry no credentials. Both modes use the
+Rust delivery journal through JNI, without a WebView or Tauri event loop. The
+checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
+android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
+./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
 configured board documents while native polling is enabled. Tests: core Rust,

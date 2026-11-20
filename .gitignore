@@ -14,3 +14,13 @@ ui/node_modules/
 ui/target/
 ui/src-tauri/gen/schemas/
 ui/tests/__pycache__/
+ui/notifications/android/build/
+ui/notifications/android/.tauri/
+ui/src-tauri/gen/android/.gradle/
+ui/src-tauri/gen/android/.kotlin/
+ui/src-tauri/gen/android/app/build/
+ui/src-tauri/gen/android/build/
+ui/src-tauri/gen/android/local.properties
+ui/src-tauri/gen/android/app/src/main/jniLibs/
+ui/src-tauri/gen/android/tauri.settings.gradle
+ui/src-tauri/gen/android/app/tauri.build.gradle.kts

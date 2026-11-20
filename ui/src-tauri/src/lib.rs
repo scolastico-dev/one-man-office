@@ -1,5 +1,7 @@
 #[cfg(target_os = "android")]
 mod android_auth;
+#[cfg(target_os = "android")]
+mod android_notifications;
 mod credentials;
 #[cfg(target_os = "macos")]
 mod macos_auth;
@@ -7,11 +9,14 @@ mod platform;
 mod windows;
 
 use omo_ui_core::{
-    Auth, BoardClient, Config, Delivery, Mode, Poll, Recovery, Result, load_config, read_json,
-    save_config, write_json,
+    Auth, BoardClient, Config, Mode, NotificationMode, Recovery, Result, load_config, save_config,
 };
+#[cfg(not(target_os = "android"))]
+use omo_ui_core::{Delivery, Poll, read_json, write_json};
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Mutex, time::Duration};
+#[cfg(not(target_os = "android"))]
+use std::time::Duration;
+use std::{path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, WebviewWindow};
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_notification::NotificationExt;
@@ -19,8 +24,10 @@ use tauri_plugin_notification::NotificationExt;
 struct Connection {
     client: BoardClient,
     secret: String,
+    #[cfg(not(target_os = "android"))]
     delivery: Delivery,
     polling: bool,
+    #[cfg(not(target_os = "android"))]
     board_label: String,
 }
 #[derive(Default)]
@@ -50,6 +57,8 @@ struct Settings {
     auth: Auth,
     username: String,
     notifications: bool,
+    #[serde(default)]
+    notification_mode: NotificationMode,
     remember: bool,
     secret: String,
     #[serde(default)]
@@ -63,11 +72,27 @@ fn require_setup(window: &WebviewWindow) -> Result<()> {
     }
     Ok(())
 }
-fn snapshot(state: &Shell) -> Result<Setup> {
+fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
     let s = state
         .session
         .lock()
         .map_err(|_| "Connection state is unavailable.")?;
+    #[cfg(target_os = "android")]
+    let native: serde_json::Value = android_worker(_app).call("status", ())?;
+    #[cfg(target_os = "android")]
+    return Ok(Setup {
+        config: s.config.clone(),
+        android: true,
+        connected: s.active.is_some() || native["connected"].as_bool().unwrap_or(false),
+        polling: native["polling"].as_bool().unwrap_or(false),
+        error: if s.error.is_empty() {
+            native["error"].as_str().unwrap_or("").into()
+        } else {
+            s.error.clone()
+        },
+        recovery: serde_json::from_value(native["recovery"].clone()).ok(),
+    });
+    #[cfg(not(target_os = "android"))]
     Ok(Setup {
         config: s.config.clone(),
         android: cfg!(target_os = "android"),
@@ -80,7 +105,7 @@ fn snapshot(state: &Shell) -> Result<Setup> {
 #[tauri::command]
 async fn get_setup(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
     require_setup(&window)?;
-    tauri::async_runtime::spawn_blocking(move || snapshot(&app.state::<Shell>()))
+    tauri::async_runtime::spawn_blocking(move || snapshot(&app.state::<Shell>(), &app))
         .await
         .map_err(|_| "Cannot read connection state.")?
 }
@@ -100,6 +125,7 @@ async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> R
             auth: settings.auth,
             username: settings.username,
             notifications: settings.notifications,
+            notification_mode: settings.notification_mode,
             remember: settings.remember,
         };
         config.validate(cfg!(target_os = "android"))?;
@@ -124,10 +150,27 @@ async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> R
         } else {
             settings.secret
         };
+        #[cfg(target_os = "android")]
+        if config.notifications {
+            use tauri_plugin_notification::NotificationExt;
+            if app
+                .notification()
+                .request_permission()
+                .map_err(|_| "Cannot request Android notification permission.")?
+                != tauri::plugin::PermissionState::Granted
+            {
+                return Err(
+                    "Enable notifications for omo ui in Android Settings to use native polling."
+                        .into(),
+                );
+            }
+        }
         let client = BoardClient::new(config.clone(), secret.clone())?;
         let polling = client.connect(cfg!(target_os = "android"))?;
+        #[cfg(not(target_os = "android"))]
         let mut delivery: Delivery =
             read_json(&state.root, &format!("{}.json", config.id))?.unwrap_or_default();
+        #[cfg(not(target_os = "android"))]
         if polling && delivery.cursor.is_none() {
             client.poll(
                 &mut delivery,
@@ -144,16 +187,28 @@ async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> R
                 credentials::forget(&old.id)?;
             }
         }
+        #[cfg(target_os = "android")]
+        android_worker(&app).call::<serde_json::Value>(
+            "configure",
+            serde_json::json!({
+                "config": config, "secret": secret, "root": state.root, "enabled":polling,
+            }),
+        )?;
         save_config(&state.root, &config)?;
         windows::close_boards(&app);
         let board = windows::open_board(&app, &config, &secret, polling, None)?;
+        #[cfg(not(target_os = "android"))]
         let board_label = board.label().to_string();
+        #[cfg(target_os = "android")]
+        let _ = board;
         s.config = Some(config);
         s.active = Some(Connection {
             client,
             secret,
+            #[cfg(not(target_os = "android"))]
             delivery,
             polling,
+            #[cfg(not(target_os = "android"))]
             board_label,
         });
         s.error.clear();
@@ -163,7 +218,7 @@ async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> R
         if let Some(setup) = app.get_webview_window("setup") {
             let _ = setup.hide();
         }
-        snapshot(&state)
+        snapshot(&state, &app)
     })
     .await
     .map_err(|_| "The connection could not be opened.")?
@@ -177,12 +232,14 @@ async fn disconnect(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
             .session
             .lock()
             .map_err(|_| "Connection state is unavailable.")?;
+        #[cfg(target_os = "android")]
+        android_worker(&app).call::<serde_json::Value>("disconnect", ())?;
         s.active = None;
         s.recovery = None;
         s.error.clear();
         windows::close_boards(&app);
         drop(s);
-        snapshot(&state)
+        snapshot(&state, &app)
     })
     .await
     .map_err(|_| "Cannot disconnect.")?
@@ -196,15 +253,28 @@ async fn recover(window: WebviewWindow, app: AppHandle, replay: bool) -> Result<
             .session
             .lock()
             .map_err(|_| "Connection state is unavailable.")?;
+        #[cfg(target_os = "android")]
+        {
+            android_worker(&app)
+                .call::<serde_json::Value>("recover", serde_json::json!({"replay":replay}))?;
+            s.recovery = None;
+            s.error.clear();
+            drop(s);
+            return snapshot(&state, &app);
+        }
+        #[cfg(not(target_os = "android"))]
         let recovery = s.recovery.clone().ok_or("No cursor recovery is pending.")?;
-        let c = s.active.as_mut().ok_or("Connect to a board first.")?;
-        recovery.apply(&mut c.delivery, replay, |d| {
-            write_json(&state.root, &format!("{}.json", c.client.config.id), d)
-        })?;
-        s.recovery = None;
-        s.error.clear();
-        drop(s);
-        snapshot(&state)
+        #[cfg(not(target_os = "android"))]
+        {
+            let c = s.active.as_mut().ok_or("Connect to a board first.")?;
+            recovery.apply(&mut c.delivery, replay, |d| {
+                write_json(&state.root, &format!("{}.json", c.client.config.id), d)
+            })?;
+            s.recovery = None;
+            s.error.clear();
+            drop(s);
+            snapshot(&state, &app)
+        }
     })
     .await
     .map_err(|_| "Cannot recover the notification cursor.")?
@@ -276,6 +346,7 @@ fn poll(app: &AppHandle) -> Result<bool> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_omo_notifications::init())
         .invoke_handler(tauri::generate_handler![
             get_setup,
             connect,
@@ -298,6 +369,16 @@ pub fn run() {
                 }),
             });
             windows::create_setup(app.handle())?;
+            #[cfg(target_os = "android")]
+            {
+                let handle = app.handle().clone();
+                android_worker(app.handle()).on_activation(move |id, path| {
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        activate_android(&handle, &id, &path)
+                    });
+                })?;
+            }
             #[cfg(not(target_os = "android"))]
             {
                 windows::menu(app.handle())?;
@@ -356,4 +437,46 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("omo ui could not start");
+}
+
+#[cfg(target_os = "android")]
+fn android_worker(
+    app: &AppHandle,
+) -> tauri::State<'_, tauri_plugin_omo_notifications::AndroidNotifications<tauri::Wry>> {
+    app.state::<tauri_plugin_omo_notifications::AndroidNotifications<tauri::Wry>>()
+}
+
+#[cfg(target_os = "android")]
+fn activate_android(app: &AppHandle, id: &str, path: &str) {
+    let state = app.state::<Shell>();
+    let Ok(mut s) = state.session.lock() else {
+        return;
+    };
+    let Some(config) = s.config.clone().filter(|c| c.id == id) else {
+        return;
+    };
+    let Ok(url) = config.destination(path) else {
+        return;
+    };
+    let secret = if let Some(active) = s.active.as_ref().filter(|c| c.client.config.id == id) {
+        active.secret.clone()
+    } else if config.auth == Auth::None {
+        String::new()
+    } else {
+        let Ok(secret) = credentials::read(id) else {
+            return;
+        };
+        secret
+    };
+    let Ok(client) = BoardClient::new(config.clone(), secret.clone()) else {
+        return;
+    };
+    if let Ok(window) = windows::open_board(app, &config, &secret, config.notifications, None) {
+        let _ = window.navigate(url);
+        s.active = Some(Connection {
+            client,
+            secret,
+            polling: config.notifications,
+        });
+    }
 }
