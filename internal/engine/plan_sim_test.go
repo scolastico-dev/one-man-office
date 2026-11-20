@@ -272,7 +272,7 @@ func (w *sim) generate() {
 	if w.p(0.15) {
 		w.unavailable["b"] = 10 + w.rng.IntN(150)
 	}
-	modes := []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart}
+	modes := []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart, api.AssignmentSuperSmart}
 	for _, r := range []api.Role{api.RoleCEO, api.RolePM, api.RoleDeveloper, api.RoleReviewer} {
 		var models []string
 		for range 1 + w.rng.IntN(3) {

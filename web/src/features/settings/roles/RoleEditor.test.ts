@@ -52,7 +52,7 @@ test('the models are shown in the stored order, repeats as weights', async () =>
   expect(w.text()).toContain('How it picks: at random')
 })
 
-const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.'
+const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover, smart and super smart it counts once.'
 
 test('the note on repeated models is shown once, above every role card and in none, in every assignment mode', async () => {
   for (const mode of ['round_robin', 'random']) {
@@ -196,4 +196,23 @@ test('one Save bar for the page saves every changed role; a refusal and a confli
   await role('developer').get('[data-use-theirs]').trigger('click')
   expect(shown(role('developer'))).toEqual(['claude/haiku'])
   expect(shown(role('pm'))).toEqual(['claude/opus'])
+})
+
+test('super smart can be selected and saved as a known assignment', async () => {
+  const { w, h } = await open(['claude/sonnet'])
+  expect(w.get('select[data-assignment] option[value="super_smart"]').text()).toContain('Super smart')
+  await w.get('select[data-assignment]').setValue('super_smart')
+  expect(w.text()).toContain('reset')
+  await save()
+  expect(h.sent.at(-1)?.body).toEqual({ name: 'developer', models: ['claude/sonnet'], assignment: 'super_smart' })
+})
+
+test('missing roles use their role-specific defaults in the editor', async () => {
+  const h = await harness()
+  h.respond.roles = []
+  mounted = await mountWith(h, RolesPage, {})
+  await flushPromises()
+  for (const [name, mode] of Object.entries({ ceo: 'failover', pm: 'super_smart', developer: 'super_smart', reviewer: 'random' })) {
+    expect((mounted.get(`[data-role-editor="${name}"] select[data-assignment]`).element as HTMLSelectElement).value).toBe(mode)
+  }
 })

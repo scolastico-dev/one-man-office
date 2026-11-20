@@ -617,7 +617,7 @@ export interface RemovedProjects {
 }
 
 export type CLI = 'claude' | 'codex' | 'agy' | 'gemini' | 'custom'
-export type Assignment = 'round_robin' | 'random' | 'failover' | 'smart'
+export type Assignment = 'round_robin' | 'random' | 'failover' | 'smart' | 'super_smart'
 
 export interface PromptDelivery {
   inject?: boolean

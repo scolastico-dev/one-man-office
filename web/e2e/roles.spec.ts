@@ -20,7 +20,7 @@ const profile = (models: Record<string, string>) => ({
 const PROFILE = profile({ sonnet: 'Everyday development', opus: 'Strongest', haiku: 'Quick and cheap' })
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
-const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover and smart it counts once.'
+const NOTE = 'With round robin and random, a model listed twice is picked twice as often; with failover, smart and super smart it counts once.'
 
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
@@ -64,6 +64,10 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
   await openRoles(page)
 
+  for (const [role, assignment] of Object.entries({ ceo: 'failover', pm: 'super_smart', developer: 'super_smart', reviewer: 'random' })) {
+    await expect(editor(page, role).getByLabel('Assignment')).toHaveValue(assignment)
+  }
+
   const dev = editor(page, 'developer')
   await expect(dev.getByText('No models yet. Nothing starts for this role until it has one.')).toBeVisible()
   await addModel(dev, 'claude/sonnet')
@@ -82,7 +86,7 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet', 'claude/haiku', 'claude/sonnet'], assignment: 'random' })
 
   // Saving the developer wrote no other role.
-  expect(await stored(omo, 'reviewer')).toEqual({ models: [], assignment: 'round_robin' })
+  expect(await stored(omo, 'reviewer')).toEqual({ models: [], assignment: 'random' })
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
@@ -93,7 +97,7 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   await saveAll(page)
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(step(page, 'Check the agent setup')).toContainText('done')
-  expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
+  expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'random' })
 })
 
 test('a refused save shows the server message under the list, with focus on it; a model that vanished is marked and removable', async ({ page, omo }) => {
@@ -190,9 +194,9 @@ test('one Save for every role: a refusal on one role and a conflict on another s
 
   await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(saveBar(page).locator('[data-save-error]')).toHaveText('Saved the CEO and the reviewer. Not saved: the product manager and the developer; see the message under each.')
-  expect(await stored(omo, 'ceo')).toEqual({ models: ['claude/opus'], assignment: 'round_robin' })
-  expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
-  expect(await stored(omo, 'pm')).toEqual({ models: [], assignment: 'round_robin' })
+  expect(await stored(omo, 'ceo')).toEqual({ models: ['claude/opus'], assignment: 'failover' })
+  expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'random' })
+  expect(await stored(omo, 'pm')).toEqual({ models: [], assignment: 'super_smart' })
   expect(await stored(omo, 'developer')).toEqual({ models: ['claude/opus'], assignment: 'failover' })
   await expect(editor(page, 'pm').locator('[data-field-error="models"]')).toContainText('claude/haiku')
   await expect(editor(page, 'pm').locator('[aria-invalid="true"]')).toBeFocused()
@@ -212,8 +216,8 @@ test('one Save for every role: a refusal on one role and a conflict on another s
   await addModel(editor(page, 'pm'), 'claude/sonnet')
   await saveAll(page)
   await expect(saveBar(page).locator('[data-save-error]')).toHaveCount(0)
-  expect(await stored(omo, 'pm')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
-  expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
+  expect(await stored(omo, 'pm')).toEqual({ models: ['claude/sonnet'], assignment: 'super_smart' })
+  expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet'], assignment: 'super_smart' })
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(page.getByRole('dialog', { name: 'Leave without saving?' })).toHaveCount(0)
 })

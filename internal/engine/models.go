@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -165,7 +166,8 @@ func canStart(c modelChoice, cat modelCatalog, use usageFunc) startCheck {
 // the next eligible model from the role's cursor; random draws one eligible
 // entry, so a model listed twice is twice as likely; failover takes the
 // attempt-th distinct model, moving on over ineligible ones; smart takes the
-// eligible model with the most capacity left (see pickSmart). Without any
+// eligible model with the most capacity left; super_smart also favors capacity
+// whose window resets soon (see pickSmart). Without any
 // model that exists the error says which role file to fix; when models
 // exist but none is eligible, the error is errUsageWait.
 func (p *picker) pick(role api.Role, c modelChoice, cat modelCatalog, use usageFunc) (string, error) {
@@ -217,8 +219,8 @@ func (p *picker) pick(role api.Role, c modelChoice, cat modelCatalog, use usageF
 		return ok[min(max(i, 0), len(ok)-1)], nil
 	case api.AssignmentFailover:
 		return nextEligible(distinctModels(models), max(c.attempt, 0), use), nil
-	case api.AssignmentSmart:
-		return p.pickSmart(role, distinctModels(ok), use), nil
+	case api.AssignmentSmart, api.AssignmentSuperSmart:
+		return p.pickSmart(role, distinctModels(ok), use, c.role.Assignment == api.AssignmentSuperSmart), nil
 	default: // round_robin and anything unknown
 		return p.next(role, models, use), nil
 	}
@@ -255,11 +257,16 @@ func (p *picker) next(role api.Role, models []string, use usageFunc) string {
 
 // pickSmart chooses among the role's eligible models (ok, distinct, in the
 // role's order): when none has a reading it is round robin; otherwise the
-// metered model with the lowest usage (the first listed on a tie) takes
+// metered model with the highest capacity score (the first listed on a tie) takes
 // turns with the unmetered and unknown models through the role's cursor.
 // Repeats in the role's list do not matter. p.mu is held.
-func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc) string {
-	best, bestUsed := "", 0.0
+// With resetAware, remaining capacity is multiplied by 1 + 24h / time to
+// reset: it retains smart's capacity baseline, with an increasing urgency
+// bonus as reset approaches. Missing/elapsed resets give no bonus; Evaluate
+// already treats elapsed windows as empty. A 1s floor bounds the bonus.
+func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc, resetAware bool) string {
+	best, bestScore := "", 0.0
+	now := time.Now()
 	var turns []string
 	for _, id := range ok {
 		u := api.ModelUsage{State: api.UsageUnmetered}
@@ -267,8 +274,12 @@ func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc) string {
 			u = use(id)
 		}
 		if u.State == api.UsageOK && u.UsedPercent != nil {
-			if best == "" || *u.UsedPercent < bestUsed {
-				best, bestUsed = id, *u.UsedPercent
+			score := 100 - *u.UsedPercent
+			if resetAware && u.ResetsAt != nil && u.ResetsAt.After(now) {
+				score *= 1 + float64(24*time.Hour)/float64(max(u.ResetsAt.Sub(now), time.Second))
+			}
+			if best == "" || score > bestScore {
+				best, bestScore = id, score
 			}
 			continue
 		}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -131,7 +133,7 @@ func TestPickModel(t *testing.T) {
 	})
 	t.Run("crash restart in other modes keeps the previous model", func(t *testing.T) {
 		p := newPicker(func(int) int { return 0 })
-		for _, mode := range []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentSmart} {
+		for _, mode := range []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentSmart, api.AssignmentSuperSmart} {
 			r := role("developer", mode, "f/a", "f/b")
 			if got := mustPick(t, p, api.RoleDeveloper, modelChoice{role: r, previous: "f/b", attempt: 2}, cat); got != "f/b" {
 				t.Fatalf("%s: got %q, want the previous f/b", mode, got)
@@ -227,7 +229,7 @@ func picks(t *testing.T, p *picker, r api.Role, c modelChoice, cat modelCatalog,
 func TestPickSkipsModelsOverSoftUsage(t *testing.T) {
 	cat := fakeCatalog{"f/a": true, "f/b": true, "f/c": true}
 	use := usageOf(map[string]string{"f/a": api.UsageSoft + ":91", "f/b": api.UsageOK + ":10", "f/c": api.UsageHard + ":99"})
-	for _, mode := range []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart} {
+	for _, mode := range []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart, api.AssignmentSuperSmart} {
 		t.Run(mode, func(t *testing.T) {
 			p := newPicker(func(n int) int { return n - 1 })
 			r := role("developer", mode, "f/a", "f/c", "f/b", "f/a")
@@ -359,26 +361,94 @@ func TestSmartPicksMostCapacity(t *testing.T) {
 }
 
 func TestSmartUnmeteredTakesTurns(t *testing.T) {
-	cat := fakeCatalog{"f/a": true, "f/u": true, "f/k": true, "f/b": true}
-	use := usageOf(map[string]string{"f/a": "ok:20", "f/b": "ok:50", "f/k": api.UsageUnknown})
-	r := role("developer", api.AssignmentSmart, "f/a", "f/u")
-	if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, use, 4); got != "f/a,f/u,f/a,f/u" {
-		t.Fatalf("got %s", got)
-	}
-	// Unknown models take turns too; the fuller metered f/b does not.
-	r = role("developer", api.AssignmentSmart, "f/b", "f/k", "f/a")
-	if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, use, 4); got != "f/k,f/a,f/k,f/a" {
-		t.Fatalf("got %s", got)
+	for _, mode := range []string{api.AssignmentSmart, api.AssignmentSuperSmart} {
+		t.Run(mode, func(t *testing.T) {
+			cat := fakeCatalog{"f/a": true, "f/u": true, "f/k": true, "f/b": true}
+			use := usageOf(map[string]string{"f/a": "ok:20", "f/b": "ok:50", "f/k": api.UsageUnknown})
+			r := role("developer", mode, "f/a", "f/u")
+			if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, use, 4); got != "f/a,f/u,f/a,f/u" {
+				t.Fatalf("got %s", got)
+			}
+			// Unknown models take turns too; the fuller metered f/b does not.
+			r = role("developer", mode, "f/b", "f/k", "f/a")
+			if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, use, 4); got != "f/k,f/a,f/k,f/a" {
+				t.Fatalf("got %s", got)
+			}
+		})
 	}
 }
 
 func TestSmartWithoutReadingsIsRoundRobin(t *testing.T) {
-	cat := fakeCatalog{"f/a": true, "f/b": true, "f/c": true}
-	use := usageOf(map[string]string{"f/a": api.UsageUnknown})
-	r := role("developer", api.AssignmentSmart, "f/a", "f/b", "f/c")
-	for _, u := range []usageFunc{nil, use} {
-		if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, u, 4); got != "f/a,f/b,f/c,f/a" {
-			t.Fatalf("got %s", got)
-		}
+	for _, mode := range []string{api.AssignmentSmart, api.AssignmentSuperSmart} {
+		t.Run(mode, func(t *testing.T) {
+			cat := fakeCatalog{"f/a": true, "f/b": true, "f/c": true}
+			use := usageOf(map[string]string{"f/a": api.UsageUnknown})
+			r := role("developer", mode, "f/a", "f/b", "f/c")
+			for _, u := range []usageFunc{nil, use} {
+				if got := picks(t, newPicker(nil), api.RoleDeveloper, modelChoice{role: r}, cat, u, 4); got != "f/a,f/b,f/c,f/a" {
+					t.Fatalf("got %s", got)
+				}
+			}
+		})
 	}
+}
+
+func TestSuperSmartPrefersExpiringCapacityAsResetApproaches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		resetA, resetB := now.Add(24*time.Hour), now.Add(7*24*time.Hour)
+		usedA, usedB := 80.0, 20.0
+		use := usageFunc(func(id string) api.ModelUsage {
+			if id == "f/a" {
+				return api.ModelUsage{State: api.UsageOK, UsedPercent: &usedA, ResetsAt: &resetA}
+			}
+			return api.ModelUsage{State: api.UsageOK, UsedPercent: &usedB, ResetsAt: &resetB}
+		})
+		cat := fakeCatalog{"f/a": true, "f/b": true}
+		c := modelChoice{role: role("developer", api.AssignmentSuperSmart, "f/a", "f/b", "f/a")}
+		p := newPicker(nil)
+		if got := picks(t, p, api.RoleDeveloper, c, cat, use, 3); got != "f/b,f/b,f/b" {
+			t.Fatalf("24h left: %s", got)
+		}
+		time.Sleep(20 * time.Hour) // Virtual time: the same readings now have 4h and 148h left.
+		if got := picks(t, p, api.RoleDeveloper, c, cat, use, 3); got != "f/a,f/a,f/a" {
+			t.Fatalf("4h left: %s", got)
+		}
+		c.role.Assignment = api.AssignmentSmart
+		if got := mustPickUsing(t, p, api.RoleDeveloper, c, cat, use); got != "f/b" {
+			t.Fatalf("smart must still prefer capacity: %s", got)
+		}
+	})
+}
+
+func TestSuperSmartResetFallbackAndTies(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		future, past, zero := now.Add(time.Hour), now.Add(-time.Hour), time.Time{}
+		for _, tc := range []struct {
+			name           string
+			resetA, resetB *time.Time
+			usedA, usedB   float64
+			want           string
+		}{
+			{"no resets", nil, nil, 80, 20, "f/b"},
+			{"equal resets", &future, &future, 80, 20, "f/b"},
+			{"equal scores keep list order", &future, &future, 20, 20, "f/a"},
+			{"past reset has no bonus", &past, nil, 80, 20, "f/b"},
+			{"reset now has no bonus", &now, nil, 80, 20, "f/b"},
+			{"zero reset has no bonus", &zero, nil, 80, 20, "f/b"},
+			{"future reset gets bonus", &future, nil, 80, 20, "f/a"},
+		} {
+			use := usageFunc(func(id string) api.ModelUsage {
+				if id == "f/a" {
+					return api.ModelUsage{State: api.UsageOK, UsedPercent: &tc.usedA, ResetsAt: tc.resetA}
+				}
+				return api.ModelUsage{State: api.UsageOK, UsedPercent: &tc.usedB, ResetsAt: tc.resetB}
+			})
+			c := modelChoice{role: role("developer", api.AssignmentSuperSmart, "f/a", "f/b")}
+			if got := picks(t, newPicker(nil), api.RoleDeveloper, c, fakeCatalog{"f/a": true, "f/b": true}, use, 2); got != tc.want+","+tc.want {
+				t.Errorf("%s: got %s, want %s twice", tc.name, got, tc.want)
+			}
+		}
+	})
 }

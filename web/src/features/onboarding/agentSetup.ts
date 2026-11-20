@@ -66,6 +66,7 @@ export const MODES: Record<string, string> = {
   random: 'at random; a model listed twice is picked twice as often',
   failover: 'the first one, and the next only when it cannot be used',
   smart: 'the one with the most capacity left',
+  super_smart: 'the one with capacity left, increasingly favoring usage windows that reset soon',
 }
 
 export function roleTitle(name: string): string {

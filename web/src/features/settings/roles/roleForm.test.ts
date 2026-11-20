@@ -43,11 +43,12 @@ test('the add options list every model and mark those agents may not choose', ()
 })
 
 test('every assignment is explained in words; an unknown one is kept', () => {
-  expect(assignmentOptions('failover').map((o) => o.value)).toEqual(['round_robin', 'random', 'failover', 'smart'])
-  expect(assignmentOptions('odd').map((o) => o.value)).toEqual(['round_robin', 'random', 'failover', 'smart', 'odd'])
+  expect(assignmentOptions('failover').map((o) => o.value)).toEqual(['round_robin', 'random', 'failover', 'smart', 'super_smart'])
+  expect(assignmentOptions('odd').map((o) => o.value)).toEqual(['round_robin', 'random', 'failover', 'smart', 'super_smart', 'odd'])
   expect(assignmentMeaning('failover')).toContain('the next only when it cannot be used')
   expect(assignmentMeaning('round_robin')).toContain('in turn')
   expect(assignmentMeaning('smart')).toContain('otherwise like round robin')
+  expect(assignmentMeaning('super_smart')).toContain('reset')
   expect(assignmentMeaning('odd')).toBe('')
 })
 
