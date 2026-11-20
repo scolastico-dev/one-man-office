@@ -29,6 +29,7 @@ var roleOrder = []string{"ceo", "pm", "developer", "reviewer"}
 // developer the middle one of the selectable models, the stronger of two in
 // the middle. PM/developer use super_smart and reviewer uses random. A role that
 // has models is never in the plan. Roles missing from roles count as empty.
+// A role's configured super smart reset weight is kept when models are added.
 // It never runs a program it finds.
 func Detect(lookPath func(string) (string, error), existing []api.Profile, roles []api.RoleSettings) Plan {
 	var plan Plan
@@ -62,6 +63,13 @@ func Detect(lookPath func(string) (string, error), existing []api.Profile, roles
 			continue
 		}
 		r := api.RoleSettings{Name: name, Assignment: api.DefaultAssignment(name)}
+		for _, current := range roles {
+			if current.Name == name && current.SuperSmartResetWeight != nil {
+				weight := *current.SuperSmartResetWeight
+				r.SuperSmartResetWeight = &weight
+				break
+			}
+		}
 		for _, p := range plan.Profiles {
 			if id, ok := pick(p, name); ok {
 				r.Models = append(r.Models, id)
