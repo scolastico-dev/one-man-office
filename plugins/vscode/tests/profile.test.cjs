@@ -68,3 +68,18 @@ test('code-server preferences use the browser user-data provider rather than byp
  const config=JSON.parse(fs.readFileSync(path.join(result.builtins,'omo.profile-bridge','profile.json')));
  assert.equal(config.browserUser.scheme,'vscode-remote');assert.equal(config.browserUser.path,path.join(user,'User'));assert.equal(config.browserUser.native,true);
 });
+test('OpenVSCode renderer history lives in a private overlay without changing publisher bytes, even across an old file link',t=>{
+ const f=fixture(t),artifact=path.join(f.root,'artifact'),profile=path.join(f.root,'profile'),state=path.join(f.root,'session');
+ const relative=path.join('out','vs','code','browser','workbench','workbench.js'),original=path.join(artifact,relative);
+ const content='// pinned renderer fixture: vscode-web-db vscode-userdata-store\n';fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,content);
+ fs.writeFileSync(path.join(path.dirname(original),'workbench.html'),'publisher html');
+ const options={editor:'openvscode',root:artifact,profile,state,data:f.root,user:path.join(profile,'portable','user-data'),local:null};
+ prepareProfile(options);
+ const overlay=path.join(state,'publisher',relative);
+ assert.match(fs.readFileSync(overlay,'utf8'),/installBrowserHistory/);assert.equal(fs.readFileSync(original,'utf8'),content);
+ fs.unlinkSync(overlay);fs.linkSync(original,overlay);
+ prepareProfile(options);
+ assert.equal(fs.readFileSync(original,'utf8'),content,'an old publisher hard link must never be written through');
+ assert.match(fs.readFileSync(overlay,'utf8'),/installBrowserHistory/);
+ assert.equal(fs.readFileSync(path.join(path.dirname(overlay),'workbench.html'),'utf8'),'publisher html');
+});

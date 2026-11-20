@@ -806,7 +806,20 @@ into the desktop User folder or private persistent preferences.
 `preference-sync.cjs` serializes clients through a native SQLite transaction,
 merges disjoint JSONC setting edits and preserves conflicts privately; native
 storage databases are outside its file allowlist. jsonc-parser 3.3.1 is vendored
-with its MIT licence. The pinned OpenVSCode bootstrap overrides builtin paths,
+with its MIT licence. `preference-history.cjs` records code-server's native
+preference payloads through its inherited Node preload, preserving fs.write's
+promisify metadata and covering `.vsctmp` disk-provider saves. OpenVSCode's
+private renderer overlay prepends `browser-history.cjs` to
+`out/vs/code/browser/workbench/workbench.js`: preference put/delete history is
+committed in the same IndexedDB transaction in `vscode-web-db` /
+`vscode-userdata-store`. The bridge verifies a fresh recording challenge before
+mutating browser preferences, archives intervening versions privately, then
+acknowledges only those records. Publisher updates must recheck these internals.
+Native-profile clients issue their own provider operation on a shared version
+change, even when another client already wrote the bytes, to refresh each UI.
+`--preference-races --smoke --profile-sharing` exercises all four file categories
+and both mutation paths against the real pinned publishers without sleeps.
+The pinned OpenVSCode bootstrap overrides builtin paths,
 so a FileAccess preload uses a private publisher-root overlay; artifacts stay
 unchanged. The opt-in publisher probe asserts the served trust option
 and never accepts a trust prompt. Routine coverage: `node --test

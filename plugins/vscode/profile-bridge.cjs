@@ -1,13 +1,52 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const {randomUUID} = require('node:crypto');
 const {PreferenceSync, nativeFiles, allowed, maxBytes, maxFiles, missing} = require('./preference-sync.cjs');
+const {nativeHistory} = require('./preference-history.cjs');
+
+function browserHistory(vscode, root) {
+  const api = vscode.workspace.fs;
+  const journal = vscode.Uri.joinPath(root, '.omo-preference-history.json');
+  const acknowledgement = vscode.Uri.joinPath(root, '.omo-preference-ack.json');
+  let ready;
+  async function read() {
+    const value = await api.readFile(journal);
+    if (value.byteLength > 32 * 1024 * 1024) throw new Error('preference history is too large');
+    const result = JSON.parse(Buffer.from(value).toString('utf8'));
+    if (result.version !== 1 || !Array.isArray(result.entries)) throw new Error('unsupported preference history');
+    return result;
+  }
+  const ensure = async () => {
+    if (!ready) {
+      const nonce = randomUUID();
+      await api.createDirectory(root);
+      await api.writeFile(acknowledgement, Buffer.from(JSON.stringify({through: 0, nonce})));
+      if ((await read()).ready !== nonce) throw new Error('publisher preference history is unavailable');
+      ready = true;
+    }
+  };
+  return {
+    ensure,
+    async entries() {
+      await ensure();
+      return (await read()).entries.map(entry => {
+        if (!allowed(entry.name) || !Number.isSafeInteger(entry.id) || typeof entry.value !== 'string' || entry.value.length > 32 * 1024 * 1024) throw new Error('invalid preference history record');
+        return {...entry, value: Buffer.from(entry.value, 'base64')};
+      });
+    },
+    async acknowledge(entries) {
+      if (entries.length) await api.writeFile(acknowledgement, Buffer.from(JSON.stringify({through: Math.max(...entries.map(entry => entry.id))})));
+    },
+  };
+}
 
 // The remote extension host forwards these operations to the browser's actual
 // user-data filesystem. Preserve its scheme/authority: a file URI can reach
 // the same bytes while bypassing the browser's configuration change events.
 // OpenVSCode's /User is not the server's Machine scope.
-function browserFiles(vscode, root) {
+function browserFiles(vscode, root, history) {
+  history ||= browserHistory(vscode, root);
   const api = vscode.workspace.fs;
   const equal = (a, b) => a === b || (a !== null && b !== null && a.equals(b));
   function resource(name) {
@@ -15,6 +54,11 @@ function browserFiles(vscode, root) {
     return vscode.Uri.joinPath(root, ...name.split('/'));
   }
   return {
+    history: () => history.entries(),
+    acknowledgeHistory: entries => history.acknowledge(entries),
+    // Native preferences are shared by several clients. Each workbench needs
+    // its own provider operation event when another client changed the bytes.
+    refreshOnSharedChanges: root.scheme === 'vscode-remote',
     async list() {
       const result = []; let visited = 0;
       async function walk(uri, prefix, ancestors = new Set()) {
@@ -52,8 +96,16 @@ function browserFiles(vscode, root) {
     },
     async write(name, value, expected) {
       const uri = resource(name);
+      await history.ensure?.();
       if (value === null) {
         if (expected !== undefined && !equal(await this.read(name), expected)) return false;
+        if (expected === null && root.scheme === 'vscode-remote') {
+          // A peer already removed this native file. Emit local provider events
+          // as well, so this window drops its cached configuration. The journal
+          // still protects a user save racing either of these operations.
+          await api.createDirectory(vscode.Uri.joinPath(uri, '..'));
+          await api.writeFile(uri, Buffer.from(name === 'keybindings.json' ? '[]' : '{}'));
+        }
         try { await api.delete(uri, {recursive: false, useTrash: false}); } catch (error) { if (!missing(error)) throw error; } return; }
       if (value.length > maxBytes) throw new Error('preference file is too large');
       await api.createDirectory(vscode.Uri.joinPath(uri, '..'));
@@ -71,7 +123,7 @@ async function activate(context) {
   const output = vscode.window.createOutputChannel('omo shared preferences');
   context.subscriptions.push(output);
   const sync = new PreferenceSync({
-    source: nativeFiles(config.sharedUser), target: browserFiles(vscode, browser), lock: config.lock,
+    source: nativeFiles(config.sharedUser), target: browserFiles(vscode, browser, config.nativeHistory ? nativeHistory(config.nativeHistory) : undefined), lock: config.lock,
     backups: config.backups, adoptBrowserOnce: config.adoptBrowserOnce,
     onConflict: () => output.appendLine('Different preference versions were preserved in ' + JSON.stringify(config.backups) + '.'),
   });
@@ -83,7 +135,7 @@ async function activate(context) {
         pending = false;
         try { await sync.tick(); failed = false; }
         catch (error) {
-          if (!failed) output.appendLine('Preference synchronization failed (' + String(error.code || error.name).replace(/[^A-Za-z0-9_]/g, '') + '). Check that the shared profile is writable.');
+          if (!failed) output.appendLine('Preference synchronization failed (' + String(error.code || error.name).replace(/[^A-Za-z0-9_]/g, '') + '). Check profile permissions and the editor version.');
           failed = true;
         }
       }
@@ -104,4 +156,4 @@ async function activate(context) {
   };
 }
 async function deactivate() { if (finish) await finish(); }
-module.exports = {activate, deactivate, browserFiles};
+module.exports = {activate, deactivate, browserFiles, browserHistory};

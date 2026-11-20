@@ -91,6 +91,9 @@ are detected automatically; the first matching product supplies the shared
 settings, keybindings, tasks, snippets and extensions. Browser/desktop changes
 use those shared files in both directions. Without a desktop profile, private
 preferences and extensions remain in plugin data across restarts.
+Intervening browser saves are recorded at the publisher's storage boundary;
+versions raced by a sync write or deletion are retained in the editor's private
+`preference-conflicts/` folder before their journal records are acknowledged.
 It permits one running editor per canonical folder. Repeated clicks reuse it
 only when editor, pinned version and ticket/global binding all match. To change
 any of those for an open folder, use **Stop** in the **VS Code** sidebar tab first;

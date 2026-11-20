@@ -84,7 +84,9 @@ function prepare(editor, root, folder, data, id, port, base, runtime) {
     const publisherPaths = { data: path.join(state, 'data'), config: path.join(state, 'config'), runtime };
     for (const dir of Object.values(publisherPaths)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const preload = path.join(state, 'paths.cjs');
-    fs.writeFileSync(preload, 'Object.assign(require(' + JSON.stringify(path.join(root, 'out', 'node', 'util.js')) + ').paths,' + JSON.stringify(publisherPaths) + ');\n', { mode: 0o600 });
+    fs.writeFileSync(preload, 'require(' + JSON.stringify(path.join(__dirname, 'preference-history.cjs')) + ').installNativeHistory(' +
+      JSON.stringify(path.join(user, 'User')) + ',' + JSON.stringify(path.join(profile, 'preference-history')) + ');\n' +
+      'Object.assign(require(' + JSON.stringify(path.join(root, 'out', 'node', 'util.js')) + ').paths,' + JSON.stringify(publisherPaths) + ');\n', { mode: 0o600 });
     const socket = process.platform === 'win32' ? '\\\\.\\pipe\\omo-editor-' + createHash('sha256').update(runtime).digest('hex').slice(0, 24) : path.join(runtime, 'ipc');
     args = ['--require', preload, path.join(root, 'out', 'node', 'entry.js'), '--bind-addr', '127.0.0.1:' + port,
       '--auth', 'none', '--enable-remote-storage', '--config', config, '--user-data-dir', user, '--extensions-dir', extensions, '--builtin-extensions-dir', builtins,

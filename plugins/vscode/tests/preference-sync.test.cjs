@@ -15,6 +15,17 @@ function fixture(t){
  const make=(target=nativeFiles(browser))=>{const sync=new PreferenceSync({source:nativeFiles(source),target,lock:path.join(root,'lock.sqlite'),backups:path.join(root,'conflicts')});engines.push(sync);return sync;};
  return {root,source,browser,put,get,make};
 }
+for(const name of ['settings.json','keybindings.json','tasks.json','snippets/shared.json'])for(const mutation of ['write','delete'])test(`${name}: each native-profile window observes a shared ${mutation} already completed by another bridge`,async t=>{
+ const f=fixture(t),original=name==='keybindings.json'?'[]':'{"a":1}',changed=name==='keybindings.json'?'[{"key":"ctrl+k","command":"fixture"}]':'{"a":2}';f.put(f.source,name,original);
+ const caches=[original,original],files=nativeFiles(f.browser),engines=[];
+ for(let client=0;client<2;client++)engines.push(f.make({...files,refreshOnSharedChanges:true,write:async(...args)=>{const result=await files.write(...args);if(result!==false)caches[client]=args[1]?.toString()??null;return result;}}));
+ for(const engine of engines)await engine.tick();
+ if(mutation==='write')f.put(f.source,name,changed);else fs.unlinkSync(path.join(f.source,name));
+ // A deterministic completion order exposes the cache bug: client two reads
+ // bytes that client one has already updated, but must still notify its UI.
+ for(const engine of engines)await engine.tick();
+ assert.deepEqual(caches,[mutation==='write'?changed:null,mutation==='write'?changed:null]);
+});
 test('initial import applies JSONC preferences and snippets without copying native storage or secrets',async t=>{
  const f=fixture(t),settings='// theme from desktop\n{"workbench.colorTheme":"Fixture Dark",}\n';
  f.put(f.source,'settings.json',settings);f.put(f.source,'keybindings.json','[{"key":"ctrl+k","command":"fixture"}]');f.put(f.source,'snippets/fixture.code-snippets','{"Fixture":{"prefix":"fixture","body":"ok"}}');

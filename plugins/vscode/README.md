@@ -123,6 +123,26 @@ value and saves both complete versions in
 that location. Builtin theme ID aliases are translated without rewriting the
 desktop's existing theme ID.
 
+Browser preference saves are recorded at the storage boundary, so a save that
+finishes during a pending bridge write or deletion remains recoverable in those
+private conflict files. Records are acknowledged only after preservation.
+code-server's inherited Node preload records complete preference write payloads,
+including its disk provider's `open`/`write`/`close` saves and `.vsctmp` atomic
+files; it retains Node's promisify metadata. OpenVSCode's private overlay prepends
+`browser-history.cjs` to `out/vs/code/browser/workbench/workbench.js`, recording
+`put`/`delete` versions in the same transaction in IndexedDB `vscode-web-db` /
+`vscode-userdata-store`. A fresh challenge verifies that recording is active
+before the bridge mutates browser preferences. Publisher updates must recheck
+these internal paths and storage APIs. Verified publisher files remain unchanged.
+Native pending records live in `profiles/<editor>/preference-history/`;
+OpenVSCode keeps its pending journal in its browser user-data store. A journal
+record is bounded to 32 MiB; the browser journal also bounds the total to 32 MiB
+and 4096 unacknowledged versions, aborting the original transaction on overflow.
+The bridge archives intervening versions even when they exceed its normal
+1 MiB synchronization limit or repeat the previous file's content.
+Each code-server window also emits its own user-data provider update when a
+peer changed the shared native file, refreshing that window's cached settings.
+
 Without a desktop profile, extensions remain in `profiles/<editor>/extensions/`
 and shared preference files in `profiles/<editor>/preferences/User/`. Fresh
 profiles initialize Dark Modern and `chat.disableAIFeatures=true`. Existing
@@ -261,6 +281,13 @@ Stop/reopen check on a new forward. `--local-product Code`, `VSCodium` or
 persistence and the dark/AI-disabled defaults. These probes install disposable
 fixture extensions only in their isolated profiles, and await an acknowledged
 extension-host startup before terminal commands.
+
+Add `--preference-races` to `--smoke --profile-sharing` to gate the disposable
+bridge after its final content check, save through the actual publisher's user
+data provider, then release the pending write/delete. All four preference
+categories must retain that newer save in private conflict copies. The gate
+changes only the installed test copy; neither publisher nor product sources
+contain a test delay.
 
 Each runs the actual plugin first-click installation through the real board,
 opens the workbench in the reserved tab, saves a text edit directly into each

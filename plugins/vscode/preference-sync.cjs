@@ -144,6 +144,7 @@ class PreferenceSync {
     try {
       const adopt = !this.initialized && this.adoptBrowserOnce && !fs.existsSync(this.adoptBrowserOnce);
       let incomplete = false;
+      const expectedVersions = new Map();
       const names = new Set([...(await this.source.list()), ...(await this.target.list()), ...this.previous.keys()]);
       if (names.size > maxFiles) throw new Error('too many preference files');
       for (const name of names) {
@@ -178,13 +179,23 @@ class PreferenceSync {
         }
         // Editors do not take our transaction. Recheck both snapshots and
         // defer changed files without advancing their baseline or migration.
+        expectedVersions.set(name, [result]);
         if (!same(await this.source.read(name), rawDesktop) || !same(await this.target.read(name), rawBrowser)) { incomplete = true; continue; }
         if (!same(desktop, result) && await this.source.write(name, name === 'settings.json' ? themeSettings(result, rawDesktop) : result, rawDesktop) === false) { incomplete = true; continue; }
-        if (!same(browser, result)) {
+        if (!same(browser, result) || (this.target.refreshOnSharedChanges && (old === undefined || !same(old, result)))) {
           if (!same(await this.target.read(name), rawBrowser) || await this.target.write(name, result, rawBrowser) === false) { incomplete = true; continue; }
         }
         this.previous.set(name, result);
       }
+      // Provider writes can finish between our last read and a pending
+      // mutation. Their durable history must be archived before acknowledgement;
+      // the SQLite gate alone cannot serialize the user's editor saves.
+      const history = await this.target.history?.() || [];
+      for (const {name, value} of history) {
+        checkedName(name);
+        if (!(expectedVersions.get(name) || []).some(expected => same(expected, value))) await this.preserve(name, value);
+      }
+      await this.target.acknowledgeHistory?.(history);
       if (!incomplete) {
         this.initialized = true;
         if (adopt) {

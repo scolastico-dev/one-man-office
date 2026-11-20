@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {createHash} = require('node:crypto');
+const {createHash, randomUUID} = require('node:crypto');
 
 // Default profiles, in a stable order when more than one product is installed.
 // Discovery only reads directory metadata, never native databases or secrets.
@@ -50,7 +50,7 @@ function prepareProfile({editor, root, profile, state, data, user, local}) {
   }
   const bridge = path.join(builtins, 'omo.profile-bridge');
   fs.mkdirSync(bridge, {recursive: true, mode: 0o700});
-  for (const name of ['profile-bridge.cjs', 'preference-sync.cjs']) fs.copyFileSync(path.join(__dirname, name), path.join(bridge, name));
+  for (const name of ['profile-bridge.cjs', 'preference-sync.cjs', 'preference-history.cjs']) fs.copyFileSync(path.join(__dirname, name), path.join(bridge, name));
   fs.cpSync(path.join(__dirname, 'vendor'), path.join(bridge, 'vendor'), {recursive: true});
   fs.writeFileSync(path.join(bridge, 'package.json'), JSON.stringify({
     name: 'profile-bridge', publisher: 'omo', version: '1.0.0', displayName: 'omo shared preferences',
@@ -63,6 +63,7 @@ function prepareProfile({editor, root, profile, state, data, user, local}) {
     sharedUser, browserUser: editor === 'code-server' ? {scheme: 'vscode-remote', path: path.join(user, 'User'), native: true} : {scheme: 'vscode-userdata', path: '/User'},
     lock: path.join(locks, createHash('sha256').update(sharedUser).digest('hex') + '.sqlite'),
     backups: path.join(profile, 'preference-conflicts'),
+    nativeHistory: editor === 'code-server' ? path.join(profile, 'preference-history') : undefined,
     adoptBrowserOnce: local ? undefined : path.join(profile, 'preferences', '.browser-imported'),
   }), {mode: 0o600});
   let preload;
@@ -73,21 +74,45 @@ function prepareProfile({editor, root, profile, state, data, user, local}) {
     // the bridge. The immutable artifact itself is never changed.
     const overlay = path.join(state, 'publisher');
     fs.mkdirSync(overlay, {recursive: true, mode: 0o700});
-    for (const name of new Set([...fs.readdirSync(root), 'extensions'])) {
-      const target = name === 'extensions' ? builtins : path.join(root, name), link = path.join(overlay, name);
+    function link(target, destination) {
       if (process.platform === 'win32' && fs.statSync(target).isFile()) {
-        // Native file symlinks need a Windows privilege. The fixture publisher
-        // root is on the same plugin-data volume, so hard links avoid copies.
         try {
-          const original = fs.statSync(target), existing = fs.statSync(link);
-          if (original.dev === existing.dev && original.ino === existing.ino) continue;
-          fs.unlinkSync(link);
+          const original = fs.statSync(target), existing = fs.statSync(destination);
+          if (original.dev === existing.dev && original.ino === existing.ino) return;
+          fs.unlinkSync(destination);
         } catch (error) { if (error.code !== 'ENOENT') throw error; }
-        fs.linkSync(target, link); continue;
+        fs.linkSync(target, destination); return;
       }
-      try { if (fs.readlinkSync(link) === target) continue; fs.unlinkSync(link); }
+      try { if (fs.readlinkSync(destination) === target) return; fs.unlinkSync(destination); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
-      fs.symlinkSync(target, link, fs.statSync(target).isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file');
+      fs.symlinkSync(target, destination, fs.statSync(target).isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file');
+    }
+    function rendererTree(source, destination, parts) {
+      try { if (fs.lstatSync(destination).isSymbolicLink()) fs.unlinkSync(destination); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      fs.mkdirSync(destination, {recursive: true, mode: 0o700});
+      for (const name of fs.readdirSync(source)) {
+        const from = path.join(source, name), to = path.join(destination, name);
+        if (name !== parts[0]) link(from, to);
+        else if (parts.length > 1) rendererTree(from, to, parts.slice(1));
+        else {
+          const workbench = fs.readFileSync(from, 'utf8');
+          if (!workbench.includes('vscode-web-db') || !workbench.includes('vscode-userdata-store')) throw new Error('unsupported publisher preference storage');
+          const temporary = to + '.omo-' + randomUUID();
+          try {
+            fs.writeFileSync(temporary, fs.readFileSync(path.join(__dirname, 'browser-history.cjs'), 'utf8') + '\n' + workbench, {mode: 0o600, flag: 'wx'});
+            fs.renameSync(temporary, to);
+          } finally { try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
+        }
+      }
+    }
+    const renderer = ['vs', 'code', 'browser', 'workbench', 'workbench.js'];
+    for (const name of new Set([...fs.readdirSync(root), 'extensions'])) {
+      const target = name === 'extensions' ? builtins : path.join(root, name), destination = path.join(overlay, name);
+      if (name === 'out' && fs.existsSync(path.join(root, 'out', ...renderer))) {
+        rendererTree(target, destination, renderer); continue;
+      }
+      link(target, destination);
     }
     preload = path.join(state, 'file-root.cjs');
     fs.writeFileSync(preload, 'let root;Object.defineProperty(globalThis,"_VSCODE_FILE_ROOT",{configurable:true,get(){return root},set(value){root=value===' +

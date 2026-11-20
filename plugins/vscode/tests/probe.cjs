@@ -5,12 +5,16 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawn,execFileSync}=require('node:child_process');const net=require('node:net');const assert=require('node:assert/strict');
 const {pinInstance,isRunning,stopChild,freshSnapshot}=require('./probe-state.cjs');
 const {setup:setupProfileFixture}=require('./profile-fixture.cjs');
+const {installGate,runRaces}=require('./probe-race.cjs');
 const jsonc=require('../vendor/jsonc-parser/main.js');
 const {chromium}=require(path.resolve(__dirname,'../../../web/node_modules/playwright'));
 const editor=process.argv[2];if(!['code-server','openvscode'].includes(editor))throw new Error('Choose code-server or openvscode. Microsoft mode is unavailable.');
 const sharing=process.argv.includes('--profile-sharing'),localIndex=process.argv.indexOf('--local-product'),localProduct=localIndex<0?null:process.argv[localIndex+1];
+const races=process.argv.includes('--preference-races');
+if(races&&!sharing)throw new Error('--preference-races requires --profile-sharing');
 if(localProduct&&!['Code','VSCodium','Code - OSS'].includes(localProduct))throw new Error('Unknown local fixture product');
 let sharedFixture;
+let preferenceRaces;
 const subdomain=process.argv.includes('--subdomain'),crossSite=process.argv.includes('--cross-site'),smoke=process.argv.includes('--smoke');
 const cacheIndex=process.argv.indexOf('--cache-dir'),cache=cacheIndex<0?null:path.resolve(process.argv[cacheIndex+1]);
 let cacheLease=false;
@@ -85,8 +89,9 @@ async function main(){
  if(cache){const destination=path.join(home,'plugins','.data','vscode','.artifacts-v1');fs.mkdirSync(path.dirname(destination),{recursive:true});if(fs.existsSync(cache))fs.renameSync(cache,destination);}
  if(subdomain)execFileSync(binary,['config','set','proxy_base_host','apps.localhost'],{env});
  fs.writeFileSync(path.join(home,'settings.yaml'),'# isolated probe: no agent program detection\n');
- fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','profile.cjs','profile-bridge.cjs','preference-sync.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
+ fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','profile.cjs','profile-bridge.cjs','preference-sync.cjs','preference-history.cjs','browser-history.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
  fs.cpSync(path.resolve(__dirname,'../vendor'),path.join(plugin,'vendor'),{recursive:true});
+ if(races)installGate(plugin,path.join(root,'race-control'));
  sharedFixture=setupProfileFixture(root,env,editor,localProduct);
  fs.writeFileSync(path.join(home,'plugins','vscode.yaml'),'source: '+JSON.stringify(plugin)+'\nenabled: true\nconfig:\n  editor: '+editor+'\n  idle_minutes: 1\n');
  server=spawn(binary,[],{env,stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>log+=b);server.stderr.on('data',b=>log+=b);
@@ -168,6 +173,7 @@ async function main(){
   await wait(()=>fs.existsSync(path.join(project,'.omo-installed-active')));
   const installed=JSON.parse(fs.readFileSync(path.join(sharedFixture.extensions,'extensions.json'),'utf8')).find(e=>e.identifier.id==='omo.browser-installed');
   assert.ok(installed,'browser installation must update the shared desktop extension inventory');assert.equal(installed.location.scheme,'file');
+  if(races)preferenceRaces=await runRaces({page,folder:project,sharedUser:sharedFixture.sharedUser,profile,control:path.join(root,'race-control'),command,wait});
  }
  if(smoke){
   for(const task of both)await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(task.name)+'/stop',{});
@@ -183,7 +189,7 @@ async function main(){
    await inspectPreferences(restarted,project,{font:20,theme:localProduct?(editor==='code-server'?'Light Modern':'Default Light Modern'):(editor==='code-server'?'Dark Modern':'Default Dark Modern'),chatDisabled:true,chatKnown:true});
    const dir=runtime(instance);captureChildren();await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(instance.taskName)+'/stop',{});await wait(()=>!fs.existsSync(dir));await wait(()=>remainingChildren().length===0);
   }
-  const report={editor,...routing,profileSharing:sharing,localProduct,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
+  const report={editor,...routing,profileSharing:sharing,localProduct,preferenceRaces,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));return;
  }
  // Last-disconnect idle: active sockets must survive > 1 minute, then expire.
