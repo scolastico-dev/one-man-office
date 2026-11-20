@@ -79,6 +79,8 @@ type Options struct {
 	// scan replaces how the project scanner reads folders and times its
 	// rounds; tests only.
 	scan *scanSeams
+	// beforeRelayStart observes the exact boundary before remote admission; tests only.
+	beforeRelayStart func(*Server)
 }
 
 // gitVersion reports the installed git version; tests replace it.
@@ -285,9 +287,6 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if firstStart && o.DetectAgents != nil {
 		s.detectAtFirstStart()
 	}
-	if err = s.initRelay(); err != nil {
-		return nil, fmt.Errorf("open relay: %w", err)
-	}
 	s.proxyTransport = proxy.NewTransport()
 	s.mux = s.routes()
 	s.startMCPRelay()
@@ -299,6 +298,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.background(s.scan.run)
 	s.background(s.runImageSweep)
 	s.background(s.runProxySweep)
+	if err = s.initRelay(); err != nil {
+		return nil, fmt.Errorf("open relay: %w", err)
+	}
 	return s, nil
 }
 
