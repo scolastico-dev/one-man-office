@@ -48,8 +48,8 @@ func (e *Engine) CheckExport(ctx context.Context, a board.Actor, n int64) error 
 }
 
 // checkExportsMerged judges a complete round from fetched remote target
-// snapshots. Recorded commits survive branch deletion and are independent of
-// any branch an agent or the user has moved since export.
+// snapshots. Recorded commits survive branch deletion; the recorded export
+// branch can also provide evidence after a rebase or follow-up commits.
 func (e *Engine) checkExportsMerged(ctx context.Context) {
 	e.exportCheckMu.Lock()
 	defer e.exportCheckMu.Unlock()
@@ -150,6 +150,9 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 				continue
 			}
 			contained, err := e.git.ExportContained(proj.Path, p.Start, p.ExportCommit, r.commit)
+			if err == nil && !contained {
+				contained, err = e.changedExportContained(proj.Path, p, r.commit)
+			}
 			if err != nil {
 				failure = fmt.Errorf("project %s: %w", p.ID, err)
 			}
@@ -195,6 +198,34 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 			delete(e.exportCheckFailures, key)
 		}
 	}
+}
+
+// changedExportContained checks the current tip of the recorded export branch
+// when the original exported patch could not prove inclusion. A rebase may
+// resolve a conflict differently, and a follow-up may replace exported lines.
+// Compare that tip with the saved target baseline, never the local base branch:
+// the local checkout need not have pulled the remote merge. Keep all saved
+// export and diff commits intact for the round guard and the historical diff.
+func (e *Engine) changedExportContained(repo string, p board.EngineProject, target string) (bool, error) {
+	if p.ExportBranch == "" {
+		return false, nil
+	}
+	if exists, err := e.git.BranchExists(repo, p.ExportBranch); err != nil || !exists {
+		return false, err
+	}
+	tip, err := e.git.RevParse(repo, gitops.BranchRef(p.ExportBranch))
+	if err != nil || tip == p.ExportCommit {
+		return false, err
+	}
+	start, err := e.git.MergeBase(repo, p.ExportTargetCommit, tip)
+	if err != nil {
+		return false, err
+	}
+	// Empty patches and changes already included at export are not evidence.
+	if already, err := e.git.ExportContained(repo, start, tip, p.ExportTargetCommit); err != nil || already {
+		return false, err
+	}
+	return e.git.ExportContained(repo, start, tip, target)
 }
 
 // checkExportsDue schedules nothing while paused, disabled, or without work.

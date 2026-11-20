@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +12,73 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 )
+
+func TestExportMergeAfterBranchChanges(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	for _, change := range []string{"rebase", "extend"} {
+		for _, style := range []string{"merge", "squash"} {
+			t.Run(change+"/"+style, func(t *testing.T) {
+				h := gitHarness(t)
+				commit(t, h.repo, "b.txt", "base\n")
+				n, job, dir, branch := h.exportedTask("Changed export")
+				if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
+					t.Fatal(err)
+				}
+				h.steps(2)
+				recorded := h.ticket(n).Projects[0]
+				remote := h.origin(h.project)
+				landed := filepath.Join(t.TempDir(), "landed")
+				gitRun(t, h.repo, "clone", "-q", "-b", "main", remote, landed)
+				if change == "rebase" {
+					commit(t, landed, "b.txt", "target edit\n")
+				} else {
+					commit(t, landed, "other.txt", "target edit\n")
+				}
+				gitRun(t, landed, "push", "-q", "origin", "main")
+				gitRun(t, dir, "fetch", "-q", "origin", "main")
+				if change == "rebase" {
+					cmd := exec.Command("git", "rebase", "FETCH_HEAD")
+					cmd.Dir = dir
+					if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "CONFLICT") {
+						t.Fatalf("rebase did not conflict: %v\n%s", err, out)
+					}
+					write(t, dir, "b.txt", "resolved export\n")
+					gitRun(t, dir, "add", "b.txt")
+					gitRun(t, dir, "commit", "-q", "--no-edit")
+					gitRun(t, dir, "rebase", "--continue")
+				} else {
+					commit(t, dir, "b.txt", "extended export\n")
+				}
+				gitRun(t, dir, "push", "-q", "--force-with-lease=refs/heads/"+branch+":"+recorded.ExportCommit, "origin", "HEAD:refs/heads/"+branch)
+				// A changed branch and an advanced target alone prove no merge.
+				h.e.checkExportsMerged(h.ctx)
+				if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
+					t.Fatalf("unmerged changed branch completed: %+v", got.TicketSummary)
+				}
+				gitRun(t, landed, "fetch", "-q", "origin", "refs/heads/"+branch)
+				if style == "merge" {
+					gitRun(t, landed, "merge", "-q", "--no-ff", "-m", "merge changed export", "FETCH_HEAD")
+				} else {
+					gitRun(t, landed, "merge", "--squash", "FETCH_HEAD")
+					gitRun(t, landed, "commit", "-q", "-m", "squash changed export")
+				}
+				commit(t, landed, "later.txt", "later target work\n")
+				gitRun(t, landed, "push", "-q", "origin", "main", ":refs/heads/"+branch)
+				before := gitRun(t, h.repo, "show-ref", "--heads")
+				h.e.checkExportsMerged(h.ctx)
+				if got := h.ticket(n); got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported || !got.ExportMerged {
+					t.Fatalf("changed export merge not detected: %+v", got.TicketSummary)
+				}
+				if got := h.ticket(n).Projects[0]; got.ExportCommit != recorded.ExportCommit || got.StartCommit != recorded.StartCommit || got.EndCommit != recorded.EndCommit {
+					t.Fatal("merge check rewrote the recorded export or diff")
+				}
+				if got := gitRun(t, h.repo, "show-ref", "--heads"); got != before {
+					t.Fatal("merge check moved local branches")
+				}
+			})
+		}
+	}
+}
 
 // A check must use remote target content, including rewritten commits, and
 // retain the pushed commit after the remote removes the feature branch.

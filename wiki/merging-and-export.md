@@ -112,14 +112,19 @@ exported]".
 
 **Checking for a merge**: omo checks the remote target branches with Git,
 without calling a forge API. It uses the remote, target branch and reviewed
-commit recorded when the work was exported, so later configuration or local
-branch changes do not change what is checked. Fetching the recorded target
-keeps the checkout, index, local branches and remote-tracking branches intact.
-A normal merge can be found by
-commit ancestry; squash and rebase merges can be found by checking that the
-exported content is present. These content checks use Git's built-in text
-merge independently of the project's merge-driver policies. Content checks
-are conservative: later rewrites,
+commit recorded when the work was exported, so later configuration changes
+do not redirect the check. Fetching the recorded target keeps the checkout,
+index, local branches and remote-tracking branches intact.
+A normal merge can be found by commit ancestry; squash and rebase merges can
+be found by checking that the exported content is present. If the original
+commit does not prove inclusion, omo also checks the current local tip of the
+recorded exported branch. This detects work rebased with conflict resolutions
+or extended by follow-up commits before merging, including squash merges.
+The original export and diff records stay intact, and remain usable if the
+branch is deleted. Changes made only in another clone must also be available
+on the local exported branch for this fallback. These content checks use Git's
+built-in text merge independently of the project's merge-driver policies.
+Content checks are conservative: later rewrites,
 reverts or conflicts can leave a merged ticket waiting. A failed or unavailable
 remote also leaves the ticket waiting.
 
