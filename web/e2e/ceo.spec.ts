@@ -222,6 +222,7 @@ test.describe('with a CEO', () => {
     const controlHeight = await toolbar.locator('[data-ceo-new]').evaluate(el => el.getBoundingClientRect().height)
     expect(toolbarHeight).toBeLessThanOrEqual(controlHeight + 1)
     const roles = await omo.api<{ name: string; models: string[]; assignment: string }[]>('GET', '/api/roles')
+    // configureAgents explicitly sets round robin; choosing a model must preserve it.
     expect(roles.find((r) => r.name === 'ceo')).toMatchObject({ models: ['fake/second'], assignment: 'round_robin' })
     // The running CEO keeps its model until it starts again.
     expect((await liveCeos(omo)).map((s) => s.model)).toEqual(['fake/default'])
