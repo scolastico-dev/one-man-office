@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -448,6 +449,39 @@ func TestSuperSmartResetFallbackAndTies(t *testing.T) {
 			c := modelChoice{role: role("developer", api.AssignmentSuperSmart, "f/a", "f/b")}
 			if got := picks(t, newPicker(nil), api.RoleDeveloper, c, fakeCatalog{"f/a": true, "f/b": true}, use, 2); got != tc.want+","+tc.want {
 				t.Errorf("%s: got %s, want %s twice", tc.name, got, tc.want)
+			}
+		}
+	})
+}
+
+func TestSuperSmartConfigurableResetWeight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		resetA, resetB := now.Add(time.Hour), now.Add(24*time.Hour)
+		usedA, usedB := 80.0, 20.0
+		use := usageFunc(func(id string) api.ModelUsage {
+			if id == "f/a" {
+				return api.ModelUsage{State: api.UsageOK, UsedPercent: &usedA, ResetsAt: &resetA}
+			}
+			return api.ModelUsage{State: api.UsageOK, UsedPercent: &usedB, ResetsAt: &resetB}
+		})
+		for _, tc := range []struct{ weight, want string }{
+			{"", "f/a"}, {"24h", "f/a"}, {"1h", "f/b"}, {"0s", "f/b"}, {"168h", "f/a"},
+		} {
+			r := role("developer", api.AssignmentSuperSmart, "f/a", "f/b")
+			if tc.weight != "" {
+				if err := json.Unmarshal([]byte(`{"super_smart_reset_weight":"`+tc.weight+`"}`), &r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c := modelChoice{role: r}
+			cat := fakeCatalog{"f/a": true, "f/b": true}
+			if got := mustPickUsing(t, newPicker(nil), api.RoleDeveloper, c, cat, use); got != tc.want {
+				t.Fatalf("weight %q: got %s, want %s", tc.weight, got, tc.want)
+			}
+			c.role.Assignment = api.AssignmentSmart
+			if got := mustPickUsing(t, newPicker(nil), api.RoleDeveloper, c, cat, use); got != "f/b" {
+				t.Fatalf("smart must ignore reset weight: %s", got)
 			}
 		}
 	})

@@ -10,6 +10,7 @@ import { computed, ref, toRef, useId } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Model } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
+import DurationField from '../../../components/ui/DurationField.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import ReorderList from '../../../components/ui/ReorderList.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
@@ -70,13 +71,21 @@ const options = computed(() => addOptions((props.models as Model[] | null) ?? []
 const selected = computed(() => (options.value.some((o) => o.value === addChoice.value) ? addChoice.value : (options.value[0]?.value ?? '')))
 const modeOptions = computed(() => assignmentOptions(draft.value?.assignment ?? ''))
 const meaning = computed(() => assignmentMeaning(draft.value?.assignment ?? ''))
+const resetWeight = computed({
+  get: () => draft.value?.super_smart_reset_weight ?? '',
+  set: (value: string) => {
+    if (draft.value === null) return
+    if (value === '') delete draft.value.super_smart_reset_weight
+    else draft.value.super_smart_reset_weight = value
+  },
+})
 
 const modelsError = computed(() => {
   const found = Object.entries(r.value.fieldErrors.value).find(([field]) => field === 'models' || modelErrorIndex(field) >= 0)
   return found === undefined ? null : { message: found[1], index: modelErrorIndex(found[0]) }
 })
 const assignmentError = computed(() => r.value.fieldErrors.value['assignment'])
-const unplaced = computed(() => unplacedErrors(r.value.fieldErrors.value, (f) => f === 'assignment' || f === 'models' || modelErrorIndex(f) >= 0))
+const unplaced = computed(() => unplacedErrors(r.value.fieldErrors.value, (f) => f === 'assignment' || f === 'models' || modelErrorIndex(f) >= 0 || (f === 'super_smart_reset_weight' && draft.value?.assignment === 'super_smart')))
 const mark = (id: string) => markOf(id, known.value)
 const noteOf = (id: string, note: string | undefined) =>
   mark(id) === 'missing' ? 'No profile defines this model. Remove it, or add the model to a profile on the Agents page.' : (note ?? '')
@@ -159,6 +168,16 @@ function add() {
           :error="assignmentError"
           data-assignment
           @update:model-value="draft.assignment = $event"
+        />
+        <DurationField
+          v-if="draft.assignment === 'super_smart'"
+          v-model="resetWeight"
+          label="Reset weight"
+          placeholder="24h"
+          hint="Higher values favor capacity that resets soon more strongly. Leave empty for 24h; 0s removes the reset bonus."
+          :examples="['6h', '24h', '168h']"
+          :error="resource.fieldErrors.value['super_smart_reset_weight']"
+          data-reset-weight
         />
       </template>
     </FormSection>

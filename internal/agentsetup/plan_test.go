@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -167,6 +168,24 @@ func TestPlanClaudeOnly(t *testing.T) {
 		r := roleByName(t, p, name)
 		if !reflect.DeepEqual(r.Models, w.models) || r.Assignment != w.assignment {
 			t.Errorf("%s = %+v, want %+v", name, r, w)
+		}
+	}
+}
+
+func TestPlanKeepsResetWeightForEmptyRoles(t *testing.T) {
+	for _, name := range []string{"ceo", "pm", "developer", "reviewer"} {
+		for _, weight := range []api.Duration{0, api.Duration(6 * time.Hour)} {
+			t.Run(name+"/"+time.Duration(weight).String(), func(t *testing.T) {
+				roles := []api.RoleSettings{{Name: name, Models: []string{}, Assignment: api.AssignmentSuperSmart, SuperSmartResetWeight: &weight}}
+				p := Detect(lookup("claude"), nil, roles)
+				got := roleByName(t, p, name)
+				if len(got.Models) == 0 {
+					t.Fatal("detection did not populate the role")
+				}
+				if got.SuperSmartResetWeight == nil || *got.SuperSmartResetWeight != weight {
+					t.Fatalf("detection lost weight %s: %+v", time.Duration(weight), got)
+				}
+			})
 		}
 	}
 }

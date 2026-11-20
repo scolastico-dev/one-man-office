@@ -327,6 +327,9 @@ type RoleSettings struct {
 	Name       string   `yaml:"-" json:"name"`
 	Models     []string `yaml:"models" json:"models"`
 	Assignment string   `yaml:"assignment" json:"assignment"`
+	// SuperSmartResetWeight scales super_smart's reset urgency bonus. Nil
+	// means 24 hours; zero disables the bonus. Other modes ignore it.
+	SuperSmartResetWeight *Duration `yaml:"super_smart_reset_weight,omitempty" json:"super_smart_reset_weight,omitempty"`
 	// Revision identifies the content of the role's file for If-Match. It is
 	// ignored in PUT bodies.
 	Revision string `yaml:"-" json:"revision,omitempty"`

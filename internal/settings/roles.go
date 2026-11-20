@@ -50,6 +50,9 @@ func (s *Store) roleKind() *kind {
 			if err := validateAssignment(r.Assignment); err != nil {
 				return err
 			}
+			if err := validateResetWeight(r); err != nil {
+				return err
+			}
 			s.roles[name] = r
 			return nil
 		},
@@ -69,10 +72,21 @@ func emptyRole(name string) Role {
 
 func normalizeRole(r Role) Role {
 	r.Models = cloneStrings(r.Models)
+	if r.SuperSmartResetWeight != nil {
+		weight := *r.SuperSmartResetWeight
+		r.SuperSmartResetWeight = &weight
+	}
 	if r.Assignment == "" {
 		r.Assignment = api.DefaultAssignment(r.Name)
 	}
 	return r
+}
+
+func validateResetWeight(r Role) error {
+	if r.SuperSmartResetWeight != nil && *r.SuperSmartResetWeight < 0 {
+		return fieldErr("super_smart_reset_weight", "super smart reset weight must not be negative")
+	}
+	return nil
 }
 
 func validateAssignment(a string) error {
@@ -135,7 +149,7 @@ func (s *Store) Role(name string) (Role, bool) {
 	return normalizeRole(r), true
 }
 
-// PutRoleIf replaces a role's models and assignment mode. Unknown roles give
+// PutRoleIf replaces a role's model assignment settings. Unknown roles give
 // not_found; unknown model ids and an invalid assignment give validation.
 // It is guarded by a revision: the role's file is read again
 // first, and when rev is not empty and differs from the file's revision the
@@ -147,6 +161,9 @@ func (s *Store) PutRoleIf(rev string, r Role) error {
 	r = normalizeRole(r)
 	r.Revision = ""
 	if err := validateAssignment(r.Assignment); err != nil {
+		return apiError(api.CodeValidation, err)
+	}
+	if err := validateResetWeight(r); err != nil {
 		return apiError(api.CodeValidation, err)
 	}
 	data, err := encodeYAML(r)

@@ -691,6 +691,8 @@ export interface RoleSettings {
   name: string
   models: string[]
   assignment: string
+  /** Reset urgency weight for super smart; omitted means 24h, 0s disables the bonus. */
+  super_smart_reset_weight?: Duration
   /** Identifies the role's file, for If-Match; ignored in PUT bodies. */
   revision?: string
 }

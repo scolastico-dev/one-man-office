@@ -27,7 +27,12 @@ export function modelItems(models: readonly Model[], list: readonly string[]): P
 
 /** The CEO role's settings with `id` as its only model, the assignment kept. */
 export function withOnlyModel(role: RoleSettings, id: string): RoleSettings {
-  return { name: role.name, models: [id], assignment: role.assignment }
+  return {
+    name: role.name,
+    models: [id],
+    assignment: role.assignment,
+    ...(role.super_smart_reset_weight == null ? {} : { super_smart_reset_weight: role.super_smart_reset_weight }),
+  }
 }
 
 /** Whether the running CEO runs a model its list no longer names: the list takes effect at its next start. */

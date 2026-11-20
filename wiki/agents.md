@@ -141,11 +141,24 @@ random for the reviewer, and failover for the CEO. Existing explicit assignments
 are kept.
 
 Super smart scores each eligible metered model by remaining percentage ×
-(1 + 24 hours ÷ time until reset), using the window reported for that model
+(1 + reset weight ÷ time until reset), using the window reported for that model
 (the fullest window below its limits). Time until reset has a one-second floor.
 Missing or elapsed reset times add no bonus; without reset times this is smart.
-For example, 80% used with 24 hours left scores 40, while 20% used with 7 days
-left scores about 91. After 20 hours, those scores become 140 and about 93,
+
+Set **Reset weight** under a role's Super smart assignment in **Settings →
+Roles**, or set `super_smart_reset_weight` in that role's YAML file. The value
+is a non-negative duration, such as `6h`, `24h`, or `168h`. Higher values favor
+capacity that resets soon more strongly. Leave it empty in the form or omit the
+YAML key to use **24h**. Set `0s` to remove the reset bonus and score like smart.
+Other assignment modes ignore the weight and keep it for switching back.
+
+```yaml
+assignment: super_smart
+super_smart_reset_weight: 6h
+```
+
+With the default 24h weight, for example, 80% used with 24 hours left scores 40,
+while 20% used with 7 days left scores about 91. After 20 hours, those scores become 140 and about 93,
 so the first profile is preferred before its allowance resets. Soft and hard
 usage limits still apply. Ties keep the role's order, and unknown or unmetered
 models take turns with the best metered model, just as in smart.
