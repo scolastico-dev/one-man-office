@@ -3,6 +3,8 @@ mod android_auth;
 #[cfg(target_os = "android")]
 mod android_notifications;
 mod credentials;
+#[cfg(not(target_os = "android"))]
+mod desktop;
 #[cfg(target_os = "macos")]
 mod macos_auth;
 mod platform;
@@ -40,6 +42,8 @@ struct Session {
 struct Shell {
     root: PathBuf,
     session: Mutex<Session>,
+    #[cfg(not(target_os = "android"))]
+    desktop: desktop::Desktop,
 }
 #[derive(Serialize)]
 struct Setup {
@@ -61,6 +65,8 @@ struct Settings {
     notification_mode: NotificationMode,
     remember: bool,
     secret: String,
+    #[serde(default)]
+    stop_with_window: bool,
     #[serde(default)]
     reset_identity: bool,
 }
@@ -112,122 +118,166 @@ async fn get_setup(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
 #[tauri::command]
 async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> Result<Setup> {
     require_setup(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<Shell>();
-        let mut s = state
-            .session
-            .lock()
-            .map_err(|_| "Connection state is unavailable.")?;
-        let mut config = Config {
-            id: Config::new_id(),
-            mode: settings.mode,
-            origin: settings.origin,
-            auth: settings.auth,
-            username: settings.username,
-            notifications: settings.notifications,
-            notification_mode: settings.notification_mode,
-            remember: settings.remember,
-        };
-        config.validate(cfg!(target_os = "android"))?;
-        if config.mode == Mode::Local {
-            return local_mode_unavailable();
-        }
-        let prior = s.config.as_ref();
-        let same = prior.is_some_and(|p| {
-            p.origin == config.origin && p.auth == config.auth && p.username == config.username
-        });
-        if same && !settings.reset_identity {
-            config.id = prior.expect("matching prior config").id.clone();
-        }
-        let secret = if settings.secret.is_empty() && config.auth != Auth::None && same {
-            if let Some(active) = s.active.as_ref() {
-                active.secret.clone()
-            } else if prior.is_some_and(|p| p.remember) {
-                credentials::read(&prior.expect("saved prior config").id)?
-            } else {
-                settings.secret
-            }
+    if settings.mode == Mode::Local {
+        return Err(if cfg!(target_os = "android") {
+            "Android requires an external omo host."
         } else {
-            settings.secret
-        };
-        #[cfg(target_os = "android")]
-        if config.notifications {
-            use tauri_plugin_notification::NotificationExt;
-            if app
-                .notification()
-                .request_permission()
-                .map_err(|_| "Cannot request Android notification permission.")?
-                != tauri::plugin::PermissionState::Granted
-            {
-                return Err(
-                    "Enable notifications for omo ui in Android Settings to use native polling."
-                        .into(),
-                );
-            }
+            "Use the local connection action."
         }
-        let client = BoardClient::new(config.clone(), secret.clone())?;
-        let polling = client.connect(cfg!(target_os = "android"))?;
+        .into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
         #[cfg(not(target_os = "android"))]
-        let mut delivery: Delivery =
-            read_json(&state.root, &format!("{}.json", config.id))?.unwrap_or_default();
+        let state = app.state::<Shell>();
         #[cfg(not(target_os = "android"))]
-        if polling && delivery.cursor.is_none() {
-            client.poll(
-                &mut delivery,
-                |_| Err("Unexpected notification during baseline.".into()),
-                |d| write_json(&state.root, &format!("{}.json", config.id), d),
-            )?;
-        }
-        if config.remember && config.auth != Auth::None {
-            credentials::save(&config.id, &secret)?;
-        }
-        // An explicit opt-out must remove an earlier saved secret, not just hide its checkbox.
-        if let Some(old) = prior.filter(|p| p.remember && p.auth != Auth::None) {
-            if !config.remember || old.id != config.id {
-                credentials::forget(&old.id)?;
-            }
-        }
-        #[cfg(target_os = "android")]
-        android_worker(&app).call::<serde_json::Value>(
-            "configure",
-            serde_json::json!({
-                "config": config, "secret": secret, "root": state.root, "enabled":polling,
-            }),
-        )?;
-        save_config(&state.root, &config)?;
-        windows::close_boards(&app);
-        let board = windows::open_board(&app, &config, &secret, polling, None)?;
-        #[cfg(not(target_os = "android"))]
-        let board_label = board.label().to_string();
-        #[cfg(target_os = "android")]
-        let _ = board;
-        s.config = Some(config);
-        s.active = Some(Connection {
-            client,
-            secret,
-            #[cfg(not(target_os = "android"))]
-            delivery,
-            polling,
-            #[cfg(not(target_os = "android"))]
-            board_label,
-        });
-        s.error.clear();
-        s.recovery = None;
-        drop(s);
-        #[cfg(not(target_os = "android"))]
-        if let Some(setup) = app.get_webview_window("setup") {
-            let _ = setup.hide();
-        }
-        snapshot(&state, &app)
+        let _operation = state
+            .desktop
+            .operation
+            .lock()
+            .map_err(|_| "Local operation state is unavailable.")?;
+        open_connection(&app, settings, None)
     })
     .await
     .map_err(|_| "The connection could not be opened.")?
 }
+fn open_connection(
+    app: &AppHandle,
+    settings: Settings,
+    local_config: Option<Config>,
+) -> Result<Setup> {
+    let state = app.state::<Shell>();
+    let mut s = state
+        .session
+        .lock()
+        .map_err(|_| "Connection state is unavailable.")?;
+    let mut config = local_config.unwrap_or_else(|| Config {
+        id: Config::new_id(),
+        mode: settings.mode,
+        origin: settings.origin,
+        auth: settings.auth,
+        username: settings.username,
+        notifications: settings.notifications,
+        notification_mode: settings.notification_mode.clone(),
+        remember: settings.remember,
+        stop_with_window: settings.stop_with_window,
+    });
+    config.notifications = settings.notifications;
+    config.notification_mode = settings.notification_mode;
+    config.remember = settings.remember;
+    config.stop_with_window = settings.stop_with_window;
+    config.validate(cfg!(target_os = "android"))?;
+    let prior = s.config.as_ref();
+    let same = prior.is_some_and(|p| {
+        p.origin == config.origin && p.auth == config.auth && p.username == config.username
+    });
+    if same && !settings.reset_identity {
+        config.id = prior.expect("matching prior config").id.clone();
+    }
+    let secret = if settings.secret.is_empty() && config.auth != Auth::None && same {
+        if let Some(active) = s.active.as_ref() {
+            active.secret.clone()
+        } else if prior.is_some_and(|p| p.remember) {
+            credentials::read(&prior.expect("saved prior config").id)?
+        } else {
+            settings.secret
+        }
+    } else {
+        settings.secret
+    };
+    #[cfg(target_os = "android")]
+    if config.notifications {
+        use tauri_plugin_notification::NotificationExt;
+        if app
+            .notification()
+            .request_permission()
+            .map_err(|_| "Cannot request Android notification permission.")?
+            != tauri::plugin::PermissionState::Granted
+        {
+            return Err(
+                "Enable notifications for omo ui in Android Settings to use native polling.".into(),
+            );
+        }
+    }
+    let client = BoardClient::new(config.clone(), secret.clone())?;
+    let polling = client.connect(cfg!(target_os = "android"))?;
+    #[cfg(not(target_os = "android"))]
+    let mut delivery: Delivery =
+        read_json(&state.root, &format!("{}.json", config.id))?.unwrap_or_default();
+    #[cfg(not(target_os = "android"))]
+    if polling && delivery.cursor.is_none() {
+        client.poll(
+            &mut delivery,
+            |_| Err("Unexpected notification during baseline.".into()),
+            |d| write_json(&state.root, &format!("{}.json", config.id), d),
+        )?;
+    }
+    #[cfg(not(target_os = "android"))]
+    if config.mode == Mode::Direct && state.desktop.release(app, Some(&config.origin))? {
+        // An alternate loopback hostname may identify the server we just stopped.
+        // Verify that the proposed direct board is still available before saving it.
+        client.connect(false)?;
+    }
+    if config.remember && config.auth != Auth::None {
+        credentials::save(&config.id, &secret)?;
+    }
+    // An explicit opt-out must remove an earlier saved secret, not just hide its checkbox.
+    if let Some(old) = prior.filter(|p| p.remember && p.auth != Auth::None) {
+        if !config.remember || old.id != config.id {
+            credentials::forget(&old.id)?;
+        }
+    }
+    #[cfg(target_os = "android")]
+    android_worker(app).call::<serde_json::Value>(
+        "configure",
+        serde_json::json!({
+            "config":config,"secret":secret,"root":state.root,"enabled":polling,
+        }),
+    )?;
+    save_config(&state.root, &config)?;
+    #[cfg(not(target_os = "android"))]
+    state
+        .desktop
+        .stop_with_window
+        .store(config.stop_with_window, std::sync::atomic::Ordering::SeqCst);
+    windows::close_boards(&app);
+    let board = windows::open_board(&app, &config, &secret, polling, None)?;
+    #[cfg(not(target_os = "android"))]
+    let board_label = board.label().to_string();
+    #[cfg(target_os = "android")]
+    let _ = board;
+    s.config = Some(config);
+    s.active = Some(Connection {
+        client,
+        secret,
+        #[cfg(not(target_os = "android"))]
+        delivery,
+        polling,
+        #[cfg(not(target_os = "android"))]
+        board_label,
+    });
+    s.error.clear();
+    s.recovery = None;
+    drop(s);
+    #[cfg(not(target_os = "android"))]
+    if let Some(setup) = app.get_webview_window("setup") {
+        let _ = setup.hide();
+    }
+    snapshot(&state, app)
+}
+
 #[tauri::command]
 async fn disconnect(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
     require_setup(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Shell>();
+        #[cfg(not(target_os = "android"))]
+        let _operation = state
+            .desktop
+            .operation
+            .lock()
+            .map_err(|_| "Local operation state is unavailable.")?;
+        #[cfg(not(target_os = "android"))]
+        state.desktop.release(&app, None)?;
         let mut s = state
             .session
             .lock()
@@ -279,17 +329,74 @@ async fn recover(window: WebviewWindow, app: AppHandle, replay: bool) -> Result<
     .await
     .map_err(|_| "Cannot recover the notification cursor.")?
 }
-fn local_mode_unavailable<T>() -> Result<T> {
-    if cfg!(target_os = "android") {
-        Err("Android requires an external omo host.".into())
-    } else {
-        Err("Local installation and lifecycle are not available in this build. Connect to an existing omo host directly.".into())
-    }
+#[derive(Deserialize)]
+struct LocalSettings {
+    notifications: bool,
+    remember: bool,
+    #[serde(default)]
+    stop_with_window: bool,
 }
 #[tauri::command]
-async fn local_connect(window: WebviewWindow) -> Result<()> {
+async fn local_connect(
+    window: WebviewWindow,
+    app: AppHandle,
+    settings: LocalSettings,
+) -> Result<Setup> {
     require_setup(&window)?;
-    local_mode_unavailable()
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, settings);
+        Err("Android requires an external omo host.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<Shell>();
+            let _operation = state
+                .desktop
+                .operation
+                .lock()
+                .map_err(|_| "Local operation state is unavailable.")?;
+            if state
+                .desktop
+                .exiting
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err("omo is exiting.".into());
+            }
+            state.desktop.stop_with_window.store(
+                settings.stop_with_window,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            // Keep the launch proof before authentication/configuration can fail.
+            // A failed connection still leaves native close/Exit able to clean up.
+            let local = omo_ui_core::local::LocalManager::from_env()?
+                .connect_with_capture(|control| state.desktop.capture(&app, control))?;
+            // An attached replacement retires any earlier launch proof only
+            // after its connection preparation succeeds.
+            state.desktop.capture(&app, local.control.clone())?;
+            desktop::refresh(&app)?;
+            let config = local.config.clone();
+            open_connection(
+                &app,
+                Settings {
+                    mode: Mode::Local,
+                    origin: config.origin.clone(),
+                    auth: config.auth.clone(),
+                    username: config.username.clone(),
+                    secret: local.secret.clone(),
+                    notifications: settings.notifications,
+                    notification_mode: NotificationMode::Background,
+                    remember: settings.remember,
+                    stop_with_window: settings.stop_with_window,
+                    reset_identity: false,
+                },
+                Some(config),
+            )
+        })
+        .await
+        .map_err(|_| "The local connection could not be opened.")?
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -362,6 +469,8 @@ pub fn run() {
             };
             app.manage(Shell {
                 root,
+                #[cfg(not(target_os = "android"))]
+                desktop: desktop::Desktop::default(),
                 session: Mutex::new(Session {
                     config,
                     error,
@@ -422,11 +531,18 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         let h = handle.clone();
-                        let more = tauri::async_runtime::spawn_blocking(move || poll(&h))
-                            .await
-                            .ok()
-                            .and_then(std::result::Result::ok)
-                            .unwrap_or(false);
+                        let more = tauri::async_runtime::spawn_blocking(move || {
+                            if let Err(error) = desktop::refresh(&h) {
+                                if let Ok(mut s) = h.state::<Shell>().session.lock() {
+                                    s.error = error;
+                                }
+                            }
+                            poll(&h)
+                        })
+                        .await
+                        .ok()
+                        .and_then(std::result::Result::ok)
+                        .unwrap_or(false);
                         if !more {
                             tokio::time::sleep(Duration::from_secs(5)).await;
                         }
@@ -435,8 +551,24 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("omo ui could not start");
+        .build(tauri::generate_context!())
+        .expect("omo ui could not start")
+        .run(|app, event| {
+            #[cfg(not(target_os = "android"))]
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if !app
+                    .state::<Shell>()
+                    .desktop
+                    .exiting
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    api.prevent_exit();
+                    desktop::request_close(app, None, omo_ui_core::lifecycle::CloseIntent::Quit);
+                }
+            }
+            #[cfg(target_os = "android")]
+            let _ = (app, event);
+        });
 }
 
 #[cfg(target_os = "android")]

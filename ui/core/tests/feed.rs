@@ -52,6 +52,7 @@ fn fixture(
         notifications: true,
         notification_mode: NotificationMode::Background,
         remember: false,
+        stop_with_window: false,
     };
     (BoardClient::new(c, String::new()).unwrap(), handle)
 }

@@ -19,7 +19,7 @@ function render(state, load = false) {
   current = state;
   if (load && state.config) {
     for (const name of ['mode','origin','auth','username','notification_mode']) field(name).value = state.config[name];
-    for (const name of ['remember','notifications']) field(name).checked = state.config[name];
+    for (const name of ['remember','notifications','stop_with_window']) field(name).checked = state.config[name];
   }
   const localOption = field('mode').querySelector('option[value=local]');
   if (!state.android && localOption) { localOption.hidden = false; localOption.disabled = false; }
@@ -27,6 +27,9 @@ function render(state, load = false) {
     field('mode').querySelector('option[value=local]')?.remove();
     element('mode-label').hidden = true;
     field('mode').value = 'direct';
+    element('stop-with-window-label').hidden = true;
+    element('close-hint').hidden = true;
+    field('stop_with_window').checked = false;
   }
   element('notification-mode-label').hidden = !state.android;
   element('saved-hint').hidden = !(state.connected || state.config?.remember);
@@ -54,9 +57,13 @@ form.addEventListener('change', modes);
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void action(async () => {
-    if (field('mode').value === 'local') { await invoke('local_connect'); return; }
+    if (field('mode').value === 'local') {
+      const settings = Object.fromEntries(['notifications','remember','stop_with_window'].map(name => [name, field(name).checked]));
+      render(await invoke('local_connect', { settings }), true);
+      return;
+    }
     const settings = Object.fromEntries(['mode','origin','auth','username','secret','notification_mode'].map(name => [name, field(name).value]));
-    for (const name of ['notifications','remember','reset_identity']) settings[name] = field(name).checked;
+    for (const name of ['notifications','remember','reset_identity','stop_with_window']) settings[name] = field(name).checked;
     const state = await invoke('connect', { settings });
     field('secret').value = '';
     field('reset_identity').checked = false;

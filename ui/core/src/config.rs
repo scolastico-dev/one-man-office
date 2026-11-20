@@ -42,6 +42,8 @@ pub struct Config {
     #[serde(default)]
     pub notification_mode: NotificationMode,
     pub remember: bool,
+    #[serde(default)]
+    pub stop_with_window: bool,
 }
 impl Config {
     pub fn validate(&mut self, android: bool) -> Result<()> {

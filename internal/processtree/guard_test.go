@@ -14,7 +14,7 @@ import (
 
 // Each exception is a function, not a file-wide permission for new helpers.
 var directLaunches = map[string]string{
-	"internal/service/service.go:StartDetached":              "detached omo server outlives the invoking CLI",
+	"internal/service/service.go:startDetached":              "detached omo server outlives the invoking CLI",
 	"internal/childenv/childenvtest/build.go:GoBuild":        "test setup runs the host Go compiler; processtree's own tests import childenvtest, so it cannot import processtree",
 	"internal/fakeagent/ops.go:git":                          "scripted test agent",
 	"internal/fakeagent/ops.go:opShBlock":                    "scripted test agent",
