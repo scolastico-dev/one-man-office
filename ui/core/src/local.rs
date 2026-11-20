@@ -312,6 +312,7 @@ impl LocalManager {
             auth: Auth::None,
             username: String::new(),
             notifications: true,
+            notification_mode: crate::NotificationMode::Background,
             remember: false,
             stop_with_window: false,
         };

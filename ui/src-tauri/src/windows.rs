@@ -1,9 +1,10 @@
 use omo_ui_core::{Config, Result};
+#[cfg(not(target_os = "android"))]
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    webview::{NewWindowFeatures, NewWindowResponse},
-};
+use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, webview::NewWindowFeatures};
+#[cfg(not(target_os = "android"))]
+use tauri::{WebviewUrl, webview::NewWindowResponse};
+#[cfg(not(target_os = "android"))]
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 pub fn show_setup(app: &AppHandle) {
@@ -139,13 +140,20 @@ pub fn open_board(
     app: &AppHandle,
     config: &Config,
     secret: &str,
-    _native: bool,
+    native: bool,
     _features: Option<NewWindowFeatures>,
 ) -> Result<WebviewWindow> {
     let window = app
         .get_webview_window("setup")
         .ok_or("Main WebView is unavailable.")?;
     crate::platform::configure(&window, config, secret)?;
+    crate::android_worker(app).call::<serde_json::Value>(
+        "setBridge",
+        serde_json::json!({
+            "origin":config.origin.trim_end_matches('/'),
+            "script":bridge(config, secret, native),
+        }),
+    )?;
     window
         .navigate(crate::platform::board_url(config, secret)?)
         .map_err(|_| "Cannot open the board.")?;
@@ -223,7 +231,7 @@ pub fn create_setup(app: &AppHandle) -> tauri::Result<WebviewWindow> {
                     let state = app.state::<crate::Shell>();
                     if let Ok(s) = state.session.lock() {
                         if let Some(c) = s.active.as_ref() {
-                            let _ = window.eval(bridge(&c.client.config, &c.secret, false));
+                            let _ = window.eval(bridge(&c.client.config, &c.secret, c.polling));
                             let _ = window.eval(include_str!("mobile-navigation.js"));
                         }
                     }

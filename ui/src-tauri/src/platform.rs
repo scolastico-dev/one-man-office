@@ -104,7 +104,10 @@ pub fn configure(window: &WebviewWindow, config: &Config, secret: &str) -> Resul
     #[cfg(target_os = "macos")]
     crate::macos_auth::configure(window, config, secret)?;
     #[cfg(target_os = "android")]
-    crate::android_auth::configure(config, secret);
+    {
+        let _ = window;
+        crate::android_auth::configure(config, secret);
+    }
     Ok(())
 }
 

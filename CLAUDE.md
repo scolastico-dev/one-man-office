@@ -548,7 +548,16 @@ behavior (`stop_with_window`, default false). Attached/direct servers never gain
 ownership; replacement instances cannot be stopped by an earlier capability.
 After control failure, native lifecycle probes the normal run.lock before
 retiring stale crash metadata; a still-held lock preserves ownership on error.
-Android refuses local mode; notification scheduling is not advertised.
+Android refuses local mode and uses the `ui/notifications` native plugin:
+WorkManager periodic GET polling (15 minutes or later) or a user-started dataSync
+foreground service with an ongoing notification and five-second polls. Android
+15+ dataSync runtime limits apply; timeout stops the service and reports status.
+Authenticated Android polling requires remembered credentials. Work configuration
+is Keystore encrypted; jobs/intents carry no credentials. Both modes use the
+Rust delivery journal through JNI, without a WebView or Tauri event loop. The
+checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
+android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
+./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
 configured board documents while native polling is enabled. Tests: core Rust,

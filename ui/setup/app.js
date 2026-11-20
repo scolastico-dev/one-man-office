@@ -18,7 +18,7 @@ function modes() {
 function render(state, load = false) {
   current = state;
   if (load && state.config) {
-    for (const name of ['mode','origin','auth','username']) field(name).value = state.config[name];
+    for (const name of ['mode','origin','auth','username','notification_mode']) field(name).value = state.config[name];
     for (const name of ['remember','notifications','stop_with_window']) field(name).checked = state.config[name];
   }
   const localOption = field('mode').querySelector('option[value=local]');
@@ -27,15 +27,15 @@ function render(state, load = false) {
     field('mode').querySelector('option[value=local]')?.remove();
     element('mode-label').hidden = true;
     field('mode').value = 'direct';
-    element('notifications-label').hidden = true;
     element('stop-with-window-label').hidden = true;
     element('close-hint').hidden = true;
-    field('notifications').checked = false;
+    field('stop_with_window').checked = false;
   }
+  element('notification-mode-label').hidden = !state.android;
   element('saved-hint').hidden = !(state.connected || state.config?.remember);
   element('disconnect').hidden = !state.connected;
   element('recovery').hidden = !state.recovery;
-  element('status').textContent = state.connected ? (state.polling ? 'Connected. System notifications are active.' : 'Connected. Native notification polling is off or unavailable on this server.') : 'Choose your board to connect.';
+  element('status').textContent = state.connected ? (state.error ? 'Connected. Notification status needs attention.' : state.polling ? 'Connected. System notifications are active.' : 'Connected. Native notification polling is off or unavailable on this server.') : 'Choose your board to connect.';
   element('problem').textContent = state.error;
   element('problem').hidden = !state.error;
   modes();
@@ -62,7 +62,7 @@ form.addEventListener('submit', (event) => {
       render(await invoke('local_connect', { settings }), true);
       return;
     }
-    const settings = Object.fromEntries(['mode','origin','auth','username','secret'].map(name => [name, field(name).value]));
+    const settings = Object.fromEntries(['mode','origin','auth','username','secret','notification_mode'].map(name => [name, field(name).value]));
     for (const name of ['notifications','remember','reset_identity','stop_with_window']) settings[name] = field(name).checked;
     const state = await invoke('connect', { settings });
     field('secret').value = '';

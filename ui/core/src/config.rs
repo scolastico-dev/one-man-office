@@ -22,6 +22,13 @@ pub enum Auth {
     Token,
     Basic,
 }
+#[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationMode {
+    #[default]
+    Background,
+    Foreground,
+}
 /// Public configuration only. Secrets live in the native credential store or session memory.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +39,8 @@ pub struct Config {
     pub auth: Auth,
     pub username: String,
     pub notifications: bool,
+    #[serde(default)]
+    pub notification_mode: NotificationMode,
     pub remember: bool,
     #[serde(default)]
     pub stop_with_window: bool,
@@ -40,6 +49,9 @@ impl Config {
     pub fn validate(&mut self, android: bool) -> Result<()> {
         if android && self.mode == Mode::Local {
             return Err("Android requires an external omo host.".into());
+        }
+        if android && self.notifications && self.auth != Auth::None && !self.remember {
+            return Err("Android notifications require Remember credentials so checks can survive process restarts.".into());
         }
         Uuid::parse_str(&self.id).map_err(|_| "Invalid connection identity.")?;
         if self.origin.contains('\\') || self.origin.chars().any(char::is_control) {

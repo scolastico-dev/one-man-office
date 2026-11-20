@@ -1,8 +1,8 @@
 use crate::Result;
 use serde::Deserialize;
-pub fn features(android: bool, notifications: bool) -> Vec<String> {
+pub fn features(_android: bool, notifications: bool) -> Vec<String> {
     let mut out = vec!["ui.capabilities.v1".into()];
-    if !android && notifications {
+    if notifications {
         out.extend([
             "ui.notifications.poll.v1".into(),
             "ui.notifications.system.v1".into(),
@@ -175,7 +175,7 @@ impl BoardClient {
             Some(serde_json::json!({"features":features(android,self.config.notifications)})),
         )?;
         let supported = polling_supported(exchange.status, &exchange.body)?;
-        Ok(supported && !android && self.config.notifications)
+        Ok(supported && self.config.notifications)
     }
     pub fn poll(
         &self,
