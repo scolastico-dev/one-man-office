@@ -57,7 +57,9 @@ func useLongTempRoot(t *testing.T) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+	// testing.T.TempDir uses GOTMPDIR independently of the platform's
+	// os.TempDir variables. Override both before the first t.TempDir call.
+	for _, key := range []string{"GOTMPDIR", "TMPDIR", "TMP", "TEMP"} {
 		t.Setenv(key, root)
 	}
 	longReasons = true

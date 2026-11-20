@@ -178,6 +178,16 @@ in the shared temporary folder (`tmpdir()`, `process.pid`), and when
 `t.TempDir()` / `t.Cleanup` in the test that uses the resource, never a package
 variable or a deferred removal in a parent of parallel subtests.
 
+Go temporary-root fixtures must distinguish `os.TempDir()` (the platform's
+OS temporary-directory rules) from `testing.T.TempDir()` and Go builds
+(`GOTMPDIR`, falling back to the OS root when empty). The engine's long-reason
+fixture overrides `GOTMPDIR` as well as `TMPDIR`, `TMP` and `TEMP`, before the
+first `t.TempDir()` call caches its parent, and restores them through `t.Setenv`.
+It keeps the shorter Windows root budget while requiring reasons to exceed
+the 200-rune summary budget and preserving the exact full comment. Fixtures
+testing only OS allocation, such as plugin task temporary-directory leases,
+keep Go's temporary root independent.
+
 ### Gates, skips and missing programs
 
 A test is never skipped to get green. The only skip allowed is one single
