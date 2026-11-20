@@ -220,7 +220,14 @@ func (p *picker) pick(role api.Role, c modelChoice, cat modelCatalog, use usageF
 	case api.AssignmentFailover:
 		return nextEligible(distinctModels(models), max(c.attempt, 0), use), nil
 	case api.AssignmentSmart, api.AssignmentSuperSmart:
-		return p.pickSmart(role, distinctModels(ok), use, c.role.Assignment == api.AssignmentSuperSmart), nil
+		var resetWeight time.Duration
+		if c.role.Assignment == api.AssignmentSuperSmart {
+			resetWeight = 24 * time.Hour
+			if c.role.SuperSmartResetWeight != nil {
+				resetWeight = time.Duration(*c.role.SuperSmartResetWeight)
+			}
+		}
+		return p.pickSmart(role, distinctModels(ok), use, resetWeight), nil
 	default: // round_robin and anything unknown
 		return p.next(role, models, use), nil
 	}
@@ -260,11 +267,11 @@ func (p *picker) next(role api.Role, models []string, use usageFunc) string {
 // metered model with the highest capacity score (the first listed on a tie) takes
 // turns with the unmetered and unknown models through the role's cursor.
 // Repeats in the role's list do not matter. p.mu is held.
-// With resetAware, remaining capacity is multiplied by 1 + 24h / time to
-// reset: it retains smart's capacity baseline, with an increasing urgency
+// With a positive resetWeight, remaining capacity is multiplied by
+// 1 + resetWeight / time to reset: it retains smart's capacity baseline, with an increasing urgency
 // bonus as reset approaches. Missing/elapsed resets give no bonus; Evaluate
 // already treats elapsed windows as empty. A 1s floor bounds the bonus.
-func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc, resetAware bool) string {
+func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc, resetWeight time.Duration) string {
 	best, bestScore := "", 0.0
 	now := time.Now()
 	var turns []string
@@ -275,8 +282,8 @@ func (p *picker) pickSmart(role api.Role, ok []string, use usageFunc, resetAware
 		}
 		if u.State == api.UsageOK && u.UsedPercent != nil {
 			score := 100 - *u.UsedPercent
-			if resetAware && u.ResetsAt != nil && u.ResetsAt.After(now) {
-				score *= 1 + float64(24*time.Hour)/float64(max(u.ResetsAt.Sub(now), time.Second))
+			if resetWeight > 0 && u.ResetsAt != nil && u.ResetsAt.After(now) {
+				score *= 1 + float64(resetWeight)/float64(max(u.ResetsAt.Sub(now), time.Second))
 			}
 			if best == "" || score > bestScore {
 				best, bestScore = id, score

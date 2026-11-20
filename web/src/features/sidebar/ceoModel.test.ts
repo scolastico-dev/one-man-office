@@ -37,6 +37,11 @@ test('a choice makes the model the list’s only entry and keeps the assignment'
   })
 })
 
+test('choosing a CEO model keeps its configured reset weight', () => {
+  const role = { name: 'ceo', models: ['a/x'], assignment: 'super_smart', super_smart_reset_weight: '6h' }
+  expect(withOnlyModel(role, 'c/z')).toEqual({ ...role, models: ['c/z'] })
+})
+
 test('a running CEO on a model the list no longer names starts with another one next time', () => {
   const live = agent({ role: 'ceo', model: 'a/x' })
   expect(startsWithOther(live, ['b/y'])).toBe(true)

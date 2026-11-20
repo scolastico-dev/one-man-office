@@ -1,6 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
-import type { Model } from '../../../api/types'
+import type { Model, RoleSettings } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
 import RolesPage from './RolesPage.vue'
 
@@ -20,10 +20,10 @@ const model = (id: string, selectable = true, description = ''): Model => {
 const MODELS = [model('claude/sonnet', true, 'Everyday'), model('claude/opus'), model('claude/haiku'), model('claude/fable', false)]
 
 /** The Roles page with the developer's role stored as given; `w` is the developer's form. */
-async function open(models: string[], assignment = 'round_robin'): Promise<{ w: Form; page: VueWrapper; h: Harness }> {
+async function open(models: string[], assignment = 'round_robin', extra: Partial<RoleSettings> = {}): Promise<{ w: Form; page: VueWrapper; h: Harness }> {
   const h = await harness()
   h.respond.models = MODELS
-  h.respond.roles = [{ name: 'developer', models, assignment, revision: 'abc123' }]
+  h.respond.roles = [{ name: 'developer', models, assignment, revision: 'abc123', ...extra }]
   h.respond.write = ({ body }) => ok({ ...(body as object), revision: 'def456' })
   const page = await mountWith(h, RolesPage, {})
   mounted = page
@@ -43,6 +43,35 @@ const save = async () => {
   await bar().findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
   await flushPromises()
 }
+
+test('super smart reset weight loads, saves, survives mode changes and can return to the default', async () => {
+  const { w, h } = await open(['claude/sonnet'], 'super_smart', { super_smart_reset_weight: '6h' })
+  const input = () => w.get('input[data-reset-weight]')
+  expect((input().element as HTMLInputElement).value).toBe('6h')
+  await input().setValue('0s')
+  await w.get('select[data-assignment]').setValue('smart')
+  expect(w.find('input[data-reset-weight]').exists()).toBe(false)
+  await save()
+  expect(h.sent.at(-1)?.body).toMatchObject({ super_smart_reset_weight: '0s' })
+  await w.get('select[data-assignment]').setValue('super_smart')
+  expect((input().element as HTMLInputElement).value).toBe('0s')
+  await input().setValue('48h')
+  await save()
+  expect(h.sent.at(-1)?.body).toMatchObject({ super_smart_reset_weight: '48h' })
+  await input().setValue('')
+  await save()
+  expect(h.sent.at(-1)?.body).not.toHaveProperty('super_smart_reset_weight')
+  expect(w.text()).toContain('24h')
+})
+
+test('a reset weight refusal is shown next to the duration input', async () => {
+  const { w, h } = await open([], 'super_smart')
+  await w.get('input[data-reset-weight]').setValue('-1h')
+  h.respond.write = () => refuse('validation', 'Reset weight must not be negative', { field: 'super_smart_reset_weight' })
+  await save()
+  expect(w.get('input[data-reset-weight]').attributes('aria-invalid')).toBe('true')
+  expect(w.text()).toContain('Reset weight must not be negative')
+})
 
 test('the models are shown in the stored order, repeats as weights', async () => {
   const { w } = await open(['claude/sonnet', 'claude/opus', 'claude/sonnet'], 'random')
