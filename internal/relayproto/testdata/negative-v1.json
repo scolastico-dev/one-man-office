@@ -1,0 +1,14 @@
+[
+ {"layer":"control","reason":"duplicate decoded key","json":"{\"v\":1,\"type\":\"host.register\",\"host_id\":\"office\",\"host_\\u0069d\":\"other\"}"},
+ {"layer":"control","reason":"version must be integer one","json":"{\"v\":1.0,\"type\":\"host.register\",\"host_id\":\"office\"}"},
+ {"layer":"control","reason":"unknown case variant","json":"{\"v\":1,\"type\":\"host.register\",\"Host_id\":\"office\"}"},
+ {"layer":"control","reason":"invalid UTF16 surrogate","json":"{\"v\":1,\"type\":\"host.register\",\"host_id\":\"\\ud800\"}"},
+ {"layer":"inner","reason":"padded base64url","json":"{\"v\":1,\"type\":\"pair.commit\",\"aid\":\"AAAAAAAAAAAAAAAAAAAAAA==\",\"C\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}"},
+ {"layer":"inner","reason":"leading-zero sequence","json":"{\"v\":1,\"type\":\"record\",\"session\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"seq\":\"00\",\"ciphertext\":\"AAAAAAAAAAAAAAAAAAAAAA\"}"},
+ {"layer":"plain","reason":"numeric stream id","json":"{\"v\":1,\"type\":\"stream.open\",\"id\":1}"},
+ {"layer":"plain","reason":"unassigned stream parity","json":"{\"v\":1,\"type\":\"stream.open\",\"id\":\"2\"}"},
+ {"layer":"plain","reason":"empty stream chunk","json":"{\"v\":1,\"type\":\"stream.data\",\"id\":\"1\",\"data\":\"\"}"},
+ {"layer":"plain","reason":"unknown stream fields","json":"{\"v\":1,\"type\":\"stream.open\",\"id\":\"1\",\"pin\":\"007026\"}"},
+ {"layer":"page","reason":"notification list must be an array","json":"{\"batch\":null,\"through\":\"0\",\"token\":null,\"notifications\":null,\"more\":false,\"acknowledged\":null}"},
+ {"layer":"page","reason":"error discriminant has no success fields","json":"{\"error\":\"invalid_ack\",\"through\":\"1\"}"}
+]
