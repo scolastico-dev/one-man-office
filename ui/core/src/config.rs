@@ -33,6 +33,8 @@ pub struct Config {
     pub username: String,
     pub notifications: bool,
     pub remember: bool,
+    #[serde(default)]
+    pub stop_with_window: bool,
 }
 impl Config {
     pub fn validate(&mut self, android: bool) -> Result<()> {

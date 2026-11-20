@@ -538,13 +538,23 @@ native HTTP, capabilities and notification cursor/dedup persistence) from
 `src-tauri` (setup-only command ACL, OS credentials, remote WebViews, native
 notifications and platform keyboard/auth settings). Run `npm ci`, `npm run dev`,
 `npm run build` and `npm run check` from `ui/`; that directory's Cargo config
-also supplies the Android Wry auth extension. Desktop local lifecycle is an
-explicit unavailable hook; Android notification scheduling is not advertised.
+also supplies the Android Wry auth extension. Desktop local mode discovers the
+normal runtime/install (including limited GUI PATH), verifies release checksums
+on a missing install, and starts through hidden `omo ui-local start` JSON.
+`service.StartOrAttach` serializes detached launches and reports ownership only
+for its newly ready child. `local.rs` captures the random control capability;
+`desktop.rs` serializes native operations and applies owned-only tray/close/Exit
+behavior (`stop_with_window`, default false). Attached/direct servers never gain
+ownership; replacement instances cannot be stopped by an earlier capability.
+After control failure, native lifecycle probes the normal run.lock before
+retiring stale crash metadata; a still-held lock preserves ownership on error.
+Android refuses local mode; notification scheduling is not advertised.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
 configured board documents while native polling is enabled. Tests: core Rust,
-Node bridge tests, affected board notification tests, and the opt-in isolated
-Linux native probe. Build/extension details and verified platform limits:
+Node bridge tests, affected board notification tests, focused service/CLI tests,
+and the opt-in isolated Linux connection and local lifecycle probes.
+Build/extension details and verified platform limits:
 [omo ui](wiki/ui.md).
 
 ## Native UI protocol

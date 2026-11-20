@@ -30,9 +30,51 @@ username. **Treat as a new server** creates a fresh history when its database
 was replaced. Switching connections closes its board/forward windows. Closing
 the main desktop board exits the app and leaves the external server running.
 
-The desktop setup also offers Local omo as an extension point. This build
-reports that local installation/lifecycle is unavailable. Android exposes only
-direct connection, and native validation refuses local mode too.
+## Local omo and closing the window
+
+On Linux, Windows and macOS, choose **Local omo** and Connect. The app first
+checks the normal `OMO_HOME` (`~/.local/omo`, `%APPDATA%\omo` on Windows).
+If an omo started by autostart, `omo -d` or a terminal already answers its
+private control endpoint, the app attaches even when no executable is on its
+GUI `PATH`. Closing the main window then exits the UI, leaves that server
+running and keeps no tray icon. **Stop an omo server started by this app when
+closing its window** never grants ownership of an attached or direct server.
+
+When nothing runs, the app reuses a normal installation from `OMO_INSTALL_DIR`,
+the installer's default directory, `PATH` or the saved autostart search path.
+If no executable exists, it downloads the matching amd64/arm64 release and
+verifies `SHA256SUMS` before installing into `~/.local/bin` or
+`%LOCALAPPDATA%\Programs\omo` (overridden by `OMO_INSTALL_DIR`). It adds that
+directory to the user's shell profile or Windows user PATH when necessary.
+The resulting `omo`, `omo -d`, `omo stop` and autostart commands work without
+the app. Existing executable installations are reused and unrelated files are
+never overwritten. An older CLI without the native launch interface needs
+`omo update`; legacy omo homes must be migrated with the normal CLI first.
+
+The app starts omo through its normal detached service, using the same home,
+configuration, database and logs. Only the launch that actually started the
+live instance owns it; losing a concurrent start means attaching. Ownership
+is held in memory as the instance's random authenticated control capability,
+never as a PID or a claim on whichever server runs later. A restart loses
+ownership, and closing the UI cannot stop the replacement.
+
+For an owned instance, the default main-window close hides the window and
+retains omo with a tray icon. **Open omo** in the tray reopens the window.
+Enable **Stop an omo server started by this app when closing its window** to
+stop that exact instance and exit instead. Tray **Exit omo and stop local
+server**, the app's Exit menu, Disconnect, and an explicit switch to an
+external host also stop the owned instance. To switch directly to the same
+owned host, disconnect first, then start omo independently. A stop waits for
+normal agent handoff/cleanup; failures leave the app and its ownership proof
+available for retry. Closing Connection while the board is visible leaves
+the board open. Ownership loss removes the tray and restores Connection if
+all windows were hidden. If a crash leaves runtime metadata behind, an unlocked
+normal service lifecycle proves the old instance is gone and allows close,
+Exit or Disconnect to finish. A failed control request while that lock is held
+keeps ownership and reports the error for retry.
+
+Android exposes only direct connection. Native validation and the local
+runtime refuse local start/install there.
 
 ## Notifications and shortcuts
 
@@ -112,14 +154,28 @@ identifier, so changing that identifier also requires updating the JNI export.
 - `ui/src-tauri/src/lib.rs`: the bundled setup's commands are `get_setup`,
   `connect({settings})`, `disconnect`, `recover({replay})` and `local_connect`.
   Settings have `mode`, `origin`, `auth`, `username`, `secret`, `notifications`,
-  `remember` and `reset_identity`. Results contain public configuration, platform,
+  `remember`, `reset_identity` and `stop_with_window` (default false). Results
+  contain public configuration, platform,
   connection/polling status, errors and pending recovery, never credentials.
-  `local_connect` is the explicit desktop lifecycle extension point and currently
-  returns an unavailable error. Android rejects it.
+  `local_connect({settings:{notifications,remember,stop_with_window}})` discovers,
+  installs, attaches or starts the normal desktop omo. Android rejects it.
 - `windows.rs`: remote views, related child windows, the connection menu/button
-  and the main-window close policy. A lifecycle implementation should replace
-  that close policy only after tracking whether the UI owns the server it
-  started. No server process or tray is owned by this shell yet.
+  and window-close dispatch. `desktop.rs` owns the captured local instance,
+  serialized native operations, tray, explicit Exit and conditional shutdown.
+- `ui/core/src/local.rs`: normal executable/home discovery, bounded native
+  downloads, verified installation and captured-instance control.
+  `LocalManager::connect_with_capture` hands its `LocalControl` to the shell
+  before fallible board/authentication preparation, so an unsuccessful connection
+  still has a native cleanup path. Launch capture files stay outside `OMO_HOME`
+  until the normal CLI initializes its layout.
+- `omo ui-local start` is a hidden native CLI interface. It emits one JSON object
+  with `endpoint`, `token`, `url`, `launch_id`, and `owned`; it emits no human
+  startup messages. `owned` is true only for this call's newly ready detached
+  child. The endpoint/token are a private per-run capability; do not log or
+  expose this response to loaded pages. `launch_id` alone is not proof of ownership.
+  Control uses authenticated loopback `GET /status` (204) and `POST /stop` (202),
+  rejecting browser Origin/fetch headers and redirects. Shutdown always uses
+  the captured endpoint/token, never a newly read replacement capability.
 - `platform.rs`, `macos_auth.rs`, `android_auth.rs`: scoped native WebView settings
   and authentication callbacks. `credentials.rs` is the OS secret-store adapter.
 - The notification worker and action listener use the Rust notification plugin;
@@ -160,13 +216,32 @@ The app's token/Basic/none loading, remote IPC denial, native notification
 submission and activation, reserved child-window shortcuts, and the actual board → authenticated proxy Open →
 code-server 4.145.2 command palette/typing/clipboard flow have been
 exercised on Linux x86_64/WebKitGTK 2.54.3 under Xvfb. Notification evidence uses
-a D-Bus fixture, not a visible desktop toast. Windows adapter compilation was
-checked with the GNU cross target; Windows runtime/Action Center, macOS and
-Android behavior have not been run on their platforms. WebView2 notification
+a D-Bus fixture, not a visible desktop toast. The Windows native shell and core
+compile with the GNU cross target; Android
+ARM64 core compilation was checked with the cached NDK. Windows runtime/Action
+Center, macOS and Android behavior have not been run on their platforms.
+WebView2 notification
 activation is limited by the plugin to on-screen toasts, not entries already
-in Action Center. This host has no macOS SDK or Android SDK/NDK, so those builds
-and device permission/background behavior need native-platform verification.
+in Action Center. This host has no macOS SDK; macOS and native Android builds,
+and device
+permission/background behavior, need native-platform verification.
 
 Implementation references: [Tauri capabilities](https://v2.tauri.app/security/capabilities/),
 [WebviewWindowBuilder](https://docs.rs/tauri/2.12.7/tauri/webview/struct.WebviewWindowBuilder.html),
 and [notification plugin](https://v2.tauri.app/plugin/notification/).
+
+The local lifecycle probe uses a standalone fixture with an isolated normal
+installation/home, private X server and D-Bus tray watcher; it never starts the
+user's omo or contacts release servers:
+
+```sh
+dbus-run-session -- python3 ui/tests/local_smoke.py --app ui/target/debug/omo-ui
+```
+
+It covers attachment with and without an executable, fresh-home startup,
+actual window close, tray reopen/Exit, stop-with-window, direct external close,
+owned Disconnect, replacement-safe stop, and owned cleanup after authentication
+preparation fails. It also terminates an owned control endpoint, joins its
+worker while retaining stale metadata, then checks both close settings and
+explicit native Exit. `--host <prefix>` can use an extracted Arch dependency tree through a read-only Bubblewrap overlay; this
+keeps WebKit helper paths intact without installing system packages.
