@@ -14,7 +14,7 @@ func TestAdapterSendsAMessageAsOneUnitAndCountsItAsTyping(t *testing.T) {
 	input := &inputClock{}
 	adapter := &terminalAdapter{sess: term, out: newOutputPipe(), input: input, now: func() time.Time { return clock }, kill: func() error { return nil }}
 
-	if err := adapter.SendMessage("\x1b[200~one\ntwo\x1b[201~", "\r"); err != nil {
+	if err := adapter.SendMessage([]string{"\x1b[200~one\ntwo\x1b[201~"}, "\r"); err != nil {
 		t.Fatal(err)
 	}
 	typed, _ := term.snapshot()

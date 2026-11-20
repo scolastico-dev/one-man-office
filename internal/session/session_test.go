@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -256,3 +257,58 @@ func (s *Session) SendTextAndKeys(text, keys string) error {
 
 // SendLine types text and a carriage return.
 func (s *Session) SendLine(text string) error { return s.SendText(text + "\r") }
+
+// Every part, including the final Enter, must own the same input lock.
+func TestMessagePartsKeepExclusiveInputThroughSubmit(t *testing.T) {
+	proc := &inputLockProcess{}
+	s := &Session{proc: proc}
+	proc.session = s
+	oldDelay := SubmitDelay
+	SubmitDelay = 0
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+	if err := s.SendPartsAndKeys([]string{"text", "image", "tail"}, "\r"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(proc.writes, []string{"text", "image", "tail", "\r"}) {
+		t.Fatalf("writes = %q", proc.writes)
+	}
+	if proc.unlocked {
+		t.Fatal("a competing writer could acquire the input during the message")
+	}
+}
+
+type inputLockProcess struct {
+	recordingProcess
+	session  *Session
+	writes   []string
+	unlocked bool
+}
+
+func (p *inputLockProcess) Write(b []byte) (int, error) {
+	if p.session.replyMu.TryLock() {
+		p.unlocked = true
+		p.session.replyMu.Unlock()
+	}
+	if p.session.inputMu.TryLock() {
+		p.unlocked = true
+		p.session.inputMu.Unlock()
+	}
+	p.writes = append(p.writes, string(b))
+	return len(b), nil
+}
+
+func TestQueryRepliesOwnTheMessageReplyLock(t *testing.T) {
+	s := &Session{}
+	wrote := false
+	s.writeInput = func(b []byte) {
+		wrote = true
+		if s.replyMu.TryLock() {
+			s.replyMu.Unlock()
+			t.Error("query reply can interleave a multipart message")
+		}
+	}
+	s.answerQueries(queryDSR)
+	if !wrote {
+		t.Fatal("query was not answered")
+	}
+}

@@ -51,13 +51,13 @@ export interface TerminalConnection {
   /** Sends typed or pasted text to the process. */
   send(text: string): void
   /**
-   * Sends one message as a paste, and its Enter, as a single unit that omo's own
-   * lines cannot get into. The server cleans the text and adds the bracketed-paste
+   * Sends ordered paste parts and their final Enter, as a single unit that omo's own
+   * lines cannot get into. The server cleans each part and adds the bracketed-paste
    * markers when the program asked for them, as of the moment it writes it. Resolves once the process took
    * it; rejects, with the connection kept as it is, when it did not. Never
    * waits for a connection: without an open one it rejects at once.
    */
-  sendMessage(text: string): Promise<void>
+  sendMessage(parts: string[]): Promise<void>
   /** Tells the process the new size; remembered and sent again on every new connection. */
   resize(rows: number, cols: number): void
   /** Connects again right now while `disconnected`, with the back-off from its start. */
@@ -216,7 +216,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
       }
       input.send(text)
     },
-    sendMessage(text) {
+    sendMessage(parts) {
       if (disposed || !socket || socket.readyState !== 1 || finished) return Promise.reject(new Error(DISCONNECTED_TEXT))
       const s = socket
       const id = nextMessage++
@@ -227,7 +227,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
         }, MESSAGE_TIMEOUT_MS)
         messages.set(id, { resolve, reject, timer })
         try {
-          s.send(JSON.stringify({ type: 'message', id, text, keys: '\r' }))
+          s.send(JSON.stringify({ type: 'message', id, parts, keys: '\r' }))
         } catch {
           clearTimeout(timer)
           messages.delete(id)

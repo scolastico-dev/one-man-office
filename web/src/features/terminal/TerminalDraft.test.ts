@@ -13,7 +13,7 @@ function sessionWith(): Session {
   return createSession({ tokens: createTokenStore(() => window.localStorage), makeClient: omo.makeClient, connect: omo.connect })
 }
 function box(props: Record<string, unknown> = {}, session: Session = sessionWith()) {
-  const send = vi.fn(async (_message: string) => {})
+  const send = vi.fn(async (_message: string[]) => {})
   const w = mount(TerminalDraft, {
     props: { draftId: 't1', label: 'Message to the agent', send, ...props },
     attachTo: document.body,
@@ -57,7 +57,7 @@ describe('TerminalDraft', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     field(w).element.dispatchEvent(enter)
     expect(enter.defaultPrevented).toBe(true)
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('one\ntwo'))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(['one\ntwo']))
     await vi.waitFor(() => expect((field(w).element as HTMLTextAreaElement).value).toBe(''))
   })
 
@@ -83,9 +83,10 @@ describe('TerminalDraft', () => {
     await field(w).setValue('keep')
     paste(field(w).element, [png()])
     await vi.waitFor(() => expect(w.findAll('[data-draft-attachment]')).toHaveLength(1))
+    await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
     await w.find('[data-draft-send]').trigger('click')
     await vi.waitFor(() => expect(w.find('[data-draft-error]').text()).toContain('did not confirm'))
-    expect((field(w).element as HTMLTextAreaElement).value).toBe('keep')
+    expect((field(w).element as HTMLTextAreaElement).value).toBe('keep[image 1]')
     expect(w.findAll('[data-draft-attachment]')).toHaveLength(1)
   })
 
@@ -96,11 +97,14 @@ describe('TerminalDraft', () => {
     const ev = paste(field(w).element, [png()])
     expect(ev.defaultPrevented).toBe(true)
     await vi.waitFor(() => expect(w.findAll('[data-draft-attachment]')).toHaveLength(1))
+    await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
     expect(upload).toHaveBeenCalledWith('/api/terminal-images', expect.any(File), { 'Omo-Image-Name': 'shot%20one.png' })
     expect(w.find('[data-draft-attachment]').text()).toContain('shot one.png')
-    await field(w).setValue('see this')
+    const el = field(w).element as HTMLTextAreaElement
+    el.selectionStart = el.selectionEnd = 0
+    paste(el, [], 'see this ')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("see this\n'/home/me/omo/images/terminal/a b.png'"))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(["see this ", "'/home/me/omo/images/terminal/a b.png'"]))
     expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
   })
 
@@ -110,11 +114,12 @@ describe('TerminalDraft', () => {
     const { w, send } = box({}, session)
     drop(w.find('[data-terminal-draft]').element, [png()])
     await vi.waitFor(() => expect(w.findAll('[data-draft-attachment]')).toHaveLength(1))
+    await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
     await w.find('[data-draft-remove]').trigger('click')
     expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
     await field(w).setValue('text only')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('text only'))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(['text only']))
   })
 
   test('files that are not images are refused with a word and not uploaded', async () => {
@@ -144,10 +149,11 @@ describe('TerminalDraft', () => {
     await field(first.w).setValue('unfinished')
     paste(field(first.w).element, [png()])
     await vi.waitFor(() => expect(first.w.findAll('[data-draft-attachment]')).toHaveLength(1))
+    await vi.waitFor(() => expect(first.w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
     first.w.unmount()
-    expect(loadDraft('t1').text).toBe('unfinished')
+    expect(loadDraft('t1').text).toBe('unfinished[image 1]')
     const again = box({}, session)
-    expect((field(again.w).element as HTMLTextAreaElement).value).toBe('unfinished')
+    expect((field(again.w).element as HTMLTextAreaElement).value).toBe('unfinished[image 1]')
     expect(again.w.findAll('[data-draft-attachment]')).toHaveLength(1)
     const other = box({ draftId: 't2' }, session)
     expect((field(other.w).element as HTMLTextAreaElement).value).toBe('')
@@ -220,4 +226,64 @@ describe('TerminalDraft', () => {
     await vi.waitFor(() => expect(w.find('[data-draft-send]').text()).toBe('Send'))
     expect((field(w).element as HTMLTextAreaElement).value).toBe('sent text and more')
   })
+})
+
+test('image paste reserves its cursor position while uploading and Backspace removes the whole marker', async () => {
+  const session = sessionWith()
+  let finish!: (value: unknown) => void
+  vi.spyOn(session.client, 'upload').mockImplementation(() => new Promise((resolve) => { finish = resolve as typeof finish }) as never)
+  const { w, send } = box({}, session)
+  await field(w).setValue('before after')
+  const el = field(w).element as HTMLTextAreaElement
+  el.setSelectionRange(7, 7)
+  paste(el, [png()])
+  await nextTick()
+  expect(el.value).toBe('before [image 1]after')
+  el.setSelectionRange(el.value.length, el.value.length)
+  paste(el, [], ' tail')
+  finish({ data: { path: '/image.png', name: 'shot one.png' } })
+  await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
+  expect(el.value).toBe('before [image 1]after tail')
+  el.setSelectionRange(16, 16)
+  await field(w).trigger('keydown', { key: 'Backspace' })
+  expect(el.value).toBe('before after tail')
+  expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
+  await w.find('[data-draft-send]').trigger('click')
+  await vi.waitFor(() => expect(send).toHaveBeenCalledWith(['before after tail']))
+})
+
+test('deleting an uploading marker does not restore its image when the upload finishes', async () => {
+  const session = sessionWith()
+  let finish!: (value: unknown) => void
+  vi.spyOn(session.client, 'upload').mockImplementation(() => new Promise((resolve) => { finish = resolve as typeof finish }) as never)
+  const { w } = box({}, session)
+  paste(field(w).element, [png()])
+  await nextTick()
+  const el = field(w).element as HTMLTextAreaElement
+  el.setSelectionRange(el.value.length, el.value.length)
+  await field(w).trigger('keydown', { key: 'Backspace' })
+  expect(el.value).toBe('')
+  finish({ data: { path: '/image.png', name: 'shot one.png' } })
+  await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
+  expect(el.value).toBe('')
+  expect(w.findAll('[data-draft-attachment]')).toHaveLength(0)
+})
+
+test('native typing next to a marker uses the actual selection even when the text repeats its label', async () => {
+  const session = sessionWith()
+  stubUpload(session)
+  const { w, send } = box({}, session)
+  paste(field(w).element, [png()])
+  await vi.waitFor(() => expect(w.find('[data-draft-send]').attributes('disabled')).toBeUndefined())
+  const el = field(w).element as HTMLTextAreaElement
+  el.setSelectionRange(0, 0)
+  el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: '[', bubbles: true, cancelable: true }))
+  el.value = '[[image 1]'
+  el.setSelectionRange(1, 1)
+  el.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: '[', bubbles: true }))
+  await nextTick()
+  expect(el.value).toBe('[[image 1]')
+  expect(w.findAll('[data-draft-attachment]')).toHaveLength(1)
+  await w.find('[data-draft-send]').trigger('click')
+  await vi.waitFor(() => expect(send).toHaveBeenCalledWith(['[', "'/home/me/omo/images/terminal/a b.png'"]))
 })

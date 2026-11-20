@@ -107,12 +107,13 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 				}
 			case websocket.MessageText:
 				var size struct {
-					Type string `json:"type"`
-					ID   int64  `json:"id"`
-					Text string `json:"text"`
-					Keys string `json:"keys"`
-					Rows uint16 `json:"rows"`
-					Cols uint16 `json:"cols"`
+					Type  string   `json:"type"`
+					ID    int64    `json:"id"`
+					Text  string   `json:"text"`
+					Parts []string `json:"parts"`
+					Keys  string   `json:"keys"`
+					Rows  uint16   `json:"rows"`
+					Cols  uint16   `json:"cols"`
 				}
 				if json.Unmarshal(data, &size) != nil {
 					return
@@ -121,7 +122,11 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 					if size.ID <= 0 {
 						continue // nobody could be answered; the message is dropped
 					}
-					if err := i.queueMessage(size.Text, size.Keys, acknowledgeMessage(size.ID)); err != nil {
+					parts := size.Parts
+					if parts == nil {
+						parts = []string{size.Text}
+					}
+					if err := i.queueMessageParts(parts, size.Keys, acknowledgeMessage(size.ID)); err != nil {
 						refuseMessage(size.ID, err)
 					}
 					continue

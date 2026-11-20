@@ -839,7 +839,7 @@ describe('agent terminals', () => {
     conn().o.onState('live')
     await w.find('[data-draft-field]').setValue('first line\nsecond line')
     await w.find('[data-draft-send]').trigger('click')
-    await vi.waitFor(() => expect(conn().sendMessage).toHaveBeenCalledWith('first line\nsecond line'))
+    await vi.waitFor(() => expect(conn().sendMessage).toHaveBeenCalledWith(['first line\nsecond line']))
     await vi.waitFor(() => expect((w.find('[data-draft-field]').element as HTMLTextAreaElement).value).toBe(''))
     expect(conn().send).not.toHaveBeenCalled()
   })
@@ -879,4 +879,61 @@ describe('agent terminals', () => {
   test('an output-only terminal (the readonly prop) has no draft box', () => {
     expect(agent({ readonly: true }).find('[data-draft-field]').exists()).toBe(false)
   })
+})
+
+
+test('a single left click on an agent screen focuses the draft, while dragging and scrolling preserve selection and focus', async () => {
+  const w = view({ src: '/api/agents/a1/terminal' })
+  const screen = w.find('.tv__screen')
+  const field = w.find('[data-draft-field]').element as HTMLTextAreaElement
+  await screen.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+  await screen.trigger('pointerup', { button: 0, clientX: 10, clientY: 10 })
+  await screen.trigger('click', { button: 0, detail: 1 })
+  expect(document.activeElement).toBe(field)
+  field.blur()
+  await screen.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+  await screen.trigger('pointermove', { clientX: 30, clientY: 10 })
+  term().selection = 'selected output'
+  await screen.trigger('pointerup', { button: 0, clientX: 30, clientY: 10 })
+  await screen.trigger('click', { button: 0, detail: 1 })
+  expect(document.activeElement).not.toBe(field)
+  expect(term().getSelection()).toBe('selected output')
+  const wheel = new Event('wheel', { bubbles: true, cancelable: true })
+  screen.element.dispatchEvent(wheel)
+  expect(wheel.defaultPrevented).toBe(false)
+  expect(document.activeElement).not.toBe(field)
+  await screen.trigger('pointerdown', { button: 2 })
+  await screen.trigger('click', { button: 2, detail: 1 })
+  expect(document.activeElement).not.toBe(field)
+})
+
+test('draft sending blocks direct typing and pasting until the message finishes', async () => {
+  const w = view({ src: '/api/agents/a1/terminal' })
+  await w.find('[data-terminal-mode]').trigger('click')
+  let release!: () => void
+  conn().sendMessage.mockImplementation(() => new Promise<void>((resolve) => { release = resolve }))
+  await w.find('[data-draft-field]').setValue('hello')
+  await w.find('[data-draft-send]').trigger('click')
+  const key = new KeyboardEvent('keydown', { key: 'a' })
+  expect(term().keyHandler!(key)).toBe(false)
+  const ev = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(ev, 'clipboardData', { value: { getData: () => 'during' } })
+  term().textarea.dispatchEvent(ev)
+  expect(term().pasted).toEqual([])
+  release()
+  await vi.waitFor(() => expect(term().keyHandler!(key)).toBe(true))
+})
+
+test('clicking a Writable agent screen leaves focus with the terminal', async () => {
+  const w = view({ src: '/api/agents/a1/terminal' })
+  await w.find('[data-terminal-mode]').trigger('click')
+  const field = w.find('[data-draft-field]').element as HTMLTextAreaElement
+  field.focus()
+  const screen = w.find('.tv__screen')
+  await screen.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+  // The xterm test double does not handle pointers; simulate its normal focus.
+  term().textarea.focus()
+  await screen.trigger('pointerup', { button: 0, clientX: 10, clientY: 10 })
+  await screen.trigger('click', { button: 0, detail: 1 })
+  expect(document.activeElement).toBe(term().textarea)
 })

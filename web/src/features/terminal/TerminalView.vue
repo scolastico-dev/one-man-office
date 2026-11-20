@@ -61,7 +61,9 @@ const props = withDefaults(
  */
 const agentTerminal = computed(() => isAgentSrc(props.src))
 const writable = ref(isWritable(props.src))
-const locked = computed(() => props.readonly || (agentTerminal.value && !writable.value))
+const sendingDraft = ref(false)
+const draftBox = ref<InstanceType<typeof TerminalDraft> | null>(null)
+const locked = computed(() => props.readonly || sendingDraft.value || (agentTerminal.value && !writable.value))
 const draftId = computed(() => targetOfSrc(props.src)?.id ?? props.src)
 /** The draft box is for a terminal that takes input and has not ended. */
 const showDraft = computed(() => agentTerminal.value && !props.readonly && state.value !== 'ended')
@@ -74,9 +76,31 @@ function toggleWritable(): void {
 }
 
 /** One message from the draft box, written by omo as a whole (omo adds the paste markers the program asked for). */
-function sendDraft(paste: string): Promise<void> {
-  if (!connection) return Promise.reject(new Error('The terminal is not connected.'))
-  return connection.sendMessage(paste)
+async function sendDraft(parts: string[]): Promise<void> {
+  if (!connection) throw new Error('The terminal is not connected.')
+  sendingDraft.value = true
+  try {
+    await connection.sendMessage(parts)
+  } finally {
+    sendingDraft.value = false
+  }
+}
+
+let press: { x: number; y: number; dragged: boolean } | null = null
+function screenPress(ev: PointerEvent): void {
+  press = ev.button === 0 ? { x: ev.clientX, y: ev.clientY, dragged: false } : null
+}
+function screenMove(ev: PointerEvent): void {
+  if (press && (ev.clientX !== press.x || ev.clientY !== press.y)) press.dragged = true
+}
+function screenClick(ev: MouseEvent): void {
+  const click = press
+  press = null
+  if (!showDraft.value || writable.value || !click || click.dragged || ev.button !== 0 || ev.detail !== 1 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return
+  // Controls and the native scrollbar keep their own focus behavior.
+  if ((ev.target as Element).closest('button, a, .xterm-viewport')) return
+  // The emulator finishes handling this click first, including its focus work.
+  queueMicrotask(() => draftBox.value?.focus())
 }
 
 /** The terminal as its own window knows it; null when it cannot have one. */
@@ -232,7 +256,7 @@ async function takeFiles(list: File[]): Promise<void> {
   const { stored, problems } = await uploadImages(session.client, list, (n) =>
     showNote(n === 1 ? 'Uploading the image…' : `Uploading ${n} images…`, false, true),
   )
-  if (unmounted || !term) return
+  if (unmounted || !term || locked.value) return
   if (stored.length === 0 && problems.length > 0) {
     showNote(problems.join(' '), true)
     announcer.assertive(problems.join(' '))
@@ -663,6 +687,11 @@ defineExpose({
       :data-readonly="locked ? '' : undefined"
       :data-size="sentSize || undefined"
       :data-drop="dropping ? '' : undefined"
+      @pointerdown.capture="screenPress"
+      @pointermove.capture="screenMove"
+      @pointerup.capture="screenMove"
+      @pointercancel="press = null"
+      @click.capture="screenClick"
       @dragenter="onDragEnter"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
@@ -683,6 +712,7 @@ defineExpose({
       </div>
     </div>
     <TerminalDraft
+      ref="draftBox"
       v-if="showDraft"
       :draft-id="draftId"
       :label="`Message to the ${label.charAt(0).toLowerCase()}${label.slice(1)}`"

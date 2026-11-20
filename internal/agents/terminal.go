@@ -141,8 +141,8 @@ func (c *inputClock) lastInput() time.Time {
 // terminalSession is what the web terminal needs from the agent's PTY.
 type terminalSession interface {
 	SendText(text string) error
-	// SendTextAndKeysIf writes text and then keys while holding the input.
-	SendTextAndKeysIf(text, keys string, ready func() bool) (bool, error)
+	// SendPartsAndKeys writes all pastes and then keys while holding the input.
+	SendPartsAndKeys(parts []string, keys string) error
 	Resize(rows, cols uint16) error
 	Done() <-chan struct{}
 	ExitErr() error
@@ -177,10 +177,9 @@ func (a *terminalAdapter) Write(b []byte) (int, error) {
 // SendMessage is a message from a viewer's draft box: the text (already a
 // paste, with its markers) and then keys, written while nothing else can write,
 // so a notification line cannot end up inside it. It counts as typing.
-func (a *terminalAdapter) SendMessage(text, keys string) error {
+func (a *terminalAdapter) SendMessage(parts []string, keys string) error {
 	a.input.record(a.now())
-	_, err := a.sess.SendTextAndKeysIf(text, keys, func() bool { return true })
-	return err
+	return a.sess.SendPartsAndKeys(parts, keys)
 }
 
 func (a *terminalAdapter) Resize(rows, cols uint16) error { return a.sess.Resize(rows, cols) }
