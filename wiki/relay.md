@@ -347,3 +347,94 @@ wiring, local pairing, authenticated reconnect/restart, application HTTP,
 chunked images, SSE replay/resync, terminal frames/acknowledgments and device
 revocation. In-memory protocol peers cover quota violations, half-close,
 deadlines, reset crossings/churn and bounded backpressure deterministically.
+
+## On-demand device notifications
+
+A paired UI can poll `GET /notifications/<host_id>/<ui_id>` without opening a
+UI WebSocket. Send the protocol's `Omo-Notification-Request` and
+`Omo-Notification-MAC` headers, generated with the device's persisted pairing
+epoch and private notification root. Optional relay admission uses the separate
+Basic Authorization header. A public key or routing ID alone grants no access.
+The host verifies authentication before reading mentions or applying a receipt.
+
+Online responses are HTTP 200 encrypted envelopes, including an empty list and
+`invalid_ack` errors. Every response uses fresh randomness and a derived
+AES-256-GCM key authenticated by the pairing root; the UI must check the host,
+device, epoch and outstanding request ID when decrypting. HTTP 204 (offline,
+unknown/revoked device, invalid authentication or timeout) is an untrusted
+availability hint. It never proves that the host has no notifications and never
+acknowledges a receipt.
+
+Each device starts at cursor zero and independently receives retained comments
+that mention the user, excluding the user's own comments, in ascending comment
+ID order. Browser bell reads and browser seen updates do not suppress device
+delivery. Pages contain at most 50 notices and 256 KiB encoded plaintext. Titles
+are limited to 128 UTF-8 bytes, bodies to 384 bytes, each truncated at a code-point
+boundary with its own truncation flag. Invalid UTF-8 from native tool output is
+replaced before applying those byte limits. Encoded notices fit 4096 bytes even
+with JSON escaping. Retrieve full comments through the application transport; an
+oversized comment does not block later notices.
+
+The host saves one pending receipt (batch ID, ordered comment IDs, through and
+secret token) before returning it. Polling alone never advances the cursor.
+Retries return that same receipt and ordered IDs, freshly encrypted and with
+current bounded source previews. Deleted or no longer qualifying sources appear
+as `{id,unavailable:true}`. Neither the relay nor the private receipt store caches
+notification content. `more` reflects whether later qualifying sources exist at
+the time of the source read.
+
+The acknowledgment transitions compare the exact full receipt tuple:
+
+| Request receipt | Host result |
+| --- | --- |
+| Null | Keep cursor, last acknowledgment and current pending batch; prepare one if needed. |
+| Current pending receipt | Atomically advance the cursor, save that exact last acknowledgment and clear pending; then prepare the next batch. |
+| Exact last acknowledgment | Acknowledge it again and return the current newer batch unchanged. |
+| Any other tuple | Encrypted `invalid_ack`; no delivery state changes. |
+
+Cursor, last acknowledgment and pending receipt survive normal host restart. If
+acknowledgment X committed but the reply containing batch Y was lost, retrying X
+returns `acknowledged:X` plus the unchanged Y receipt. If the host stopped after
+saving X but before saving Y, retrying X prepares Y from the saved cursor.
+Revocation and GET cancellation stop in-flight source work; the manager rechecks
+authority before commits and replies, and unregister joins notification work.
+
+The following is the contract for a future native UI, not a UI implementation:
+
+1. Keep one durable receipt chain per host/device identity and one logical
+   outstanding poll. Use a fresh request ID on retry and abandon superseded IDs.
+2. Authenticate/decrypt the current reply, then durably store and deduplicate
+   **all** its notices by comment ID before sending its receipt back.
+3. Clear an outstanding receipt only when `acknowledged` matches its batch ID.
+   Atomically store/deduplicate the returned next batch and replace the receipt
+   with its tuple, or null for an authenticated empty page.
+4. Retain the receipt after a lost, invalid or untrusted empty/error response.
+   For an authenticated `invalid_ack` only, discard the stale receipt, retain
+   received notices/IDs, and poll with ack null to recover the host's current
+   pending batch. Deduplicate and acknowledge that batch normally.
+
+Delivery is at least once until durable acknowledgment. A receipt from one
+device cannot consume another device's notifications.
+
+The production adapter is `server/relay_notifications.go`, using the board's
+`RelayMentionsAfter(ctx, actor, after, limit, maxBytes)` and
+`RelayMentionsByID(ctx, actor, ids)` consistent reads with `board.User`.
+`relayhost.Manager.PollNotifications` consumes `NotificationSource` inside the
+manager's existing per-device gate; callers must not nest another `WithDevice`.
+The startup installs all callbacks together before `Manager.Run`, preserving
+both consumers when application transport is installed.
+
+Focused notification verification:
+
+```sh
+go test ./internal/board -run 'TestRelayMentions|TestUserMentions' -count=1
+go test ./internal/relayhost -run 'TestNotifications|TestNotification|TestRevocationWaits' -count=1
+go test ./internal/server -run '^TestRelayNotifications' -count=1
+```
+
+The server tests use the real relay HTTP route and the production startup
+callback with durable active-device fixtures and no UI socket. Host tests
+exercise receipt persistence/restart, lost replies, source-read interruption
+after acknowledgment commit, concurrent polls and cancellation at the source
+read boundary. Existing host writer-join coverage checks revocation while an
+admitted response write is unfinished.
