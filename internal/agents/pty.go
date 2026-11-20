@@ -107,6 +107,12 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	}
 
 	out := newOutputPipe()
+	var pasteReady func(string, string) func(string) bool
+	if spec.CLI == api.CLIClaude {
+		pasteReady = func(pasted, before string) func(string) bool {
+			return agentcli.PasteReady(agentcli.Claude, pasted, before)
+		}
+	}
 	sess, err := session.Start(session.Options{
 		Cmd:          spec.Command,
 		Args:         launch.Args,
@@ -121,7 +127,8 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 			a.lastLine = t
 			a.mu.Unlock()
 		},
-		OnOutput: out.write,
+		OnOutput:   out.write,
+		PasteReady: pasteReady,
 		// The agent may print its environment; nothing omo stores or shows
 		// to others may carry the id.
 		Secret: spec.SessionID,
