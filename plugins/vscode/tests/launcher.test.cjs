@@ -62,7 +62,15 @@ for(const editor of ['code-server','openvscode']) test(editor+' imports a deskto
   const cipher=createCipheriv('aes-128-cbc',pbkdf2Sync('peanuts','saltysalt',1,16,'sha1'),Buffer.alloc(16,32));
   const key='{"extensionId":"vscode.github-authentication","key":"github.auth"}',value='fixture-session';
   db.prepare('INSERT INTO ItemTable VALUES (?,?)').run('secret://'+key,JSON.stringify(Buffer.concat([Buffer.from('v10'),cipher.update(value),cipher.final()])));db.close();
-  const r=run(t,f,editor,await port());await until(()=>r.output().includes('OMO_EDITOR_READY'));
+  // This is a synthetic Linux v10 fixture on every host. Select Linux only
+  // at the discovery/decryption boundaries; keep native process, filesystem
+  // and runtime checks intact, and never consult the host user's keyring.
+  const platformFixture=path.join(f.root,'linux-secret-fixture.cjs');
+  fs.writeFileSync(platformFixture,'const profile=require('+JSON.stringify(path.resolve(__dirname,'../profile.cjs'))+'),detect=profile.detectLocal;'+
+    'profile.detectLocal=()=>detect({platform:"linux",home:'+JSON.stringify(f.host.HOME)+'});'+
+    'const secrets=require('+JSON.stringify(path.resolve(__dirname,'../desktop-secrets.cjs'))+'),read=secrets.readDesktopSecrets;'+
+    'secrets.readDesktopSecrets=local=>read(local,{platform:"linux"});');
+  const r=run(t,f,editor,await port(),'a'.repeat(32),{NODE_OPTIONS:'--require '+JSON.stringify(platformFixture)});await until(()=>r.output().includes('OMO_EDITOR_READY'));
   const {SecretStore}=require('../secret-provider.cjs'),store=new SecretStore(path.join(f.data,'profiles',editor,'secrets'));
   try{assert.equal(store.get(key),value);}finally{store.close();}
   assert.doesNotMatch(r.output(),/fixture-session/);
