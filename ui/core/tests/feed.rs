@@ -51,6 +51,7 @@ fn fixture(
         username: String::new(),
         notifications: true,
         remember: false,
+        stop_with_window: false,
     };
     (BoardClient::new(c, String::new()).unwrap(), handle)
 }

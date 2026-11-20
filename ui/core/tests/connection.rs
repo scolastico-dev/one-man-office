@@ -8,6 +8,7 @@ fn config() -> Config {
         username: String::new(),
         notifications: true,
         remember: false,
+        stop_with_window: false,
     }
 }
 fn notice(id: &str) -> Notice {
@@ -445,4 +446,25 @@ fn basic_challenges_match_ipv6_hosts_without_url_brackets() {
     c.origin = "http://[::1]:8090/".into();
     assert!(c.challenge_allowed("http://[::1]:8090/", "::1", "omo"));
     assert!(c.challenge_allowed("http://[::1]:8090/", "0:0:0:0:0:0:0:1", "omo"));
+}
+
+#[test]
+fn old_saved_connections_default_to_keeping_owned_server_running() {
+    let c: Config = serde_json::from_value(serde_json::json!({
+        "id":"3381221a-1afb-43cb-9b9b-27d3e140296b", "mode":"local",
+        "origin":"http://localhost:8090/", "auth":"none", "username":"",
+        "notifications":true, "remember":false
+    }))
+    .unwrap();
+    assert!(!c.stop_with_window);
+    let mut enabled = c;
+    enabled.stop_with_window = true;
+    let dir = tempfile::tempdir().unwrap();
+    save_config(dir.path(), &enabled).unwrap();
+    assert!(
+        load_config(dir.path(), false)
+            .unwrap()
+            .unwrap()
+            .stop_with_window
+    );
 }

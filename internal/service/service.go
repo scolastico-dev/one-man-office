@@ -174,71 +174,159 @@ func Run(ctx context.Context, out io.Writer, launchID string, serve ServeFunc) (
 	})
 }
 
+// Instance is a live local control capability, returned only to native callers.
+// Token changes on every Run, even when a launch identity is reused.
+// Owned is true only if this call started the process that published readiness.
+type Instance struct {
+	Endpoint string `json:"endpoint"`
+	Token    string `json:"token"`
+	URL      string `json:"url"`
+	LaunchID string `json:"launch_id"`
+	Owned    bool   `json:"owned"`
+}
+
+func instance(state runtimeState, owned bool) Instance {
+	return Instance{Endpoint: state.Endpoint, Token: state.Token, URL: state.URL, LaunchID: state.LaunchID, Owned: owned}
+}
+
 // StartDetached waits for readiness; a failed launch never reports success.
 // The child is the same executable started with only the hidden background id.
 func StartDetached(ctx context.Context, executable string, out io.Writer) error {
+	_, err := startDetached(ctx, executable, out, false)
+	return err
+}
+
+// StartOrAttach starts through the normal detached lifecycle or returns an
+// authenticated existing instance without ownership. Concurrent detached starts
+// serialize on launch.lock; foreground/autostart races are decided by run.lock.
+func StartOrAttach(ctx context.Context, executable string) (Instance, error) {
+	return startDetached(ctx, executable, io.Discard, true)
+}
+
+// liveState distinguishes a free run lock from a server still initializing.
+func liveState(ctx context.Context, dir string) (state runtimeState, running, starting bool, err error) {
+	lock, err := shortLock(ctx, filepath.Join(dir, "run.lock"))
+	if err == nil {
+		lock.Close()
+		return state, false, false, nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		return state, false, false, err
+	}
+	state, err = readState(dir)
+	if err != nil || controlRequest(ctx, state, "GET", "/status") != nil {
+		return runtimeState{}, false, true, nil
+	}
+	return state, true, false, nil
+}
+
+func startDetached(ctx context.Context, executable string, out io.Writer, attach bool) (Instance, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	dir, err := prepareDirectory()
 	if err != nil {
-		return err
+		return Instance{}, err
 	}
-	launchLock, err := shortLock(ctx, filepath.Join(dir, "launch.lock"))
+	acquire := shortLock
+	if attach {
+		acquire = filelock.Acquire
+	}
+	launchLock, err := acquire(ctx, filepath.Join(dir, "launch.lock"))
 	if err != nil {
-		return fmt.Errorf("another omo launch is in progress: %w", err)
+		return Instance{}, fmt.Errorf("another omo launch is in progress: %w", err)
 	}
 	defer launchLock.Close()
-	lock, err := shortLock(ctx, filepath.Join(dir, "run.lock"))
-	if err != nil {
-		return fmt.Errorf("omo is already running or starting (use omo stop): %w", err)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		state, running, starting, err := liveState(ctx, dir)
+		if err != nil {
+			return Instance{}, err
+		}
+		if !running && !starting {
+			break
+		}
+		if !attach {
+			return Instance{}, fmt.Errorf("omo is already running or starting (use omo stop)")
+		}
+		if running {
+			return instance(state, false), nil
+		}
+		select {
+		case <-ctx.Done():
+			return Instance{}, ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	lock.Close()
 	id, err := nonce()
 	if err != nil {
-		return err
+		return Instance{}, err
 	}
 	cmd := exec.Command(executable, "--background-id="+id)
 	configureDetached(cmd)
 	if err := cmd.Start(); err != nil {
-		return err
+		return Instance{}, err
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	var childErr error
+	childExited := false
+	// A canceled start must reap only its own child, never an instance found
+	// through runtime.json. Successful detached children remain independent.
+	stopChild := func() {
+		if childExited {
+			return
+		}
+		interruptDetached(cmd.Process)
 		select {
-		case err := <-exited:
-			return fmt.Errorf("omo failed to start (%v); see %s", err, filepath.Join(dir, "omo.log"))
-		case <-ctx.Done():
-			interruptDetached(cmd.Process)
-			select {
-			case <-exited:
-			case <-time.After(5 * time.Second):
-				terminateDetached(cmd.Process)
-				<-exited
-			}
-			return fmt.Errorf("omo startup canceled: %w; see %s", ctx.Err(), filepath.Join(dir, "omo.log"))
-		case <-ticker.C:
-			state, err := readState(dir)
-			if err != nil || state.LaunchID != id {
-				continue
-			}
-			if err := controlRequest(ctx, state, "GET", "/status"); err != nil {
-				continue
-			}
-			fmt.Fprintln(out, "omo started in the background.")
-			logPath := filepath.Join(dir, "omo.log")
-			if startup, err := homefile.Read(logPath, homefile.MaxStartupLog); err == nil {
-				// Preserve the same exposure/authentication warnings as foreground startup.
-				fmt.Fprint(out, string(startup))
-			} else {
-				fmt.Fprintf(out, "omo: %s\n", state.URL)
-			}
-			fmt.Fprintf(out, "Log: %s\nStop with: omo stop\n", logPath)
-			return nil
+		case <-exited:
+		case <-time.After(5 * time.Second):
+			terminateDetached(cmd.Process)
+			<-exited
 		}
 	}
+	for {
+		select {
+		case childErr = <-exited:
+			childExited = true
+			exited = nil
+		case <-ctx.Done():
+			stopChild()
+			return Instance{}, fmt.Errorf("omo startup canceled: %w; see %s", ctx.Err(), filepath.Join(dir, "omo.log"))
+		case <-ticker.C:
+		}
+		state, running, starting, err := liveState(ctx, dir)
+		if err != nil {
+			stopChild()
+			return Instance{}, err
+		}
+		if running && state.LaunchID == id && !childExited {
+			if !attach {
+				printDetached(out, dir, state)
+			}
+			return instance(state, true), nil
+		}
+		if childExited {
+			if attach && running {
+				return instance(state, false), nil
+			}
+			if !attach || !starting {
+				return Instance{}, fmt.Errorf("omo failed to start (%v); see %s", childErr, filepath.Join(dir, "omo.log"))
+			}
+		}
+	}
+}
+
+func printDetached(out io.Writer, dir string, state runtimeState) {
+	fmt.Fprintln(out, "omo started in the background.")
+	logPath := filepath.Join(dir, "omo.log")
+	if startup, err := homefile.Read(logPath, homefile.MaxStartupLog); err == nil {
+		// Preserve the same exposure/authentication warnings as foreground startup.
+		fmt.Fprint(out, string(startup))
+	} else {
+		fmt.Fprintf(out, "omo: %s\n", state.URL)
+	}
+	fmt.Fprintf(out, "Log: %s\nStop with: omo stop\n", logPath)
 }
 
 // Stop authenticates to the owner, then waits for its lifecycle lock to release.

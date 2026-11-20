@@ -104,9 +104,15 @@ pub fn open_board(
     crate::platform::configure(&window, config, secret)?;
     if !child {
         let handle = app.clone();
+        let main_label = window.label().to_string();
         window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                handle.exit(0);
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                crate::desktop::request_close(
+                    &handle,
+                    Some(main_label.clone()),
+                    omo_ui_core::lifecycle::CloseIntent::Main,
+                );
             }
         });
         window
@@ -148,9 +154,11 @@ pub fn open_board(
 
 #[cfg(not(target_os = "android"))]
 pub fn menu(app: &AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    #[cfg(target_os = "macos")]
+    use tauri::menu::PredefinedMenuItem;
+    use tauri::menu::{Menu, MenuItem, Submenu};
     let connection = MenuItem::with_id(app, "connection", "Connection…", true, None::<&str>)?;
-    let quit = PredefinedMenuItem::quit(app, None)?;
+    let quit = MenuItem::with_id(app, "exit", "Exit omo", true, None::<&str>)?;
     let app_menu = Submenu::with_items(app, "omo ui", true, &[&connection, &quit])?;
     // macOS needs the standard edit menu for clipboard/undo. No browser/developer accelerators.
     #[cfg(target_os = "macos")]
@@ -176,17 +184,19 @@ pub fn menu(app: &AppHandle) -> tauri::Result<()> {
     app.set_menu(Menu::with_items(app, &[&app_menu, &edit])?)?;
     #[cfg(not(target_os = "macos"))]
     app.set_menu(Menu::with_items(app, &[&app_menu])?)?;
-    app.on_menu_event(|app, event| {
-        if event.id().as_ref() == "connection" {
-            show_setup(app);
+    app.on_menu_event(|app, event| match event.id().as_ref() {
+        "connection" => show_setup(app),
+        "exit" => {
+            crate::desktop::request_close(app, None, omo_ui_core::lifecycle::CloseIntent::Quit)
         }
+        _ => {}
     });
     Ok(())
 }
 
 pub fn create_setup(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let app_nav = app.clone();
-    WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+    let window = WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
         .on_navigation(move |url| {
             if url.as_str() == "omo-ui:configure" {
                 show_setup(&app_nav);
@@ -222,5 +232,20 @@ pub fn create_setup(app: &AppHandle) -> tauri::Result<WebviewWindow> {
             #[cfg(not(target_os = "android"))]
             let _ = (window, payload);
         })
-        .build()
+        .build()?;
+    #[cfg(not(target_os = "android"))]
+    {
+        let handle = app.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                crate::desktop::request_close(
+                    &handle,
+                    Some("setup".into()),
+                    omo_ui_core::lifecycle::CloseIntent::LastSetup,
+                );
+            }
+        });
+    }
+    Ok(window)
 }
