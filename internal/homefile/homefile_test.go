@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// A settings save or a plugin tree swap must not depend on whether another
-// goroutine has finished reading the earlier file. Keep the reader open across
-// each filesystem operation instead of trying to race it with a short sleep.
+// A settings save must not depend on whether another goroutine has finished
+// reading the earlier file. Windows allows renaming that file with delete
+// sharing, but directory renames still require every child reader to close.
 func TestOpenAllowsReplacementDuringRead(t *testing.T) {
 	for _, depth := range []int{1, 8} {
 		t.Run(fmt.Sprint(depth), func(t *testing.T) {
@@ -36,17 +36,14 @@ func TestOpenAllowsReplacementDuringRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer reader.Close()
-			moved := filepath.Join(root, "earlier")
-			if err := os.Rename(dir, moved); err != nil {
-				t.Fatalf("move the tree with an open reader: %v", err)
-			}
-			if err := os.Mkdir(dir, 0o700); err != nil {
-				t.Fatal(err)
+			moved := filepath.Join(dir, "earlier.json")
+			if err := os.Rename(path, moved); err != nil {
+				t.Fatalf("move the file with an open reader: %v", err)
 			}
 			if err := os.WriteFile(path, []byte("replacement"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Remove(filepath.Join(moved, "plugin.json")); err != nil {
+			if err := os.Remove(moved); err != nil {
 				t.Fatalf("delete the earlier file with an open reader: %v", err)
 			}
 			if got, err := io.ReadAll(reader); err != nil || string(got) != "earlier" {
@@ -55,9 +52,6 @@ func TestOpenAllowsReplacementDuringRead(t *testing.T) {
 			// Windows may keep a deleted file's directory entry until the last
 			// handle closes, so finish the reader before removing its directory.
 			if err := reader.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.RemoveAll(moved); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := Read(path, 32); err != nil || string(got) != "replacement" {

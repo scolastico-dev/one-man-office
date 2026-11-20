@@ -510,6 +510,9 @@ type Options struct {
 	// Root is the plugin root, <home>/plugins: plugin <name> is in
 	// Root/<name>, its data folder is Root/.data/<name>.
 	Root string
+	// TreeMu is shared with the installer. Loading and asset reads hold its
+	// read lock so a tree rename cannot race open files, including on Windows.
+	TreeMu *sync.RWMutex
 	// DB holds the plugins' runtime records, logs and stored values.
 	DB *sql.DB
 	// Socket returns the endpoint plugin programs reach omo on
@@ -745,6 +748,10 @@ func (m *Manager) Close() {
 func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
 	m.loadMu.Lock()
 	defer m.loadMu.Unlock()
+	if m.o.TreeMu != nil {
+		m.o.TreeMu.RLock()
+		defer m.o.TreeMu.RUnlock()
+	}
 	errs := map[string]error{}
 	list := append([]api.PluginSettings(nil), settings...)
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })

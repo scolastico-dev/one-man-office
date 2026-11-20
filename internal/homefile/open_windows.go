@@ -25,7 +25,8 @@ func openNoFollow(path string) (*os.File, error) {
 		return nil, &os.PathError{Op: "open", Path: path, Err: ErrNotRegular}
 	}
 	// Unlike os.Open, share deletion as well as reads/writes: settings saves
-	// and plugin tree swaps may rename a file while another goroutine reads it.
+	// may rename a file while another goroutine reads it. A directory rename
+	// still needs all child handles closed, so tree swaps need their own lock.
 	// The existing handle still reads the same file after that rename.
 	name, err := filepath.Abs(path)
 	if err != nil {

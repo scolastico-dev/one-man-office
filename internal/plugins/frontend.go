@@ -161,6 +161,10 @@ func (m *Manifest) readFrontend(dir string, raw []byte) error {
 // Recorded per-file digests prevent new bytes under an old content identity
 // without re-reading or re-hashing unrelated assets on a public request.
 func (m *Manager) FrontendFile(name, identity, rel string) ([]byte, error) {
+	if m.o.TreeMu != nil {
+		m.o.TreeMu.RLock()
+		defer m.o.TreeMu.RUnlock()
+	}
 	missing := errors.New("plugin asset unavailable")
 	if !ValidName(name) || publicPath(rel) != nil || identity == "" {
 		return nil, missing
