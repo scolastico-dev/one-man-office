@@ -2,11 +2,70 @@ package homefile
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// A settings save or a plugin tree swap must not depend on whether another
+// goroutine has finished reading the earlier file. Keep the reader open across
+// each filesystem operation instead of trying to race it with a short sleep.
+func TestOpenAllowsReplacementDuringRead(t *testing.T) {
+	for _, depth := range []int{1, 8} {
+		t.Run(fmt.Sprint(depth), func(t *testing.T) {
+			root := t.TempDir()
+			for range depth {
+				root = filepath.Join(root, strings.Repeat("folder", 8))
+			}
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(root, "plugin")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "plugin.json")
+			if err := os.WriteFile(path, []byte("earlier"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			reader, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			moved := filepath.Join(root, "earlier")
+			if err := os.Rename(dir, moved); err != nil {
+				t.Fatalf("move the tree with an open reader: %v", err)
+			}
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("replacement"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(moved, "plugin.json")); err != nil {
+				t.Fatalf("delete the earlier file with an open reader: %v", err)
+			}
+			if got, err := io.ReadAll(reader); err != nil || string(got) != "earlier" {
+				t.Fatalf("open reader = %q, %v", got, err)
+			}
+			// Windows may keep a deleted file's directory entry until the last
+			// handle closes, so finish the reader before removing its directory.
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(moved); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := Read(path, 32); err != nil || string(got) != "replacement" {
+				t.Fatalf("new reader = %q, %v", got, err)
+			}
+		})
+	}
+}
 
 func TestReadRegularFile(t *testing.T) {
 	dir := t.TempDir()

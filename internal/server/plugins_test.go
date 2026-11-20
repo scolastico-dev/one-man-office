@@ -17,6 +17,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/testpath"
@@ -751,6 +752,14 @@ func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
 	}
 	other := pluginRepo(t, recordManifest("rec", plugins.EventTicketMoved))
 
+	// A reload can be reading the current manifest as a reinstall starts.
+	// Keep that handle through activation and rollback, making Windows delete
+	// sharing a deterministic requirement rather than a race with the reload.
+	reading, err := homefile.Open(filepath.Join(s.plugins.o.Root, "rec", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reading.Close() })
 	afterPluginInstall = func(name string) {
 		cur, _ := s.settings.Plugin(name)
 		cur.Config = maps.Clone(cur.Config)
