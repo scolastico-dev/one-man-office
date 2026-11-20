@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { createServer } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -89,7 +89,14 @@ export const test = base.extend<{ editor: EditorFixture }>({
         expect(lua.split(guard)).toHaveLength(2)
         if (options.unsupported) lua = 'event.host.os="windows";event.host.arch="arm64"\n' + lua
         else lua = lua.replace(guard, 'if false and not checksums[editor][platform] then')
+        const backend: Record<string, string> = {}
+        for (const file of ['profile.cjs', 'profile-bridge.cjs', 'preference-sync.cjs']) backend[file] = readFileSync(join(folder, file), 'utf8')
+        for (const file of readdirSync(join(folder, 'vendor'), { recursive: true }) as string[]) {
+          const full = join(folder, 'vendor', file)
+          if (statSync(full).isFile()) backend[join('vendor', file)] = readFileSync(full, 'utf8')
+        }
         const repo = makePlugin(join(omo.home, 'editor-source'), JSON.parse(readFileSync(join(folder, 'plugin.json'), 'utf8')) as object, {
+          ...backend,
           'editor.lua': lua,
           'launch.cjs': readFileSync(join(folder, 'launch.cjs'), 'utf8'),
           'frontend.js': readFileSync(join(folder, 'frontend.js'), 'utf8'),

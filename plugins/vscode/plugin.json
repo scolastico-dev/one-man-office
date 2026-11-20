@@ -1,6 +1,6 @@
 {
   "name": "vscode",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Browser VS Code through omo's sign-in. Edits directly alongside agents. Microsoft mode is unavailable until its terms are confirmed; direct server-web would differ from code serve-web.",
   "default_config": {
     "editor": "code-server",

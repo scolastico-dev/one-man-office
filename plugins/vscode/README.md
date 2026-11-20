@@ -86,20 +86,61 @@ plugin; there is no `latest` lookup or arbitrary download/version setting.
 The generic artifact helper downloads asynchronously over HTTPS, checks SHA-256,
 bounds compressed/expanded size and archive members, rejects unsafe paths/links,
 and publishes an atomic cache generation. Reuse checks the complete cached tree
-without downloading again. Artifact generations and editor-managed persistent
-state stay below the plugin's own data folder, `plugins/.data/vscode/`.
-`profiles/<editor>/` holds settings, extensions, portable defaults and extension
-downloads, shared across folders and pinned versions of that editor. The two
-editors have separate profiles. Shared Remote settings live in
-`profiles/<editor>/portable/user-data/Machine/settings.json`; edit the Remote
-settings scope in the editor. `User/settings.json` is retained and seeds a missing
-Machine file without replacing existing JSONC. New settings files initialize
-`workbench.colorTheme` to `Default Dark Modern` and `chat.disableAIFeatures` to
-`true`; existing files remain unchanged. code-server uses its supported
-`--enable-remote-storage` mode for workbench state on disk, across browser
-origins and restarts. OpenVSCode's user preferences/state still follow its
-normal browser origin/profile storage; its remote settings file alone cannot
-configure every user-scoped setting. `sessions/<folder/editor/version hash>/` holds
+without downloading again. Artifact generations and private editor state stay below the plugin's data
+folder, `plugins/.data/vscode/`.
+
+### Desktop preferences and extensions
+
+At launch the plugin detects standard default profiles for Microsoft VS Code,
+VS Code Insiders, VSCodium, VSCodium Insiders and Code OSS, in that priority
+order. Linux uses `XDG_CONFIG_HOME` (or `~/.config`), macOS uses
+`~/Library/Application Support`, and Windows uses `APPDATA`. The selected
+product and paths appear in the task output. With several installations, the
+first matching profile is the shared source. Custom user-data directories,
+portable installations and named profiles need their files in the standard
+default profile to participate.
+
+The browser uses that product's existing extensions directory (`.vscode`,
+`.vscode-insiders`, `.vscode-oss` or `.vscode-oss-insiders` under the OS home).
+Installing or removing a compatible extension updates the same directory and
+inventory used by the desktop editor; its next start sees those changes.
+Desktop-only UI extensions without a browser entry point cannot run in this
+browser host; the task output names them and keeps the complete list in
+`profiles/<editor>/incompatible-extensions.json`. Extension licences, host/API version
+requirements and native dependencies still apply.
+
+A builtin **omo shared preferences** extension connects the browser's actual
+user-data provider to the selected desktop `User` directory. It shares
+`settings.json`, `keybindings.json`, `tasks.json` and `snippets/`, including new
+files and deletions. Dotfile-managed snippet links are followed, with directory
+cycles bounded; edits retain existing links, and deletion removes the link
+without deleting its external target. User-scoped themes/settings therefore apply in both editor
+builds. Changes are synchronized on settings/save events and a one-second
+poll. Raw JSONC, trailing commas and UTF-8 BOMs are retained. Disjoint
+concurrent setting changes merge using the desktop document’s comments/formatting; a same-setting conflict keeps the desktop
+value and saves both complete versions in
+`profiles/<editor>/preference-conflicts/`. The extension's output channel reports
+that location. Builtin theme ID aliases are translated without rewriting the
+desktop's existing theme ID.
+
+Without a desktop profile, extensions remain in `profiles/<editor>/extensions/`
+and shared preference files in `profiles/<editor>/preferences/User/`. Fresh
+profiles initialize Dark Modern and `chat.disableAIFeatures=true`. Existing
+browser choices are imported once, and later browser origins recover the
+persistent preferences. Each editor has its own private profile. Remote
+terminal settings live in `profiles/<editor>/portable/user-data/Machine/settings.json`;
+existing JSONC is preserved. code-server also uses `--enable-remote-storage`
+for workbench state on disk.
+
+Publisher files remain in the verified artifact. A private builtin-extension
+overlay adds the bridge. OpenVSCode's pinned bootstrap overwrites the builtin
+directory flag; its preload maps FileAccess to a private publisher root linked
+to the verified files and builtin overlay. Databases/runtime stay private.
+The bridge includes the pinned MIT-licensed
+[jsonc-parser 3.3.1](vendor/jsonc-parser/ORIGIN.md); no package installer runs
+when opening an editor.
+
+`sessions/<folder/editor/version hash>/` holds
 server data, logs and cache for each instance. Completed
 artifact generations, profiles and session directories survive restart and idle
 cleanup; session directories are not automatically pruned. Stop the editor before
@@ -117,13 +158,13 @@ have their own network behavior/licences. Host HOME/USERPROFILE, XDG configurati
 data/cache/state roots and Windows APPDATA/LOCALAPPDATA remain available to Git,
 SSH and terminal tools. Those tools use and may write their normal host
 configuration; the editor is not a filesystem sandbox. Editor-specific flags,
-portable paths and a pinned code-server path-provider preload direct editor
-state into plugin data, including wrapper logs/heartbeat that bypass
+portable paths and pinned path-provider preloads keep runtime, databases and
+wrapper state in plugin data, including logs/heartbeat that bypass
 `--user-data-dir`. IPC/runtime/tmp uses a short unique private OS temporary
 directory allocated by omo's generic task helper, with mode 0700 on Unix. This
 avoids Unix socket byte-length limits even with long or multibyte plugin paths
 or inherited TMPDIR. The editor receives this private XDG_RUNTIME_DIR. Initial
-Linux/macOS terminal settings restore the host value through
+Linux/macOS remote terminal settings restore the host value through
 `EDITOR_HOST_XDG_RUNTIME_DIR` (empty if originally unset); existing user JSONC
 and terminal overrides remain untouched. Such profiles may need that terminal
 setting explicitly if they predate it or override it. This runtime distinction
@@ -210,6 +251,16 @@ node plugins/vscode/tests/probe.cjs code-server --subdomain
 node plugins/vscode/tests/probe.cjs code-server --subdomain --cross-site
 node plugins/vscode/tests/probe.cjs openvscode --subdomain --cross-site
 ```
+
+Use `--cache-dir <folder>` to move one reusable publisher cache between
+isolated probe homes instead of downloading/copying each publisher again. Keep
+that folder outside `/tmp`; only one probe may lease it at a time. Add
+`--smoke --profile-sharing` for real settings/extension changes and a full
+Stop/reopen check on a new forward. `--local-product Code`, `VSCodium` or
+`"Code - OSS"` creates an isolated desktop profile; omit it to verify private
+persistence and the dark/AI-disabled defaults. These probes install disposable
+fixture extensions only in their isolated profiles, and await an acknowledged
+extension-host startup before terminal commands.
 
 Each runs the actual plugin first-click installation through the real board,
 opens the workbench in the reserved tab, saves a text edit directly into each

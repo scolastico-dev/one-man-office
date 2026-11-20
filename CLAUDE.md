@@ -792,14 +792,23 @@ long-lived child and on a shell option. The e2e
 process is closed. omo's own agent containment on Windows is product work, not
 covered here.
 
-## VS Code plugin launch defaults
+## VS Code plugin profiles and launch
 
 `plugins/vscode/launch.cjs` passes `--disable-workspace-trust` to both pinned
-publishers. Fresh settings files initialize `workbench.colorTheme=Default Dark
-Modern` and `chat.disableAIFeatures=true`, preserving existing JSONC verbatim.
+publishers. Without a local desktop profile, fresh settings initialize
+`workbench.colorTheme=Default Dark Modern` and `chat.disableAIFeatures=true`,
+preserving existing JSONC verbatim.
 code-server enables its supported `--enable-remote-storage` for on-disk
-workbench state; OpenVSCode still uses upstream browser storage for user-scoped
-preferences/state. The opt-in publisher probe asserts the served trust option
+workbench state. `profile.cjs` detects standard desktop default profiles and
+shares the selected extension inventory. `profile-bridge.cjs` mirrors user-scoped
+settings/keybindings/tasks/snippets through the actual browser user-data provider
+into the desktop User folder or private persistent preferences.
+`preference-sync.cjs` serializes clients through a native SQLite transaction,
+merges disjoint JSONC setting edits and preserves conflicts privately; native
+storage databases are outside its file allowlist. jsonc-parser 3.3.1 is vendored
+with its MIT licence. The pinned OpenVSCode bootstrap overrides builtin paths,
+so a FileAccess preload uses a private publisher-root overlay; artifacts stay
+unchanged. The opt-in publisher probe asserts the served trust option
 and never accepts a trust prompt. Routine coverage: `node --test
 plugins/vscode/tests/*.test.cjs`, `lua5.1 plugins/vscode/tests/hooks.lua`, and
 `go test ./internal/plugins ./internal/pluginmanager`.
