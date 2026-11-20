@@ -127,7 +127,7 @@ func oscConsumed(body []byte, end int) int {
 // sendInput writes bytes into the PTY as if typed. Tests substitute
 // writeInput to observe replies without a real PTY.
 func (s *Session) sendInput(b []byte) {
-	// Query replies are input too. Keep them outside a draft's paste sequence.
+	// Query replies are input too. Keep them outside each complete paste.
 	// This separate lock leaves ordinary prompt readiness waits free to receive
 	// output that depends on a query being answered.
 	s.replyMu.Lock()
