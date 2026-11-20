@@ -1,7 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { microtaskGuesses } from './completionGuard'
+import { sourceInventory } from './testing/sourceInventory'
+
+const root = join(__dirname, '..')
+const files = sourceInventory(join(root, 'src'), join(root, 'e2e'))
 
 describe('completion guess guard', () => {
   it('rejects a fixed number of microtask turns', () => {
@@ -20,22 +24,13 @@ describe('completion guess guard', () => {
     expect(microtaskGuesses('async function t() { for (let i = 0; i < 3; i++) { const g = async () => { await Promise.resolve() }; g }}')).toEqual([])
   })
 
-  it('keeps web sources and browser tests free of microtask-count completion guesses', () => {
-    const root = join(__dirname, '..')
-    let checked = 0
-    const visit = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith('.') || ['node_modules', 'dist', 'test-results', 'playwright-report'].includes(entry.name)) continue
-        const path = join(dir, entry.name)
-        if (entry.isDirectory()) visit(path)
-        else if (/\.(ts|js|mjs)$/.test(entry.name)) {
-          checked++
-          expect(microtaskGuesses(readFileSync(path, 'utf8')), path).toEqual([])
-        }
-      }
-    }
-    visit(join(root, 'src'))
-    visit(join(root, 'e2e'))
-    expect(checked).toBeGreaterThan(100)
+  it('retains the complete web source and browser test inventory', () => {
+    expect(files.length).toBeGreaterThan(100)
+  })
+
+  // Each source is an independent assertion. Parser cost must not accumulate
+  // across the entire repository under a single test's execution limit.
+  it.each(files.map((file) => [relative(root, file), file] as const))('keeps %s free of microtask-count completion guesses', (_name, file) => {
+    expect(microtaskGuesses(readFileSync(file, 'utf8')), file).toEqual([])
   })
 })

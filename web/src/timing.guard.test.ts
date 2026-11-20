@@ -1,7 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fixedBrowserWaits } from './timingGuard'
+import { sourceInventory } from './testing/sourceInventory'
+
+const root = join(__dirname, '..')
+const files = sourceInventory(root)
 
 describe('browser synchronization guard', () => {
   it('rejects fixed browser waits including optional calls and spacing', () => {
@@ -20,21 +24,11 @@ describe('browser synchronization guard', () => {
     `)).toEqual([])
   })
 
-  it('keeps browser tests and support helpers free of fixed waits', () => {
-    const root = join(__dirname, '..')
-    let checked = 0
-    const visit = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith('.') || ['node_modules', 'dist', 'test-results', 'playwright-report'].includes(entry.name)) continue
-        const path = join(dir, entry.name)
-        if (entry.isDirectory()) visit(path)
-        else if (/\.(ts|js|mjs)$/.test(entry.name)) {
-          checked++
-          expect(fixedBrowserWaits(readFileSync(path, 'utf8')), path).toEqual([])
-        }
-      }
-    }
-    visit(root)
-    expect(checked).toBeGreaterThan(20)
+  it('retains the complete web source, browser test and tooling inventory', () => {
+    expect(files.length).toBeGreaterThan(20)
+  })
+
+  it.each(files.map((file) => [relative(root, file), file] as const))('keeps %s free of fixed waits', (_name, file) => {
+    expect(fixedBrowserWaits(readFileSync(file, 'utf8')), file).toEqual([])
   })
 })
