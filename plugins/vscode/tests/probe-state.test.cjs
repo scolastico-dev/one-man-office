@@ -63,3 +63,11 @@ test('fresh probe responses recognize a new extension host even when its counter
  assert.equal(freshSnapshot(previous,previous),false);
  assert.equal(freshSnapshot(previous,null),false);
 });
+test('preference probes accept publisher theme aliases only when the requested theme is actually rendered',()=>{
+ const {preferencesMatch}=require('./probe-state.cjs');
+ const expected={font:19,theme:'Light Modern'},actual={font:19,theme:'Default Light Modern'};
+ assert.equal(preferencesMatch(actual,expected,['vs','vscode-theme-defaults-themes-light_modern-json']),true);
+ assert.equal(preferencesMatch(actual,expected,['vs-dark','vscode-theme-defaults-themes-dark_modern-json']),false);
+ assert.equal(preferencesMatch({...actual,font:22},expected,['vscode-theme-defaults-themes-light_modern-json']),false);
+ assert.equal(preferencesMatch({...actual,theme:'Default Light+'},expected,['vscode-theme-defaults-themes-light_modern-json']),false);
+});

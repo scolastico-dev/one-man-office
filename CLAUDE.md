@@ -276,6 +276,17 @@ settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
 Official browser editor: all editor policy is in `plugins/vscode/` (Lua,
 frontend and a JS launcher executed by the verified artifact's bundled Node;
 no editor-specific core package). Pins: code-server 4.145.2, OpenVSCode 1.109.5;
+`desktop-secrets.cjs` reads the selected native default profile's SQLite secrets
+read-only and decrypts Electron safeStorage with OS helpers. Product nameShort
+selects Secret Service application/macOS service+account; KWallet uses Chromium
+Keys/Safe Storage and its network wallet, honoring explicit argv.json versions.
+`secret-provider.cjs` supplies a capability-protected loopback POST route via
+launcher preload and encrypted private SQLite persistence. `browser-secrets.cjs`
+is injected into both pinned renderers through session overlays before extension
+activation. Imported fingerprints preserve browser edits/sign-outs; no desktop
+secret writes. Unknown publisher layouts fail closed. `--secrets` publisher
+probes assert synthetic GitHub account discovery and extension secrets after
+restart; native macOS/Windows/KWallet remain fixture-covered.
 OpenVSCode root/subdomain launches omit `--server-base-path`: explicit `/`
 becomes an empty publisher client base and breaks WebSocket URLs. Path-mode
 launches preserve the exact non-root prefix, including its trailing slash.

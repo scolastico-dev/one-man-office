@@ -3,7 +3,7 @@
 // test: run only by the explicit command documented in ../README.md.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawn,execFileSync}=require('node:child_process');const net=require('node:net');const assert=require('node:assert/strict');
-const {pinInstance,isRunning,stopChild,freshSnapshot}=require('./probe-state.cjs');
+const {pinInstance,isRunning,stopChild,freshSnapshot,preferencesMatch}=require('./probe-state.cjs');
 const {setup:setupProfileFixture}=require('./profile-fixture.cjs');
 const {installGate,runRaces}=require('./probe-race.cjs');
 const jsonc=require('../vendor/jsonc-parser/main.js');
@@ -11,6 +11,8 @@ const {chromium}=require(path.resolve(__dirname,'../../../web/node_modules/playw
 const editor=process.argv[2];if(!['code-server','openvscode'].includes(editor))throw new Error('Choose code-server or openvscode. Microsoft mode is unavailable.');
 const sharing=process.argv.includes('--profile-sharing'),localIndex=process.argv.indexOf('--local-product'),localProduct=localIndex<0?null:process.argv[localIndex+1];
 const races=process.argv.includes('--preference-races');
+const secrets=process.argv.includes('--secrets');
+if(secrets&&(!sharing||!localProduct))throw new Error('--secrets requires --profile-sharing and --local-product');
 if(races&&!sharing)throw new Error('--preference-races requires --profile-sharing');
 if(localProduct&&!['Code','VSCodium','Code - OSS'].includes(localProduct))throw new Error('Unknown local fixture product');
 let sharedFixture;
@@ -61,12 +63,15 @@ async function inspectPreferences(page,folder,expected){
   const file=path.join(folder,'.omo-fixture-settings.json'),before=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):null;
   await command(page,'omo fixture: Inspect preferences');
   await wait(()=>fs.existsSync(file)&&freshSnapshot(before,JSON.parse(fs.readFileSync(file,'utf8'))));
-  const actual=JSON.parse(fs.readFileSync(file,'utf8'));return Object.entries(expected).every(([key,value])=>actual[key]===value);
+  const actual=JSON.parse(fs.readFileSync(file,'utf8')),themeClasses=await page.locator('.monaco-workbench').evaluate(element=>[...element.classList]);
+  return preferencesMatch(actual,expected,themeClasses);
  });
 }
 async function editCheck(page,folder){
- await page.keyboard.press('Control+P');await page.locator('.quick-input-widget input').fill('probe.txt');
- await page.locator('.quick-input-widget .monaco-list-row').filter({hasText:'probe.txt'}).first().click();
+ // The terminal can receive a late focus event after its command completes.
+ // Open the stable Explorer entry rather than a focus-sensitive Quick Open
+ // overlay that such an event dismisses between searching and selection.
+ await page.getByRole('treeitem',{name:'probe.txt',exact:true}).dblclick();
  await page.locator('.part.editor .monaco-editor .view-lines:visible').last().click({position:{x:60,y:10}});
  assert.equal(await page.evaluate(()=>!!document.activeElement?.closest('.part.editor .monaco-editor')),true,'file editor must own keyboard focus');
  await page.keyboard.press('Control+A');
@@ -74,6 +79,13 @@ async function editCheck(page,folder){
  await wait(()=>fs.readFileSync(path.join(folder,'probe.txt'),'utf8')===content);
 }
 function runtime(instance){const dir=instance.runtimePath;assert.ok(dir,'missing observed runtime path');assert.equal(fs.statSync(dir).mode&0o777,0o700);assert.ok(Buffer.byteLength(path.join(dir,'vscode-ipc-'+ 'a'.repeat(36)+'.sock'))<=103);return dir}
+async function inspectSignins(page,folder){
+ const file=path.join(folder,'.omo-fixture-signins.json');fs.rmSync(file,{force:true});
+ await command(page,'omo fixture: Inspect sign-ins');await wait(()=>fs.existsSync(file));
+ const result=JSON.parse(fs.readFileSync(file,'utf8'));
+ assert.deepEqual(result.githubAccounts,[{id:'123456',label:'omo-secret-fixture'}]);
+ assert.equal(result.extensionSecretMatches,true);
+}
 async function main(){
  if(cache){fs.mkdirSync(path.dirname(cache),{recursive:true});fs.mkdirSync(cache+'.in-use');cacheLease=true;}
  fs.writeFileSync(path.join(root,'.gitconfig'),'[user]\n name = OmoProbe\n');
@@ -89,10 +101,10 @@ async function main(){
  if(cache){const destination=path.join(home,'plugins','.data','vscode','.artifacts-v1');fs.mkdirSync(path.dirname(destination),{recursive:true});if(fs.existsSync(cache))fs.renameSync(cache,destination);}
  if(subdomain)execFileSync(binary,['config','set','proxy_base_host','apps.localhost'],{env});
  fs.writeFileSync(path.join(home,'settings.yaml'),'# isolated probe: no agent program detection\n');
- fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','profile.cjs','profile-bridge.cjs','preference-sync.cjs','preference-history.cjs','browser-history.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
+ fs.mkdirSync(plugin,{recursive:true});for(const name of ['plugin.json','editor.lua','launch.cjs','profile.cjs','profile-bridge.cjs','preference-sync.cjs','preference-history.cjs','browser-history.cjs','desktop-secrets.cjs','secret-provider.cjs','browser-secrets.cjs','frontend.js'])fs.copyFileSync(path.resolve(__dirname,'..',name),path.join(plugin,name));
  fs.cpSync(path.resolve(__dirname,'../vendor'),path.join(plugin,'vendor'),{recursive:true});
  if(races)installGate(plugin,path.join(root,'race-control'));
- sharedFixture=setupProfileFixture(root,env,editor,localProduct);
+ sharedFixture=setupProfileFixture(root,env,editor,localProduct,secrets);
  fs.writeFileSync(path.join(home,'plugins','vscode.yaml'),'source: '+JSON.stringify(plugin)+'\nenabled: true\nconfig:\n  editor: '+editor+'\n  idle_minutes: 1\n');
  server=spawn(binary,[],{env,stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>log+=b);server.stderr.on('data',b=>log+=b);
  await wait(()=>{const m=log.match(/omo: http:\/\/omo\.localhost:\d+\/#([a-f0-9]{64})/);if(!isRunning(server))throw new Error('test server exited before ready');if(m)token=m[1];return !!token});
@@ -163,6 +175,7 @@ async function main(){
  captureChildren();await checkpoint('both-active');
  assert.equal((await api('GET','/api/proxy/forwards')).forwards.length,2);
  if(sharing){
+  if(secrets)await inspectSignins(page,project);
   await inspectPreferences(page,project,{theme:localProduct?(editor==='code-server'?'Light Modern':'Default Light Modern'):(editor==='code-server'?'Dark Modern':'Default Dark Modern'),chatDisabled:true,chatKnown:true});
   await command(page,'omo fixture: Set font size');
   const preferences=path.join(sharedFixture.sharedUser,'settings.json');
@@ -187,9 +200,10 @@ async function main(){
    assert.notEqual(instance.taskID,firstInstance.taskID);assert.notEqual(instance.forwardID,firstInstance.forwardID);if(subdomain)assert.notEqual(new URL(restarted.url()).origin,appURL.origin,'restart must recover preferences on a fresh browser origin');
    await wait(()=>fs.existsSync(path.join(project,'.omo-fixture-active'))&&fs.existsSync(path.join(project,'.omo-installed-active')));
    await inspectPreferences(restarted,project,{font:20,theme:localProduct?(editor==='code-server'?'Light Modern':'Default Light Modern'):(editor==='code-server'?'Dark Modern':'Default Dark Modern'),chatDisabled:true,chatKnown:true});
+   if(secrets)await inspectSignins(restarted,project);
    const dir=runtime(instance);captureChildren();await api('POST','/api/plugins/vscode/tasks/'+encodeURIComponent(instance.taskName)+'/stop',{});await wait(()=>!fs.existsSync(dir));await wait(()=>remainingChildren().length===0);
   }
-  const report={editor,...routing,profileSharing:sharing,localProduct,preferenceRaces,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
+  const report={editor,...routing,profileSharing:sharing,localProduct,secrets,preferenceRaces,instances,processCleanup:{platform:process.platform,verified:process.platform==='linux',tracked:children.size,remaining:remainingChildren()},smoke:true,firstClick:true,reused:true,concurrentFolders:true,editedDirectly:true,terminalHostGitConfig:true,hostRuntimeRestored:true,sharedProfileRetained:true,runtimeCleanup:true,explicitStop:true,failedRequests:failed};
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));return;
  }
  // Last-disconnect idle: active sockets must survive > 1 minute, then expire.
