@@ -270,8 +270,12 @@ tab synchronously, wait through plugin-controlled polling, and acquire proxy
 Open only for a final forward result. They never retry a lost action and close
 unused blank tabs; disabling/updating prevents late navigation. Config editor
 primitive controls share the JSON draft, unknown keys, If-Match and conflict
-handling; missing booleans are unchecked. PluginTasks uses task API/events,
+handling; missing booleans are unchecked. PluginTasks uses task/forward APIs and events,
 reconnect/snapshot refresh, shared useNow, bounded visible output and Stop.
+Sidebar running instances with an attached forward show its name and authenticated Open;
+matching requires the same plugin, stable task ID and ticket binding. The VS
+Code plugin labels forwards with the selected project ID (or No project), with
+the task's ticket number shown separately in the instance list.
 Focused checks: Go TestPluginAssets, Vue features/plugins/proxy/pluginNavigation,
 settings/plugins and ticket/pluginActions, and e2e/plugin-frontend.spec.ts
 (actual entry/image/own-hook execution under unchanged CSP). Full schema: [Plugins](wiki/plugins.md).

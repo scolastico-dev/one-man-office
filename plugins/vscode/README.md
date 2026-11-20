@@ -3,7 +3,9 @@
 Install **vscode** from omo's official plugin list and enable it. **Open in VS
 Code** in the **VS Code** sidebar tab opens a project search; selecting a
 project opens its repository. The tab lists running instances below the button,
-each with **Stop**. It adds no controls to the CEO tab. On a ticket it opens the
+each showing its project ID (or **No project**) and its ticket number when bound
+to a ticket. **Open** reopens that instance in a new tab; **Stop** ends it.
+It adds no controls to the CEO tab. On a ticket it opens the
 selected project's worktree (one button per worktree), or the recorded working
 directory of a task without a project. Start ticket work to create its folder.
 Missing, removed or replaced folders are reported as unavailable; the plugin
