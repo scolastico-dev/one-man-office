@@ -3,7 +3,11 @@
 Native UI clients load the board from their configured omo server. These
 additive endpoints support capability discovery and system notification
 polling without a WebSocket or a second notification queue. Shared Go wire
-types live in `internal/api/ui.go`.
+types live in `internal/api/ui.go`. The board's `web/src/api/types.ts` mirrors
+`UICapabilities`, `UINotification`, `UINotificationFeed` and
+`UINotificationCursorReset`; `web/src/api/types.test.ts` guards field parity
+with the Go API types. Notification IDs and all feed and recovery cursors
+are strings in both languages.
 
 ## Authentication and access
 
