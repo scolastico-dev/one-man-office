@@ -8,13 +8,10 @@ availability. The relay routes opaque messages between an outbound omo host
 and several native UI clients. Trust, keys, authorization and notification
 receipt state belong to the endpoints.
 
-**Pending product decision:** initial UI trust requires a human confirmation
-of successful acceptance on the real host, or an explicit out-of-band host
-fingerprint invitation. The proposed `pair.confirm` extension below is syntax
-and a proposed consumer gate, not approval of that ceremony. A relay success
-message alone establishes neither provisional usable trust nor persistent
-host trust. The base commitment, possession proof and encryption primitives
-are independent of that decision. No UI is implemented here.
+The host authorizes a device only through the real host's local PIN or full-key
+accept command. Successful local acceptance stores the device as active before
+CLI success and encrypted `pair.accepted`. There is no extra UI confirmation
+or `pair.confirm` activation step. No UI is implemented here.
 
 ## 1 Existing integration points
 
@@ -62,13 +59,17 @@ Host registration is the first control message; UI attach is the first UI contro
 
 Host socket loss atomically removes its registration, cancels notification requests and closes all its UI sockets. A late callback from the old host cannot remove or answer for its replacement. Relay restart clears every map. Host automatically redials its saved id. On `id_in_use`, show status `collision` and keep retrying while relay_enabled is true, with delays 1, 2, 4, 8, 16, then 30 seconds capped for every further attempt; reset backoff only after successful registration. Never take over a registration or silently select another name. This handles both selected and random ids. A genuine foreign collision remains visibly retrying until its owner leaves or the human changes the id; local `connect --new-id` explicitly generates a replacement. Lost application sessions always redo authentication with fresh randomness/keys; do not replay uncertain writes. Independent UIs remain connected when a different UI leaves.
 
+The host bounds dial/upgrade and the initial wait for host.registered to 30 seconds each. A silent relay or middlebox closes that attempt and enters the same saved-id reconnect loop; keepalive begins after registration.
+
+Host-local admission is capped at 128 endpoint channels and 128 pending notification polls per registration. Refuse excess/duplicate endpoints individually with ui.close and excess/duplicate/misdirected polls with notification.empty. Duplicate handles cancel only that endpoint or poll, never the shared socket. Later frames for a refused/closed endpoint have no authority and are ignored. Refusal replies are best effort through bounded queues: saturation may drop that one close/empty reply, with no growing refusal backlog, while the control reader and other authenticated devices remain live. The relay's ordinary GET timeout covers a dropped empty response.
+
 Keepalive is mandatory: the relay sends a WebSocket Ping to every registered host and attached UI every 20 seconds, first at 20 seconds after registration/attachment. Each Ping must receive its matching Pong within 10 seconds; on expiry, immediately close that socket and remove its scoped routing registration/connection, cancel its pending GETs and close affected UI sessions as described above. The host independently Pings its relay socket on the same 20-second interval/10-second deadline, closes and redials on failure. Both endpoints continuously service the WebSocket read/control loop, even with no application traffic or a busy request handler; other traffic does not satisfy a missing Pong. Thus a registration whose socket becomes half-open is reaped no later than the next Ping deadline (at most 30 seconds after its last working control exchange), and the enabled host eventually reacquires its saved id through collision retries. No resume token or registration takeover is used. Use `Conn.Ping` concurrently with the existing continuous read loop, and `CloseNow` on timeout so removal does not wait for a close handshake. [WebSocket Ping/read API](https://pkg.go.dev/github.com/coder/websocket@v1.8.15#Conn.Ping). Timeout tests inject a clock or use synctest and wait for exact expiry/removal/retry events; real time is not a test pass condition.
 
 Use bounded in-memory routing queues and one writer per socket. Outer messages are at most 1 MiB, forwarded inner messages at most 64 KiB, encrypted stream data at most 16 KiB per chunk, notification replies at most 512 KiB. Backpressure closes a slow endpoint instead of buffering content indefinitely. Mandatory keepalive never resets pairing permission. No relay persistence, disk spool, notification cache or payload logging. Routing names and traffic sizes/timing remain visible; a malicious relay can deny service or occupy a name.
 
 ## 3 Keys and authentication
 
-The version 1 primitive suite is ML-KEM identities with mutual MAC possession proofs, staying within Go's standard crypto library and retaining a separate shared root for offline notifications. Adding post-quantum signatures would instead require a second identity/signing format and key lifecycle; signatures are unnecessary when both endpoints already hold paired trust and a notification root. Relay-terminated TLS alone cannot meet the compromised-relay threat model. These choices define v1 primitives and do not approve the pending initial trust ceremony.
+The version 1 primitive suite is ML-KEM identities with mutual MAC possession proofs, staying within Go's standard crypto library and retaining a separate shared root for offline notifications. Adding post-quantum signatures would instead require a second identity/signing format and key lifecycle; signatures are unnecessary when both endpoints already hold paired trust and a notification root. Relay-terminated TLS alone cannot meet the compromised-relay threat model. These choices define the v1 primitives; first-contact limits are described in section 4.
 
 ML-KEM-768 generates an encapsulation public key (1184 bytes), encapsulation ciphertext (1088 bytes) and shared secret (32 bytes). Use Go `crypto/mlkem.GenerateKey768`, `NewEncapsulationKey768`, `Encapsulate`, `Decapsulate` and `NewDecapsulationKey768`. Go private serialization is a **64-byte d||z seed**, not an expanded ML-KEM private key. Keep it local. Raw FIPS 203 public-key/ciphertext bytes are the interoperable wire format, with explicit suite and lengths; no PEM/ASN.1/Go object serialization or prestandard Kyber encoding. [Go 1.26.2 ML-KEM API](https://pkg.go.dev/crypto/mlkem@go1.26.2).
 
@@ -83,15 +84,13 @@ Run this after pairing reveal, or immediately for reconnect. All messages are in
 1. U encapsulates to pinned/candidate pkH: `(ssH,ctH)`. It sends `p.init {host_fp,ui_id,pair_epoch,nu,ctH}`, nu fresh random 32 bytes. In pairing pkU is already fixed by reveal; on reconnect look it up by ui_id and epoch. No public key supplied in reconnect can override it.
 2. H decapsulates ctH, generates random nh (32 bytes), encapsulates to pinned/candidate pkU: `(ssU,ctU)`. Define `T=H(E("omo-relay-v1/auth-transcript",B,nu,nh,ctH,ctU))`, `PRK=HKDF-Extract-SHA384(salt=T,IKM=ssH||ssU)`. H sends `p.challenge {nh,ctU,proofH}`, where `proofH=MAC(Expand(PRK,E("omo-relay-v1/finish-host"),32),E("omo-relay-v1/host-finished",T))`.
 3. U decapsulates ctU, derives PRK, verifies proofH and sends `p.finish {proofU}` with separate key `Expand(PRK,E("omo-relay-v1/finish-ui"),32)` and input `E("omo-relay-v1/ui-finished",T,proofH)`. H verifies before granting any device authority. Each side's own encapsulation is fresh. An impostor knowing its own encapsulated secret still lacks the other challenge's secret. No decapsulation result, raw secret, PIN or PIN-check result is sent.
-4. On reconnect H rechecks current device authorization and sends encrypted `ready {pair_epoch,state,aid}`, where state is `active` or `awaiting-confirmation` and aid is the saved pairing attempt id. U responds encrypted `ready.ack {pair_epoch}`. For active devices streams may then open; awaiting-confirmation allows only pair.confirm as proposed below. Session id is base64url(T). A handshake is attached to one connection, one init and one challenge; another/out-of-order message aborts it. Duplicate or tampered proofs fail closed with a generic authentication failure. No application data is accepted during authentication.
+4. On reconnect H rechecks current device authorization and sends encrypted `ready {pair_epoch,state,aid}`, where state is `active` and aid is the saved pairing attempt id. U responds encrypted `ready.ack {pair_epoch}`. Streams may then open. Session id is base64url(T). A handshake is attached to one connection, one init and one challenge; another/out-of-order message aborts it. Duplicate or tampered proofs fail closed with a generic authentication failure. No application data is accepted during authentication.
 
 Here Expand is RFC 5869 HKDF-Expand-SHA384 with the literal info bytes supplied. Separate Expand info values `E("omo-relay-v1/record-ui-host")` and `E("omo-relay-v1/record-host-ui")` derive AES keys `record-ui-host` and `record-host-ui` (32 bytes each) from PRK. This is fresh key establishment through the post-quantum identities, not reuse of the identity key as AES. Hashes bind mode, identities, roles, route, version, epoch and the full exchange. Erase ephemeral secrets/session keys on close. Static KEM identity compromise later can expose recorded sessions; version 1 does not claim forward secrecy against endpoint key theft. It protects against the relay, including recorded traffic under a future quantum attack under the ML-KEM assumption.
 
 ## 4 Pairing ceremony and attempt budget
 
-The host normally rejects pairing. The state machine below consumes a single locally authorized budget; `PairHost.Accept` returns acceptance material without selecting the pending product trust policy. The human runs `omo relay pair begin`; this durably opens exactly one local slot with random window (16 bytes) for at most five minutes. There is only one slot for the entire host, across UI sockets and relay reconnects. Local state is `closed -> armed -> committed -> revealed -> proved -> accepted`, or `spent`. No remote event can return it to armed.
-
-The last two lines are the pending, unapproved confirmation extension:
+The host normally rejects pairing. The state machine below consumes a single locally authorized budget; `PairHost.Accept` returns acceptance material; the host consumer must persist its device record as active before acknowledging the local command. The human runs `omo relay pair begin`; this durably opens exactly one local slot with random window (16 bytes) for at most five minutes. There is only one slot for the entire host, across UI sockets and relay reconnects. Local state is `closed -> armed -> committed -> revealed -> proved -> accepted`, or `spent`. No remote event can return it to armed.
 
 ```text
 UI                    untrusted relay                    host
@@ -102,8 +101,7 @@ mutual KEM init / challenge / finish -------------------- prove both candidate k
 display PIN                                               await local command
 human reads UI PIN ---------------- local keyboard -----> accept aid PIN (or full pkU)
                    <------------------------------------ encrypted pair.accepted
-human confirms that the real host command succeeded
-encrypted pair.confirm --------------------------------> device becomes active
+                                                         device is active after local save
 ```
 
 UI generates a persistent ML-KEM identity if needed, random aid (16 bytes) and ru (32 bytes) for this ceremony. It persists its tentative attempt before sending, and sends **only** `pair.commit {aid,C}` where `C=H(E("omo-relay-v1/pair-commit",v,suite,R,host_id,aid,pkU,ru))`. It sends neither pkU nor ru, ui_id nor a key-dependent descriptive name at this step.
@@ -118,13 +116,15 @@ PIN is exactly six decimal digits, leading zeros retained. For i=0,1,..., read t
 
 This bounds an active relay to one independent six-digit substitution trial per human-authorized ceremony (approximately 1/1,000,000, rather than unlimited adaptive trials). It can steal the first slot and cause failure/denial of service. It cannot silently cycle slots, compare a typed PIN against a list of pending attempts or grind a late host random against a reused honest UI reveal. The UI must likewise refuse replaying/revealing its old commitment into another response or auto-starting a new ceremony. Explicit new human ceremonies accumulate their usual guessing probability. Commitment/SAS is an established technique, but this exact construction remains a proposed protocol. [ZRTP commitment and SAS rationale](https://www.rfc-editor.org/rfc/rfc6189#section-4.3.2).
 
-### Trust persistence and the pending product decision
+### Trust persistence and first contact
 
-After mutual proofs, both derive notification root `N=Expand(PRK,E("omo-relay-v1/notification-root",pair_hash),32)`. The UI durably stores it and pkH only as a **tentative, unusable** candidate. A fake host can complete cryptography under its own key and send a fake accepted response; this does not prove it is the user's intended host.
+After mutual proofs, both derive notification root `N=Expand(PRK,E("omo-relay-v1/notification-root",pair_hash),32)`. The UI keeps its host candidate, pairing epoch/root and identity in private persistent storage so the exact ceremony can recover a lost reply.
 
-On a successful local accept, H atomically stores pkU, ui_id, pair_epoch, N, label and state `awaiting-confirmation` under the pending extension; only then returns local CLI success (printing aid and host_fp) and sends encrypted `pair.accepted {aid,host_fp,ui_id,pair_epoch}`. No application or notification access yet. Pending extension, not approved: the user confirms that acceptance of this attempt succeeded on the **real host**, including when the full-key option was used. Only with that human check plus a valid encrypted accepted response (or authenticated reconnect to the same candidate and epoch in `awaiting-confirmation`) may the UI promote pkH/N to persistent trusted state and send encrypted `pair.confirm {aid,pair_epoch}`. Host persists `active` and returns encrypted `pair.confirmed`; then streams and notification checks are allowed. Repeated confirm is idempotent. Never infer human confirmation from any network response or timer.
+On successful local PIN or full-public-key acceptance, H durably stores pkU, ui_id, pair_epoch, N, original aid, local label and state `active`. Only after this save does it return local CLI success (printing aid and host_fp) and send encrypted `pair.accepted {aid,host_fp,ui_id,pair_epoch}`. This local acceptance is the authorization point for application sessions and authenticated notification GETs. No network message or timer authorizes an unregistered device. There is no awaiting-confirmation state and no pair.confirm exchange.
 
-If a reply/disconnect occurs after local acceptance, the pending pair survives restart, but permits only the mutual handshake and pair.confirm, no application access. UI retains its tentative candidate to recover that exact attempt; reconnect cannot silently promote trust. `devices` shows awaiting-confirmation distinctly; local unregister cancels it. If either side loses its tentative secrets, unregister and pair afresh. **Awaiting CEO decision:** the human trust check above versus an explicit out-of-band host fingerprint invitation. Without either, initial host authentication is not established; the implementation must not claim otherwise. This decision concerns the later UI ceremony; no UI is built here.
+If the accepted reply is lost or the host/UI/relay restarts, the same saved key and epoch may reconnect with fresh mutual proof, receive active ready and send ready.ack. Never regenerate the saved notification root or silently replace either pinned key. An unaccepted or spent attempt cannot reconnect as an authorized device. Losing tentative UI secrets requires unregistering any accepted registration and starting a new local ceremony.
+
+The PIN bounds substitution against the real host to one trial per local ceremony, and full-key acceptance additionally compares the complete candidate UI key with private possession proof. First contact still has an identity limit: cryptography proves possession of the candidate host key, and a fake host can send an accepted-looking response under its own key. A routing name, relay TLS or a network success alone is not independent evidence that this candidate is the user's intended host. The selected product flow uses the local host command plus PIN/full key without adding an out-of-band fingerprint invitation or a second confirmation step. The later native UI must visibly distinguish its pairing/connection screen, including titlebar/chrome, from forwarded host pages; forwarded content must not masquerade as that native screen. This task supplies no UI implementation.
 
 ## 5 Encrypted records and application transport
 
@@ -211,11 +211,11 @@ omo relay devices
 omo relay unregister <ui-id>
 ```
 
-`connect` without either id option reuses saved id, or generates one if absent. Persist desired enabled/disabled state; restart reconnects only when enabled. `disconnect` stops outbound connections and burns a pending attempt, retaining device registrations for later. `status` distinguishes connected, retrying, admission denied and collision, prints route and host fingerprint, never secrets. `pending` shows at most one aid and key fingerprint/state, not a candidate list to search by PIN. `devices` prints exact ui_id, local name, host acceptance time, active/awaiting-confirmation and live connection count. `unregister` works offline too, persists revocation and prevents reconnect, notifications and live access; re-pair requires new local acceptance/epoch. Control routes `/api/relay/*` require **local socket human context**, not just user role; agent sessions, browser TCP and paired remote devices cannot self-register devices or cancel revocation.
+`connect` without either id option reuses saved id, or generates one if absent. Persist desired enabled/disabled state; restart reconnects only when enabled. `disconnect` stops outbound connections and burns a pending attempt, retaining device registrations for later. `status` distinguishes connected, retrying, admission denied and collision, prints route and host fingerprint, never secrets. `pending` shows at most one aid and key fingerprint/state, not a candidate list to search by PIN. `devices` prints exact ui_id, local name, host acceptance time, active and live connection count. `unregister` works offline too, persists revocation and prevents reconnect, notifications and live access; re-pair requires new local acceptance/epoch. Control routes `/api/relay/*` require **local socket human context**, not just user role; agent sessions, browser TCP and paired remote devices cannot self-register devices or cancel revocation.
 
 Add strict `server.yaml` keys `relay_url` (empty disables configuration) and `relay_enabled` (false default), including all config setter/validator paths. Password, selected/generated id and trust material live at `<home>/relay/state.json`; do not put an admission password into exported server.yaml. `connect` updates private state before enabling and signals the running manager; disabled config does not delete state. The private state also stores its bound origin R. A config/state origin mismatch pauses access and requires explicit connect to reconcile; it cannot combine an old password/trust context with a new server silently. A changed relay origin is explicit and pauses access until clients are reconfigured for it.
 
-State version 1 stores host seed/public fingerprint, route origin R and id, relay admission secret, pair slot consumption marker, accepted/active devices (pkU, epoch, N, label), original pairing aid, notification cursors, last_ack (null or exact batch/through/token tuple) and pending receipt metadata. Cursor and last_ack commit together; normal restart preserves cursor, last_ack and pending. Single server-owned store with a mutex serializes read-modify-atomic-write; CLI never edits it concurrently with the server. Seed generation and trusted-device updates must commit before success is reported. `relay/` is a private plain directory, state file 0600/protected Windows ACL, safe reads via `homefile.Read` with explicit `MaxRelayState` (4 MiB), writes via `globalhome.WriteFileAtomic`, and no secret logging. Add `Layout.Relay`, classify `relay` in `homezip.NotExported` with identity/private admission/delivery-state reason, and add relayhost to homefile's reader guard. Check parent directory is a plain private directory too; homefile protects the last element only. Fail closed on corruption, invalid key/duplicate ui_id/unsupported state version or failed save, never silently generate replacement identity.
+State version 1 stores host seed/public fingerprint, route origin R and id, relay admission secret, pair slot consumption marker, active devices (pkU, epoch, N, label), original pairing aid, notification cursors, last_ack (null or exact batch/through/token tuple) and pending receipt metadata. Cursor and last_ack commit together; normal restart preserves cursor, last_ack and pending. Single server-owned store with a mutex serializes read-modify-atomic-write; CLI never edits it concurrently with the server. Seed generation and trusted-device updates must commit before success is reported. `relay/` is a private plain directory, state file 0600/protected Windows ACL, safe reads via `homefile.Read` with explicit `MaxRelayState` (4 MiB), writes via `globalhome.WriteFileAtomic`, and no secret logging. Add `Layout.Relay`, classify `relay` in `homezip.NotExported` with identity/private admission/delivery-state reason, and add relayhost to homefile's reader guard. Check parent directory is a plain private directory too; homefile protects the last element only. Fail closed on corruption, invalid key/duplicate ui_id/unsupported state version or failed save, never silently generate replacement identity.
 
 Local state is not in normal settings/database exports; a whole-home secure backup can preserve it. Importing server.yaml without this private state does not enable an unknown identity automatically. Rolling back a whole-home backup may restore a revoked registration; backup rollback is an explicit administrative trust rollback, not a relay restart guarantee. UI stores its seed, trusted/tentative host pins, pairing epoch/root, received notification ids and outstanding receipt in the platform's private persistent storage; no UI implementation here.
 
@@ -267,14 +267,15 @@ Exact encrypted PlainRecord variants also include v and type:
 | --- | --- |
 | ready | pair_epoch, state, aid |
 | ready.ack | pair_epoch |
-| pair.accepted (pending ceremony gate) | aid, host_fp, ui_id, pair_epoch |
-| pair.confirm, pair.confirmed (pending extension) | aid, pair_epoch |
+| pair.accepted | aid, host_fp, ui_id, pair_epoch |
 | stream.open, stream.opened, stream.fin | id |
 | stream.data | id, data |
 | stream.credit | id, bytes |
 | stream.reset | id, code |
 
-`state` is `active` or, under the pending extension, `awaiting-confirmation`.
+`state` is `active`. The primitive codec retains reserved legacy confirmation
+syntax for compatibility with its foundation fixtures; the host does not send
+or accept pair.confirm/pair.confirmed and grants them no authority.
 All stream ids are positive odd integers. Credit grants are 1..65536; data is
 1..16384 bytes. Fixed stream reset codes are `cancelled`, `refused`, `internal`,
 `closed`. Fixed relay error codes are `id_in_use`, `host_offline`,
@@ -435,8 +436,8 @@ than rolling back consumption. Every storage error latches that PairHost
 closed: repair storage, reconstruct it, and Recover before resuming.
 
 Acceptance material is not a capability or local CLI success. The consumer
-must durably save its device record/root and apply the decided human trust
-gate before acknowledging success or granting access. A crash between slot
+must durably save its device record/root as active after local acceptance
+before acknowledging success or granting access. A crash between slot
 acceptance and device-record save fails closed and may require a fresh local
 ceremony; it must never restore a consumed slot. Accept returns only Acceptance.
 No policy in this package activates a device.

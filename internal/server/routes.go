@@ -14,6 +14,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/server", s.getServer)
 	mux.HandleFunc("PUT /api/server/paused", s.putPaused)
 	mux.HandleFunc("GET /api/me", s.getMe)
+	s.registerRelay(mux)
 	s.registerTickets(mux)
 	s.registerDiff(mux)
 	s.registerSettings(mux)

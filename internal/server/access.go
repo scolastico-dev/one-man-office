@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
 // routeAccess says who may call an API route. The zero value is no rule at
@@ -21,12 +23,16 @@ const (
 	// sessions; the board applies its own write rule for the agent (for an
 	// image upload, the rule for comments). Only non-GET routes take it.
 	agentWrite
+	// localHumanOnly additionally requires socket provenance, absent on TCP/relay.
+	localHumanOnly
 )
 
 func (a routeAccess) String() string {
 	switch a {
 	case userOnly:
 		return "user only"
+	case localHumanOnly:
+		return "local socket human only"
 	case agentRead:
 		return "agents may read"
 	case agentWrite:
@@ -65,6 +71,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux, rows []apiRoute) {
 			next := row.handler
 			h = func(w http.ResponseWriter, r *http.Request) {
 				if !requireUser(w, r) {
+					return
+				}
+				next(w, r)
+			}
+		case localHumanOnly:
+			next := row.handler
+			h = func(w http.ResponseWriter, r *http.Request) {
+				if !requireUser(w, r) {
+					return
+				}
+				local, _ := r.Context().Value(relayHumanKey{}).(bool)
+				if !local {
+					writeError(w, r, api.Errorf(api.CodeForbidden, "relay administration requires a human on the local socket"))
 					return
 				}
 				next(w, r)

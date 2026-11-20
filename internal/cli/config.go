@@ -174,6 +174,10 @@ func validKey(key string) bool {
 
 func configValue(c serverconfig.Config, key string) string {
 	switch key {
+	case "relay_url":
+		return c.RelayURL
+	case "relay_enabled":
+		return strconv.FormatBool(c.RelayEnabled)
 	case "host":
 		return c.Host
 	case "port":

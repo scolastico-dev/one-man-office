@@ -105,6 +105,7 @@ The [wiki](wiki/README.md) is the manual:
 - [Merging and export](wiki/merging-and-export.md): local merges and pull requests
 - [Agents](wiki/agents.md), [Settings](wiki/settings.md), [Skill sets](wiki/skills.md), [Plugins](wiki/plugins.md), [MCP](wiki/mcp.md)
 - [Running omo](wiki/running.md), [Command line](wiki/cli.md), [Backup](wiki/backup.md), [Troubleshooting](wiki/troubleshooting.md)
+- [Outbound relay host](wiki/relay.md): local connection, pairing and device controls
 - [Upgrading from 0.11](wiki/upgrading-from-0.11.md)
 - [Contributing](wiki/contributing.md)
 

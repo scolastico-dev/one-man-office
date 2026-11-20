@@ -13,7 +13,7 @@ import (
 // homePackages are the packages that read or append to files in the omo
 // home. Every such read goes through Open or Read, every append through
 // Append.
-var homePackages = []string{"settings", "serverconfig", "globalhome", "service", "engine", "agents", "server", "session",
+var homePackages = []string{"relayhost", "settings", "serverconfig", "globalhome", "service", "engine", "agents", "server", "session",
 	"usage", "plugins", "pluginmanager", "skillsets", "images", "homezip", "mcprelay", "mcpclients", "oldhome", "cli", "filelock", "db"}
 
 // notHome are reads in those packages of files outside the omo home, by file

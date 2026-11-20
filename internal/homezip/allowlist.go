@@ -63,6 +63,7 @@ var Exported = []Entry{
 // NotExported names every other entry at the top of the omo home, and why a
 // settings zip leaves it out.
 var NotExported = map[string]string{
+	"relay":         "private relay identity, admission secret, device trust and delivery state",
 	"layout.json":   "the layout marker; every home writes its own",
 	"token":         "this home's login token; another home keeps its own",
 	"omo.db":        "the database: in the zip only on request, as a consistent snapshot",

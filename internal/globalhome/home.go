@@ -22,6 +22,7 @@ const (
 
 // Layout holds the absolute paths of everything inside the omo home.
 type Layout struct {
+	Relay     string // private relay identity and trust
 	Root      string
 	Settings  string // settings.yaml
 	Projects  string
@@ -86,6 +87,7 @@ func resolveDir(platform, user, app, override string) (string, error) {
 func layoutFor(root string) Layout {
 	return Layout{
 		Root:         root,
+		Relay:        filepath.Join(root, "relay"),
 		Settings:     filepath.Join(root, "settings.yaml"),
 		Projects:     filepath.Join(root, "projects"),
 		Profiles:     filepath.Join(root, "profiles"),
@@ -132,6 +134,9 @@ func Open() (Layout, error) {
 			}
 		}
 	} else if err != nil {
+		return Layout{}, err
+	}
+	if err := EnsurePrivateDir(l.Relay); err != nil {
 		return Layout{}, err
 	}
 	if err := ensurePrivateDir(l.Run); err != nil {
@@ -192,3 +197,21 @@ func (e oldInstallationError) Error() string {
 }
 
 func (e oldInstallationError) Is(target error) bool { return target == ErrOldInstallation }
+
+// EnsurePrivateDir creates/protects a plain private directory, refusing links.
+func EnsurePrivateDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		if err = os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
+		info, err = os.Lstat(dir)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("private directory is not a plain directory")
+	}
+	return ensurePrivateDir(dir)
+}

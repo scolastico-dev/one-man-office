@@ -31,7 +31,17 @@ func (s *Server) SocketHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
 		r = withRequestContext(r, board.User, s.log)
-		values, sent := r.Header[http.CanonicalHeaderKey(SessionHeader)]
+		var values []string
+		sent := false
+		for key, entries := range r.Header {
+			if strings.EqualFold(key, SessionHeader) {
+				sent = true
+				values = append(values, entries...)
+			}
+		}
+		if !sent {
+			r = r.WithContext(context.WithValue(r.Context(), relayHumanKey{}, true))
+		}
 		if sent {
 			if len(values) != 1 {
 				writeError(w, r, api.Errorf(api.CodeUnknownSession, "send exactly one %s header", SessionHeader))

@@ -15,6 +15,8 @@ import (
 
 // Limits of the files omo reads from its home, in bytes.
 const (
+	// MaxRelayState bounds private host identity, trust and receipt metadata.
+	MaxRelayState = 4 << 20
 	// MaxSettingsFile bounds settings.yaml and every file in projects/,
 	// profiles/ and roles/.
 	MaxSettingsFile = 1 << 20

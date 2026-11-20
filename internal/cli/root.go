@@ -37,5 +37,6 @@ func Root(version string) *cobra.Command {
 	addUpdateCommand(cmd, version)
 	addAICommand(cmd)
 	addMCPCommand(cmd)
+	addRelayCommand(cmd)
 	return cmd
 }
