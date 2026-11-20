@@ -59,6 +59,9 @@ func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.Tick
 			return nil
 		}
 		doneConds := append(conds, `t.col = 'done'`)
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM tickets t WHERE `+strings.Join(doneConds, ` AND `), args...).Scan(&out.DoneTotal); err != nil {
+			return err
+		}
 		doneArgs := slices.Clip(args)
 		if f.DoneBefore > 0 {
 			if err := checkRead(tx, a, int64(f.DoneBefore)); err != nil {

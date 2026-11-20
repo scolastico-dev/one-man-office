@@ -31,6 +31,8 @@ export interface BoardState {
   lastEventId: number
   /** The `done_before` value of the next older Done page; null when every Done ticket is loaded. */
   doneBefore: number | null
+  /** Full Done count at lastEventId; null when the server did not supply it. */
+  doneTotal: number | null
   projects: Map<string, Project>
   paused: boolean
   general: General | null
@@ -48,6 +50,7 @@ export function emptyState(): BoardState {
     tickets: new Map(),
     lastEventId: 0,
     doneBefore: null,
+    doneTotal: null,
     projects: new Map(),
     paused: false,
     general: null,
@@ -72,6 +75,7 @@ export function installSnapshot(s: BoardState, list: TicketList): void {
   for (const t of list.tickets) s.tickets.set(t.number, { t, at: list.event_id })
   s.lastEventId = list.event_id
   s.doneBefore = list.next_done_before ?? null
+  s.doneTotal = list.done_total ?? null
   s.loaded = true
 }
 
@@ -167,8 +171,9 @@ function setRank(s: BoardState, n: number, rank: number, column: Column | null, 
  * for kinds the board does not use, which only advance `lastEventId`.
  *
  * Ticket summaries are replaced wholesale; `ticket.moved` may stay in the
- * same column and nothing is inferred from its `from` and `to`. Malformed
- * data is ignored rather than thrown.
+ * same column. Its `from` and `to` adjust only the full Done total, which
+ * also covers tickets absent from the store. Malformed data is ignored
+ * rather than thrown.
  */
 export function applyEvent(s: BoardState, ev: ApiEvent): boolean {
   if (ev.id <= s.lastEventId) return false
@@ -184,7 +189,15 @@ export function applyEvent(s: BoardState, ev: ApiEvent): boolean {
     case 'ticket.refused':
     case 'ticket.overridden':
     case 'ticket.hold_cancelled':
-      if (isSummary(d.ticket)) upsert(s, d.ticket, ev.id)
+      if (isSummary(d.ticket)) {
+        // Move payloads also cover older Done tickets absent from the store.
+        // Keep the total on the stream's timeline, even if a fetched page has
+        // already installed a newer version of this ticket.
+        if (ev.kind === 'ticket.moved' && s.doneTotal !== null && isColumn(d.from) && isColumn(d.to)) {
+          s.doneTotal += Number(d.to === 'done') - Number(d.from === 'done')
+        }
+        upsert(s, d.ticket, ev.id)
+      }
       break
     case 'ticket.reordered': {
       const r = d as unknown as TicketReorderedData

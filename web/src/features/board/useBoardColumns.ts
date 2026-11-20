@@ -87,6 +87,7 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
 
   return computed(() => {
     const f = filters.value
+    const filtered = Boolean(f.project || f.story !== undefined || f.supervisor || f.needsMe || f.q?.trim())
     const hits = serverHits.value
     const shown = (t: TicketSummary) => matches(t, f, hits)
     const all = store.columns.value
@@ -114,7 +115,8 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
         const extra = (searchOnly?.value ?? []).filter((t) => t.column === 'done' && store.view(t.number) === undefined)
         const list = extra.length === 0 ? col.all : doneOrder([...col.all, ...extra])
         const cards = list.filter(shown).map((t) => card(t, seen, slots))
-        return { ...base, cards, count: cards.length, total: list.length, more: store.state.doneBefore !== null }
+        const total = store.counts.value.done
+        return { ...base, cards, count: filtered ? cards.length : total, total, more: store.state.doneBefore !== null }
       }
       const stories = col.stories.filter(shown).map((t) => card(t, seen, slots))
       const tasks = col.tasks.filter(shown).map((t) => card(t, seen, slots))

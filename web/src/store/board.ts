@@ -213,6 +213,11 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
   const counts = computed(() => {
     const out = {} as Record<Column, number>
     for (const c of COLUMNS) out[c] = columns.value[c].all.length
+    if (state.doneTotal !== null) {
+      const loadedDone = [...state.tickets.values()].filter((e) => e.t.column === 'done').length
+      // The difference between displayed and stored cards is the optimistic move overlay.
+      out.done = state.doneTotal + out.done - loadedDone
+    }
     return out
   })
 

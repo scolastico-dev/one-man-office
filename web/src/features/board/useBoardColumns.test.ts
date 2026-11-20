@@ -73,6 +73,57 @@ test('cards name their projects (the id when unknown) and their story (the numbe
   expect(cards.find((c) => c.ticket.number === 3)!.storyTitle).toBeUndefined()
 })
 
+test('Done headings and mobile tabs show the full total before and after loading older tickets', async () => {
+  const { store } = await storeWith(
+    Array.from({ length: 95 }, (_, i) => ticket({ number: i + 1, column: 'done', closed_at: '2026-11-15T10:00:00Z' })),
+  )
+  const filters = noFilter()
+  const cols = useBoardColumns({ store, filters })
+  const Host = defineComponent({ setup: () => () => h(BoardView, { columns: cols.value, onLoadMore: () => store.loadOlderDone() }) })
+  const wrapper = mount(Host)
+  const heading = () => wrapper.get('section[data-drop-column="done"] h2').text().trim()
+  const tab = () => wrapper.get('[role="tab"][data-drop-column="done"] .switcher__count').text().trim()
+  expect(cols.value[4]!.cards).toHaveLength(50)
+  expect(store.counts.value.done).toBe(95)
+  expect(heading()).toBe('Done 95')
+  expect(tab()).toBe('95')
+
+  await wrapper.get('[data-load-more]').trigger('click')
+  await flushPromises()
+  expect(cols.value[4]!.cards).toHaveLength(95)
+  expect(heading()).toBe('Done 95')
+  expect(tab()).toBe('95')
+  expect(wrapper.find('[data-load-more]').exists()).toBe(false)
+
+  filters.filters.value = { q: '#1' }
+  await flushPromises()
+  expect(cols.value[4]!.count).toBe(1)
+  expect(cols.value[4]!.total).toBe(95)
+  wrapper.unmount()
+  store.stop()
+})
+
+test('Done counts follow live closes and reopens even when the reopened card was not loaded', async () => {
+  const { omo, store } = await storeWith(
+    [
+      ticket({ number: 1, column: 'done', closed_at: '2026-11-15T10:00:00Z' }),
+      ticket({ number: 2, column: 'done', closed_at: '2026-11-15T10:00:01Z' }),
+      ticket({ number: 3 }),
+    ],
+    (o) => (o.donePage = 1),
+  )
+  const cols = useBoardColumns({ store, filters: noFilter() })
+  expect(cols.value[4]!.count).toBe(2)
+  expect(store.view(1)).toBeUndefined()
+  omo.change('ticket.moved', ticket({ number: 1 }))
+  expect(cols.value[4]!.count).toBe(1)
+  expect(cols.value[0]!.count).toBe(2)
+  omo.change('ticket.moved', ticket({ number: 3, column: 'done', closed_at: '2026-11-15T10:00:02Z' }))
+  expect(cols.value[4]!.count).toBe(2)
+  expect(cols.value[0]!.count).toBe(1)
+  store.stop()
+})
+
 test('filters hide cards and the counts follow', async () => {
   const { store } = await storeWith([ticket({ number: 1, title: 'alpha' }), ticket({ number: 2, title: 'beta' })])
   const f = noFilter()
