@@ -116,7 +116,9 @@ the refusal keeps the existing editor running. Different folders can run
 independently. Its default is code-server, its idle setting defaults to 30 minutes after the
 last connected browser disconnects. The **VS Code** sidebar tab has one
 **Open in VS Code** button: search for a project and select it to open its
-repository. Running instances appear below it, each with **Stop**. Task output
+repository. Running instances appear below it, each showing its project ID
+(or **No project**) and, when applicable, ticket number. **Open** reopens the
+running instance in a new tab; **Stop** ends it. Task output
 and Stop are also available on its settings page. It adds nothing to the CEO tab.
 First-use progress completes in the tab reserved by that
 same click; the editor has no separate sign-in. OpenVSCode path forwards retain
@@ -967,7 +969,7 @@ The stable facade methods are:
 | `removeButton(id)` | Removes only this plugin's button. |
 | `addPanel(spec)` | Adds or replaces `{id,place,title,text,image?,tab?}`; returns its registration's disposer. Place is `ticket` or `sidebar`; sidebar panels may target a previously registered own `tab`. Text is plain text with hidden characters escaped. Optional image must use this plugin's versioned asset URL. |
 | `removePanel(id)` | Removes only this plugin's panel. |
-| `addSidebarTab(spec)` | Adds or replaces `{id,label,tasks?}` for this plugin and returns its registration's disposer. The tab appears beside CEO, Agents and Terminals on desktop and in the mobile sheet. With `tasks: true`, it lists this plugin's running tasks below its controls, each with Stop; task events/reconnects refresh the list. |
+| `addSidebarTab(spec)` | Adds or replaces `{id,label,tasks?}` for this plugin and returns its registration's disposer. The tab appears beside CEO, Agents and Terminals on desktop and in the mobile sheet. With `tasks: true`, it lists this plugin's running tasks below its controls, each with Stop. A task with an attached forward shows the forward's name and an Open button using omo's authenticated proxy; matching uses the plugin, stable task ID and ticket binding. Task/forward events and reconnects refresh the list. |
 | `removeSidebarTab(id)` | Removes only this plugin's tab. Its controls remain registered but hidden until the tab is added again. |
 | `context()` | Returns a detached copy of the current route context. |
 | `onRouteChange(callback)` | Immediately supplies current context, then each route/context change; returns unsubscribe. Identical context replacements are ignored. Suspended under the lock screen, then delivers changed context on unlock. A failing listener removes that plugin's frontend without affecting others. |

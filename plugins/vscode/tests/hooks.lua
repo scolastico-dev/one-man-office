@@ -76,6 +76,20 @@ test('authoritative selected project and no folder fallback',function()
  f=fixture();f:opened('open-project','beta',false);same(f.identity,'/repo/beta');same(f.starts[1].ticket,nil)
 end)
 
+test('instance forwards identify the selected project for both editors and folder kinds',function()
+ for _,editor in ipairs({'code-server','openvscode'}) do
+  local f=fixture();f.config.editor=editor;f:opened('open-project','beta',false)
+  contains(f.forward_options.name,'beta');same(f.forward_options.ticket,nil)
+  f=fixture();f.config.editor=editor;f:opened('open-ticket','beta')
+  contains(f.forward_options.name,'beta');same(f.forward_options.ticket,7)
+  -- A single recorded worktree can be selected without an explicit project.
+  f=fixture();f.config.editor=editor;f.ticket.folders={f.ticket.folders[2]};f:opened('open-ticket',false)
+  contains(f.forward_options.name,'beta');same(f.forward_options.ticket,7)
+  f=fixture();f.config.editor=editor;f.ticket.projects={};f.ticket.folders={{project='',path='/work/task',available=true,kind='working_directory'}}
+  f:opened('open-ticket',false);contains(f.forward_options.name,'No project');same(f.forward_options.ticket,7)
+ end
+end)
+
 test('repeated pending clicks and healthy instances reuse task and forward',function()
  local f=fixture();f:run('open-ticket');f:run('open-ticket');same(f.installs,1);f:ready();f:run('status-ticket');f:run('status-ticket');same(#f.starts,1)
  f.tasks[1].output={'OMO_EDITOR_READY'};local r=f:run('status-ticket');local again=f:run('open-ticket');same(again.forward_id,r.forward_id);same(#f.starts,1);same(#f.forwards,1)

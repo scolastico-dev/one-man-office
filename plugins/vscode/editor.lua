@@ -92,17 +92,17 @@ if not idle or idle~=idle or idle<1 or idle>10080 then return message('Set idle_
 local ticket,project=data.ticket,data.project
 local ticket_action=data.action=='open-ticket' or data.action=='status-ticket'
 local opening=data.action=='open-ticket' or data.action=='open-project'
-local folder,binding
+local folder,binding,project_id
 if ticket_action then
   if not ticket then return message('The ticket folder is unavailable.') end
   if ticket.column=='done' then return message('Work on this ticket is finished; its editor cannot be started again.') end
   for _,f in ipairs(ticket.folders or {}) do
     if (project and f.project==project.id) or (not project and #(ticket.folders or {})==1) then
-      if f.available and f.path~='' then folder=f.path;binding=ticket.number end
+      if f.available and f.path~='' then folder=f.path;binding=ticket.number;project_id=f.project end
     end
   end
 elseif ticket then return message('Use the ticket action for a ticket folder; a project action requires repository context without a ticket.')
-elseif project and project.available and project.path~='' then folder=project.path end
+elseif project and project.available and project.path~='' then folder=project.path;project_id=project.id end
 if not folder then
   if ticket_action and #(ticket.projects or {})==0 and not project then
     return message('The ticket working folder is unavailable. It may not have been created, may have been removed, or may no longer match its recorded directory.')
@@ -269,7 +269,8 @@ local port,port_error=omo.free_loopback_port()
 if not port then drop(request_key);return message('No loopback port available: '..tostring(port_error)) end
 local sequence=(omo.store_get('run-sequence') or 0)+1
 save('run-sequence',sequence)
-local forward,forward_error=omo.forward_add{name='VS Code '..(binding and 'ticket '..binding or 'project'),host='127.0.0.1',port=port,ticket=binding,strip_prefix=editor=='code-server'}
+local label='VS Code · '..(project_id and project_id~='' and project_id or 'No project')
+local forward,forward_error=omo.forward_add{name=label,host='127.0.0.1',port=port,ticket=binding,strip_prefix=editor=='code-server'}
 if not forward then drop(request_key);return message('Editor forward could not be registered: '..tostring(forward_error)) end
 local base=forward.base_path
 -- The address is a routing hint only. The final UI obtains a fresh Open grant.
