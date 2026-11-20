@@ -450,8 +450,9 @@ tools; omitted CLI/MCP ticket uses the agent's own ticket (user add: global,
 user list: all). Add prints the address, required app base path and process
 reminder. Browser routing and Open/sign-in are implemented separately in
 `server/proxy_routes.go` and `proxy_auth.go`. The browser uses shared
-`features/proxy/ForwardList.vue` / `ForwardForm.vue` in both ticket views and
-the topbar overall dialog; authoritative live reads follow forward events,
+`features/proxy/ForwardList.vue` / `ForwardForm.vue` in the Forwards tab of
+tasks and stories in both ticket views, and in the topbar overall dialog;
+authoritative live reads follow forward events,
 reconnect and resync. `openForward.ts` reserves one detached new tab during the
 user gesture, calls Open with normal API auth, and navigates the returned
 opaque URL unchanged. It closes failed blank reservations and reports errors;

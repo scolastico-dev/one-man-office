@@ -50,6 +50,8 @@ for (const width of [1440, 390]) {
       await openBoard(page, omo)
       await page.goto(omo.url(`/${n}`))
       const panel = page.locator('[data-ticket-panel]')
+      await expect(panel.locator('[data-forward-list]')).toHaveCount(0)
+      await panel.getByRole('tab', { name: 'Forwards', exact: true }).click()
       const list = panel.locator('[data-forward-list]')
       await expect(list.locator('[data-forward-empty]')).toContainText('No forwards')
       const response = page.waitForResponse((r) => r.url().endsWith('/api/proxy/forwards') && r.request().method() === 'POST')
@@ -83,7 +85,10 @@ for (const width of [1440, 390]) {
       // The full ticket page shares the same list and form.
       await panel.locator('[data-open-page]').click()
       const ticketPage = page.locator('[data-ticket-page]')
+      await expect(ticketPage.getByRole('tab', { name: 'Forwards', exact: true })).toHaveAttribute('aria-selected', 'true')
       await ticketPage.getByRole('tab', { name: 'Overview', exact: true }).click()
+      await expect(ticketPage.locator('[data-forward-list]')).toHaveCount(0)
+      await ticketPage.getByRole('tab', { name: 'Forwards', exact: true }).click()
       await expect(ticketPage.locator(`[data-forward="${f.id}"]`)).toBeVisible()
       await layout(page)
       // A dead service stays registered, and Open still gives a useful page.
@@ -151,6 +156,7 @@ test('overall form uses the keyboard, links to the owner and shows API validatio
   await expect(all.locator('[data-forward]')).toHaveCount(1)
   await all.getByRole('link', { name: `Ticket #${n}`, exact: true }).click()
   await expect(all).toHaveCount(0)
+  await page.locator('[data-ticket-panel]').getByRole('tab', { name: 'Forwards', exact: true }).click()
   await expect(page.locator('[data-ticket-panel] [data-forward]')).toHaveCount(1)
 })
 
@@ -166,6 +172,7 @@ test('an app without a base path loads root assets through the Referer fallback'
     expect(securityPolicy).toBeTruthy()
     await openBoard(page, omo)
     await page.goto(omo.url(`/${n}`))
+    await page.locator('[data-ticket-panel]').getByRole('tab', { name: 'Forwards', exact: true }).click()
     const tab = context.waitForEvent('page')
     await page.getByRole('button', { name: 'Open No base path in new tab', exact: true }).click()
     const opened = await tab

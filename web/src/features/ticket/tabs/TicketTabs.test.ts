@@ -26,16 +26,16 @@ async function open(t: ReturnType<typeof ticket>, path: string, props: Record<st
 const task = (n: number) => ticket({ number: n, projects: [{ project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '', export_error: '', export_remote: '', export_branch: '', export_base: '', export_commit: '', export_target_commit: '' }] })
 const labels = (w: VueWrapper) => w.findAll('[role="tab"]').map((t) => t.attributes('data-tab'))
 
-test('tabs: Comments, Diff, Agents; Tasks only for a story', async () => {
+test('tabs: Comments, Diff, Agents, Forwards; Tasks only for a story', async () => {
   const a = await open(task(4), '/4')
-  expect(labels(a.w)).toEqual(['comments', 'diff', 'agents'])
+  expect(labels(a.w)).toEqual(['comments', 'diff', 'agents', 'forwards'])
   a.w.unmount()
   const b = await open(ticket({ number: 5, type: 'story' }), '/5')
-  expect(labels(b.w)).toEqual(['comments', 'diff', 'agents', 'tasks'])
+  expect(labels(b.w)).toEqual(['comments', 'diff', 'agents', 'tasks', 'forwards'])
   b.w.unmount()
   // A task without a project changes no repository: no Diff.
   const c = await open(ticket({ number: 6, projects: [] }), '/6')
-  expect(labels(c.w)).toEqual(['comments', 'agents'])
+  expect(labels(c.w)).toEqual(['comments', 'agents', 'forwards'])
 })
 
 test('tabs: the query keeps filters and other keys when switching tabs; only the selected panel exists', async () => {
@@ -64,7 +64,7 @@ test('tabs: the address picks the tab; an unknown or inapplicable tab falls back
 test('tabs on the page: Overview first and shown by default, from the slot; Comments is then named in the address', async () => {
   const slots = { overview: () => h('p', { 'data-overview': '' }, 'The description') }
   const { w, router } = await open(task(4), '/ticket/4?q=x', { overview: true }, slots)
-  expect(labels(w)).toEqual(['overview', 'comments', 'diff', 'agents'])
+  expect(labels(w)).toEqual(['overview', 'comments', 'diff', 'agents', 'forwards'])
   expect(w.get('[aria-selected="true"]').attributes('data-tab')).toBe('overview')
   expect(w.find('[data-ticket-tabs="page"]').exists()).toBe(true)
   expect(w.get('[role="tabpanel"] [data-overview]').text()).toBe('The description')

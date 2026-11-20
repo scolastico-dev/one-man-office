@@ -80,7 +80,7 @@ test('the page: a level-one heading with the focus, the actions, the tabs at the
   expect(page.attributes('aria-labelledby')).toBe(title.attributes('id'))
   expect(document.activeElement).toBe(title.element)
   expect(page.find('[data-ticket-actions], [data-action]').exists()).toBe(true)
-  expect(page.findAll('[role="tab"]').map((t) => t.attributes('data-tab'))).toEqual(['overview', 'comments', 'diff', 'agents'])
+  expect(page.findAll('[role="tab"]').map((t) => t.attributes('data-tab'))).toEqual(['overview', 'comments', 'diff', 'agents', 'forwards'])
   expect(page.get('[role="tab"][aria-selected="true"]').attributes('data-tab')).toBe('overview')
   expect(page.get('[role="tabpanel"] [data-description]').text()).toContain('Make it work.')
   // Wide: the fields stand in the details column, not in Overview.
