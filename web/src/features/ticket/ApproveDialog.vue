@@ -10,8 +10,9 @@ import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useBoard } from '../../store'
 import { approvalEffect, projectNames } from './actions'
-import { exportEffect, mergeInsteadNote } from './exportState'
+import { exportEffect, mergeInsteadNote, wasExported } from './exportState'
 import { withoutProject } from './fieldRules'
+import { visibleText } from '../../components/ui/visibleText'
 
 const props = withDefaults(
   defineProps<{
@@ -32,14 +33,21 @@ const forced = computed(() => props.mode === 'export')
 /** A task without a project is done once approved: nothing to merge or export, no other choice. */
 const plain = computed(() => !forced.value && withoutProject(props.ticket))
 const exporting = computed(() => !plain.value && (forced.value || props.ticket.effective_when_approved === 'export'))
+const reexporting = computed(() => exporting.value && wasExported(props.ticket))
+const changedExports = computed(() => exporting.value ? props.ticket.projects.filter((p) => p.last_export_commit && p.review_commit && p.review_commit !== p.last_export_commit) : [])
 const effect = computed(() => (forced.value ? exportEffect(props.ticket, nameOf) : approvalEffect(props.ticket, nameOf)))
 const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInsteadNote(props.ticket, nameOf) : ''))
 </script>
 
 <template>
-  <UiDialog :open="open" :title="forced ? `Export #${ticket.number}?` : `Approve #${ticket.number}?`" :eyebrow="ticket.title" @close="emit('close')">
+  <UiDialog :open="open" :title="forced ? `${reexporting ? 'Re-export' : 'Export'} #${ticket.number}?` : `Approve #${ticket.number}?`" :eyebrow="ticket.title" @close="emit('close')">
     <div class="approve" data-approve-dialog>
       <p class="approve__text" data-approve-effect>{{ effect }}</p>
+      <p v-for="p in changedExports" :key="p.project" class="approve__text approve__warning" role="status" data-reexport-warning>
+        {{ nameOf(p.project) }}: the exported branch is at <code>{{ visibleText(p.last_export_commit!) }}</code>,
+        which differs from the locally reviewed commit <code>{{ visibleText(p.review_commit!) }}</code>.
+        Re-export pushes the reviewed changes to the remote branch.
+      </p>
       <p v-if="mergeNote" class="approve__text" data-merge-instead-note>{{ mergeNote }}</p>
       <p v-if="exporting" class="approve__text approve__muted" data-export-text-note>
         The pull request text is written per repository by the export agent.
@@ -65,7 +73,7 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
         :disabled="busy"
         @click="!busy && (forced ? emit('confirm', { export: true }) : emit('confirm'))"
       >
-        {{ forced ? 'Export' : plain ? 'Approve' : exporting ? 'Approve and export' : 'Approve and merge' }}
+        {{ forced ? (reexporting ? 'Re-export' : 'Export') : plain ? 'Approve' : exporting ? (reexporting ? 'Approve and re-export' : 'Approve and export') : 'Approve and merge' }}
       </UiButton>
     </template>
   </UiDialog>
@@ -83,6 +91,10 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
 }
 .approve__muted {
   color: var(--omo-muted);
+}
+.approve__warning {
+  color: var(--omo-warn);
+  overflow-wrap: anywhere;
 }
 .approve__error {
   margin: 0;

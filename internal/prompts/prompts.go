@@ -74,6 +74,8 @@ type Data struct {
 	Question     int
 	Projects     []Project
 	MultiProject bool
+	// FollowUpReview scopes a user-assigned verification task on an export.
+	FollowUpReview bool
 	// NoProject is set for a task without a project: its developer and
 	// reviewer work in Workdir, the working folder omo made for it, and
 	// Repositories lists the projects omo knows (ID, Name, Folder), which

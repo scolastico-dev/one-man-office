@@ -151,7 +151,13 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 			}
 			contained, err := e.git.ExportContained(proj.Path, p.Start, p.ExportCommit, r.commit)
 			if err == nil && !contained {
-				contained, err = e.changedExportContained(proj.Path, p, r.commit)
+				contained, err = e.changedExportContained(proj.Path, p, r.commit, &pushed)
+				if err == nil && pushed.ObservedCommit != "" {
+					err = e.pins.observeExport(t.ID, p.ID, pushed)
+					if err == nil {
+						err = e.keepCommits(ctx, t.ID, proj.Path)
+					}
+				}
 			}
 			if err != nil {
 				failure = fmt.Errorf("project %s: %w", p.ID, err)
@@ -207,7 +213,7 @@ func (e *Engine) checkExportsMerged(ctx context.Context) {
 // chain that the tip contains. This excludes upstream changes brought in by a
 // rebase, even after a merge makes the tip itself an ancestor of the target.
 // Keep all saved export and diff commits intact for the round guard and diff.
-func (e *Engine) changedExportContained(repo string, p board.EngineProject, target string) (bool, error) {
+func (e *Engine) changedExportContained(repo string, p board.EngineProject, target string, record *pushRecord) (bool, error) {
 	if p.ExportBranch == "" {
 		return false, nil
 	}
@@ -228,10 +234,17 @@ func (e *Engine) changedExportContained(repo string, p board.EngineProject, targ
 	if err != nil {
 		return false, err
 	}
+	if record.ObservedCommit == tip && record.ObservedStart != "" {
+		start = record.ObservedStart
+	}
+	if nonempty, err := e.git.ExportContained(repo, start, tip, tip); err != nil || !nonempty {
+		return false, err
+	}
 	// Empty patches and changes already included at export are not evidence.
 	if already, err := e.git.ExportContained(repo, start, tip, p.ExportTargetCommit); err != nil || already {
 		return false, err
 	}
+	record.ObservedCommit, record.ObservedStart = tip, start
 	return e.git.ExportContained(repo, start, tip, target)
 }
 

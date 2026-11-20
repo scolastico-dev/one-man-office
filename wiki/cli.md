@@ -782,6 +782,25 @@ Global Flags:
       --json   print the server's JSON answer instead of text
 ```
 
+### `omo ai ticket follow-up`
+
+Send further work on an exported ticket to its developer (product manager for
+a story) or reviewer. The ticket must wait for its exported merge or human
+review. Only the user can invoke this command.
+
+```bash
+omo ai ticket follow-up N --role developer --comment-file task.md
+omo ai ticket follow-up N --role reviewer --comment-file - <<'EOF'
+Verify the requested compatibility checks and report the results.
+EOF
+```
+
+The previous pull request stays linked. After the task and the configured
+review, omo re-exports the reviewed commit and records the updated merge
+watch. Human review offers **Re-export…**, with a warning when the local
+reviewed commit differs from the last export. See
+[Follow-up work after export](merging-and-export.md#follow-up-work-after-export).
+
 ### `omo ai ticket remove-project`
 
 ```text

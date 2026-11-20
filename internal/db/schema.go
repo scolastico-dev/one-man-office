@@ -355,4 +355,12 @@ CREATE TABLE IF NOT EXISTS ticket_gates (
   PRIMARY KEY (ticket_id, plugin)
 );
 `,
+	// Version 13: retained export revisions and explicit follow-up work.
+	`ALTER TABLE ticket_projects ADD COLUMN last_export_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE ticket_projects ADD COLUMN last_export_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE ticket_projects ADD COLUMN review_commit TEXT NOT NULL DEFAULT '';
+UPDATE ticket_projects SET last_export_commit=export_commit,last_export_url=export_url;
+ALTER TABLE tickets ADD COLUMN followup_review INTEGER NOT NULL DEFAULT 0 CHECK (followup_review IN (0,1));
+ALTER TABLE tickets ADD COLUMN reexport_pending INTEGER NOT NULL DEFAULT 0 CHECK (reexport_pending IN (0,1));
+`,
 }

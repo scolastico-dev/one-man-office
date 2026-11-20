@@ -44,6 +44,11 @@ export interface TicketProject {
   export_base: string
   export_commit: string
   export_target_commit: string
+  /** The most recent successful export, retained while follow-up work is reviewed. */
+  last_export_commit?: string
+  last_export_url?: string
+  /** The commit handed in for the current review. */
+  review_commit?: string
   /**
    * The merge base and reviewed commit recorded for the completed or exported diff, full ids.
    * Exported tickets may have them while waiting in Review. Empty before recording or after cancellation.
@@ -241,6 +246,11 @@ export interface ApproveRequest {
 
 export interface RejectRequest {
   comment: string
+}
+
+export interface FollowUpRequest {
+  comment: string
+  role: 'developer' | 'reviewer'
 }
 
 export interface CancelRequest {

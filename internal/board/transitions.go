@@ -459,10 +459,12 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 		return err
 	}
 	if col == api.ColumnInProgress {
-		if _, err := tx.Exec(`UPDATE tickets SET export_url = '', export_merged = 0 WHERE id = ?`, n); err != nil {
+		if err := clearExportWatch(tx, n); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = '', export_remote = '', export_branch = '', export_base = '', export_commit = '', export_target_commit = '' WHERE ticket_id = ?`, n); err != nil {
+	}
+	if col != api.ColumnReview {
+		if _, err := tx.Exec(`UPDATE tickets SET followup_review=0 WHERE id=?`, n); err != nil {
 			return err
 		}
 	}
@@ -529,6 +531,11 @@ func (b *Board) closeQuestions(tx *sql.Tx, n int64, res api.Resolution) error {
 // that step's reason and stays: the two are cleared together, by Retry,
 // ClearFailed or a column change.
 func (b *Board) setStage(tx *sql.Tx, n int64, stage api.ReviewStage, attention string) error {
+	if stage != api.ReviewStageAgent {
+		if _, err := tx.Exec(`UPDATE tickets SET followup_review=0,reexport_pending=CASE WHEN ?='awaiting_merge' THEN 0 ELSE reexport_pending END WHERE id=?`, stage, n); err != nil {
+			return err
+		}
+	}
 	if stage == api.ReviewStageExporting {
 		// A new export attempt tries the failed projects afresh.
 		if _, err := tx.Exec(`UPDATE ticket_projects SET export_state = '', export_error = ''

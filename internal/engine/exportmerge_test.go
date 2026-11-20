@@ -16,7 +16,11 @@ import (
 func TestExportMergeAfterBranchChanges(t *testing.T) {
 	t.Setenv("LC_ALL", "C")
 	for _, change := range []string{"rebase", "extend"} {
-		for _, style := range []string{"merge", "squash"} {
+		styles := []string{"merge", "squash"}
+		if change == "rebase" {
+			styles = append(styles, "fast-forward")
+		}
+		for _, style := range styles {
 			t.Run(change+"/"+style, func(t *testing.T) {
 				h := gitHarness(t)
 				commit(t, h.repo, "b.txt", "base\n")
@@ -55,10 +59,18 @@ func TestExportMergeAfterBranchChanges(t *testing.T) {
 				if got := h.ticket(n); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAwaitingMerge || got.ExportMerged {
 					t.Fatalf("unmerged changed branch completed: %+v", got.TicketSummary)
 				}
-				commit(t, landed, "before-merge.txt", "upstream work after the branch changed\n")
+				if style == "fast-forward" {
+					// A later round must recover pre-merge evidence from disk.
+					h.e.pins = &pinStore{path: h.e.pins.path}
+				}
+				if style != "fast-forward" {
+					commit(t, landed, "before-merge.txt", "upstream work after the branch changed\n")
+				}
 				gitRun(t, landed, "fetch", "-q", "origin", "refs/heads/"+branch)
 				if style == "merge" {
 					gitRun(t, landed, "merge", "-q", "--no-ff", "-m", "merge changed export", "FETCH_HEAD")
+				} else if style == "fast-forward" {
+					gitRun(t, landed, "merge", "-q", "--ff-only", "FETCH_HEAD")
 				} else {
 					gitRun(t, landed, "merge", "--squash", "FETCH_HEAD")
 					gitRun(t, landed, "commit", "-q", "-m", "squash changed export")

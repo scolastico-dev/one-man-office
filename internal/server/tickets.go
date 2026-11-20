@@ -40,7 +40,23 @@ func (s *Server) registerTickets(mux *http.ServeMux) {
 		{"POST /api/tickets/{n}/remove-project", s.removeTicketProject, agentWrite},
 		{"POST /api/tickets/{n}/remove-workdir", s.removeTicketWorkdir, userOnly},
 		{"POST /api/tickets/{n}/check-export", s.checkExport, userOnly},
+		{"POST /api/tickets/{n}/follow-up", s.followUpTicket, userOnly},
 	})
+}
+
+func (s *Server) followUpTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.FollowUpRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.RequestFollowUp(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
 }
 
 // checkExport accepts a manual check through the same coalesced round as

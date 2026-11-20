@@ -152,6 +152,21 @@ var pushConfig = []string{
 // time wraps ErrTimeout. Every URL in an error has lost its user and
 // password.
 func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, branch, prev string) error {
+	return g.pushCommit(ctx, repo, r, commit, branch, prev, false)
+}
+
+// PushReviewedUpdate replaces the previously exported commit with an explicitly
+// reviewed update, including a rewritten history. The caller must supply the
+// recorded destination, branch and last exported commit as prev. Unlike
+// PushCommit, this may replace a non-ancestor, but only when the remote branch
+// still exists at nonempty prev. A branch already at commit needs no push.
+// All other ownership, protected-branch, isolation and lease checks are shared
+// with PushCommit.
+func (g *Git) PushReviewedUpdate(ctx context.Context, repo string, r Remote, commit, branch, prev string) error {
+	return g.pushCommit(ctx, repo, r, commit, branch, prev, true)
+}
+
+func (g *Git) pushCommit(ctx context.Context, repo string, r Remote, commit, branch, prev string, reviewedUpdate bool) error {
 	if !commitID.MatchString(commit) {
 		return fmt.Errorf("%q is not a full commit id", oneLine(commit))
 	}
@@ -194,7 +209,15 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 	if err != nil {
 		return err
 	}
-	if seen != "" && seen != commit {
+	if reviewedUpdate {
+		if seen == commit {
+			return nil
+		}
+		if prev == "" || seen != prev {
+			return &cleanError{msg: fmt.Sprintf("%s: %s; the remote branch must still be at the recorded previous export", where, ErrForeignBranch), err: ErrForeignBranch}
+		}
+	}
+	if !reviewedUpdate && seen != "" && seen != commit {
 		if _, _, err := g.exec(o, "merge-base", "--is-ancestor", seen, commit); err != nil {
 			return &cleanError{msg: fmt.Sprintf("%s: %s (non-fast-forward: %s there is not part of %s)", where, ErrPushRejected, seen[:12], commit[:12]), err: ErrPushRejected}
 		}

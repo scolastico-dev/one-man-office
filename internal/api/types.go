@@ -134,6 +134,10 @@ type TicketProject struct {
 	ExportBase         string `json:"export_base"`
 	ExportCommit       string `json:"export_commit"`
 	ExportTargetCommit string `json:"export_target_commit"`
+	// LastExport survives follow-up work; ReviewCommit is the current hand-in.
+	LastExportCommit string `json:"last_export_commit,omitempty"`
+	LastExportURL    string `json:"last_export_url,omitempty"`
+	ReviewCommit     string `json:"review_commit,omitempty"`
 	// ExportState says where the export of this project stands (see
 	// ExportState); ExportError is why it failed, for ExportFailedState only.
 	ExportState ExportState `json:"export_state"`
@@ -322,6 +326,12 @@ type ApproveRequest struct {
 // RejectRequest is the body of POST /api/tickets/{n}/reject.
 type RejectRequest struct {
 	Comment string `json:"comment"`
+}
+
+// FollowUpRequest assigns further work on an exported ticket.
+type FollowUpRequest struct {
+	Comment string `json:"comment"`
+	Role    string `json:"role"`
 }
 
 // CancelRequest is the body of POST /api/tickets/{n}/cancel.

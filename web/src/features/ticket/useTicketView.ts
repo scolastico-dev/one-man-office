@@ -20,12 +20,14 @@ import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import { ticketDrafts } from './drafts'
 import { registerExportAction } from './exportAction'
+import { registerFollowUpAction } from './followUpAction'
 import { usePluginActions } from './pluginActions'
 import { usePluginTicketContext } from '../plugins/usePluginExtensions'
 import { registerGateActions } from './gateActions'
 import { registerStartAnywayAction, useStartAnywayUsage } from './startAnywayAction'
 
 registerExportAction()
+registerFollowUpAction()
 registerStartAnywayAction()
 registerGateActions()
 

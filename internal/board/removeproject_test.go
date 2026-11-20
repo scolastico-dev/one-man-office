@@ -164,7 +164,12 @@ func TestLegacyTruncatedExportAttentionCanBeCleared(t *testing.T) {
 			if err := b.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := b.db.Exec(`ALTER TABLE tickets DROP COLUMN attention_owner;
+			if _, err := b.db.Exec(`ALTER TABLE ticket_projects DROP COLUMN last_export_commit;
+ALTER TABLE ticket_projects DROP COLUMN last_export_url;
+ALTER TABLE ticket_projects DROP COLUMN review_commit;
+ALTER TABLE tickets DROP COLUMN followup_review;
+ALTER TABLE tickets DROP COLUMN reexport_pending;
+ALTER TABLE tickets DROP COLUMN attention_owner;
 ALTER TABLE agent_sessions DROP COLUMN end_kind; PRAGMA user_version = 10`); err != nil {
 				t.Fatal(err)
 			}

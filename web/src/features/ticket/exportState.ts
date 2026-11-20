@@ -68,8 +68,14 @@ export function projectExportWords(s: ProjectExport): string {
 /** The projects of the ticket that have a pull request already. */
 const exported = (t: TicketSummary) => t.projects.filter((p) => p.export_url)
 
+/** A successful export survives a further round of work and review. */
+export const wasExported = (t: TicketSummary): boolean => t.projects.some((p) => Boolean(p.last_export_commit))
+
 /** What exporting the ticket does, for the approve and export dialogs and the action's hint. */
 export function exportEffect(t: TicketSummary, nameOf: (id: string) => string): string {
+  if (t.projects.some((p) => p.last_export_commit && p.export_state !== 'exported')) {
+    return 'omo pushes the reviewed changes to the exported branches and updates their existing pull requests. Any project without a pull request is exported separately. The ticket waits in Review until every exported project is merged into its remote target branch.'
+  }
   const done = exported(t)
   if (t.projects.length <= 1) {
     return 'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket waits in Review until the exported work is merged into the remote target branch.'

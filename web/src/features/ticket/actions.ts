@@ -9,7 +9,7 @@ import type { Column, FailedStep, TicketSummary } from '../../api/types'
 import { canReject, type Target } from '../../board/moveRules'
 import type { DialogScope } from '../../components/ui/mountDialog'
 import { visibleText } from '../../components/ui/visibleText'
-import { exportEffect } from './exportState'
+import { exportEffect, wasExported } from './exportState'
 import { withoutProject } from './fieldRules'
 import type { BoardStore } from '../../store'
 
@@ -79,7 +79,7 @@ const humanReview = (t: TicketSummary) => t.column === 'review' && t.review_stag
 const approve: TicketAction = {
   id: 'approve',
   label: (t) =>
-    t.column === 'planning' ? 'Approve' : withoutProject(t) ? 'Approve…' : t.effective_when_approved === 'export' ? 'Approve and export…' : 'Approve and merge…',
+    t.column === 'planning' ? 'Approve' : withoutProject(t) ? 'Approve…' : t.effective_when_approved === 'export' ? (wasExported(t) ? 'Approve and re-export…' : 'Approve and export…') : 'Approve and merge…',
   tone: 'primary',
   applies: (t) => t.column === 'planning' || humanReview(t),
   unavailable: (t, ctx) => {

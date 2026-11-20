@@ -53,6 +53,15 @@ const removingProject = computed<TicketProject | null>(() => props.ticket.projec
           :data-export-state="exportOf(p.project)!.kind"
           >{{ visibleText(projectExportWords(exportOf(p.project)!)) }}</span
         >
+        <a
+          v-if="!linkOf(p.export_url) && linkOf(p.last_export_url)"
+          :href="linkOf(p.last_export_url)"
+          class="branch__pr"
+          target="_blank"
+          rel="noreferrer noopener"
+          data-last-export-url
+          >Previously exported pull request{{ ticket.projects.length > 1 ? ` for ${nameOf(p.project)}` : '' }}</a
+        >
         <span v-if="canRemoveProject(ticket, p)" class="branch__remove">
           <UiButton size="sm" variant="ghost" :data-remove-project="p.project" @click="removing = p.project">Remove from ticket</UiButton>
         </span>
