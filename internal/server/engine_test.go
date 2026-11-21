@@ -115,6 +115,11 @@ func (a *testAgent) Notify(line string) {
 	defer a.mu.Unlock()
 	a.lines = append(a.lines, line)
 }
+func (a *testAgent) NotifyDeferred(render func() string) {
+	if line := render(); line != "" {
+		a.Notify(line)
+	}
+}
 func (a *testAgent) Kill() error {
 	a.once.Do(func() {
 		a.proc.Kill()

@@ -118,23 +118,30 @@ func (e *Engine) deliverLSP(r lsp.Report) {
 		return
 	}
 	force := e.st.General().LSP.ForceChat
+	manager := e.lsp
 	for _, session := range r.Sessions {
 		// An issue ignored after the report was queued is not told.
-		own := r
-		own.Issues = nil
-		for _, i := range r.Issues {
-			if !e.lsp.Ignored(session, i.ID) {
-				own.Issues = append(own.Issues, i)
+		render := func() string {
+			own := r
+			own.Issues = nil
+			for _, i := range r.Issues {
+				if !manager.Ignored(session, i.ID) {
+					own.Issues = append(own.Issues, i)
+				}
 			}
+			if len(own.Issues) == 0 {
+				return ""
+			}
+			return lspText(own)
 		}
-		if len(own.Issues) == 0 {
+		text := render()
+		if text == "" {
 			continue
 		}
-		text := lspText(own)
 		if e.o.Listeners != nil && !slices.Contains(force, e.sessionCLI(session)) && e.o.Listeners.Notify(session, text) {
 			continue
 		}
-		e.Notify(session, text)
+		e.deliverNotification(session, func() string { return agents.NotificationLine(render()) }, false)
 	}
 }
 

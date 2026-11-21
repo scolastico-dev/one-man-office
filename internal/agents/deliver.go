@@ -206,7 +206,7 @@ type notifier struct {
 }
 
 type queuedLine struct {
-	text   string
+	render func() string
 	queued time.Time
 }
 
@@ -216,17 +216,20 @@ func newNotifier(t lineTypist, input *inputClock, now func() time.Time, debounce
 
 // enqueue adds a line; lines after the process ended are dropped.
 func (n *notifier) enqueue(line string) {
+	line = notificationLine(line)
+	if line != "" {
+		n.enqueueDeferred(func() string { return line })
+	}
+}
+
+func (n *notifier) enqueueDeferred(render func() string) {
 	select {
 	case <-n.typist.Done():
 		return
 	default:
 	}
-	line = notificationLine(line)
-	if line == "" {
-		return
-	}
 	n.mu.Lock()
-	n.queue = append(n.queue, queuedLine{text: line, queued: n.now()})
+	n.queue = append(n.queue, queuedLine{render: render, queued: n.now()})
 	n.mu.Unlock()
 	select {
 	case n.wake <- struct{}{}:
@@ -268,7 +271,16 @@ func (n *notifier) flush() time.Duration {
 		}
 		// The idle check runs again while omo holds the input, so a key a
 		// person types in between cannot end up inside the line.
-		sent, err := n.typist.SendTextAndKeysIf(line.text, "\r", func() bool { return n.holdBack(line.queued) == 0 })
+		text := notificationLine(line.render())
+		sent := true
+		var err error
+		if text != "" {
+			sent, err = n.typist.SendTextAndKeysIf(text, "\r", func() bool {
+				// Suppression may change while we wait to own the input.
+				// Retry with a fresh rendering if the selected text changed.
+				return n.holdBack(line.queued) == 0 && notificationLine(line.render()) == text
+			})
+		}
 		if !sent && err == nil {
 			continue
 		}

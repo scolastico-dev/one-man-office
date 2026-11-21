@@ -159,6 +159,11 @@ func (a *fakeAgent) Notify(line string) {
 	defer a.mu.Unlock()
 	a.lines = append(a.lines, line)
 }
+func (a *fakeAgent) NotifyDeferred(render func() string) {
+	if line := render(); line != "" {
+		a.Notify(line)
+	}
+}
 func (a *fakeAgent) Kill() error {
 	a.mu.Lock()
 	if !a.isOverLocked() {

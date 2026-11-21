@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -244,6 +246,103 @@ func TestLSPQueuedReportDropsIgnoredIssues(t *testing.T) {
 	}
 }
 
+func TestLSPFallbackQueueDropsIgnoredIssuesOnFlush(t *testing.T) {
+	h, _ := lspNotifyHarness(t)
+	dev := h.lspDeveloper("Queued fallback")
+	h.e.nt.grace = time.Hour
+	issues := h.e.LSP().Snapshot(dev.ID)
+	h.e.deliverLSP(lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: issues})
+	h.e.nt.mu.Lock()
+	queued := len(h.e.nt.box(dev.ID).queue)
+	h.e.nt.mu.Unlock()
+	if queued != 1 {
+		t.Fatalf("queued %d reports, want one", queued)
+	}
+	if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	h.e.flush(dev.ID)
+	if got := h.chatLines(dev.ID); hasLine(got, issues[0].ID) {
+		t.Fatalf("ignored issue delivered from fallback queue: %v", got)
+	}
+}
+
+func TestLSPSuppressionPreservesOrdinaryNotificationWithIdenticalText(t *testing.T) {
+	h, _ := lspNotifyHarness(t)
+	dev := h.lspDeveloper("Ordinary text")
+	h.e.nt.grace = time.Hour
+	issues := h.e.LSP().Snapshot(dev.ID)
+	r := lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: issues}
+	h.e.deliverLSP(r)
+	// A plugin can send the same words; only the structured report is LSP.
+	h.e.Notify(dev.ID, lspText(r))
+	if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	h.e.flush(dev.ID)
+	if got := h.chatLines(dev.ID); len(got) != 1 || !strings.Contains(got[0], issues[0].ID) {
+		t.Fatalf("ordinary notification changed by LSP suppression: %v", got)
+	}
+}
+
+// Rendering before queuing loses suppression in every mailbox consumer.
+func TestLSPFallbackQueueFiltersMixedReports(t *testing.T) {
+	for _, consumer := range []string{"flush", "ready", "wait", "flush-empty", "ready-empty", "wait-empty"} {
+		t.Run(consumer, func(t *testing.T) {
+			h, _ := lspNotifyHarness(t)
+			dev := h.lspDeveloper("Mixed fallback")
+			h.e.nt.grace = time.Hour
+			issues := h.e.LSP().Snapshot(dev.ID)
+			other := issues[0]
+			other.ID, other.Message = "unrelated-id", "still wanted"
+			r := lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: []lsp.Issue{issues[0], other}}
+			h.e.Notify(dev.ID, "ordinary plugin notification")
+			h.e.notify(dev.ID, "ordinary board notification")
+			if strings.HasSuffix(consumer, "empty") {
+				r.Issues = issues
+			}
+			h.e.deliverLSP(r)
+			if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+				t.Fatal(err)
+			}
+			var text string
+			switch consumer {
+			case "flush", "flush-empty":
+				h.e.flush(dev.ID)
+				text = strings.Join(h.chatLines(dev.ID), "\n")
+			case "ready", "ready-empty":
+				var err error
+				text, err = h.e.Ready(h.ctx, h.actor(dev.ID))
+				if err != nil {
+					t.Fatal(err)
+				}
+			default:
+				var err error
+				text, err = h.e.Wait(h.ctx, h.actor(dev.ID), time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			wants := []string{"ordinary plugin notification", "ordinary board notification"}
+			if strings.HasSuffix(consumer, "empty") {
+				if strings.Contains(text, "Language server:") {
+					t.Fatalf("empty report delivered: %s", text)
+				}
+			} else {
+				wants = append(wants, "unrelated-id", "still wanted", "1 new issue ")
+			}
+			for _, want := range wants {
+				if !strings.Contains(text, want) {
+					t.Errorf("missing %q in %s", want, text)
+				}
+			}
+			if strings.Contains(text, issues[0].ID) {
+				t.Fatalf("ignored issue delivered: %s", text)
+			}
+		})
+	}
+}
+
 // A very long message is cut so the id and the ignore advice survive the
 // notification line's length limit, in chat too.
 func TestLSPLongMessageKeepsTheIDInChat(t *testing.T) {
@@ -261,5 +360,101 @@ func TestLSPLongMessageKeepsTheIDInChat(t *testing.T) {
 	snap := h.e.LSP().Snapshot(dev.ID)
 	if len(snap) != 1 || !strings.Contains(line, "(id "+snap[0].ID+")") || !strings.Contains(line, "omo ai lsp ignore") {
 		t.Fatalf("the id or the advice was cut: %q", line)
+	}
+}
+
+// waitDeliveryGate pauses Wait at its cancellation check after a delivery.
+// It controls the race without depending on the goroutine scheduler.
+type waitDeliveryGate struct {
+	context.Context
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (c *waitDeliveryGate) Err() error {
+	c.once.Do(func() { close(c.entered); <-c.resume })
+	return c.Context.Err()
+}
+
+func TestLSPReleasedWaitFiltersIgnoredIssues(t *testing.T) {
+	for _, mode := range []string{"delivered", "delivered-empty", "canceled-flush", "canceled-wait", "replaced"} {
+		t.Run(mode, func(t *testing.T) {
+			h, _ := lspNotifyHarness(t)
+			dev := h.lspDeveloper("Released fallback")
+			h.e.nt.grace = time.Hour
+			issues := h.e.LSP().Snapshot(dev.ID)
+			other := issues[0]
+			other.ID, other.Message = "unrelated-id", "still wanted"
+			base, cancel := context.WithCancel(h.ctx)
+			defer cancel()
+			ctx := &waitDeliveryGate{Context: base, entered: make(chan struct{}), resume: make(chan struct{})}
+			var old <-chan waitResult
+			if mode == "replaced" {
+				old = h.park(h.ctx, dev.ID, time.Hour)
+			}
+			pending := h.park(ctx, dev.ID, time.Hour)
+			if old != nil {
+				if got := h.result(old); !isCode(got.err, api.CodeConflict) {
+					t.Fatalf("replaced wait: %+v", got)
+				}
+			}
+			reportIssues := []lsp.Issue{issues[0], other}
+			if mode == "delivered-empty" {
+				reportIssues = issues
+			}
+			h.e.deliverLSP(lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: reportIssues})
+			<-ctx.entered
+			if !strings.HasPrefix(mode, "canceled") {
+				if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasPrefix(mode, "canceled") {
+				cancel()
+			}
+			close(ctx.resume)
+			if mode == "delivered-empty" {
+				h.waitFor("the suppressed wait to park again", func() bool {
+					h.e.nt.mu.Lock()
+					defer h.e.nt.mu.Unlock()
+					return h.e.nt.box(dev.ID).waiter != nil
+				})
+				h.e.Notify(dev.ID, "ordinary notification")
+				if got := h.result(pending); got.err != nil || got.reason != "omo: ordinary notification" {
+					t.Fatalf("suppressed wait: %+v", got)
+				}
+				return
+			}
+			got := h.result(pending)
+			text := got.reason
+			if strings.HasPrefix(mode, "canceled") {
+				if !errors.Is(got.err, context.Canceled) {
+					t.Fatalf("canceled wait: %+v", got)
+				}
+				if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+					t.Fatal(err)
+				}
+				h.e.Notify(dev.ID, "ordinary notification")
+				if mode == "canceled-flush" {
+					h.e.flush(dev.ID)
+					text = strings.Join(h.chatLines(dev.ID), "\n")
+				} else {
+					var err error
+					text, err = h.e.Wait(h.ctx, h.actor(dev.ID), time.Hour)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !strings.Contains(text, "ordinary notification") {
+					t.Fatalf("ordinary notification lost: %s", text)
+				}
+			} else if got.err != nil {
+				t.Fatal(got.err)
+			}
+			if strings.Contains(text, issues[0].ID) || !strings.Contains(text, "unrelated-id") || !strings.Contains(text, "1 new issue ") {
+				t.Fatalf("released wait delivered: %s", text)
+			}
+		})
 	}
 }
