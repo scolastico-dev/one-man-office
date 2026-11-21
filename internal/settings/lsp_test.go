@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 const lspJSON = `{"servers":[{"name":"go","enabled":true,"command":"gopls","args":["serve"],"env":{"MODE":"${LITERAL}"},"files":[{"pattern":"*.go","language_id":"go"},{"pattern":"go.mod","language_id":"go.mod"}],"initialization_options":{"nested":{"list":[true,null,"x"]}},"configuration":{"gopls":{"staticcheck":true}}}],"debounce":"750ms","force_chat":["codex","custom"]}`
@@ -269,5 +272,59 @@ func TestLSPBoundsAndEmptyNormalization(t *testing.T) {
 	m := s.General().LSP.Servers[0]
 	if m.Enabled || m.Args == nil || m.Env == nil || m.InitializationOptions == nil || m.Configuration == nil {
 		t.Fatalf("omitted values not normalized: %+v", m)
+	}
+}
+
+func TestLSPRejectsOversizedYAMLBeforeChangingSettings(t *testing.T) {
+	for _, method := range []string{"SetGeneralIf", "UpdateGeneral"} {
+		t.Run(method, func(t *testing.T) {
+			s, home, log := openTest(t)
+			before := s.General()
+			path := filepath.Join(home, "settings.yaml")
+			rawBefore, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			revision := s.Revision(SectionGeneral, "")
+			g := s.General()
+			values := make([]any, 10000)
+			for i := range values {
+				values[i] = false
+			}
+			for i := range 6 {
+				g.LSP.Servers = append(g.LSP.Servers, api.LSPServer{
+					Name: "server-" + strconv.Itoa(i), Command: "server",
+					Files:         []api.LSPFileSelector{{Pattern: "*.go", LanguageID: "go"}},
+					Configuration: map[string]any{"values": values},
+				})
+			}
+			if err := g.Validate(); err != nil {
+				t.Fatalf("fixture violates a field limit: %v", err)
+			}
+			raw, err := encodeYAML(g.normalize())
+			if err != nil || int64(len(raw)) <= homefile.MaxSettingsFile {
+				t.Fatalf("fixture does not exceed encoded limit: %d, %v", len(raw), err)
+			}
+			if method == "SetGeneralIf" {
+				err = s.SetGeneralIf(revision, g)
+			} else {
+				_, err = s.UpdateGeneral(revision, func(next *General) error { *next = g; return nil })
+			}
+			wantCode(t, err, api.CodeInvalidSettings)
+			rawAfter, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(rawAfter) != string(rawBefore) || s.Revision(SectionGeneral, "") != revision || !reflect.DeepEqual(s.General(), before) || len(log.take()) != 0 {
+				t.Fatal("oversized write changed disk, active state, revision or notifications")
+			}
+			reopened, err := Open(home, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reopened.Errors()) != 0 || !reflect.DeepEqual(reopened.General(), before) {
+				t.Fatal("oversized refusal left unreadable settings")
+			}
+		})
 	}
 }

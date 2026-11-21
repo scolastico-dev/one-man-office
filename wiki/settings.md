@@ -199,6 +199,9 @@ hand-edit notifications, last-valid-state handling and backup/import flow.
 Patching `servers` or `force_chat` replaces that whole list; server objects
 inside a new list are complete replacements. Opaque options/configuration
 objects allow nested null values; null settings fields are refused on PATCH.
+The complete encoded `settings.yaml` must also fit the store's 1 MiB file
+limit. A save that would exceed it is refused before changing the file or
+active settings, even if each registration meets its own limits.
 
 ## Environment
 

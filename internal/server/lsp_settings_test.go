@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -93,6 +94,36 @@ func TestLSPSettingsAPI(t *testing.T) {
 	if e.Source != api.SourceDisk || s.settings.General().LSP.Debounce != api.Duration(time.Second) {
 		t.Fatalf("hand edit not loaded/announced: %s", changes[3])
 	}
+}
+
+func TestLSPSettingsAPIRejectsYAMLExpansion(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	start := lastEventID(t, s)
+	before := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil))
+	values := make([]bool, 10000)
+	servers := []map[string]any{}
+	for i := range 6 {
+		servers = append(servers, map[string]any{
+			"name": "server-" + strconv.Itoa(i), "command": "server",
+			"files":         []api.LSPFileSelector{{Pattern: "*.go", LanguageID: "go"}},
+			"configuration": map[string]any{"values": values},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{"lsp": map[string]any{"servers": servers}})
+	if err != nil || len(raw) >= maxBody {
+		t.Fatalf("fixture exceeds request limit: %d, %v", len(raw), err)
+	}
+	resp := rawDo(t, b, s, "PATCH", "/api/settings", string(raw))
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	if got := body[errorEnvelope](t, resp).Error.Code; got != api.CodeInvalidSettings {
+		t.Fatalf("code = %s", got)
+	}
+	after := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil))
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("oversized settings altered the API state or revision")
+	}
+	wantEvents(t, s, api.KindSettingsChanged, start, 0)
 }
 
 func TestLSPSettingsAPIRefusals(t *testing.T) {

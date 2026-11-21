@@ -182,6 +182,13 @@ Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
 and TypeScript checks.
 
+Settings writes enforce each section's read limit on the final encoded bytes
+in `Store.writeFile`, before disk or active state changes. YAML expansion and
+combined registrations can exceed a file's bound despite passing individual
+field limits; `TestSettingsWriterRespectsEverySectionReadLimit` guards every
+section and `TestLSPRejectsOversizedYAMLBeforeChangingSettings` guards both
+general write entry points.
+
 Reading files: every read of a file in the home goes through `internal/homefile` (see the package map), with a limit per kind of file (settings and project files 1 MiB, prompts 256 KiB, `server.yaml` 64 KiB, the token 4 KiB). A link, a named pipe, a device or a file over its limit is refused, so a bad file in the home cannot hang the poll or fill memory. Windows read handles share deletion as well as reads/writes, so an in-flight reader can coexist with a file replacement; opened-file identity and reparse-point checks still apply. Directory renames still require child handles to close on Windows: plugin runtime loads, public asset reads and installation-record reads share a tree read lock with the installer, which holds the write lock from activation through settings commit or rollback. Fetching and staging happen outside that lock.
 
 Workspace folders (`workspace_roots` in `settings.yaml`: `path`, `max_depth` 1 to 16 with default 4, `ignore`) are searched by one scanner goroutine in `internal/server/discovery.go`: at start, every `rescan_interval`, when the roots change and on "Rescan". A folder that contains a `.git` directory is a repository and becomes a project (named after its path below the root, enabled); folders inside a repository are not searched. Skipped: links, folders that match an ignore pattern (default `node_modules` and `.*`), the omo home and its `worktrees` folder, and folders beyond the depth or the visit, time and per-folder limits (the report says what was cut). A found project can be switched off but not removed while its folder lies under a root; an ignore pattern is the way out. `POST /api/projects/rescan` answers the report; `projects.scanned` is its event.
