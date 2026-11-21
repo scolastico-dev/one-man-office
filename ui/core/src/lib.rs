@@ -17,3 +17,16 @@ pub use local::*;
 mod chrome;
 pub mod relay;
 pub use chrome::{host_window_title, trusted_setup_document};
+#[cfg(not(target_os = "android"))]
+pub mod tunnel;
+#[cfg(not(target_os = "android"))]
+pub use tunnel::*;
+
+#[cfg(not(target_os = "android"))]
+pub mod forwards;
+#[cfg(not(target_os = "android"))]
+pub use forwards::*;
+#[cfg(not(target_os = "android"))]
+mod forward_listener;
+#[cfg(not(target_os = "android"))]
+pub use forward_listener::*;

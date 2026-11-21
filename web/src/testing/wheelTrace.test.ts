@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { summarizeWheelTrace, wheelTraceProblems } from '../../e2e/support/wheelTrace'
 
-type Ev = { name: string; ph: string; pid?: number; tid?: number; args?: { dx?: number; dy?: number } }
+type Ev = { name: string; ph: string; ts?: number; pid?: number; tid?: number; args?: { dx?: number; dy?: number } }
 const e = (name: string, args?: { dx?: number; dy?: number }): Ev => ({ name, ph: 'X', pid: 1, tid: 1, args })
 const wheel = (dx: number, dy: number): Ev[] => [
   e('RenderWidgetHostImpl::ForwardWheelEvent', { dx, dy }),
@@ -75,6 +75,15 @@ test('async spans are matched by their id and a wheel with no delta is not a whe
   expect(summarizeWheelTrace([b, { ...b, ph: 'e' }]).unfinished).toBe(0)
   expect(summarizeWheelTrace([{ ...b, id: '0x2' }, { ...b, ph: 'e' }]).unfinished).toBe(1)
   expect(summarizeWheelTrace([...wheel(0, -400), ...wheel(-300, 0), ...wheel(0, 0)]).wheels).toBe(2)
+})
+
+test('complete spans remain complete when trace chunks arrive out of timestamp order', () => {
+  const span = { name: 'InputHandlerProxy::HandleGestureScrollUpdate', cat: 'input', id: '0x1', pid: 1 }
+  const begin = { ...span, ph: 'b', tid: 1, ts: 100 }
+  const end = { ...span, ph: 'e', tid: 2, ts: 200 }
+  expect(summarizeWheelTrace([end, ...compositorOnly, begin])).toEqual(summarizeWheelTrace([begin, ...compositorOnly, end]))
+  // Ordering must not make a genuinely absent end look complete.
+  expect(summarizeWheelTrace([...compositorOnly, begin]).unfinished).toBe(1)
 })
 
 test("the browser's input latency spans are bookkeeping: one still open when the trace stops does not make it incomplete", () => {

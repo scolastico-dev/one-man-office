@@ -6,9 +6,13 @@ mod credentials;
 pub use credentials::RelaySecrets;
 #[cfg(not(target_os = "android"))]
 mod desktop;
+#[cfg(not(target_os = "android"))]
+mod forwards;
 #[cfg(target_os = "macos")]
 mod macos_auth;
 mod platform;
+#[cfg(windows)]
+mod preview_profile;
 mod relay;
 mod windows;
 #[cfg(windows)]
@@ -35,6 +39,8 @@ struct Connection {
     polling: bool,
     #[cfg(not(target_os = "android"))]
     board_label: String,
+    #[cfg(not(target_os = "android"))]
+    forwards: Option<forwards::Resources>,
 }
 #[derive(Default)]
 struct Session {
@@ -63,6 +69,8 @@ struct Setup {
     android: bool,
     connected: bool,
     polling: bool,
+    forward_tunnel: bool,
+    forward_generation: String,
     error: String,
     recovery: Option<Recovery>,
 }
@@ -115,6 +123,8 @@ fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
         connected: s.active.is_some() || native["connected"].as_bool().unwrap_or(false),
         polling: s.active.as_ref().is_some_and(|c| c.polling)
             || native["polling"].as_bool().unwrap_or(false),
+        forward_tunnel: false,
+        forward_generation: String::new(),
         error: if s.error.is_empty() {
             native["error"].as_str().unwrap_or("").into()
         } else {
@@ -131,6 +141,13 @@ fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
         polling: s.active.as_ref().is_some_and(|c| c.polling)
             || s.relay_notifications.is_some()
                 && s.config.as_ref().is_some_and(|c| c.notifications),
+        forward_tunnel: s.active.as_ref().is_some_and(|c| c.forwards.is_some()),
+        forward_generation: s
+            .active
+            .as_ref()
+            .and_then(|c| c.forwards.as_ref())
+            .map(|r| r.generation.clone())
+            .unwrap_or_default(),
         error: s.error.clone(),
         recovery: s.recovery.clone(),
     })
@@ -238,6 +255,12 @@ fn open_connection(
     let client = BoardClient::new(config.clone(), secret.clone())?;
     let polling = client.connect(cfg!(target_os = "android"))?;
     #[cfg(not(target_os = "android"))]
+    let forward_resources = if client.capabilities(false)?.forward_tunnel {
+        Some(forwards::Resources::new(&client, &secret)?)
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "android"))]
     let mut delivery: Delivery =
         read_json(&state.root, &format!("{}.json", config.id))?.unwrap_or_default();
     #[cfg(not(target_os = "android"))]
@@ -276,6 +299,10 @@ fn open_connection(
         .desktop
         .stop_with_window
         .store(config.stop_with_window, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(not(target_os = "android"))]
+    if let Some(old) = s.active.as_mut() {
+        forwards::close_connection(app, old)?;
+    }
     windows::close_boards(&app);
     let board = windows::open_board(&app, &config, &secret, polling, None)?;
     #[cfg(not(target_os = "android"))]
@@ -292,6 +319,8 @@ fn open_connection(
         polling,
         #[cfg(not(target_os = "android"))]
         board_label,
+        #[cfg(not(target_os = "android"))]
+        forwards: forward_resources,
     });
     s.error.clear();
     s.recovery = None;
@@ -328,6 +357,10 @@ async fn disconnect(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
             .map_err(|_| "Connection state is unavailable.")?;
         #[cfg(target_os = "android")]
         android_worker(&app).call::<serde_json::Value>("disconnect", ())?;
+        #[cfg(not(target_os = "android"))]
+        if let Some(old) = s.active.as_mut() {
+            forwards::close_connection(&app, old)?;
+        }
         s.active = None;
         s.recovery = None;
         s.error.clear();
@@ -372,6 +405,105 @@ async fn recover(window: WebviewWindow, app: AppHandle, replay: bool) -> Result<
     })
     .await
     .map_err(|_| "Cannot recover the notification cursor.")?
+}
+#[tauri::command]
+async fn get_forwards(window: WebviewWindow, app: AppHandle) -> Result<serde_json::Value> {
+    require_setup(&window)?;
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        Err("Desktop app forwarding is unavailable on Android.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        forward_action(window, app, |app| {
+            serde_json::to_value(forwards::view(app)?).map_err(|_| "Cannot read apps.".into())
+        })
+        .await
+    }
+}
+#[tauri::command]
+async fn preview_forward(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+) -> Result<serde_json::Value> {
+    require_setup(&window)?;
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, id);
+        Err("Desktop app forwarding is unavailable on Android.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        forward_action(window, app, move |app| {
+            serde_json::to_value(forwards::open(app, &id, None)?)
+                .map_err(|_| "Cannot open preview.".into())
+        })
+        .await
+    }
+}
+#[tauri::command]
+async fn expose_forward(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+    port: String,
+) -> Result<serde_json::Value> {
+    require_setup(&window)?;
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, id, port);
+        Err("Desktop app forwarding is unavailable on Android.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        forward_action(window, app, move |app| {
+            serde_json::to_value(forwards::open(app, &id, Some(&port))?)
+                .map_err(|_| "Cannot expose app.".into())
+        })
+        .await
+    }
+}
+#[tauri::command]
+async fn stop_forward(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+) -> Result<serde_json::Value> {
+    require_setup(&window)?;
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, id);
+        Err("Desktop app forwarding is unavailable on Android.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        forward_action(window, app, move |app| {
+            serde_json::to_value(forwards::stop(app, &id)?)
+                .map_err(|_| "Cannot end exposure.".into())
+        })
+        .await
+    }
+}
+#[cfg(not(target_os = "android"))]
+async fn forward_action(
+    window: WebviewWindow,
+    app: AppHandle,
+    action: impl FnOnce(&AppHandle) -> Result<serde_json::Value> + Send + 'static,
+) -> Result<serde_json::Value> {
+    require_setup(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Shell>();
+        let _operation = state
+            .desktop
+            .operation
+            .lock()
+            .map_err(|_| "Native operation state is unavailable.")?;
+        action(&app)
+    })
+    .await
+    .map_err(|_| "Cannot update app forwarding.")?
 }
 #[derive(Deserialize)]
 struct LocalSettings {
@@ -534,7 +666,11 @@ pub fn run() {
             disconnect,
             recover,
             local_connect,
-            relay::relay_connect
+            relay::relay_connect,
+            get_forwards,
+            preview_forward,
+            expose_forward,
+            stop_forward
         ])
         .setup(|app| {
             let root = app.path().app_config_dir()?;

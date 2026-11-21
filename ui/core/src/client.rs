@@ -1,7 +1,10 @@
 use crate::Result;
 use serde::Deserialize;
-pub fn features(_android: bool, notifications: bool) -> Vec<String> {
+pub fn features(android: bool, notifications: bool) -> Vec<String> {
     let mut out = vec!["ui.capabilities.v1".into()];
+    if !android && !cfg!(target_os = "android") {
+        out.push("ui.forwards.tunnel.v1".into());
+    }
     if notifications {
         out.extend([
             "ui.notifications.poll.v1".into(),
@@ -10,9 +13,15 @@ pub fn features(_android: bool, notifications: bool) -> Vec<String> {
     }
     out
 }
-pub fn polling_supported(status: u16, body: &[u8]) -> Result<bool> {
+/// Optional server behavior; missing discovery and unknown flags disable features.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ServerCapabilities {
+    pub notification_polling: bool,
+    pub forward_tunnel: bool,
+}
+fn server_capabilities(status: u16, body: &[u8]) -> Result<ServerCapabilities> {
     if status == 404 {
-        return Ok(false);
+        return Ok(ServerCapabilities::default());
     }
     if status != 200 {
         return Err(format!("Capability exchange failed (HTTP {status})."));
@@ -23,10 +32,17 @@ pub fn polling_supported(status: u16, body: &[u8]) -> Result<bool> {
     }
     let c: Capabilities =
         serde_json::from_slice(body).map_err(|_| "Invalid capability response.")?;
-    Ok(c.features
-        .unwrap_or_default()
-        .iter()
-        .any(|f| f == "ui.notifications.poll.v1"))
+    let flags = c.features.unwrap_or_default();
+    Ok(ServerCapabilities {
+        notification_polling: flags.iter().any(|f| f == "ui.notifications.poll.v1"),
+        forward_tunnel: flags.iter().any(|f| f == "ui.forwards.tunnel.v1"),
+    })
+}
+pub fn polling_supported(status: u16, body: &[u8]) -> Result<bool> {
+    Ok(server_capabilities(status, body)?.notification_polling)
+}
+pub fn tunnel_supported(status: u16, body: &[u8]) -> Result<bool> {
+    Ok(server_capabilities(status, body)?.forward_tunnel)
 }
 use crate::{Config, Delivery, cursor};
 use reqwest::{blocking::Client, redirect::Policy};
@@ -174,13 +190,18 @@ impl BoardClient {
                 check.status
             ));
         }
+        Ok(self.capabilities(android)?.notification_polling && self.config.notifications)
+    }
+    /// Exchange additive flags independently of the notification setting.
+    pub fn capabilities(&self, android: bool) -> Result<ServerCapabilities> {
         let exchange = self.request(
             "POST",
             "/api/ui/capabilities",
             Some(serde_json::json!({"features":features(android,self.config.notifications)})),
         )?;
-        let supported = polling_supported(exchange.status, &exchange.body)?;
-        Ok(supported && self.config.notifications)
+        let mut supported = server_capabilities(exchange.status, &exchange.body)?;
+        supported.forward_tunnel &= !android && !cfg!(target_os = "android");
+        Ok(supported)
     }
     pub fn poll(
         &self,

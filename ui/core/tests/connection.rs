@@ -529,3 +529,24 @@ fn relay_profiles_validate_routes_without_changing_saved_direct_profiles() {
         .validate(false)
         .unwrap();
 }
+
+#[test]
+fn forward_tunnel_negotiation_is_optional_and_desktop_only() {
+    assert_eq!(
+        features(false, false).contains(&"ui.forwards.tunnel.v1".into()),
+        !cfg!(target_os = "android")
+    );
+    assert!(!features(true, true).contains(&"ui.forwards.tunnel.v1".into()));
+    assert!(tunnel_supported(200, br#"{"features":["future","ui.forwards.tunnel.v1"]}"#).unwrap());
+    for body in [
+        br#"{}"#.as_slice(),
+        br#"{"features":null}"#,
+        br#"{"features":["future"]}"#,
+    ] {
+        assert!(!tunnel_supported(200, body).unwrap());
+    }
+    assert!(!tunnel_supported(404, b"").unwrap());
+    assert!(tunnel_supported(401, b"").is_err());
+    assert!(tunnel_supported(500, b"").is_err());
+    assert!(tunnel_supported(200, b"broken").is_err());
+}

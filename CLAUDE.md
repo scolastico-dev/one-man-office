@@ -580,6 +580,9 @@ Rust delivery journal through JNI, without a WebView or Tauri event loop. The
 checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
 android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
 ./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
+Root buildscript/project repositories and buildSrc's plugin/dependency repositories
+prefer Google's Maven Central mirror before Central; keep these scopes aligned
+so plugin-portal redirects do not reintroduce shared-runner HTTP 429 failures.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
 configured board documents while native polling is enabled. Tests: core Rust,
@@ -643,15 +646,43 @@ receipt loss/restart/invalid_ack and headless JVM calls into the actual JNI sour
 focused Android notification JVM tests, and Android arm64/Windows GNU shell
 compilation. Device OS scheduling/Keystore/taps and native desktop relay toasts
 remain runtime validation limits. See [native relay library](wiki/ui.md#native-relay-library).
+Desktop **Connection… → Apps** reads the authenticated forward registry after
+`ui.forwards.tunnel.v1` negotiation. **Open preview** uses a real HTTP `.omo`
+origin (name plus stable forward ID) at the app root, with start_path only for
+initial navigation. Tauri per-WebView SOCKS routing pins that host:80 to the
+existing `ForwardConnector`; no system DNS/hosts or direct upstream connections.
+Root assets, streaming and application WS use the same transport. **Expose on
+this computer** binds `127.0.0.1` at a validated user-selected port; refresh shows
+local errors/status even when registry reads fail, and **End exposure** releases
+it. Setup-only native commands: get_forwards, preview_forward, expose_forward,
+stop_forward; Android rejects them and advertises no tunnel support. Old servers
+keep the board with desktop forwarding unavailable. Preview documents receive
+no board bridge/credentials or setup permissions; native shortcuts/clipboard and
+related popups remain enabled. Last-preview close, reconnect, disconnect and
+exit join listeners and tunnels; owned-server tray hiding retains the connection.
+`ui/core/src/forward_listener.rs` owns bounded loopback/SOCKS workers;
+`ui/src-tauri/src/forwards.rs` owns connection resources. Windows uses a separate profile
+per preview family and waits for BrowserProcessExited before deleting it;
+macos-proxy uses WKWebsiteDataStore and sets the app's minimum macOS to 14.
+Focused checks: `npm run check` in ui, native builds, and
+`dbus-run-session -- python3 ui/tests/forwards_smoke.py --fixture <standalone-server-test-binary>`.
+The probe checks Linux native origins/assets/SSE/WS, credential/command isolation,
+keybinds/clipboard, final-view close, ports and active-stream reconnect/disconnect/exit
+lifecycle. `cargo test -p omo-ui --lib --locked` checks the compiled native ACL
+(including related-child labels) and cleanup continuing after errors. Related
+WebKit child IPC response delivery was not established; see wiki/ui.md.
+Windows cross-compilation
+and Android checks do not establish runtime behavior; macOS needs a native runner.
 
 ## Native UI protocol
 
 `internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
 exchanges each side's `features` list; unknown/absent client flags are harmless and
-no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`.
+no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`,
+`ui.forwards.tunnel.v1`.
 `GET /api/ui/notifications?cursor=<decimal-event-id>&limit=<0..200>` scans committed
 events in a board read transaction (`board/ui.go`), returning
-`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. Both routes
+`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. These routes
 are registered as `userOnly` in `server/ui.go` and use existing auth/Host/Origin
 checks; native HTTP clients omit Origin, with no CORS exception. Each UI retains
 its own cursor; the bell routes and mentions seen marker stay independent.
@@ -663,6 +694,29 @@ is 400; unavailable history is 409 with `reset_cursor` and `latest_cursor`.
 The existing SQLite AUTOINCREMENT sequence preserves recovery information even
 when all events have been removed. The exact protocol, examples, initial
 baselining and retry rules are in [Native UI API](wiki/ui-api.md).
+
+Desktop forward transport: `GET /api/ui/forwards/{id}/tunnel` is another
+`userOnly` route (`server/ui_tunnel.go`), reserved as a board WebSocket before
+browser forward fallbacks. Required subprotocol `ui.forwards.tunnel.v1` carries
+root HTTP/1.1 as binary messages up to 64 KiB, with arbitrary boundaries and no
+half-close. A pipe gives the inner HTTP server ordinary deadline semantics;
+output drains before HTTP close ends the outer socket. Registry checks on every
+request precede the existing root proxy/activity path. Inner Host must be a
+loopback authority (`127.0.0.1`, `localhost`, `[::1]`, optional valid TCP port) or
+the selected forward's exact `<label>-<id>.omo` HTTP host (implicit/explicit 80);
+unrelated/malformed authorities get 421 before upstream work, including on
+keepalive and app upgrades (HTTP parser errors may return 400). The shared wire
+fixture pins the Go/Rust virtual label contract. Preview path validation runs
+only for that action; query backslashes remain data and no row's preview error
+discards the registry or blocks local exposure. SSE and nested app WS
+stream through bounded buffers. Outer handshake auth never enters app traffic.
+`ui/core/src/tunnel.rs` exports desktop-only `ForwardConnector::new(&Config,
+&str)`, async `connect(&str)` and `ForwardTunnel` (Tokio AsyncRead/AsyncWrite).
+`BoardClient::capabilities(android)` returns independent optional notification
+and forward support; Android excludes the connector and tunnel advertisement.
+Shared Go/Rust wire fixture: `internal/api/testdata/forward_tunnel_v1.json`.
+Focused checks: server `TestUIForwardTunnel`, existing UI/auth/proxy tests and
+`cargo test -p omo-ui-core` from `ui/`. Wire and lifecycle details: [Native UI API](wiki/ui-api.md).
 
 ## Invariants
 

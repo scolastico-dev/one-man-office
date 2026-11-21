@@ -110,6 +110,10 @@ pub(crate) fn start(
             .session
             .lock()
             .map_err(|_| "Connection state is unavailable.")?;
+        #[cfg(not(target_os = "android"))]
+        if let Some(active) = session.active.as_mut() {
+            crate::forwards::close_connection(app, active)?;
+        }
         session.active = None;
         session.relay_view = None;
         session.error.clear();
@@ -286,6 +290,8 @@ fn open_board(app: &AppHandle, config: &Config, owner: &RelayConnection) -> Resu
         delivery: Default::default(),
         #[cfg(not(target_os = "android"))]
         board_label: board.label().to_string(),
+        #[cfg(not(target_os = "android"))]
+        forwards: None,
     });
     #[cfg(target_os = "android")]
     let _ = board;
