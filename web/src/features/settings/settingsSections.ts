@@ -56,6 +56,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     component: () => import('./mcp/McpPage.vue').then(page),
   },
   {
+    id: 'lsp',
+    label: 'LSP',
+    description: 'Language servers in managed worktrees and how agents hear about issues',
+    component: () => import('./lsp/LspPage.vue').then(page),
+  },
+  {
     id: 'environment',
     label: 'Environment',
     description: 'Variables every agent starts with',
