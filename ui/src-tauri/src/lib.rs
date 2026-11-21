@@ -3,6 +3,7 @@ mod android_auth;
 #[cfg(target_os = "android")]
 mod android_notifications;
 mod credentials;
+pub use credentials::RelaySecrets;
 #[cfg(not(target_os = "android"))]
 mod desktop;
 #[cfg(target_os = "macos")]
