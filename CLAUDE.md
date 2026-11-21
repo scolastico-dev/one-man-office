@@ -554,7 +554,7 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 
 ## Native UI application
 
-`ui/` is the Tauri 2 direct-host shell; only `ui/setup/` is bundled, never
+`ui/` is the Tauri 2 local/direct/relay shell; only `ui/setup/` is bundled, never
 `web/dist`. The Rust workspace separates `core` (configuration/auth validation,
 native HTTP, capabilities and notification cursor/dedup persistence) from
 `src-tauri` (setup-only command ACL, OS credentials, remote WebViews, native
@@ -570,7 +570,7 @@ behavior (`stop_with_window`, default false). Attached/direct servers never gain
 ownership; replacement instances cannot be stopped by an earlier capability.
 After control failure, native lifecycle probes the normal run.lock before
 retiring stale crash metadata; a still-held lock preserves ownership on error.
-Android refuses local mode and uses the `ui/notifications` native plugin:
+Android offers direct/relay modes, refuses local mode and uses the `ui/notifications` native plugin:
 WorkManager periodic GET polling (15 minutes or later) or a user-started dataSync
 foreground service with an ongoing notification and five-second polls. Android
 15+ dataSync runtime limits apply; timeout stops the service and reports status.
@@ -608,8 +608,20 @@ with fresh session keys after loss, never replaying requests or terminal input.
 `close` joins the listener, accepted connections and its own authentication work.
 Only headers needed for virtual Host/Origin/close and bridge authentication
 change; HTTP bodies, assets, SSE and WebSocket frames remain opaque.
-This library does not add the setup choice/window wiring or Android relay
-receipt/delivery policy. Focused checks: core cargo tests, Node bridge tests,
+`RelayConnection` owns explicit pairing or saved-trust reconnect, public
+`RelayView` state and the bridge, joining its socket/transport on `close`.
+Config's additive `host_id` and `relay_allow_loopback_http` preserve saved
+direct/local profiles. `src-tauri/relay.rs` uses OS `RelaySecrets`, restores the
+saved route on startup and opens the board after authenticated acceptance/Ready.
+Setup displays the proved PIN/exact accept command; full raw key stays under
+Advanced. New ceremonies are explicit and receive fresh identities/randomness.
+Desktop host titles have an immutable Host content prefix; setup-only ACL plus
+`trusted_setup_document` keep remote documents out of native commands. Android
+`TrustedChrome` surrounds separate setup/host WebViews with native labels, colors
+and a Connection button; `RemoteBoard` has no Tauri command interface. Relay
+notification preferences remain saved, but receipt/delivery policy belongs to
+the native notifier integration; no active system delivery is advertised yet.
+Focused checks: core cargo tests, Node bridge tests,
 `node ui/scripts/relay-probe.mjs` for real Go relay/host acceptance/recovery/restart,
 `node ui/scripts/relay-probe.mjs --board` for real embedded board/API, chunked
 upload, SSE/terminal streams and automatic host/relay recovery without re-pairing,

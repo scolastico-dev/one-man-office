@@ -5,7 +5,7 @@
 <main>
   <header><span class="mark" aria-hidden="true">omo</span><h1>Your office, connected.</h1><p>Open your omo board in its own window.</p></header>
   <form id="connection">
-    <label id="mode-label">Connect to<select name="mode"><option value="direct">An external omo host</option><option value="local" hidden disabled>Local omo</option></select></label>
+    <label id="mode-label">Connect to<select name="mode"><option value="direct">An external omo host directly</option><option value="relay">An external omo host through relay</option><option value="local" hidden disabled>Local omo</option></select></label>
     <p id="local-hint" hidden>Connect to the local omo server, or install and start it if needed. An existing server stays independent.</p>
     <fieldset id="direct">
       <label>Board address<input name="origin" type="url" required placeholder="http://localhost:8090" autocomplete="url" spellcheck="false"></label>
@@ -17,6 +17,23 @@
       <label class="check" id="remember-label"><input type="checkbox" name="remember">Remember credentials in the system credential store</label>
       <details><summary>Connection identity</summary><p class="hint">If the database at this address was replaced, start a new notification history for it.</p><label class="check"><input name="reset_identity" type="checkbox">Treat as a new server</label></details>
     </fieldset>
+    <fieldset id="relay" hidden disabled>
+      <label>Relay origin<input name="relay_origin" type="url" required placeholder="https://relay.example" spellcheck="false"></label>
+      <label>Host client id<input name="host_id" required maxlength="64" pattern="[A-Za-z0-9_-]+" spellcheck="false"></label>
+      <label>Relay admission password (optional)<input name="admission" type="password" autocomplete="off"></label>
+      <p class="hint">Admission only lets you use the relay. Your native device key authenticates to omo and stays in the system credential store.</p>
+      <p>For a fresh ceremony, run <code>omo relay pair begin</code> locally on the host, then choose Start new pairing. After mutual proof, accept the command shown here. Acceptance opens the board automatically.</p>
+      <p class="hint">Connect uses saved trust only. After cancellation or expiry, start a new ceremony explicitly. If a previous attempt may have been accepted, unregister that device on the host before replacing it.</p>
+      <label class="check"><input name="relay_allow_loopback_http" type="checkbox">Allow HTTP for a local loopback relay</label>
+      <button type="button" id="new-pair">Start new pairing</button>
+      <p id="relay-status" role="status"></p>
+    </fieldset>
+    <section id="pairing" hidden aria-live="polite">
+      <h2>Accept on your omo host</h2>
+      <p>Compare this six-digit PIN on the host:</p><strong id="pair-pin"></strong>
+      <pre id="pair-command"></pre>
+      <details><summary>Advanced</summary><p>Accept using the entire raw public key instead of the PIN:</p><pre id="pair-public-key"></pre><pre id="pair-key-command"></pre></details>
+    </section>
     <label class="check" id="notifications-label"><input type="checkbox" name="notifications" checked>System notifications</label>
     <label id="notification-mode-label" hidden>Android notification mode<select name="notification_mode"><option value="background">Background — checks every 15 minutes or later</option><option value="foreground">Foreground — frequent checks with a persistent notification</option></select><span class="hint">Android can delay background checks. Foreground polling uses more battery and may be stopped by Android. Remember credentials for checks after a restart.</span></label>
     <label class="check" id="stop-with-window-label"><input type="checkbox" name="stop_with_window">Stop an omo server started by this app when closing its window</label>

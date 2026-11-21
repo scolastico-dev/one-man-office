@@ -309,6 +309,8 @@ impl LocalManager {
             id: Config::new_id(),
             mode: Mode::Local,
             origin: url.to_string(),
+            host_id: String::new(),
+            relay_allow_loopback_http: false,
             auth: Auth::None,
             username: String::new(),
             notifications: true,

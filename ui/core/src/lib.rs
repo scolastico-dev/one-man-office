@@ -14,4 +14,6 @@ pub mod lifecycle;
 pub mod local;
 pub use local::*;
 
+mod chrome;
 pub mod relay;
+pub use chrome::{host_window_title, trusted_setup_document};

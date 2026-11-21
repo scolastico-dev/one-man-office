@@ -15,13 +15,15 @@ pub fn show_setup(app: &AppHandle) {
     {
         #[cfg(target_os = "android")]
         {
-            let _ = window.navigate(tauri::Url::parse("http://tauri.localhost/").expect("app URL"));
+            let _ = crate::android_worker(app).call::<serde_json::Value>("showConnection", ());
         }
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 pub fn close_boards(app: &AppHandle) {
+    #[cfg(target_os = "android")]
+    let _ = crate::android_worker(app).call::<serde_json::Value>("closeBoard", ());
     for (label, window) in app.webview_windows() {
         if label.starts_with("board-") {
             let _ = window.destroy();
@@ -63,7 +65,8 @@ pub fn open_board(
         label,
         WebviewUrl::External("about:blank".parse().expect("blank URL")),
     )
-    .title("omo ui")
+    .title("omo ui · Host content")
+    .decorations(true)
     .inner_size(1280., 840.)
     .min_inner_size(360., 480.)
     .incognito(true)
@@ -80,12 +83,7 @@ pub fn open_board(
         matches!(url.scheme(), "http" | "https") || url.as_str() == "about:blank"
     })
     .on_document_title_changed(|window, title| {
-        let clean: String = title
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(160)
-            .collect();
-        let _ = window.set_title(&format!("{clean} · omo ui"));
+        let _ = window.set_title(&omo_ui_core::host_window_title(&title));
     })
     .on_new_window(move |url, features| {
         if !(matches!(url.scheme(), "http" | "https") || url.as_str() == "about:blank") {
@@ -147,16 +145,16 @@ pub fn open_board(
         .get_webview_window("setup")
         .ok_or("Main WebView is unavailable.")?;
     crate::platform::configure(&window, config, secret)?;
+    let target = crate::platform::board_url(config, secret)?;
     crate::android_worker(app).call::<serde_json::Value>(
-        "setBridge",
+        "openBoard",
         serde_json::json!({
+            "url":target.as_str(),
             "origin":config.origin.trim_end_matches('/'),
-            "script":bridge(config, secret, native),
+            "script":format!("{};{}",bridge(config, secret, native),include_str!("mobile-navigation.js")),
+            "auth":config.auth,"username":config.username,"secret":secret,
         }),
     )?;
-    window
-        .navigate(crate::platform::board_url(config, secret)?)
-        .map_err(|_| "Cannot open the board.")?;
     Ok(window)
 }
 
@@ -210,35 +208,7 @@ pub fn create_setup(app: &AppHandle) -> tauri::Result<WebviewWindow> {
                 show_setup(&app_nav);
                 return false;
             }
-            #[cfg(target_os = "android")]
-            {
-                return matches!(url.scheme(), "http" | "https" | "tauri");
-            }
-            #[cfg(not(target_os = "android"))]
-            {
-                url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
-            }
-        })
-        .on_page_load(|window, payload| {
-            #[cfg(target_os = "android")]
-            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
-                && matches!(payload.url().scheme(), "http" | "https")
-                && payload.url().host_str() != Some("tauri.localhost")
-            {
-                let window = window.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    let app = window.app_handle();
-                    let state = app.state::<crate::Shell>();
-                    if let Ok(s) = state.session.lock() {
-                        if let Some(c) = s.active.as_ref() {
-                            let _ = window.eval(bridge(&c.client.config, &c.secret, c.polling));
-                            let _ = window.eval(include_str!("mobile-navigation.js"));
-                        }
-                    }
-                });
-            }
-            #[cfg(not(target_os = "android"))]
-            let _ = (window, payload);
+            omo_ui_core::trusted_setup_document(url)
         })
         .build()?;
     #[cfg(not(target_os = "android"))]

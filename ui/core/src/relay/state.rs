@@ -100,6 +100,16 @@ impl RelayClient {
     pub fn restore(store: Arc<dyn SecretStore>, key: &str, route: Route) -> Result<Self> {
         Self::load(store, key, route, None, true)
     }
+    /// Update relay admission while restoring the same identity. Missing private
+    /// state remains an error even when a new admission password was entered.
+    pub fn restore_with_admission(
+        store: Arc<dyn SecretStore>,
+        key: &str,
+        route: Route,
+        admission: Option<String>,
+    ) -> Result<Self> {
+        Self::load(store, key, route, admission, true)
+    }
     fn load(
         store: Arc<dyn SecretStore>,
         key: &str,

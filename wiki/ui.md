@@ -6,7 +6,7 @@ the selected server supplies the board, plugins and forwarded applications.
 
 ## Connect
 
-Start the app, choose **An external omo host**, and enter its origin, for
+Start the app, choose **An external omo host directly**, and enter its origin, for
 example `http://localhost:8090` or `https://office.example`. Enter the login
 token separately, or select username/password or no authentication to match
 the server. The address must contain no path, query, fragment or credentials.
@@ -73,8 +73,71 @@ normal service lifecycle proves the old instance is gone and allows close,
 Exit or Disconnect to finish. A failed control request while that lock is held
 keeps ownership and reports the error for retry.
 
-Android exposes only direct connection. Native validation and the local
+Android offers direct and relay connections. Native validation and the local
 runtime refuse local start/install there.
+
+## Connect through a relay
+
+Desktop offers **Local omo**, **An external omo host directly**, and **An external
+omo host through relay**. Android offers the two external choices. Select the
+relay choice and enter its HTTPS origin (no slash/path, query, fragment or
+credentials), the omo host's client id, and an optional separate relay admission
+password. An explicit checkbox permits HTTP only for a loopback relay.
+
+For a new device, run `omo relay pair begin` on the host's local command line,
+then click **Start new pairing** in the app. The app creates a post-quantum device
+identity in the native credential store and proves possession with the host.
+Only after mutual proof does Connection show the six-digit PIN (including leading
+zeroes) and the exact command:
+
+```sh
+omo relay pair accept <aid> <PIN>
+```
+
+Run that command locally on the real host. Acceptance is the entire ceremony:
+the app loads the host's board automatically, with no second confirmation or
+invitation. **Advanced** contains the entire raw public key and the alternative
+`omo relay pair accept <aid> --public-key <full-public-key>` command. A fingerprint
+is not a replacement for the full key.
+
+**Connect** uses saved trust only. The app restores its relay connection after a
+restart and reconnects with fresh session keys after host/relay loss. It never
+starts another pairing automatically. Disconnect cancels and waits for this
+connection's socket/bridge to close and closes its board windows. After a failed,
+expired or cancelled ceremony, start a fresh host ceremony and explicitly choose
+**Start new pairing**. If the earlier device may have been accepted, unregister
+it on the host before replacing it. Saved candidate trust can instead recover an
+acceptance whose reply was lost. Missing private state is an error; restoration
+never silently creates a replacement identity.
+
+Relay identities, host pins, roots and admission passwords stay in the native
+credential store. Public settings contain the route and connection preferences.
+The board is served through an authenticated private loopback bridge over the
+encrypted relay; bridge credentials never enter page JavaScript. Relay admission
+and TLS routing do not grant host authority. This UI does not bundle the board.
+
+The notification checkbox and Android scheduling preference are saved for relay
+connections. Relay receipt/delivery scheduling is a separate native integration;
+until it is active, relay connections negotiate capabilities without claiming
+system delivery and leave browser notifications available.
+
+## Recognize the Connection screen
+
+On desktop, the app-owned window is titled **omo ui · Connection**. Every board
+and child document's native title starts with **omo ui · Host content ·**, followed
+by bounded plain document text. A page cannot replace that prefix with its own
+Connection title. Host HTML fullscreen is disabled on WebKit so it cannot hide
+the native frame. On Windows, a native window subclass preserves the caption
+and nonclient frame even if WebView2 requests fullscreen. Remote windows have
+no configuration or pairing command ACL.
+
+Android keeps the bundled Connection WebView separate from the native host
+WebView. An app-owned blue surrounding frame says **omo ui · Trusted Connection**;
+remote content gets a brown frame saying **omo ui · Host content**, with a native
+**Connection** button. These widgets live outside page HTML, ignore page titles,
+and remain visible when a document requests fullscreen. Native Connection actions
+switch to the trusted view. The host WebView has no Tauri JavaScript command
+interface, and visiting a local-looking URL there never grants setup authority.
 
 ## Notifications and shortcuts
 
@@ -414,9 +477,9 @@ marker and a configure action, not a general native API.
 in native Rust, without a Go process. It provides committed pairing, mutual
 ML-KEM-768 possession proofs, authenticated records/reconnect and notification
 request/envelope cryptography. Its native stream multiplexer and private board
-bridge carry host HTTP, SSE and WebSocket traffic. Setup/window wiring and
-persisted relay notification receipt policy are separate consumers; the shell
-does not yet offer a relay connection choice.
+bridge carry host HTTP, SSE and WebSocket traffic. The shell uses `RelayConnection`
+for setup/window wiring; persisted relay notification receipt policy is a
+separate consumer.
 
 The entry points for those consumers are:
 
@@ -547,9 +610,9 @@ Last-Event-ID/resync and terminal replay/message-ack behavior.
 Own one adapter with the configured connection and call `close().await` on
 disconnect/replacement: it closes the listener, cancels and joins every accepted
 connection and its own authentication/socket work before reporting Stopped.
-Drop requests cancellation; explicit close observes completion. Setup screens,
-native chrome and Android notification receipt policy are not implemented by
-this adapter.
+Drop requests cancellation; explicit close observes completion. `RelayConnection`
+and the shell own setup/native chrome; Android notification receipt policy is
+a separate integration.
 
 The `--board` probe builds the real Vue board and a test-only control-pipe
 fixture around the production Go server and relay, without a host browser
@@ -559,7 +622,12 @@ host/relay loss and delayed host registration, saved-trust UI reconstruction,
 no duplicate uncertain write or terminal input, revocation and joined shutdown.
 Protocol unit tests use exact records and consumption events, not elapsed time.
 Transport compilation is checked for Linux desktop, Windows GNU and Android
-arm64; OS WebView runtime remains unvalidated here on every platform.
+arm64. The native setup owner is also exercised against the real Go board for
+acceptance and saved restoration. For the relay setup integration, Android debug
+APK/AAB compilation and 24 Robolectric tests (including native frame switching)
+pass; Windows GNU shell compilation passes. This development host lacks
+WebKitGTK development files, an attached Android device, and the Apple SDK, so
+relay loading in an OS WebView and Windows/macOS runtime chrome remain unverified.
 
 ## Focused native smoke
 

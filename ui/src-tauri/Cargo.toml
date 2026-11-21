@@ -37,6 +37,7 @@ glib = "0.18"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.39.1"
 windows-core = "=0.62.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

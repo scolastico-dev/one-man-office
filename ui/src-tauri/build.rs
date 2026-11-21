@@ -6,6 +6,7 @@ fn main() {
             "disconnect",
             "recover",
             "local_connect",
+            "relay_connect",
         ]),
     ))
     .expect("Tauri build configuration failed");

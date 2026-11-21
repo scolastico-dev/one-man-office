@@ -360,6 +360,15 @@ impl RelayClient {
     /// Explicit human-authorized new ceremony. No automatic fallback from a
     /// failed reconnect. Saves commitment and consumed reveal before sending.
     pub async fn begin_pair(&self) -> Result<Pairing> {
+        self.begin_pair_inner(None).await
+    }
+    pub(super) async fn begin_pair_observed(
+        &self,
+        completed: oneshot::Sender<()>,
+    ) -> Result<Pairing> {
+        self.begin_pair_inner(Some(completed)).await
+    }
+    async fn begin_pair_inner(&self, completed: Option<oneshot::Sender<()>>) -> Result<Pairing> {
         let gate = self
             .inner
             .gate
@@ -368,7 +377,7 @@ impl RelayClient {
             .map_err(|_| "Relay connection is busy.")?;
         let commit = self.inner.prepare_commit()?;
         let s = self.inner.snapshot()?;
-        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate, None).await?;
+        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate, completed).await?;
         transition(&t.status, SessionStatus::Pairing)?;
         t.send(commit).await?;
         let host = t.handshake_receive().await?;

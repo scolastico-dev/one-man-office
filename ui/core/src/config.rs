@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub enum Mode {
     Direct,
     Local,
+    Relay,
 }
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +37,10 @@ pub struct Config {
     pub id: String,
     pub mode: Mode,
     pub origin: String,
+    #[serde(default)]
+    pub host_id: String,
+    #[serde(default)]
+    pub relay_allow_loopback_http: bool,
     pub auth: Auth,
     pub username: String,
     pub notifications: bool,
@@ -49,6 +54,16 @@ impl Config {
     pub fn validate(&mut self, android: bool) -> Result<()> {
         if android && self.mode == Mode::Local {
             return Err("Android requires an external omo host.".into());
+        }
+        if self.mode == Mode::Relay {
+            Uuid::parse_str(&self.id).map_err(|_| "Invalid connection identity.")?;
+            let route = crate::relay::wire::Route::new(&self.origin, &self.host_id, self.relay_allow_loopback_http)
+                .map_err(|_| "Enter a relay HTTPS origin and a host client id (letters, digits, _ or -; at most 64 characters). HTTP requires explicit loopback permission.")?;
+            if self.auth != Auth::None || !self.username.is_empty() || !self.remember {
+                return Err("Relay identities require native credential storage, without board login credentials.".into());
+            }
+            self.origin = route.origin;
+            return Ok(());
         }
         if android && self.notifications && self.auth != Auth::None && !self.remember {
             return Err("Android notifications require Remember credentials so checks can survive process restarts.".into());

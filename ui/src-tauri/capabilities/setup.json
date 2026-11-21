@@ -4,5 +4,5 @@
   "description": "Only bundled setup can configure the single native connection. Remote board/proxy windows have no capabilities.",
   "local": true,
   "windows": ["setup"],
-  "permissions": ["allow-get-setup", "allow-connect", "allow-disconnect", "allow-recover", "allow-local-connect"]
+  "permissions": ["allow-get-setup", "allow-connect", "allow-disconnect", "allow-recover", "allow-local-connect", "allow-relay-connect", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -220,6 +220,7 @@ fn close(app: &AppHandle, label: Option<String>, mut intent: CloseIntent) -> Res
             if action == CloseAction::StopAndExit {
                 owned.expect("owned stop policy").stop_owned()?;
             }
+            crate::relay::stop(app)?;
             remove_tray(app);
             state.desktop.exiting.store(true, Ordering::SeqCst);
             app.exit(0);
