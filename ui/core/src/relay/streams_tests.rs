@@ -388,3 +388,24 @@ fn final_fin_and_reset_retain_slots_until_the_writer_completes() {
         assert!(m.slots.is_empty());
     }
 }
+
+#[test]
+fn queued_fin_does_not_follow_drop_reset_while_awaiting_the_peer() {
+    let mut m = Machine::default();
+    let id = opened(&mut m);
+    m.sent(id);
+    // The shared writer has not yet selected the application's shutdown FIN.
+    m.finish(id);
+    m.dispatch(json!({"v":1,"type":"stream.data","id":id.to_string(),"data":"YQ"}))
+        .unwrap();
+    let stream = owned(m, id);
+    let shared = stream.shared.clone();
+    drop(stream);
+    let mut m = shared.machine.lock().unwrap();
+    assert_eq!(transmit(&mut m)["type"], "stream.reset");
+    assert!(m.slots.contains_key(&id));
+    assert!(m.next().is_none(), "no queued FIN may follow reset");
+    m.dispatch(json!({"v":1,"type":"stream.reset","id":id.to_string(),"code":"closed"}))
+        .unwrap();
+    assert!(m.slots.is_empty());
+}

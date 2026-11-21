@@ -674,3 +674,53 @@ func TestFullCloseDrainsCrossedDataBeforeRetirement(t *testing.T) {
 		openPeer(t, m, p, 3)
 	})
 }
+
+func TestQueuedFINMustNotFollowFullCloseReset(t *testing.T) {
+	// Drive the real state transitions while the shared writer is occupied:
+	// no record can be selected until CloseWrite, incoming data and Close ran.
+	m := &Mux{
+		streams: map[relayproto.Counter]*Conn{},
+		wake:    make(chan struct{}, 1),
+		changed: make(chan struct{}),
+	}
+	c := &Conn{mux: m, id: 1, opened: true, sendCredit: relayproto.InitialCredit, recvCredit: relayproto.InitialCredit}
+	m.streams[1] = c
+	m.order = []*Conn{c}
+	if err := c.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	data := record("stream.data", 1)
+	data.Data = []byte("unread")
+	if err := m.dispatch(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item := m.nextLocked()
+	if item == nil || item.record.Type != "stream.reset" {
+		t.Fatal("full close did not replace queued FIN with reset", item)
+	}
+	// Complete the local reset, leaving its reciprocal acknowledgment pending.
+	c.sending = false
+	m.retireLocked(c)
+	if m.streams[1] != c {
+		t.Fatal("reset retired before reciprocal completion")
+	}
+	if item := m.nextLocked(); item != nil {
+		t.Fatalf("record after reset: %s (id %d)", item.record.Type, item.record.ID)
+	}
+	// Crossed bytes are still validated/discarded, never granted or enqueued.
+	if err := m.dispatch(data); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.input) != 0 || c.credit != 0 || m.nextLocked() != nil {
+		t.Fatal("crossed data revived a resetting stream")
+	}
+	if err := m.dispatch(record("stream.reset", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.streams) != 0 || len(m.order) != 0 {
+		t.Fatal("reciprocal reset did not retire")
+	}
+}

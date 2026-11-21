@@ -247,6 +247,8 @@ func (m *Mux) nextLocked() *sendItem {
 			item.record.Code = c.reset
 			c.reset = ""
 			c.resetSent = true
+		case c.resetting:
+			continue
 		case c.credit > 0:
 			item.record.Type = "stream.credit"
 			item.credit = c.credit
