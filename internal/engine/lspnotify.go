@@ -117,9 +117,20 @@ func (e *Engine) deliverLSP(r lsp.Report) {
 	if len(r.Issues) == 0 {
 		return
 	}
-	text := lspText(r)
 	force := e.st.General().LSP.ForceChat
 	for _, session := range r.Sessions {
+		// An issue ignored after the report was queued is not told.
+		own := r
+		own.Issues = nil
+		for _, i := range r.Issues {
+			if !e.lsp.Ignored(session, i.ID) {
+				own.Issues = append(own.Issues, i)
+			}
+		}
+		if len(own.Issues) == 0 {
+			continue
+		}
+		text := lspText(own)
 		if e.o.Listeners != nil && !slices.Contains(force, e.sessionCLI(session)) && e.o.Listeners.Notify(session, text) {
 			continue
 		}
@@ -141,11 +152,13 @@ func lspText(r lsp.Report) string {
 	if n != 1 {
 		b.WriteByte('s')
 	}
-	fmt.Fprintf(&b, " in %s:", r.Worktree)
+	fmt.Fprintf(&b, " in %s:", tailRunes(r.Worktree, 80))
 	shown := 0
 	for _, i := range r.Issues {
-		item := fmt.Sprintf(" %s:%d:%d %s: %s (id %s);", i.File, i.Range.Start.Line+1, i.Range.Start.Character+1,
-			severityName(i.Severity), strings.TrimSpace(i.Message), i.ID)
+		// File and message are cut so the id and the advice always fit
+		// inside one notification line.
+		item := fmt.Sprintf(" %s:%d:%d %s: %s (id %s);", tailRunes(i.File, 100), i.Range.Start.Line+1, i.Range.Start.Character+1,
+			severityName(i.Severity), headRunes(strings.TrimSpace(i.Message), maxLSPMessage), i.ID)
 		if shown > 0 && b.Len()+len(item) > maxLSPText {
 			break
 		}
@@ -157,6 +170,23 @@ func lspText(r lsp.Report) string {
 	}
 	b.WriteString(" Fix them, or silence a wrong report with `omo ai lsp ignore <id>` (MCP tool lsp_ignore).")
 	return b.String()
+}
+
+// maxLSPMessage caps one issue's message in a notification.
+const maxLSPMessage = 160
+
+func headRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+func tailRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return "…" + string(r[len(r)-n+1:])
+	}
+	return s
 }
 
 func severityName(s int) string {

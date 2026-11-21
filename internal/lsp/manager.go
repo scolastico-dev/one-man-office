@@ -206,6 +206,19 @@ func (m *Manager) Ignore(session, id string) bool {
 	return false
 }
 
+// Ignored reports whether id is suppressed in one of the session's worktrees.
+// Delivery adapters use it to drop issues from reports they already queued.
+func (m *Manager) Ignored(session, id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, root := range m.sessions[session] {
+		if r := m.roots[root]; r != nil && r.issues.isIgnored(id) {
+			return true
+		}
+	}
+	return false
+}
+
 // Scan synchronizes current disk content immediately and waits for advertised
 // pull diagnostics. Push diagnostics remain asynchronous. Polling does this
 // automatically; callers may request it after a known batch of writes.

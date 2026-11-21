@@ -18,8 +18,8 @@ import (
 // accepts text/event-stream) and passes each notification on to the client.
 // omo confirms a session as listening only while that stream is open, so a
 // bridge whose client never asked, or that lost omo, leaves the agent to omo's
-// chat delivery. Clients speaking the newest protocol version have no
-// logging/setLevel and are not listeners through the bridge.
+// chat delivery. Only a client that sends logging/setLevel is a listener
+// through the bridge; one that never sends it stays on chat.
 
 // logPassThrough is the level the bridge passes omo's notifications on at:
 // the highest, so the level filter of the SDK cannot drop a notification omo
@@ -46,8 +46,12 @@ func (b *bridge) deliver(ctx context.Context, text string) {
 	b.mu.Lock()
 	ss := b.session
 	b.mu.Unlock()
-	if ss != nil {
-		_ = ss.Log(ctx, &mcp.LoggingMessageParams{Level: logPassThrough, Logger: "omo", Data: text})
+	if ss == nil {
+		b.o.Log.Printf("a notification from omo arrived before the client had a session; dropped")
+		return
+	}
+	if err := ss.Log(ctx, &mcp.LoggingMessageParams{Level: logPassThrough, Logger: "omo", Data: text}); err != nil {
+		b.o.Log.Printf("could not pass a notification from omo to the client: %v", err)
 	}
 }
 

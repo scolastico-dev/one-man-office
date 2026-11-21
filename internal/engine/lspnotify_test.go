@@ -202,11 +202,64 @@ func TestLSPIgnoredIssueIsNotReportedAgainButANewOneIs(t *testing.T) {
 	if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), "no-such-issue"); err == nil {
 		t.Fatal("an unknown issue was confirmed as ignored")
 	}
-	// The same diagnostic again, then another one: only the other arrives.
+	// The issue goes away, then comes back together with an unrelated one:
+	// only the unrelated one is reported.
+	if err := os.Remove(filepath.Join(dev.Workdir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.LSP().Scan(h.ctx, dev.Workdir); err != nil {
+		t.Fatal(err)
+	}
 	h.diagnose(dev, "a.txt", "bogus finding")
 	h.diagnose(dev, "b.txt", "a real problem")
 	h.waitFor("the new notification", func() bool { return len(listeners.received(dev.ID)) == 2 })
 	if got := listeners.received(dev.ID)[1]; !strings.Contains(got, "a real problem") || strings.Contains(got, "bogus finding") {
 		t.Fatalf("the second notification: %s", got)
+	}
+}
+
+// A report already queued for delivery loses the issues ignored since; a
+// report with nothing left is not delivered at all.
+func TestLSPQueuedReportDropsIgnoredIssues(t *testing.T) {
+	h, listeners := lspNotifyHarness(t)
+	dev := h.lspDeveloper("Queued")
+	issues := h.e.LSP().Snapshot(dev.ID)
+	if len(issues) != 1 {
+		t.Fatalf("issues %+v", issues)
+	}
+	other := issues[0]
+	other.ID, other.Message = "other-id", "still wanted"
+	listeners.set(dev.ID, true)
+	if _, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	h.e.deliverLSP(lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: issues})
+	if got := listeners.received(dev.ID); len(got) != 0 {
+		t.Fatalf("a report of only ignored issues was delivered: %v", got)
+	}
+	h.e.deliverLSP(lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: []lsp.Issue{issues[0], other}})
+	got := listeners.received(dev.ID)
+	if len(got) != 1 || !strings.Contains(got[0], "still wanted") || strings.Contains(got[0], issues[0].ID) || !strings.Contains(got[0], "1 new issue ") {
+		t.Fatalf("delivered %v", got)
+	}
+}
+
+// A very long message is cut so the id and the ignore advice survive the
+// notification line's length limit, in chat too.
+func TestLSPLongMessageKeepsTheIDInChat(t *testing.T) {
+	h, _ := lspNotifyHarness(t)
+	dev := h.lspDeveloper("Long")
+	long := strings.Repeat("type mismatch ", 200)
+	h.diagnose(dev, "a.txt", long)
+	h.waitFor("the chat line", func() bool { return hasLine(h.chatLines(dev.ID), "type mismatch") })
+	var line string
+	for _, l := range h.chatLines(dev.ID) {
+		if strings.Contains(l, "type mismatch") {
+			line = l
+		}
+	}
+	snap := h.e.LSP().Snapshot(dev.ID)
+	if len(snap) != 1 || !strings.Contains(line, "(id "+snap[0].ID+")") || !strings.Contains(line, "omo ai lsp ignore") {
+		t.Fatalf("the id or the advice was cut: %q", line)
 	}
 }

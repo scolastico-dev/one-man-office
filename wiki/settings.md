@@ -312,7 +312,7 @@ How a stream is opened:
   for asking for `notifications/message`. The bridge then holds the stream
   above for its session, passes each notification on to its client and opens
   the stream again after omo restarts. A client that never sends it, or that
-  speaks the newest protocol version (which has no `logging/setLevel`), is not
+  speaks a protocol version without `logging/setLevel`, is not
   a listener and keeps getting chat lines.
 
 The text lists each issue as `file:line:column severity: message (id <id>)`
