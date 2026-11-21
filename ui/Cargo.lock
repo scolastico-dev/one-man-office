@@ -2807,6 +2807,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-omo-notifications",
+ "tempfile",
  "tokio",
  "webkit2gtk",
  "webview2-com",

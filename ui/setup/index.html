@@ -26,6 +26,19 @@
     <div id="recovery" hidden><p>The saved cursor is outside the server’s retained history.</p><button type="button" id="replay">Replay retained notifications</button><button type="button" id="baseline">Notify from now</button></div>
     <footer><button type="submit" id="connect">Connect</button><button type="button" id="disconnect" hidden>Disconnect</button></footer>
   </form>
+  <section id="forwards" hidden aria-label="Desktop apps">
+    <h2>Apps</h2>
+    <p>Choose an app registered with your connected omo.</p>
+    <button type="button" id="refresh-forwards">Refresh apps and status</button>
+    <label>Registered app<select id="forward-app"></select></label>
+    <button type="button" id="preview-forward" disabled>Open preview</button>
+    <label>Local port<input id="forward-port" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="8099"></label>
+    <button type="button" id="expose-forward" disabled>Expose on this computer</button>
+    <p id="forward-problem" role="alert" hidden></p>
+    <p id="forward-status" role="status"></p>
+    <p id="forward-exposure-status" role="status"></p>
+    <ul id="forward-exposures"></ul>
+  </section>
   <p class="hint">The board and its features come from your server. Connection settings remain available from the app menu or the board’s Connection button.</p>
 </main>
 </body>

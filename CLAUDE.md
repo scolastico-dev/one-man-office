@@ -588,6 +588,34 @@ and the opt-in isolated Linux connection and local lifecycle probes.
 Build/extension details and verified platform limits:
 [omo ui](wiki/ui.md).
 
+Desktop **Connection… → Apps** reads the authenticated forward registry after
+`ui.forwards.tunnel.v1` negotiation. **Open preview** uses a real HTTP `.omo`
+origin (name plus stable forward ID) at the app root, with start_path only for
+initial navigation. Tauri per-WebView SOCKS routing pins that host:80 to the
+existing `ForwardConnector`; no system DNS/hosts or direct upstream connections.
+Root assets, streaming and application WS use the same transport. **Expose on
+this computer** binds `127.0.0.1` at a validated user-selected port; refresh shows
+local errors/status even when registry reads fail, and **End exposure** releases
+it. Setup-only native commands: get_forwards, preview_forward, expose_forward,
+stop_forward; Android rejects them and advertises no tunnel support. Old servers
+keep the board with desktop forwarding unavailable. Preview documents receive
+no board bridge/credentials or setup permissions; native shortcuts/clipboard and
+related popups remain enabled. Last-preview close, reconnect, disconnect and
+exit join listeners and tunnels; owned-server tray hiding retains the connection.
+`ui/core/src/forward_listener.rs` owns bounded loopback/SOCKS workers;
+`ui/src-tauri/src/forwards.rs` owns connection resources. Windows uses a separate profile
+per preview family and waits for BrowserProcessExited before deleting it;
+macos-proxy uses WKWebsiteDataStore and sets the app's minimum macOS to 14.
+Focused checks: `npm run check` in ui, native builds, and
+`dbus-run-session -- python3 ui/tests/forwards_smoke.py --fixture <standalone-server-test-binary>`.
+The probe checks Linux native origins/assets/SSE/WS, credential/command isolation,
+keybinds/clipboard, final-view close, ports and active-stream reconnect/disconnect/exit
+lifecycle. `cargo test -p omo-ui --lib --locked` checks the compiled native ACL
+(including related-child labels) and cleanup continuing after errors. Related
+WebKit child IPC response delivery was not established; see wiki/ui.md.
+Windows cross-compilation
+and Android checks do not establish runtime behavior; macOS needs a native runner.
+
 ## Native UI protocol
 
 `internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`

@@ -24,6 +24,7 @@ tokio = { version = "1", features = ["sync", "time"] }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri = { version = "=2.12.7", features = ["tray-icon"] }
 keyring = "4.2.0"
+tempfile = "3.24.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 keyring-core = "1.0.0"
@@ -42,6 +43,7 @@ windows-core = "=0.62.2"
 custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
+tauri = { version = "=2.12.7", features = ["macos-proxy"] }
 objc2 = "0.6.5"
 block2 = "0.6.2"
 objc2-foundation = { version = "0.3.2", features = ["NSURLAuthenticationChallenge", "NSURLProtectionSpace", "NSURLCredential", "NSURLSession", "NSString"] }
