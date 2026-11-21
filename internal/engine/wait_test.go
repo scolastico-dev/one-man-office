@@ -183,6 +183,28 @@ func TestWaitCallerGoneKeepsTheLine(t *testing.T) {
 	}
 }
 
+func TestSuppressedDeliveryDoesNotReplaceNewerWait(t *testing.T) {
+	h := newHarness(t)
+	_, dev := h.readyDeveloper("Suppressed delivery")
+	old := h.park(h.ctx, dev.ID, time.Hour)
+	rendering, resume := make(chan struct{}), make(chan struct{})
+	h.e.deliverNotification(dev.ID, func() string {
+		close(rendering)
+		<-resume
+		return ""
+	}, false)
+	<-rendering
+	newer := h.park(h.ctx, dev.ID, time.Hour)
+	close(resume)
+	if got := h.result(old); !isCode(got.err, api.CodeConflict) {
+		t.Fatalf("suppressed older wait: %+v", got)
+	}
+	h.e.notify(dev.ID, "ordinary notification")
+	if got := h.result(newer); got.err != nil || got.reason != "omo: ordinary notification" {
+		t.Fatalf("newer wait: %+v", got)
+	}
+}
+
 func TestWaitMinimum(t *testing.T) {
 	h := newHarness(t)
 	h.e.minWait = MinWait
