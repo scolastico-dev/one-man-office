@@ -191,6 +191,11 @@ func (s *issues) ignore(id string) bool {
 	}
 	return s.ignored[id]
 }
+func (s *issues) isIgnored(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ignored[id]
+}
 func (s *issues) close() {
 	s.dispatch.Lock()
 	defer s.dispatch.Unlock()

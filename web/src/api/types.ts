@@ -680,6 +680,28 @@ export interface LSPFileSelector {
   language_id: string
 }
 
+export interface LSPConfirmRequest {
+  token: string
+}
+
+export interface LSPConfirmResult {
+  confirmed: boolean
+}
+
+export interface LSPIgnoreRequest {
+  id: string
+}
+
+export interface LSPIgnoreResult {
+  id: string
+  ignored: boolean
+  worktree: string
+  file: string
+  line: number
+  column: number
+  message: string
+}
+
 /** The revision of a settings item that has no file. */
 export const NO_REVISION = '0'
 

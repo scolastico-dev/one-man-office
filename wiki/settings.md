@@ -276,9 +276,64 @@ function; callbacks must promptly queue delivery and must not call lifecycle
 methods. `Options.Report` is an equivalent construction-time callback.
 `Report` contains `Worktree`, eligible `Sessions` and `Issues`. Each `Issue`
 has a stable worktree-scoped `ID`, server name, relative file, zero-based
-UTF-16 range, severity, code, source and message. The runtime has no MCP/chat
-transport; delivery adapters must authorize agent access and use the report's
-session eligibility.
+UTF-16 range, severity, code, source and message. The runtime itself has no
+MCP/chat transport; the engine is its delivery adapter (see
+[How agents are told](#how-agents-are-told)) and uses the report's session
+eligibility.
+
+### How agents are told
+
+Each report names the sessions that may receive it, and the engine tells each
+of them once:
+
+- **Confirmed MCP listener**: omo sends the report over that session's
+  notification stream and does not also type it into the terminal. A session
+  is a *confirmed listener* only while a stream is open **and the agent
+  confirmed it**. An open stream alone is no proof: some programs only write
+  notifications to a debug log. So omo sends a probe notification when a
+  stream opens, containing a one-time token, and the agent returns it from its
+  own session with `omo ai lsp confirm TOKEN` (MCP tool `lsp_confirm`). Only
+  then does the stream count. A token of another session, a wrong token or the
+  stale token of an earlier stream confirms nothing; every new stream
+  (reconnect, omo restart, bridge reopen) is probed again. Using omo's MCP
+  tools, listing them, being injected with omo's MCP entry or advertising a
+  capability does not count either.
+- **Everything else** (no stream, a stream whose probe is unanswered, a stream
+  that was closed or failed, or a program in `force_chat`): the report is typed into the terminal as one
+  `omo:` line, or returned by `omo ai wait`, like every other notification.
+  `force_chat` wins even while a stream is open.
+
+How a stream is opened:
+
+- **Directly connected MCP agents** open the standalone notification stream of
+  the Streamable HTTP transport: a `GET` of `/mcp` with
+  `Accept: text/event-stream`, authenticated as the agent session (bearer
+  session id, or the socket's `X-Omo-Session`). omo answers with an SSE stream
+  that starts with a comment line, keeps it alive with comment lines every 15
+  seconds and sends each report as a JSON-RPC `notifications/message` (logger
+  `omo`, level `error`, the text in `data`). Closing the stream, or a write
+  that fails or does not finish within 5 seconds, ends the listener, and the
+  next report goes to chat.
+- **Agents behind `omo mcp stdio`** (Claude Code and Codex as omo starts them)
+  become listeners when their client sends `logging/setLevel`, the MCP request
+  for asking for `notifications/message`. The bridge then holds the stream
+  above for its session, passes each notification on to its client and opens
+  the stream again after omo restarts. A client that never sends it, or that
+  speaks a protocol version without `logging/setLevel`, or never answers the
+  probe, is not a listener and keeps getting chat lines.
+
+The text lists each issue as `file:line:column severity: message (id <id>)`
+(positions are one-based as editors show them), at most about 750 characters
+of issues per report with a count of the rest, and tells the agent to fix them
+or silence a wrong one.
+
+An agent silences a wrong report with `omo ai lsp ignore ID` or the MCP tool
+`lsp_ignore` (developers, reviewers and product managers). The answer confirms
+the file, position and worktree. The issue then leaves queued reports and is
+not reported again in that worktree while it stays ignored; other issues, and
+other worktrees, are unaffected. An id that names no issue of the caller's own
+worktrees is refused (`not_found`). Ignoring never touches the language server
+or the source; the issue stays visible to inspection.
 
 ## Environment
 

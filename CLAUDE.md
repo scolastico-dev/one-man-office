@@ -191,7 +191,29 @@ and the shared SettingsPage save/discard, leave guard, revision conflicts and
 hand-edit notices. `LspServerEditor` edits registrations and ordered selectors;
 `LspJsonField` keeps invalid JSON text local and blocks Save until it is fixed,
 discarded or its registration is removed.
-Agent commands and delivery are separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
+Delivery (`engine/lspnotify.go`): the engine subscribes to the manager and a
+queue goroutine tells each `Report.Sessions` entry once, over its confirmed MCP
+notification stream (`Options.Listeners`, the server's `mcpserver.Listeners`)
+unless the session's profile program is in `force_chat`, and otherwise through
+`Engine.Notify` (chat / `omo ai wait`). `Listeners.Notify` is true only when an
+established stream took the write; a stream is registered at its `GET /mcp`
+with `Accept: text/event-stream` as an agent identity (`mcpserver/listen.go`),
+sends a probe notification (one-time token) after its opening line and counts
+as confirmed only once the agent returned that token through `omo ai lsp
+confirm TOKEN` / tool `lsp_confirm` (`aicmd/lsp.go`, `POST /api/lsp/confirm`,
+`Listeners.Confirm`, route rule `agentWrite`); it is gone on disconnect, write
+failure or a 5 s write timeout, and a new stream is probed again (stale tokens
+confirm nothing). Notifications are JSON-RPC
+`notifications/message` (logger `omo`, level `error`). The stdio bridge
+(`mcpbridge/listen.go`) holds that stream for its session only after its
+client sent `logging/setLevel` (a protocol version without it never listens), and forwards each notification with
+`ServerSession.Log`. Using tools, `Seen`, injection or capabilities never
+confirms a listener. `omo ai lsp ignore ID` / tool `lsp_ignore` (`aicmd/lsp.go`,
+`POST /api/lsp/ignore`, route rule `agentWrite`, `Engine.IgnoreLSPIssue`)
+suppresses an issue of the caller's own worktrees (developer, reviewer, PM).
+Checks: engine `TestLSP`, mcpserver `TestListener`, mcpbridge
+`TestBridgeForwardsNotifications`, server `TestLSPIgnore`/`TestMCPNotificationStream`.
+Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
 Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
 and TypeScript checks, plus focused LspPage, settings navigation and resource

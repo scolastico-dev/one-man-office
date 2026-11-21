@@ -41,3 +41,36 @@ type LSPFileSelector struct {
 	Pattern    string `yaml:"pattern" json:"pattern"`
 	LanguageID string `yaml:"language_id" json:"language_id"`
 }
+
+// LSPIgnoreRequest is the body of POST /api/lsp/ignore: the id of a reported
+// language-server issue, as the notification or `omo ai lsp ignore` names it.
+type LSPIgnoreRequest struct {
+	ID string `json:"id"`
+}
+
+// LSPIgnoreResult confirms that an issue is suppressed in the caller's
+// worktree: it is no longer reported there, queued or in the future, while
+// the language server keeps reporting it. File is slash-separated and
+// relative to Worktree; the position is one-based as editors show it.
+type LSPIgnoreResult struct {
+	ID       string `json:"id"`
+	Ignored  bool   `json:"ignored"`
+	Worktree string `json:"worktree"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Column   int    `json:"column"`
+	Message  string `json:"message"`
+}
+
+// LSPConfirmRequest is the body of POST /api/lsp/confirm: the token of the
+// probe omo sent over the caller's MCP notification stream.
+type LSPConfirmRequest struct {
+	Token string `json:"token"`
+}
+
+// LSPConfirmResult says the probe's token was accepted: from now on, while
+// that stream stays open, omo tells the caller about language-server issues
+// over MCP instead of in the terminal.
+type LSPConfirmResult struct {
+	Confirmed bool `json:"confirmed"`
+}
