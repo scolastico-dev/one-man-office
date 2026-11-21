@@ -29,6 +29,7 @@ type Conn struct {
 	remoteFin, localFin, finQueued, closed bool
 	reset                                  string
 	resetting, peerReset, resetSent        bool
+	sending                                bool
 	failure                                error
 	pending                                *writeOp
 	readDeadline, writeDeadline            time.Time
