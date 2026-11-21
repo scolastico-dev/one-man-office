@@ -458,3 +458,67 @@ func TestLSPReleasedWaitFiltersIgnoredIssues(t *testing.T) {
 		})
 	}
 }
+
+func TestLSPSuppressedWaitReplacedByQueuedReturn(t *testing.T) {
+	for _, queuedReport := range []bool{false, true} {
+		name := "ordinary"
+		if queuedReport {
+			name = "ordinary-and-ignored-report"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, _ := lspNotifyHarness(t)
+			dev := h.lspDeveloper("Queued replacement")
+			h.e.nt.grace = time.Hour
+			issues := h.e.LSP().Snapshot(dev.ID)
+			report := lsp.Report{Worktree: dev.Workdir, Sessions: []string{dev.ID}, Issues: issues}
+			old := h.park(h.ctx, dev.ID, time.Hour)
+
+			h.e.nt.mu.Lock()
+			mb := h.e.nt.box(dev.ID)
+			h.e.nt.mu.Unlock()
+			// Hold the old wait before its post-delivery state write and
+			// rendering, while a newer call consumes the ordinary queue.
+			mb.stateMu.Lock()
+			resume := sync.OnceFunc(mb.stateMu.Unlock)
+			defer resume()
+			h.e.deliverLSP(report)
+			if queuedReport {
+				h.e.deliverLSP(report)
+			}
+			if res, err := h.e.IgnoreLSPIssue(h.actor(dev.ID), issues[0].ID); err != nil || !res.Ignored {
+				t.Fatalf("ignore: %+v, %v", res, err)
+			}
+			h.e.Notify(dev.ID, "queued ordinary notification")
+			if reason, err := h.e.Wait(h.ctx, h.actor(dev.ID), time.Hour); err != nil || reason != "omo: queued ordinary notification" {
+				t.Fatalf("newer wait: %q, %v", reason, err)
+			}
+			resume()
+
+			// Observe either completion or the erroneous re-registration.
+			// Both are exact conditions; no quiet interval proves success.
+			var got waitResult
+			completed := false
+			h.waitFor("the old wait to finish or register again", func() bool {
+				select {
+				case got = <-old:
+					completed = true
+					return true
+				default:
+				}
+				h.e.nt.mu.Lock()
+				defer h.e.nt.mu.Unlock()
+				return mb.waiter != nil
+			})
+			h.e.Notify(dev.ID, "subsequent ordinary notification")
+			if !completed {
+				got = h.result(old)
+			}
+			if !isCode(got.err, api.CodeConflict) {
+				t.Fatalf("suppressed older wait: %+v; want conflict", got)
+			}
+			if reason, err := h.e.Wait(h.ctx, h.actor(dev.ID), time.Hour); err != nil || reason != "omo: subsequent ordinary notification" {
+				t.Fatalf("next wait: %q, %v", reason, err)
+			}
+		})
+	}
+}
