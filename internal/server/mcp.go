@@ -51,6 +51,10 @@ type mcpEndpoint struct {
 	// set by registerMCPAuth); nil accepts none.
 	verify mcpTokenVerifier
 
+	// listeners are the notification streams agent sessions hold open; the
+	// engine delivers language-server reports through them.
+	listeners *mcpserver.Listeners
+
 	mu sync.Mutex
 	// seen are the agent sessions that used the endpoint.
 	seen map[string]bool
@@ -82,10 +86,11 @@ func (s *Server) mcpHandler() http.Handler {
 			Dispatch: func(id mcpserver.Identity) *apiclient.Client {
 				return apiclient.NewWithTransport(apiclient.HandlerTransport(s.SocketHandler()), id.Session)
 			},
-			Settings: s.mcpSettings,
-			Seen:     s.mcpSeen,
-			Log:      s.log,
-			Version:  s.opts.Version,
+			Settings:  s.mcpSettings,
+			Seen:      s.mcpSeen,
+			Listeners: s.mcp.listeners,
+			Log:       s.log,
+			Version:   s.opts.Version,
 		}
 		if s.mcp.relay != nil {
 			opts.Relay = s.mcp.relay
