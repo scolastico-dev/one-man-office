@@ -463,6 +463,54 @@ export interface ServerInfo {
   version_commit: string
 }
 
+export interface RelayStatus {
+  state: string
+  enabled: boolean
+  origin: string
+  host_id: string
+  host_fp: string
+  retry_seconds: number
+}
+
+export interface RelayConnectRequest {
+  origin: string
+  client_id: string
+  new_id: boolean
+  password?: string | null
+}
+
+export interface RelayAcceptRequest {
+  aid: string
+  pin: string
+  public_key: string
+  name: string
+}
+
+export interface RelayPending {
+  phase: string
+  expires: string
+  aid: string
+  ui_id: string
+}
+
+export interface RelayDevice {
+  ui_id: string
+  name: string
+  state: string
+  accepted_at: string
+  live_connections: number
+}
+
+export interface RelayDeviceList {
+  devices: RelayDevice[]
+}
+
+export interface RelayAccepted {
+  aid: string
+  host_fp: string
+  device: RelayDevice
+}
+
 /** The answer of `POST /api/ai/ready` (agent socket). */
 export interface ReadyResponse {
   prompt: string

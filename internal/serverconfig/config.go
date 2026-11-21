@@ -19,17 +19,20 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
+	"github.com/scolastico-dev/one-man-office/internal/relayproto"
 	"gopkg.in/yaml.v3"
 )
 
 // Config holds the options that decide how the server listens and who may
 // connect.
 type Config struct {
-	Host        string `yaml:"host"`
-	Port        int    `yaml:"port"`
-	Auth        string `yaml:"auth"`
-	BasicAuth   string `yaml:"basic_auth"`
-	OriginCheck bool   `yaml:"origin_check"`
+	RelayURL     string `yaml:"relay_url,omitempty"`
+	RelayEnabled bool   `yaml:"relay_enabled"`
+	Host         string `yaml:"host"`
+	Port         int    `yaml:"port"`
+	Auth         string `yaml:"auth"`
+	BasicAuth    string `yaml:"basic_auth"`
+	OriginCheck  bool   `yaml:"origin_check"`
 	// AllowedHosts lists extra host names the user trusts in the Host and
 	// Origin headers, each "name" (any port, or none) or "name:port".
 	AllowedHosts []string `yaml:"allowed_hosts"`
@@ -53,7 +56,7 @@ func Defaults() Config {
 
 // Keys lists the option names in their documented order.
 func Keys() []string {
-	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts", "public_url", "proxy_base_host", "proxy_label_prefix", "proxy_label_suffix"}
+	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts", "public_url", "proxy_base_host", "proxy_label_prefix", "proxy_label_suffix", "relay_url", "relay_enabled"}
 }
 
 // Validate checks every option and the relations between them.
@@ -82,6 +85,11 @@ func (c Config) Validate() error {
 	}
 	if _, _, err := ParsePublicURL(c.PublicURL); err != nil {
 		return fmt.Errorf("public_url: %w", err)
+	}
+	if c.RelayURL != "" {
+		if _, err := relayproto.NewRoute(c.RelayURL, "config", true); err != nil {
+			return errors.New("relay_url must be an HTTPS origin (HTTP only for loopback development)")
+		}
 	}
 	return c.validateProxy()
 }
@@ -259,6 +267,9 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
+// Save atomically writes a complete validated server configuration.
+func Save(path string, c Config) error { return save(path, c) }
+
 func save(path string, c Config) error {
 	if err := c.Validate(); err != nil {
 		return err
@@ -278,6 +289,22 @@ func Set(path, key, value string) (Config, error) {
 		return Config{}, err
 	}
 	switch key {
+	case "relay_url":
+		if value == "" {
+			c.RelayURL = ""
+		} else {
+			r, e := relayproto.NewRoute(value, "config", true)
+			if e != nil {
+				return Config{}, errors.New("relay_url must be an HTTPS origin (HTTP only for loopback development)")
+			}
+			c.RelayURL = r.Origin
+		}
+	case "relay_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return Config{}, errors.New("relay_enabled must be true or false")
+		}
+		c.RelayEnabled = b
 	case "host":
 		c.Host = value
 	case "port":
@@ -327,6 +354,10 @@ func Unset(path, key string) (Config, error) {
 	}
 	d := Defaults()
 	switch key {
+	case "relay_url":
+		c.RelayURL = ""
+	case "relay_enabled":
+		c.RelayEnabled = false
 	case "host":
 		c.Host = d.Host
 	case "port":

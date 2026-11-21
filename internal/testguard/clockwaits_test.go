@@ -188,6 +188,7 @@ var retainedClockWaits = map[string]struct {
 	"internal/server/plugin_tasks_test.go":      {map[string]int{"context.WithTimeout": 1}, "a probe program started by the test has no parent that could dump its goroutines, so its own request is bounded to let it exit and report"},
 	"internal/service/service_test.go":          {map[string]int{"context.WithTimeout": 1}, "the deadline is the input of Stop under test: how long it may wait for the server"},
 	"cmd/omo/smoke_test.go":                     {map[string]int{"context.WithTimeout": 2}, "the smoke test drives a built omo and its child programs; the bound makes a stuck child end with its own output instead of the binary's time limit"},
+	"internal/relaytransport/mux_test.go":       {map[string]int{"SetReadDeadline": 2, "SetWriteDeadline": 1}, "connection deadlines are the product inputs under test, entirely within synctest virtual time; assertions verify timeout and deadline clearing, never impose a wall-clock bound on completion"},
 	"internal/usage/tracker_test.go":            {map[string]int{"poll deadline": 1}, "the loop runs inside a synctest bubble: its deadline is virtual time, which advances only when every goroutine of the bubble is blocked, so it is no wall clock and decides a livelock deterministically"},
 	"internal/mcpbridge/bridge_test.go":         {map[string]int{"time.After": 3, "context.WithTimeout": 2}, "waits on a separate bridge process whose stderr belongs in the failure and which must be killed, and one loop that re-emits until the bridge's event stream is attached"},
 }

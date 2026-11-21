@@ -34,6 +34,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/proxy"
+	"github.com/scolastico-dev/one-man-office/internal/relayhost"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/usage"
@@ -78,6 +79,8 @@ type Options struct {
 	// scan replaces how the project scanner reads folders and times its
 	// rounds; tests only.
 	scan *scanSeams
+	// beforeRelayStart observes the exact boundary before remote admission; tests only.
+	beforeRelayStart func(*Server)
 }
 
 // gitVersion reports the installed git version; tests replace it.
@@ -90,6 +93,7 @@ type Server struct {
 	// it before the server is ready. Agents receive it as OMO_SOCKET.
 	SocketEndpoint string
 
+	relay    *relayhost.Manager
 	opts     Options
 	log      *log.Logger
 	db       *sql.DB
@@ -294,6 +298,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.background(s.scan.run)
 	s.background(s.runImageSweep)
 	s.background(s.runProxySweep)
+	if err = s.initRelay(); err != nil {
+		return nil, fmt.Errorf("open relay: %w", err)
+	}
 	return s, nil
 }
 
@@ -329,6 +336,9 @@ func (s *Server) Close() error {
 		}
 		s.Shutdown(ended)
 		s.cancel()
+		if s.relay != nil {
+			_ = s.relay.Close()
+		}
 		s.wg.Wait()
 		s.stopPlugins()
 		s.stopSkillSets()
