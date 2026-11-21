@@ -469,3 +469,17 @@ fn old_saved_connections_default_to_keeping_owned_server_running() {
             .stop_with_window
     );
 }
+
+#[test]
+fn oversized_json_save_preserves_previous_readable_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let previous = serde_json::json!({"previous": true});
+    write_json(dir.path(), "state.json", &previous).unwrap();
+    // The public helper's bounded reader must be able to reopen every save.
+    let oversized = serde_json::json!({"data": "\u{1}".repeat(1024 * 1024 / 6)});
+    assert!(write_json(dir.path(), "state.json", &oversized).is_err());
+    assert_eq!(
+        read_json::<serde_json::Value>(dir.path(), "state.json").unwrap(),
+        Some(previous)
+    );
+}

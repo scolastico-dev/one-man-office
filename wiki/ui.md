@@ -458,9 +458,11 @@ The entry points for those consumers are:
 `SecretStore` loads/saves one private snapshot atomically and durably, with a
 missing entry distinct from unavailable storage. Snapshots contain the private
 seed, admission password, consumed attempt marker, host candidate/pin, original
-attempt id, epoch and notification root; none belongs in public settings. Saves
-precede commitment, reveal, final proof and trust transitions. Any failed save
-latches the client closed until storage is repaired and it is reconstructed.
+attempt id, epoch and notification root; none belongs in public settings.
+Snapshots use the same 32 KiB encoded limit for reads and writes, checked before
+replacement; this includes worst-case JSON escaping of a 4 KiB admission password.
+Saves precede commitment, reveal, final proof and trust transitions. A failed
+storage write latches the client closed until storage is repaired and it is reconstructed.
 `omo_ui::RelaySecrets` adapts the existing desktop/Android credential store using
 separate `relay:<key>` entries. Android headless worker storage can implement the
 same trait without Tauri or a WebView; worker wiring is not provided here.

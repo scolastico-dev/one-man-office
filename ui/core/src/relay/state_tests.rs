@@ -109,3 +109,45 @@ fn any_save_failure_latches_connection_closed_and_preserves_durable_state() {
         assert_eq!(before, *v.value.lock().unwrap());
     }
 }
+
+#[test]
+fn trusted_candidate_and_root_survive_maximum_escaped_admission_update() {
+    let v = Arc::new(Vault::default());
+    let c = client(&v);
+    let commit = c.inner.prepare_commit().unwrap();
+    c.inner.reveal(&contribution(&commit)).unwrap();
+    c.inner.save_root(&[9; 32]).unwrap();
+    c.inner.trust().unwrap();
+    let before = c.inner.snapshot().unwrap();
+    RelayClient::open(
+        v.clone(),
+        "device",
+        before.route.clone(),
+        Some("\u{1}".repeat(4096)),
+    )
+    .unwrap();
+    let restored = RelayClient::restore(v.clone(), "device", before.route.clone()).unwrap();
+    let after = restored.inner.snapshot().unwrap();
+    assert_eq!(before.seed, after.seed);
+    let a = before.attempt.as_ref().unwrap();
+    let b = after.attempt.as_ref().unwrap();
+    assert_eq!(a.aid, b.aid);
+    let ah = a.host.as_ref().unwrap();
+    let bh = b.host.as_ref().unwrap();
+    assert_eq!(ah.pk, bh.pk);
+    assert_eq!(ah.epoch, bh.epoch);
+    assert_eq!(ah.root, bh.root);
+    assert!(bh.trusted);
+    let durable = v.value.lock().unwrap().clone();
+    assert!(durable.as_ref().unwrap().len() <= MAX_PRIVATE_STATE_BYTES);
+    assert!(
+        RelayClient::open(
+            v.clone(),
+            "device",
+            before.route,
+            Some("\u{1}".repeat(4097))
+        )
+        .is_err()
+    );
+    assert_eq!(*v.value.lock().unwrap(), durable);
+}

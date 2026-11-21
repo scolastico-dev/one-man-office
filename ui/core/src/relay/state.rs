@@ -8,6 +8,10 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
+// A 4096-byte admission password can require six JSON bytes per byte.
+// Leave room for the private identity, candidate, root and canonical route.
+const MAX_PRIVATE_STATE_BYTES: usize = 32 * 1024;
+
 /// Platform boundary for *private* atomic durable storage. `save` must commit all
 /// bytes before returning success; failures must preserve the previous value.
 /// Missing and unavailable/corrupt storage are distinct. Implementations must not
@@ -115,7 +119,7 @@ impl RelayClient {
         }
         let update = admission.is_some() || loaded.is_none();
         let mut state = if let Some(bytes) = loaded.as_ref() {
-            if bytes.len() > 16384 {
+            if bytes.len() > MAX_PRIVATE_STATE_BYTES {
                 return Err("Invalid private relay state.".into());
             }
             let s: PrivateState =
@@ -206,6 +210,9 @@ impl Inner {
     pub fn save(&self, s: PrivateState) -> Result<()> {
         validate(&s)?;
         let bytes = serde_json::to_vec(&s).map_err(|_| "Cannot encode private relay state.")?;
+        if bytes.len() > MAX_PRIVATE_STATE_BYTES {
+            return Err("Private relay state is too large.".into());
+        }
         if self.store.save(&self.key, &bytes).is_err() {
             *self.failed.lock().map_err(|_| "Relay state lock failed.")? = true;
             return Err("Cannot durably save private relay state.".into());

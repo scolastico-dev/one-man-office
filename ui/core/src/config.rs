@@ -135,10 +135,15 @@ pub fn load_config(root: &Path, android: bool) -> Result<Option<Config>> {
     c.validate(android)?;
     Ok(Some(c))
 }
+const MAX_JSON_BYTES: usize = 1024 * 1024;
+
 /// Atomic replacement in the same directory; failure leaves the last complete file intact.
 pub fn write_json(root: &Path, name: &str, value: &impl Serialize) -> Result<()> {
     fs::create_dir_all(root).map_err(|_| "Cannot create app configuration directory.")?;
     let data = serde_json::to_vec_pretty(value).map_err(|_| "Cannot encode app configuration.")?;
+    if data.len() > MAX_JSON_BYTES {
+        return Err("App configuration is too large.".into());
+    }
     let temp = root.join(format!(".{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut options = fs::OpenOptions::new();
@@ -171,10 +176,10 @@ pub fn read_json<T: DeserializeOwned>(root: &Path, name: &str) -> Result<Option<
     };
     let mut data = Vec::new();
     Read::by_ref(&mut file)
-        .take(1024 * 1024 + 1)
+        .take(MAX_JSON_BYTES as u64 + 1)
         .read_to_end(&mut data)
         .map_err(|_| "Cannot read app configuration.")?;
-    if data.len() > 1024 * 1024 {
+    if data.len() > MAX_JSON_BYTES {
         return Err("App configuration is too large.".into());
     }
     serde_json::from_slice(&data)

@@ -87,3 +87,29 @@ fn restoring_a_saved_profile_with_missing_secrets_never_generates_an_identity() 
         first.identity_id().unwrap()
     );
 }
+
+#[test]
+fn escaped_admission_snapshots_remain_readable_and_invalid_updates_preserve_identity() {
+    let vault = Arc::new(Vault::default());
+    // Six encoded JSON bytes per password byte, valid relay admission data.
+    let password = "\u{1}".repeat(4096);
+    let c = RelayClient::open(vault.clone(), "device", route(), Some(password.clone())).unwrap();
+    let identity = c.identity_id().unwrap();
+    assert_eq!(
+        RelayClient::restore(vault.clone(), "device", route())
+            .unwrap()
+            .identity_id()
+            .unwrap(),
+        identity
+    );
+    let previous = vault.value.lock().unwrap().clone();
+    assert!(RelayClient::open(vault.clone(), "device", route(), Some(password + "x")).is_err());
+    assert_eq!(*vault.value.lock().unwrap(), previous);
+    assert_eq!(
+        RelayClient::restore(vault, "device", route())
+            .unwrap()
+            .identity_id()
+            .unwrap(),
+        identity
+    );
+}
