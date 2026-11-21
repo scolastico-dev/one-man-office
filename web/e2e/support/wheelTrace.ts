@@ -34,6 +34,7 @@ export interface WheelTrace {
 interface TraceEvent {
   name?: string
   ph?: string
+  ts?: number
   pid?: number
   tid?: number
   cat?: string
@@ -51,7 +52,9 @@ function completed(events: readonly TraceEvent[]): { done: TraceEvent[]; unfinis
   const done: TraceEvent[] = []
   const open = new Map<string, TraceEvent[]>()
   const key = (e: TraceEvent) => (e.ph === 'B' || e.ph === 'E' ? `${e.pid}/${e.tid}` : `${e.cat}/${e.name}/${e.id ?? JSON.stringify(e.id2)}`)
-  for (const e of events) {
+  // Chromium can serialize different threads' chunks out of order. Pair by
+  // event time, otherwise an async end seen before its begin looks cut short.
+  for (const e of [...events].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))) {
     if (e.ph === 'X') done.push(e)
     else if (e.ph === 'B' || e.ph === 'b') open.set(key(e), [...(open.get(key(e)) ?? []), e])
     else if (e.ph === 'E' || e.ph === 'e') {

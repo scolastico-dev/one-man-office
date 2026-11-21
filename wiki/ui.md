@@ -248,6 +248,10 @@ npm run android:dev
 
 CI needs those same SDK/NDK/JDK and Rust components, Node/npm, accepted SDK
 licenses, and dependency access to crates.io, Google Maven and Maven Central.
+Gradle resolves Maven Central artifacts through Google's public mirror first,
+including `buildSrc` plugin dependencies, to avoid Central's shared-runner rate
+limits. Google Maven and the Gradle plugin portal remain available for their
+own artifacts, with Maven Central as fallback.
 The checked-in Gradle wrapper downloads Gradle 9.6.1 and uses AGP 9.3.1 / Kotlin
 2.2.10. Platform/target SDK is pinned to the available stable SDK 36 rather than
 the generated template's unavailable SDK 37. The scoped Wry class extension in

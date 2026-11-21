@@ -580,6 +580,9 @@ Rust delivery journal through JNI, without a WebView or Tauri event loop. The
 checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
 android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
 ./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
+Root buildscript/project repositories and buildSrc's plugin/dependency repositories
+prefer Google's Maven Central mirror before Central; keep these scopes aligned
+so plugin-portal redirects do not reintroduce shared-runner HTTP 429 failures.
 Remote pages have no native command capabilities. The board's browser notifier
 honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
 configured board documents while native polling is enabled. Tests: core Rust,
