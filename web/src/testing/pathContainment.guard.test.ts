@@ -24,12 +24,10 @@ describe('path containment in the browser test support code', () => {
     expect(containment("if (!isBelow(tmp, root)) throw 1")).toHaveLength(0)
     expect(containment("path.startsWith('/') ? path : `/${path}`")).toHaveLength(0)
   })
-  it('is not used in e2e', () => {
+  it.each(walk(resolve('e2e')))('is not used in e2e: %s', (path) => {
     const found: string[] = []
-    for (const path of walk(resolve('e2e'))) {
-      if (path.endsWith('within.ts')) continue
-      for (const line of containment(readFileSync(path, 'utf8'))) found.push(`${path.slice(resolve('.').length + 1)}: ${line.trim()}`)
-    }
+    if (path.endsWith('within.ts')) return
+    for (const line of containment(readFileSync(path, 'utf8'))) found.push(`${path.slice(resolve('.').length + 1)}: ${line.trim()}`)
     expect(found).toEqual([])
   })
 })

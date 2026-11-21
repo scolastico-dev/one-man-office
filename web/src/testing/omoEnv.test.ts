@@ -133,17 +133,15 @@ it('isolates real Bash startup code and Readline from hostile runner files', () 
 })
 
 
-it('all browser child environments inherit through the central shell-config filter', () => {
-  const root = resolve('e2e')
-  const failures: string[] = []
-  for (const name of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
-    if (!name.endsWith('.ts') || resolve(root, name) === resolve(root, 'support/env.ts')) continue
-    const text = readFileSync(resolve(root, name), 'utf8')
-    // Individual reads (PATH, CPU settings, etc.) are fine. Inheriting the
-    // entire environment must go through withoutShellConfig or cleanEnv.
-    if (/\bprocess\s*\.\s*env\b(?!\s*(?:\.|\[))/.test(text)) failures.push(name)
-  }
-  expect(failures).toEqual([])
+const browserRoot = resolve('e2e')
+const browserSources = readdirSync(browserRoot, { recursive: true, encoding: 'utf8' })
+  .filter((name) => name.endsWith('.ts') && resolve(browserRoot, name) !== resolve(browserRoot, 'support/env.ts'))
+
+it.each(browserSources)('all browser child environments inherit through the central shell-config filter: %s', (name) => {
+  const text = readFileSync(resolve(browserRoot, name), 'utf8')
+  // Individual reads (PATH, CPU settings, etc.) are fine. Inheriting the
+  // entire environment must go through withoutShellConfig or cleanEnv.
+  expect(text, name).not.toMatch(/\bprocess\s*\.\s*env\b(?!\s*(?:\.|\[))/)
 })
 
 it('does not skip whole fixture tests for a platform; only single POSIX-only assertions are conditional', () => {

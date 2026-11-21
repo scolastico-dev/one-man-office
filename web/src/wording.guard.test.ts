@@ -15,15 +15,13 @@ function files(dir: string): string[] {
   })
 }
 
-test('the labels of review, when approved and task release are defined once', () => {
+test.each(files(SRC))('the labels of review, when approved and task release are defined once: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    if (relative(SRC, f) === join('features', 'ticket', 'fieldRules.ts')) continue
-    readFileSync(f, 'utf8')
-      .split('\n')
-      .forEach((line, i) => {
-        if (/\b(REVIEW|WHEN|APPROVED|RELEASE)_LABEL\b\s*(:[^=]*)?=/.test(line)) bad.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
-      })
-  }
+  if (relative(SRC, f) === join('features', 'ticket', 'fieldRules.ts')) return
+  readFileSync(f, 'utf8')
+    .split('\n')
+    .forEach((line, i) => {
+      if (/\b(REVIEW|WHEN|APPROVED|RELEASE)_LABEL\b\s*(:[^=]*)?=/.test(line)) bad.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
+    })
   expect(bad).toEqual([])
 })

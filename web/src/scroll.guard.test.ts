@@ -13,53 +13,45 @@ test('the guard sees the files it scans', () => {
   expect(sources['/src/layout/AppShell.vue']).toBeDefined()
 })
 
-test('nothing calls the browser scrollIntoView, which can move the whole page: rows are shown with revealInBox', () => {
-  const found = Object.entries(sources)
-    .filter(([file, text]) => file !== '/src/components/ui/scrollBox.ts' && /\.scrollIntoView(IfNeeded)?\b/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
+test.each(Object.entries(sources))('nothing calls the browser scrollIntoView, which can move the whole page: rows are shown with revealInBox: %s', (file, text) => {
+  if (file === '/src/components/ui/scrollBox.ts') return
+  expect(text, file).not.toMatch(/\.scrollIntoView(IfNeeded)?\b/)
 })
 
 /** Modal dialogs are drawn above the page (the top layer) and scroll themselves. */
 const DIALOGS = new Set(['/src/components/ui/UiDialog.vue', '/src/features/ticket/TicketPanel.vue'])
 
-test('every frame as tall as the window is positioned and clips: nothing inside, not even a screen-reader-only label, makes the document scroll', () => {
-  const frames: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (!file.endsWith('.vue') || DIALOGS.has(file)) continue
-    const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? ''
-    for (const m of style.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      const body = m[2]!
-      if (!/(^|[\s;])height:\s*100(d|s|l)?vh/.test(body)) continue
-      frames.push(file)
-      const where = `${file} ${m[1]!.trim()}`
-      expect(body, where).toMatch(/position:\s*relative/)
-      expect(body, where).toMatch(/overflow:\s*clip/)
-    }
-  }
-  // The board's frame and a terminal's own window.
-  expect(frames).toEqual(expect.arrayContaining(['/src/layout/AppShell.vue', '/src/features/terminal/TerminalWindow.vue']))
+const frames = Object.entries(sources).flatMap(([file, text]) => {
+  if (!file.endsWith('.vue') || DIALOGS.has(file)) return []
+  const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? ''
+  return [...style.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((m) => /(^|[\s;])height:\s*100(d|s|l)?vh/.test(m[2]!))
+    .map((m) => ({ file, where: `${file} ${m[1]!.trim()}`, body: m[2]! }))
 })
 
-test('no scroll box swallows the other axis: overscroll is contained per axis, never with the shorthand, never sideways', () => {
+test.each(frames)('every frame as tall as the window is positioned and clips: $where', ({ where, body }) => {
+  expect(body, where).toMatch(/position:\s*relative/)
+  expect(body, where).toMatch(/overflow:\s*clip/)
+})
+
+test('the frame guard sees the board and terminal window', () => {
+  expect(frames.map((f) => f.file)).toEqual(expect.arrayContaining(['/src/layout/AppShell.vue', '/src/features/terminal/TerminalWindow.vue']))
+})
+
+test.each(Object.entries(sources))('no scroll box swallows the other axis: overscroll is contained per axis, never with the shorthand, never sideways: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (file === '/src/scroll.guard.test.ts') continue
-    for (const m of text.matchAll(/overscroll-behavior(-[a-z]+)?\s*:\s*([a-z]+)/g)) {
-      const axis = m[1] ?? ''
-      const value = m[2]!
-      // A box that scrolls only up and down must let a sideways wheel reach the board around it.
-      if (axis === '' || ((axis === '-x' || axis === '-inline') && value !== 'auto')) found.push(`${file}: ${m[0]}`)
-    }
+  if (file === '/src/scroll.guard.test.ts') return
+  for (const m of text.matchAll(/overscroll-behavior(-[a-z]+)?\s*:\s*([a-z]+)/g)) {
+    const axis = m[1] ?? ''
+    const value = m[2]!
+    // A box that scrolls only up and down must let a sideways wheel reach the board around it.
+    if (axis === '' || ((axis === '-x' || axis === '-inline') && value !== 'auto')) found.push(`${file}: ${m[0]}`)
   }
   expect(found).toEqual([])
 })
 
-test('nothing listens to the wheel: scrolling is left to the browser (a listener would break sideways wheels or the drag edge scroll)', () => {
-  const found = Object.entries(sources)
-    .filter(([, text]) => /@wheel\b|['"](mouse)?wheel['"]|\bonwheel\b/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
+test.each(Object.entries(sources))('nothing listens to the wheel: scrolling is left to the browser (a listener would break sideways wheels or the drag edge scroll): %s', (file, text) => {
+  expect(text, file).not.toMatch(/@wheel\b|['"](mouse)?wheel['"]|\bonwheel\b/)
 })
 
 /** The declarations of the first rule of a file's styles with exactly this selector. */
@@ -134,22 +126,20 @@ const AUDITED_CLEAN: Record<string, string> = {
   '/src/features/terminal/LogView.vue .log__text': 'omo-logtext',
 }
 
-test('every scroll box rule composites its box or is listed with the audit that cleared it', () => {
-  const unlisted: string[] = []
-  const seen = new Set<string>()
-  for (const [file, text] of Object.entries(sources)) {
-    if (file.startsWith('/src/sample/') || file === '/src/scroll.guard.test.ts') continue
-    const style = file.endsWith('.vue') ? (/<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? '') : text
-    for (const m of style.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      const body = m[2]!
-      if (!/(^|[\s;])overflow(-[xy])?:\s*(auto|scroll)/.test(body)) continue
-      const key = `${file} ${m[1]!.trim().replace(/\s+/g, ' ')}`
-      seen.add(key)
-      if (!/will-change:\s*(scroll-position|transform)/.test(body) && AUDITED_CLEAN[key] === undefined) unlisted.push(key)
-    }
-  }
-  expect(unlisted).toEqual([])
-  // No entry outlives its rule.
+const scrollRules = Object.entries(sources).flatMap(([file, text]) => {
+  if (file.startsWith('/src/sample/') || file === '/src/scroll.guard.test.ts') return []
+  const style = file.endsWith('.vue') ? (/<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? '') : text
+  return [...style.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((m) => /(^|[\s;])overflow(-[xy])?:\s*(auto|scroll)/.test(m[2]!))
+    .map((m) => ({ key: `${file} ${m[1]!.trim().replace(/\s+/g, ' ')}`, body: m[2]! }))
+})
+
+test.each(scrollRules)('every scroll box rule composites its box or is listed with the audit that cleared it: $key', ({ key, body }) => {
+  expect(/will-change:\s*(scroll-position|transform)/.test(body) || AUDITED_CLEAN[key] !== undefined, key).toBe(true)
+})
+
+test('no scroll audit entry outlives its rule', () => {
+  const seen = new Set(scrollRules.map((r) => r.key))
   expect(Object.keys(AUDITED_CLEAN).filter((k) => !seen.has(k))).toEqual([])
 })
 

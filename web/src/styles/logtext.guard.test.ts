@@ -19,21 +19,19 @@ test("the guard sees the files it scans", () => {
   );
 });
 
-test("every pre that shows a log or a test output breaks long lines", () => {
+test.each(Object.entries(sources))("every pre that shows a log or a test output breaks long lines: %s", (file, text) => {
   const missing: string[] = [];
-  for (const [file, text] of Object.entries(sources)) {
-    if (file.startsWith("/src/sample/")) continue;
-    for (const m of text.matchAll(/<pre\b[^>]*>/g)) {
-      const tag = m[0];
-      if (/log|output|result/i.test(tag) && !/\bomo-logtext\b/.test(tag))
-        missing.push(`${file}: ${tag.slice(0, 80)}`);
-    }
-    for (const m of text.matchAll(
-      /\.([\w-]*(?:log|output)[\w-]*)\s*\{([^}]*)\}/gi,
-    )) {
-      if (/white-space:\s*pre\s*;/.test(m[2] ?? ""))
-        missing.push(`${file}: .${m[1]} keeps white-space: pre`);
-    }
+  if (file.startsWith("/src/sample/")) return;
+  for (const m of text.matchAll(/<pre\b[^>]*>/g)) {
+    const tag = m[0];
+    if (/log|output|result/i.test(tag) && !/\bomo-logtext\b/.test(tag))
+      missing.push(`${file}: ${tag.slice(0, 80)}`);
+  }
+  for (const m of text.matchAll(
+    /\.([\w-]*(?:log|output)[\w-]*)\s*\{([^}]*)\}/gi,
+  )) {
+    if (/white-space:\s*pre\s*;/.test(m[2] ?? ""))
+      missing.push(`${file}: .${m[1]} keeps white-space: pre`);
   }
   expect(missing).toEqual([]);
 });

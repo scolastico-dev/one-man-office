@@ -29,15 +29,18 @@ test('every shown time reads one clock: 200 times run no more timers than one, a
   expect(vi.getTimerCount()).toBe(before)
 })
 
-test('no component runs a clock of its own; only the connection status counts seconds', () => {
-  const SRC = join(__dirname, '../..')
-  const files = (dir: string): string[] =>
-    readdirSync(dir).flatMap((n) => {
-      const p = join(dir, n)
-      return statSync(p).isDirectory() ? files(p) : n.endsWith('.vue') ? [p] : []
-    })
-  const own = files(SRC)
-    .filter((f) => /\bsetInterval\(/.test(readFileSync(f, 'utf8')))
-    .map((f) => relative(SRC, f).split('\\').join('/'))
-  expect(own).toEqual(['features/topbar/ConnectionStatus.vue'])
+const SRC = join(__dirname, '../..')
+const files = (dir: string): string[] =>
+  readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n)
+    return statSync(p).isDirectory() ? files(p) : n.endsWith('.vue') ? [p] : []
+  })
+
+test.each(files(SRC))('no component runs a clock of its own; only the connection status counts seconds: %s', (f) => {
+  const path = relative(SRC, f).split('\\').join('/')
+  expect(/\bsetInterval\(/.test(readFileSync(f, 'utf8')), path).toBe(path === 'features/topbar/ConnectionStatus.vue')
+})
+
+test('the clock guard sees the connection status', () => {
+  expect(files(SRC).map((f) => relative(SRC, f).split('\\').join('/'))).toContain('features/topbar/ConnectionStatus.vue')
 })

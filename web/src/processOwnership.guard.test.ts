@@ -62,6 +62,8 @@ const testFiles = importing.filter((f) => isTest(f.path))
 // Everything that starts a program, tests included: the shape checks run on all of it.
 const checked = importing
 
+const spawners = checked.filter((f) => /\bspawn\(/.test(f.text)).map((f) => f.path).sort()
+
 describe('programs started by the web tooling', () => {
   it('lists every tooling file that imports child_process, with its lifecycle', () => {
     expect(launchers.map((f) => f.path).sort()).toEqual(Object.keys(INVENTORY).sort())
@@ -76,12 +78,13 @@ describe('programs started by the web tooling', () => {
 
   // A spec or unit test that runs a program waits for it: execFileSync/spawnSync/execFile-style synchronous calls only.
   // A long-lived child of a test is the helper's job (fixtureProcess.mjs) or run.ts's.
-  it('lets a spec or unit test start programs only synchronously', () => {
+  it('finds test files that start programs', () => {
     expect(testFiles.length).toBeGreaterThan(0)
-    for (const f of testFiles) {
-      expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(LONG_LIVED)
-      expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(IMPORTS_LONG_LIVED)
-    }
+  })
+
+  it.each(testFiles)('lets a spec or unit test start programs only synchronously: $path', (f) => {
+    expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(LONG_LIVED)
+    expect(f.text, `${f.path}: ${LONG_LIVED_HINT}`).not.toMatch(IMPORTS_LONG_LIVED)
   })
 
   it('gives every entry a reason', () => {
@@ -90,16 +93,13 @@ describe('programs started by the web tooling', () => {
 
   // A long-lived child is started with spawn; only the helper and the runner of the test binaries may do that.
   it('starts a long-lived child (spawn) only in the files that own their child to its close', () => {
-    const spawners = checked.filter((f) => /\bspawn\(/.test(f.text)).map((f) => f.path).sort()
     expect(spawners).toEqual(['e2e/support/omo.ts', 'e2e/support/run.ts', 'scripts/fixtureProcess.mjs'])
   })
 
-  it('never starts a launcher (go, npm, npx, a shell) as a long-lived child, nor uses a shell option', () => {
-    for (const f of checked) {
-      expect(f.text, `${f.path}: spawn of a launcher`).not.toMatch(SPAWNED_LAUNCHER)
-      expect(f.text, `${f.path}: shell option`).not.toMatch(SHELL_OPTION)
-      expect(f.text, `${f.path}: exec through a shell`).not.toMatch(SHELL_EXEC)
-    }
+  it.each(checked)('never starts a launcher (go, npm, npx, a shell) as a long-lived child, nor uses a shell option: $path', (f) => {
+    expect(f.text, `${f.path}: spawn of a launcher`).not.toMatch(SPAWNED_LAUNCHER)
+    expect(f.text, `${f.path}: shell option`).not.toMatch(SHELL_OPTION)
+    expect(f.text, `${f.path}: exec through a shell`).not.toMatch(SHELL_EXEC)
   })
 
   // `go` appears in fixtureProcess.mjs only as the awaited build; it is never the held child.

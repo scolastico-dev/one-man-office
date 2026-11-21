@@ -82,6 +82,18 @@ Playwright `waitForTimeout` calls are rejected by the browser unit-test guard.
 Lower bounds, virtual clocks and diagnostic elapsed values remain valid. These
 narrow guards complement review; they do not infer the purpose of every timer.
 
+Source guards enumerate their files during test collection and register separate
+cases with the source path in each name (`test.each` / `it.each`). A scan of the
+whole tree must not share one test timeout: total parsing work grows with the
+source set and runner load. Shared declaration discovery and global inventories
+finish synchronously during collection; per-source rule checks finish before
+their case returns. Keep the full enumeration, rule self-tests and inventory
+coverage assertions when changing a guard. `web/src/testing/guardSources.test.ts`
+pins the completion/timing guards' file filters and rejection of a nested bad
+source. To diagnose aggregate timing dependence, temporarily delay each source
+scan, verify the corrected guards at several delays, then remove the probe;
+never raise a timeout or add a retry to hide the failure.
+
 Tests own their temporary homes, repositories, processes and state. Strip all
 inherited `OMO_` variables case-insensitively before setting isolated values;
 isolate HOME/XDG/git configuration and use fake agent programs. A port observed
