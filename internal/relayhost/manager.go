@@ -28,6 +28,9 @@ type Options struct {
 	Enabled    bool
 	SaveConfig func(origin string, enabled bool) error
 	Callbacks  Callbacks
+	// Baseline returns the newest notification source ID that exists when a
+	// device is accepted; the device's cursor starts there. Nil starts at zero.
+	Baseline func(context.Context) (relayproto.Counter, error)
 	// Dial is an optional transport seam; nil uses certificate-verified WebSocket dialing.
 	Dial func(context.Context, string, http.Header) (*websocket.Conn, *http.Response, error)
 }

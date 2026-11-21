@@ -21,3 +21,9 @@ func (s relayNotificationSource) RelayMentionsByID(ctx context.Context, ids []re
 func (s *Server) pollRelayNotifications(ctx context.Context, d relayhost.Device, p relayproto.Poll) (relayproto.NotificationEnvelope, error) {
 	return s.relay.PollNotifications(ctx, d, p, relayNotificationSource{board: s.board})
 }
+
+// relayMentionBaseline is where a newly paired device's cursor starts: after
+// every mention that exists now.
+func (s *Server) relayMentionBaseline(ctx context.Context) (relayproto.Counter, error) {
+	return s.board.RelayMentionsHead(ctx, board.User)
+}

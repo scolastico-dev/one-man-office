@@ -377,9 +377,10 @@ unknown/revoked device, invalid authentication or timeout) is an untrusted
 availability hint. It never proves that the host has no notifications and never
 acknowledges a receipt.
 
-Each device starts at cursor zero and independently receives retained comments
-that mention the user, excluding the user's own comments, in ascending comment
-ID order. Browser bell reads and browser seen updates do not suppress device
+Each device starts its cursor at the newest retained mention that exists when
+it is accepted (so first pairing and every new pairing show no old mentions) and
+independently receives later comments that mention the user, excluding the
+user's own comments, in ascending comment ID order. Browser bell reads and browser seen updates do not suppress device
 delivery. Pages contain at most 50 notices and 256 KiB encoded plaintext. Titles
 are limited to 128 UTF-8 bytes, bodies to 384 bytes, each truncated at a code-point
 boundary with its own truncation flag. Invalid UTF-8 from native tool output is
