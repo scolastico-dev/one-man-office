@@ -148,7 +148,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 
 ## Settings
 
-Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
+Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, LSP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
 
 Routes, all in `registerRoutes` tables (`internal/server/settings.go`, `setup.go`, `discovery.go`): `/api/settings` (GET, PUT whole, PATCH by key; `POST /api/settings/branch-preview`), `/api/profiles` (+ `/{name}/catalog-models`, which adds the catalog models a profile lacks), `/api/roles`, `/api/prompts` (+ `/preview`), `/api/projects` (+ `/scan`, `/rescan`, and `POST /batch` with `{ids, action: remove|disable|enable}`, answered per id: `{results: [{id, done, error?}]}`; 422 for a bad action, no or more than 1000 ids or a repeated id), `/api/folders`, `/api/agent-setup/detect`, `/api/settings/agent-env/check`. Who may call: only the user may call all of them, except `GET /api/projects` and `GET /api/models`, which agents may call (models: only the selectable ones). Every other settings route answers an agent session 403, because prompts, environments, profile commands and arguments are code that runs as the user. A route cannot be added without a rule (`userOnly`, `agentRead` for GET, `agentWrite` for a write agents may make within the board's rules: the image upload and the removal of a project from a ticket): `registerRoutes` panics on a row without one, and `TestNoGuardedRouteOutsideTable`, `TestSettingsRouteTableAccess` (which walks every row, the image rows with paths inside each role's scope), `TestImageRoutesInTable` and `TestAgentReadsNoCodeExecutionSettings` pin it.
 
@@ -176,11 +176,15 @@ path; no **, backslash, colon or empty/dot/parent components. Validation and
 deep copies are in `settings/lsp.go`; the same settings revision, last-valid
 state, event and backup/import machinery applies. PATCH still rejects null
 settings but permits null inside the opaque JSON objects. This adds the
-configuration contract only; runtime, agent commands and browser UI are
-separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
+configuration contract and browser settings page; runtime and agent commands
+are separate work. The lazy `lsp/LspPage.vue` uses `useGeneralForm(['lsp'])`
+and the shared SettingsPage save/discard, leave guard, revision conflicts and
+hand-edit notices. `LspServerEditor` edits registrations and ordered selectors;
+`LspJsonField` keeps invalid JSON text local and blocks Save until it is fixed,
+discarded or its registration is removed. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
 Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
-and TypeScript checks.
+and TypeScript checks, plus focused LspPage, settings navigation and resource tests.
 
 Settings writes enforce each section's read limit on the final encoded bytes
 in `Store.writeFile`, before disk or active state changes. YAML expansion and
