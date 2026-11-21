@@ -99,3 +99,13 @@ test('each desktop architecture stages the documented installer format', async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// Tauri's bundler captures the output of the platform packagers (bundle_dmg.sh,
+// NSIS, dpkg) and prints it only in verbose mode; without it a failing
+// installer step reports just "failed to run <script>" and no cause.
+test('every desktop installer build logs the bundler subprocess output', async () => {
+  const workflow = await readFile(new URL('../../.github/workflows/ui-desktop.yml', import.meta.url), 'utf8');
+  const builds = workflow.split('\n').filter(line => /\bnpm run build\b/.test(line));
+  assert.equal(builds.length, 1, 'expected exactly one installer build command');
+  assert.match(builds[0], /\bnpm run build -- (?:\S+ )*--verbose\b/);
+});
