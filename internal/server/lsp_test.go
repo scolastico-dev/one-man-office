@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -107,8 +106,8 @@ func TestMCPNotificationStreamConfirmsOnlyItsOwnSession(t *testing.T) {
 		t.Fatalf("the client received %q", line)
 	}
 	cancel()
-	for listeners.Confirmed(one) {
-		time.Sleep(time.Millisecond)
+	if err := listeners.Wait(t.Context(), one, false); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -86,7 +86,7 @@ func TestListenerConfirmedOnlyOnceTheStreamIsEstablished(t *testing.T) {
 	}
 	rd, _, _ := openListener(t, l, "s1")
 	readReady(t, rd)
-	if !l.Confirmed("s1") {
+	if err := l.Wait(t.Context(), "s1", true); err != nil || !l.Confirmed("s1") {
 		t.Fatal("an established stream is not confirmed")
 	}
 	if l.Confirmed("s2") {

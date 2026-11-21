@@ -2,10 +2,8 @@ package mcpbridge
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -34,16 +32,11 @@ func connectLogging(t *testing.T, o *omo, session, version string) (*mcp.ClientS
 }
 
 // waitListening waits until omo holds an established stream of session (or
-// no longer does). It waits for that state only; the generous limit makes a
-// state that never comes fail the test instead of hanging it.
+// no longer does): for that change itself, until the test ends.
 func waitListening(t *testing.T, o *omo, session string, want bool) {
 	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	for o.srv.MCPListeners().Confirmed(session) != want {
-		if time.Now().After(deadline) {
-			t.Fatalf("omo never saw the stream of the session as listening=%v", want)
-		}
-		runtime.Gosched()
+	if err := o.srv.MCPListeners().Wait(t.Context(), session, want); err != nil {
+		t.Fatalf("omo never saw the stream of the session as listening=%v: %v", want, err)
 	}
 }
 

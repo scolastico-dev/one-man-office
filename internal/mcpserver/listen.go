@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,11 +34,14 @@ type Listeners struct {
 	mu   sync.Mutex
 	next uint64
 	by   map[string]map[uint64]*listener
+	// changed is closed, and replaced, whenever a stream becomes confirmed
+	// or goes away; Wait sleeps on it.
+	changed chan struct{}
 }
 
 // NewListeners returns an empty registry.
 func NewListeners() *Listeners {
-	return &Listeners{by: map[string]map[uint64]*listener{}}
+	return &Listeners{by: map[string]map[uint64]*listener{}, changed: make(chan struct{})}
 }
 
 type listener struct {
@@ -106,6 +110,31 @@ func (l *Listeners) remove(session string, id uint64) {
 	if len(l.by[session]) == 0 {
 		delete(l.by, session)
 	}
+	l.signalLocked()
+}
+
+// signalLocked wakes every Wait; the caller holds l.mu.
+func (l *Listeners) signalLocked() {
+	close(l.changed)
+	l.changed = make(chan struct{})
+}
+
+// Wait returns once Confirmed(session) equals want, or ctx ends. It waits
+// for the change itself, so it needs no polling interval.
+func (l *Listeners) Wait(ctx context.Context, session string, want bool) error {
+	for {
+		l.mu.Lock()
+		changed := l.changed
+		l.mu.Unlock()
+		if l.Confirmed(session) == want {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // write sends one frame; false when the stream is not (or no longer) ready
@@ -159,6 +188,9 @@ func (l *Listeners) serve(w http.ResponseWriter, r *http.Request, session string
 	if !ready {
 		return
 	}
+	l.mu.Lock()
+	l.signalLocked()
+	l.mu.Unlock()
 	tick := time.NewTicker(keepAlive)
 	defer tick.Stop()
 	for {
