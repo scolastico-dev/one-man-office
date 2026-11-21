@@ -120,10 +120,32 @@ access for other programs.* Files: `mcpservers/<name>.yaml`, `settings.yaml`
 
 ## Language servers
 
-`settings.yaml` has an `lsp` group, also available through the user-only
-`GET`, `PUT` and `PATCH /api/settings` routes. This is the configuration
-contract; starting servers, watching files, sending notifications and a browser
-settings page are separate work. No language server is installed automatically.
+Open **Settings → LSP** to register and configure language servers. The page
+edits the `lsp` group in `settings.yaml`, also available through the user-only
+`GET`, `PUT` and `PATCH /api/settings` routes. Starting servers, watching files
+and sending notifications are separate work. No language server is installed
+automatically.
+
+**Add language server** adds an initially disabled registration. Set its unique
+name, **Command**, literal **Arguments** (one per row), **Environment overrides**
+and **File selection** (pattern and language ID). **Move up** and **Move down**
+change selector priority; the first matching selector wins. **Initialization
+options (JSON)** and **Server configuration (JSON)** accept JSON objects,
+including nested nulls. Invalid JSON is marked and blocks Save. **Remove language
+server** removes a registration from the draft. Registrations run in managed
+worktrees, with the worktree root as their working directory.
+
+Under **Reporting issues**, set **Debounce** (`500ms` by default, `0s` to disable
+the delay, at most `1m`). **Force chat by agent program** explicitly selects chat
+delivery for Claude Code, Codex, Antigravity, Gemini or Custom agents. The fallback
+sends a chat message even when the agent is listening for MCP notifications. A
+program left off uses MCP when the agent is listening, with chat as the fallback
+otherwise.
+
+Changes take effect only after **Save**; **Discard** restores stored values.
+The page asks before leaving with unsaved edits, places server field errors
+beside their fields and reports hand edits. A conflicting edit offers **Use the
+new value** or **Keep mine** before another save.
 
 The default for existing and new installations is:
 
