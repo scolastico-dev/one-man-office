@@ -14,7 +14,7 @@ import (
 // home. Every such read goes through Open or Read, every append through
 // Append.
 var homePackages = []string{"relayhost", "settings", "serverconfig", "globalhome", "service", "engine", "agents", "server", "session",
-	"usage", "plugins", "pluginmanager", "skillsets", "images", "homezip", "mcprelay", "mcpclients", "oldhome", "cli", "filelock", "db"}
+	"usage", "plugins", "pluginmanager", "skillsets", "images", "homezip", "mcprelay", "mcpclients", "oldhome", "cli", "filelock", "db", "lsp"}
 
 // notHome are reads in those packages of files outside the omo home, by file
 // and call.

@@ -122,9 +122,8 @@ access for other programs.* Files: `mcpservers/<name>.yaml`, `settings.yaml`
 
 Open **Settings → LSP** to register and configure language servers. The page
 edits the `lsp` group in `settings.yaml`, also available through the user-only
-`GET`, `PUT` and `PATCH /api/settings` routes. Starting servers, watching files
-and sending notifications are separate work. No language server is installed
-automatically.
+`GET`, `PUT` and `PATCH /api/settings` routes. Enabled registrations run in
+the managed worktrees used by agents. No language server is installed automatically.
 
 **Add language server** adds an initially disabled registration. Set its unique
 name, **Command**, literal **Arguments** (one per row), **Environment overrides**
@@ -224,6 +223,62 @@ objects allow nested null values; null settings fields are refused on PATCH.
 The complete encoded `settings.yaml` must also fit the store's 1 MiB file
 limit. A save that would exceed it is refused before changing the file or
 active settings, even if each registration meets its own limits.
+
+### Runtime and diagnostics
+
+A server starts when its enabled registration selects a file in a worktree
+used by an agent. Its working directory, LSP root and workspace folder are that
+worktree. The engine validates the worktree against Git's records; it never
+starts servers in a source checkout, an export folder, the CEO's directory or
+a projectless working folder. Product managers monitor all their ticket's
+managed worktrees. Sessions sharing a worktree share its runtime; separate
+worktrees keep separate processes and diagnostic state.
+
+The runtime polls every 250ms, notices file replacement and new directories,
+and follows the server's open/close, full or incremental change and save
+capabilities. Incremental replacements use UTF-16 positions. Registered LSP
+file watchers also receive changes to matching dependency/configuration files,
+including files outside the document selectors. Polling does not follow
+symlinks or enter `.git`; selected files over 4 MiB or unreadable files are
+logged and skipped while other documents keep synchronizing. Skipped files
+are tried again on later polls. Server
+initialization options and configuration come from the registration. Changes
+to a registration restart it; disabling or removing it stops its process.
+Start/protocol failures are logged, stop the failed child, and are retried when
+the registration changes or a fresh worktree runtime starts.
+
+Both pushed diagnostics and advertised document/workspace pull diagnostics are
+supported, including diagnostic refresh requests and related-document reports.
+Pull error replies during indexing keep the connection and current issues;
+the next poll, edit or refresh retries the request.
+Initial analysis establishes a baseline without nudges. After an observed file
+change, only newly appearing issues are eligible for reports. Unchanged reports
+do not restart the debounce clock, and clearing an issue removes it from a
+queued batch. A session attached later receives future reports without replaying
+earlier notifications. The current snapshot still includes baseline and
+suppressed issues.
+
+Ignoring an issue filters pending and future notifications for that issue in
+the current worktree runtime. Other issues continue to report. It sends no
+custom ignore request to the server and does not edit source files. Ignore
+state ends when the last session leaves that worktree. Ending sessions, failed
+agent starts and omo shutdown stop polling, kill server process trees and wait
+for child cleanup.
+
+For delivery adapters, `internal/lsp.New(Options)` constructs a manager and
+`Engine.LSP()` returns the engine-owned one. `Attach(session, roots)` and
+`Detach(session)` bind its lifetime; `Close()` waits for shutdown.
+`Worktrees(session)` lists roots, `Snapshot(session)` returns `[]Issue`, and
+`Ignore(session, issueID)` suppresses an issue only in that session's attached
+worktrees. `Scan(ctx, root)` requests immediate disk synchronization (pushed
+reports remain asynchronous). `Subscribe(func(Report))` returns an unsubscribe
+function; callbacks must promptly queue delivery and must not call lifecycle
+methods. `Options.Report` is an equivalent construction-time callback.
+`Report` contains `Worktree`, eligible `Sessions` and `Issues`. Each `Issue`
+has a stable worktree-scoped `ID`, server name, relative file, zero-based
+UTF-16 range, severity, code, source and message. The runtime has no MCP/chat
+transport; delivery adapters must authorize agent access and use the report's
+session eligibility.
 
 ## Environment
 

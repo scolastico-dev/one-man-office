@@ -175,16 +175,28 @@ basename at any depth, otherwise against the slash-separated worktree-relative
 path; no **, backslash, colon or empty/dot/parent components. Validation and
 deep copies are in `settings/lsp.go`; the same settings revision, last-valid
 state, event and backup/import machinery applies. PATCH still rejects null
-settings but permits null inside the opaque JSON objects. This adds the
-configuration contract and browser settings page; runtime and agent commands
-are separate work. The lazy `lsp/LspPage.vue` uses `useGeneralForm(['lsp'])`
+settings but permits null inside the opaque JSON objects. `internal/lsp` implements the worktree runtime: engine startup validates
+recorded Git worktrees, attaches sessions (all PM worktrees), and releases
+servers/pollers on failed starts, session ends and shutdown. `Engine.LSP()`
+exposes `Manager.Worktrees`, `Snapshot`, `Ignore` and `Subscribe` for delivery;
+`Report` carries worktree, eligible sessions and stable `Issue` identities with
+relative files and zero-based UTF-16 locations. Push, document/workspace pull,
+refresh and registered dependency watchers feed baseline/diff/debounce state.
+Ignored issues remain inspectable but leave pending/future batches. New
+attachments receive no replay. Oversized/unreadable selected files are logged
+and skipped individually; pull RPC errors retry without stopping the server.
+Group cleanup runs once across startup failure, cancellation and natural exit.
+The lazy `lsp/LspPage.vue` uses `useGeneralForm(['lsp'])`
 and the shared SettingsPage save/discard, leave guard, revision conflicts and
 hand-edit notices. `LspServerEditor` edits registrations and ordered selectors;
 `LspJsonField` keeps invalid JSON text local and blocks Save until it is fixed,
-discarded or its registration is removed. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
+discarded or its registration is removed.
+Agent commands and delivery are separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
 Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
-and TypeScript checks, plus focused LspPage, settings navigation and resource tests.
+and TypeScript checks, plus focused LspPage, settings navigation and resource
+tests. Runtime: `go test ./internal/lsp`, engine `TestLSP`,
+and existing engine lifecycle checks; fake stdio processes only.
 
 Settings writes enforce each section's read limit on the final encoded bytes
 in `Store.writeFile`, before disk or active state changes. YAML expansion and
