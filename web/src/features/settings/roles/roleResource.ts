@@ -7,12 +7,17 @@ import { NO_REVISION, type ApiEvent, type FileError, type RoleSettings, type Set
 import type { SettingsResourceOptions } from '../useSettingsResource'
 
 /** What a role's form edits. */
-export type RoleDraft = Pick<RoleSettings, 'name' | 'models' | 'assignment'>
+export type RoleDraft = Pick<RoleSettings, 'name' | 'models' | 'assignment' | 'super_smart_reset_weight'>
 
 /** Whether a settings file is this role's. */
 export const isRoleFile = (role: string, file: string) => new RegExp(`[\\\\/]roles[\\\\/]${role}\\.ya?ml$`).test(file)
 
-const plain = (r: RoleSettings): RoleDraft => ({ name: r.name, models: [...r.models], assignment: r.assignment })
+const plain = (r: RoleSettings): RoleDraft => ({
+  name: r.name,
+  models: [...r.models],
+  assignment: r.assignment,
+  ...(r.super_smart_reset_weight == null ? {} : { super_smart_reset_weight: r.super_smart_reset_weight }),
+})
 
 export function roleResourceOptions(client: ApiClient, role: string): SettingsResourceOptions<RoleDraft> {
   return {

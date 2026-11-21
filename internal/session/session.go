@@ -5,6 +5,7 @@ package session
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -45,6 +46,11 @@ type Options struct {
 	// is called synchronously from the output loop and must never block.
 	OnOutput func([]byte)
 
+	// PasteReady optionally checks when a CLI has finished reading an image
+	// paste. A nil check means this part needs no acknowledgement. The factory
+	// receives the paste and the screen before it; the check reads later screens.
+	PasteReady func(pasted, before string) func(screen string) bool
+
 	// Secret, when set, is replaced by RedactedPlaceholder in everything
 	// the session hands out or stores: OnOutput, the screen, the transcript
 	// and TailLog. Only the process's own terminal still shows it. Output
@@ -65,7 +71,7 @@ type Session struct {
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
 	inputMu  sync.Mutex // keeps injected prompts and terminal input from interleaving
-	replyMu  sync.Mutex // keeps automatic query replies out of multipart messages
+	replyMu  sync.Mutex // keeps automatic query replies outside individual pastes
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error
@@ -222,18 +228,54 @@ func (s *Session) SendTextAndKeysIf(text, keys string, ready func() bool) (bool,
 func (s *Session) SendPartsAndKeys(parts []string, keys string) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
-	s.replyMu.Lock()
-	defer s.replyMu.Unlock()
+	// Device replies may pass between complete pastes while an image loads.
+	// Holding replyMu across the wait could block the output pump itself.
+	write := func(text string) error {
+		s.replyMu.Lock()
+		defer s.replyMu.Unlock()
+		return s.sendText(text)
+	}
+	var changed <-chan struct{}
+	if s.opts.PasteReady != nil {
+		var stop func()
+		changed, stop = s.Subscribe()
+		defer stop()
+	}
+	var deadline *time.Timer
+	defer func() {
+		if deadline != nil {
+			deadline.Stop()
+		}
+	}()
 	for _, part := range parts {
-		if err := s.sendText(part); err != nil {
+		var ready func(string) bool
+		if s.opts.PasteReady != nil {
+			ready = s.opts.PasteReady(part, s.Screen())
+		}
+		if err := write(part); err != nil {
 			return err
+		}
+		if ready != nil {
+			if deadline == nil {
+				// Leave room for the websocket's 30-second message acknowledgement.
+				deadline = time.NewTimer(20 * time.Second)
+			}
+			for !ready(s.Screen()) {
+				select {
+				case <-changed:
+				case <-s.done:
+					return errors.New("terminal ended before confirming an image paste; message was not submitted")
+				case <-deadline.C:
+					return errors.New("terminal did not confirm an image paste; message was not submitted")
+				}
+			}
 		}
 	}
 	if len(parts) > 0 && keys != "" {
 		time.Sleep(SubmitDelay)
 	}
 	if keys != "" {
-		return s.sendText(keys)
+		return write(keys)
 	}
 	return nil
 }

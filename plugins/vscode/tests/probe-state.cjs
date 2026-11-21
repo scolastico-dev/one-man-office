@@ -26,4 +26,12 @@ async function stopChild(child,graceMs=15000){
 function freshSnapshot(before,after){
  return !!after&&typeof after.instance==='string'&&(!before||before.instance!==after.instance||after.sequence>before.sequence);
 }
-module.exports={pinInstance,isRunning,stopChild,freshSnapshot};
+function preferencesMatch(actual,expected,themeClasses){
+ const theme=name=>name.replace(/^Default /,'');
+ return Object.entries(expected).every(([key,value])=>{
+  if(key!=='theme')return actual[key]===value;
+  const name=theme(value),file=name==='Light Modern'?'light_modern':name==='Dark Modern'?'dark_modern':null;
+  return theme(actual.theme)===name&&file!==null&&themeClasses.includes('vscode-theme-defaults-themes-'+file+'-json');
+ });
+}
+module.exports={pinInstance,isRunning,stopChild,freshSnapshot,preferencesMatch};

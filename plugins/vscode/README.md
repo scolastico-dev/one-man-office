@@ -3,7 +3,9 @@
 Install **vscode** from omo's official plugin list and enable it. **Open in VS
 Code** in the **VS Code** sidebar tab opens a project search; selecting a
 project opens its repository. The tab lists running instances below the button,
-each with **Stop**. It adds no controls to the CEO tab. On a ticket it opens the
+each showing its project ID (or **No project**) and its ticket number when bound
+to a ticket. **Open** reopens that instance in a new tab; **Stop** ends it.
+It adds no controls to the CEO tab. On a ticket it opens the
 selected project's worktree (one button per worktree), or the recorded working
 directory of a task without a project. Start ticket work to create its folder.
 Missing, removed or replaced folders are reported as unavailable; the plugin
@@ -220,6 +222,70 @@ forwards pass the exact `/proxy/<id>/` flag value, including its trailing slash.
 Assets and WebSockets use omo's existing proxy and
 Open grant; board credentials never enter editor URLs. Loopback listeners are
 reachable to other local processes, as with other omo Web UI forwards.
+
+### Desktop sign-ins and secrets
+
+Every new editor process imports the selected desktop default profile's
+SecretStorage records from `User/globalStorage/state.vscdb`, opened read-only.
+The import decrypts Electron safeStorage records through the host keyring. For
+example, an existing GitHub session is available to the browser's GitHub
+authentication extension without signing in again. Expired or revoked tokens
+still need the provider's normal sign-in flow. Reusing an already running editor
+does not import again; Stop and reopen it after signing in on the desktop.
+
+Linux uses `secret-tool` for Secret Service, or `dbus-send` for KWallet
+(including its configured network wallet). These host utilities must be
+installed for keyring-encrypted records. Desktop `argv.json` password-store
+selection takes precedence over desktop-environment detection, including explicit
+KWallet service versions. KWallet discovery, synchronous open, password read and
+non-forced handle release all address that same daemon; an unversioned KF wallet
+client cannot redirect the read to another version. Existing Linux basic-text (`v10`) records need no
+keyring helper. macOS uses `/usr/bin/security`; Windows uses built-in Windows
+PowerShell and DPAPI, including the profile key in `Local State` when present.
+The OS may request permission to unlock/access its keyring. Missing helpers,
+locked keyrings, unsupported ciphertext or an unreadable desktop database stop
+startup with a credential-free error in task output. A desktop database lock
+waits up to five seconds before reporting failure. No keyring item is created
+or changed by the import.
+
+The browser's provider is installed before authentication extensions activate.
+It persists secrets across folders, process restarts and changed proxy origins in
+`profiles/<editor>/secrets/`: AES-256-GCM ciphertext in SQLite, with a separate
+private random key. The directory is 0700 and its files 0600 on Unix; access to
+both key and database permits decryption. It follows omo's existing user account
+boundary. Secret values, helper output and capability tokens are never printed
+by the plugin or placed in URLs. Requests use a private per-launch capability
+through the editor's loopback listener and omo's authenticated proxy.
+
+Unchanged imported values follow refreshed desktop values on the next launch.
+Browser edits and sign-outs take precedence and survive subsequent imports;
+secrets are not written back to the desktop. The existing first-matching-profile
+selection also applies to secrets. Legacy keytar-only stores, custom/portable
+layouts and named profiles are outside automatic discovery.
+
+The pinned publisher renderer is copied into a private session overlay to supply
+the provider; verified artifact bytes remain unchanged. An unknown renderer
+layout is refused. The native format references are VS Code's
+[secret store](https://github.com/microsoft/vscode/blob/1.109.5/src/vs/platform/secrets/common/secrets.ts),
+[encryption service](https://github.com/microsoft/vscode/blob/1.109.5/src/vs/platform/encryption/electron-main/encryptionMainService.ts)
+and [Electron keyring setup](https://github.com/electron/electron/blob/v37.3.1/shell/browser/electron_browser_main_parts.cc).
+
+Linux amd64 publisher probes use synthetic encrypted GitHub sessions and assert
+account discovery through the real GitHub authentication extension plus extension
+SecretStorage access before and after restart. They do not use a real GitHub
+token or certify a live GitHub API request. Linux Secret Service decryption has
+also been exercised against an isolated native keyring. Real `dbus-send` calls
+against simultaneous synthetic KWallet 5/6 services verify the selected daemon
+throughout the sequence, even when wallet names match, including handle release.
+Native macOS, Windows and KWallet daemon execution remains fixture-covered.
+
+```sh
+node plugins/vscode/tests/probe.cjs openvscode --smoke --profile-sharing --local-product VSCodium --secrets
+node plugins/vscode/tests/probe.cjs code-server --smoke --subdomain --cross-site --profile-sharing --local-product Code --secrets
+```
+
+`--cache-dir` reuses a probe artifact cache; keep it on the same filesystem as
+the probe temporary root (`TMPDIR`) because the probe moves the cache by rename.
 
 ## Stop and idle
 

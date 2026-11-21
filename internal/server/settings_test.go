@@ -552,6 +552,39 @@ func TestRoleRoutes(t *testing.T) {
 	}
 }
 
+func TestRoleResetWeightRoutes(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	for _, weight := range []string{"6h30m", "0s", "168h"} {
+		resp := asUser(b, s, "PUT", "/api/roles/developer", map[string]any{
+			"models": []string{}, "assignment": "super_smart", "super_smart_reset_weight": weight,
+		})
+		wantStatus(t, resp.StatusCode, http.StatusOK)
+		got := body[map[string]any](t, resp)
+		if got["super_smart_reset_weight"] != weight {
+			t.Fatalf("saved weight: %+v", got)
+		}
+		roles := body[[]map[string]any](t, asUser(b, s, "GET", "/api/roles", nil))
+		for _, r := range roles {
+			if r["name"] == "developer" && r["super_smart_reset_weight"] != weight {
+				t.Fatalf("read weight: %+v", r)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		weight string
+		status int
+	}{
+		{"-1h", http.StatusUnprocessableEntity},
+		{"nonsense", http.StatusBadRequest},
+	} {
+		resp := asUser(b, s, "PUT", "/api/roles/developer", map[string]any{
+			"models": []string{}, "assignment": "super_smart", "super_smart_reset_weight": tc.weight,
+		})
+		wantStatus(t, resp.StatusCode, tc.status)
+	}
+}
+
 func TestPromptRoutes(t *testing.T) {
 	l := testHome(t)
 	s, err := newServer(Options{Layout: l, Config: testConfig(), Version: "test", PromptDefaults: map[string]string{"pm": "default pm"}}, io.Discard)

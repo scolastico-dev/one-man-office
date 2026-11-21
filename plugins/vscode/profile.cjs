@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {createHash, randomUUID} = require('node:crypto');
+const {patchRenderer} = require('./secret-provider.cjs');
 
 // Default profiles, in a stable order when more than one product is installed.
 // Discovery only reads directory metadata, never native databases or secrets.
@@ -22,7 +23,7 @@ function detectLocal({platform = process.platform, home = os.homedir(), env = pr
   return null;
 }
 
-function prepareProfile({editor, root, profile, state, data, user, local}) {
+function prepareProfile({editor, root, profile, state, data, user, local, secretCapability}) {
   const extensions = local?.extensions || path.join(profile, 'extensions');
   const sharedUser = local?.user || path.join(profile, 'preferences', 'User');
   for (const dir of [extensions, sharedUser]) fs.mkdirSync(dir, {recursive: true, mode: 0o700});
@@ -67,12 +68,13 @@ function prepareProfile({editor, root, profile, state, data, user, local}) {
     adoptBrowserOnce: local ? undefined : path.join(profile, 'preferences', '.browser-imported'),
   }), {mode: 0o600});
   let preload;
-  if (editor === 'openvscode') {
+  if (editor === 'openvscode' || secretCapability) {
     // This pinned bootstrap assigns builtin-extensions-dir from FileAccess,
     // overriding the CLI flag. Give FileAccess a private root whose publisher
     // files remain links to the verified generation and whose extensions add
     // the bridge. The immutable artifact itself is never changed.
     const overlay = path.join(state, 'publisher');
+    const publisherRoot = editor === 'code-server' ? path.join(root, 'lib', 'vscode') : root;
     fs.mkdirSync(overlay, {recursive: true, mode: 0o700});
     function link(target, destination) {
       if (process.platform === 'win32' && fs.statSync(target).isFile()) {
@@ -96,27 +98,31 @@ function prepareProfile({editor, root, profile, state, data, user, local}) {
         if (name !== parts[0]) link(from, to);
         else if (parts.length > 1) rendererTree(from, to, parts.slice(1));
         else {
-          const workbench = fs.readFileSync(from, 'utf8');
-          if (!workbench.includes('vscode-web-db') || !workbench.includes('vscode-userdata-store')) throw new Error('unsupported publisher preference storage');
+          let workbench = fs.readFileSync(from, 'utf8');
+          if (editor === 'openvscode') {
+            if (!workbench.includes('vscode-web-db') || !workbench.includes('vscode-userdata-store')) throw new Error('unsupported publisher preference storage');
+            workbench = fs.readFileSync(path.join(__dirname, 'browser-history.cjs'), 'utf8') + '\n' + workbench;
+          }
+          if (secretCapability) workbench = patchRenderer(workbench, secretCapability);
           const temporary = to + '.omo-' + randomUUID();
           try {
-            fs.writeFileSync(temporary, fs.readFileSync(path.join(__dirname, 'browser-history.cjs'), 'utf8') + '\n' + workbench, {mode: 0o600, flag: 'wx'});
+            fs.writeFileSync(temporary, workbench, {mode: 0o600, flag: 'wx'});
             fs.renameSync(temporary, to);
           } finally { try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
         }
       }
     }
     const renderer = ['vs', 'code', 'browser', 'workbench', 'workbench.js'];
-    for (const name of new Set([...fs.readdirSync(root), 'extensions'])) {
-      const target = name === 'extensions' ? builtins : path.join(root, name), destination = path.join(overlay, name);
-      if (name === 'out' && fs.existsSync(path.join(root, 'out', ...renderer))) {
+    for (const name of new Set([...(fs.existsSync(publisherRoot) ? fs.readdirSync(publisherRoot) : []), 'extensions'])) {
+      const target = name === 'extensions' ? builtins : path.join(publisherRoot, name), destination = path.join(overlay, name);
+      if (name === 'out' && fs.existsSync(path.join(publisherRoot, 'out', ...renderer))) {
         rendererTree(target, destination, renderer); continue;
       }
       link(target, destination);
     }
     preload = path.join(state, 'file-root.cjs');
     fs.writeFileSync(preload, 'let root;Object.defineProperty(globalThis,"_VSCODE_FILE_ROOT",{configurable:true,get(){return root},set(value){root=value===' +
-      JSON.stringify(path.join(root, 'out')) + '?' + JSON.stringify(path.join(overlay, 'out')) + ':value}});\n', {mode: 0o600});
+      JSON.stringify(path.join(publisherRoot, 'out')) + '?' + JSON.stringify(path.join(overlay, 'out')) + ':value}});\n', {mode: 0o600});
   }
   return {extensions, sharedUser, builtins, preload};
 }

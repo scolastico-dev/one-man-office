@@ -1,7 +1,9 @@
 package settings
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -28,6 +30,50 @@ func TestRoleFilesCreatedAtOpen(t *testing.T) {
 	}
 	if len(s.Errors()) != 0 {
 		t.Fatalf("errors = %+v", s.Errors())
+	}
+}
+
+func TestRoleResetWeightPersistence(t *testing.T) {
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "roles", "developer.yaml")
+	for _, weight := range []string{"6h30m", "0s"} {
+		var r Role
+		if err := json.Unmarshal([]byte(`{"name":"developer","models":[],"assignment":"super_smart","super_smart_reset_weight":"`+weight+`"}`), &r); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutRoleIf("", r); err != nil {
+			t.Fatal(err)
+		}
+		// Reload a valid different value before loading the saved file again.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, "models: []\n")
+		s.Reload()
+		writeFile(t, path, string(data))
+		s.Reload()
+		got, _ := s.Role("developer")
+		encoded, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["super_smart_reset_weight"] != weight {
+			t.Fatalf("reloaded weight %s: %s", weight, encoded)
+		}
+		writeFile(t, path, "models: []\nsuper_smart_reset_weight: -1h\n")
+		s.Reload()
+		if len(s.Errors()) != 1 {
+			t.Fatalf("negative weight accepted: %+v", s.Errors())
+		}
+		after, _ := s.Role("developer")
+		if !reflect.DeepEqual(got, after) {
+			t.Fatalf("invalid hand edit replaced last valid role: %+v", after)
+		}
 	}
 }
 

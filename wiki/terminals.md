@@ -54,6 +54,10 @@ lines into the terminal above.
   input stays locked for the whole message, including against omo's own lines
   and input from other views. Pasted text is cleaned of control characters, as
   in a terminal. Other files are refused with a note.
+  Claude Code loads pasted images asynchronously; omo waits for each image to
+  appear before sending the following text or image. If an image is not
+  confirmed, sending stops before Enter and the draft stays. Text already
+  pasted into the CLI stays there too.
 - Each terminal keeps its own draft in this browser: it survives a reload,
   switching to another ticket and back, and opening the terminal in its own
   window or bringing it back. Drafts of terminals untouched for two weeks are

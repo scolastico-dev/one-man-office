@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fixedBrowserWaits } from './timingGuard'
-import { guardSources } from './testing/guardSources'
+import { sourceInventory } from './testing/sourceInventory'
 
 const root = join(__dirname, '..')
-const files = guardSources(root)
+const files = sourceInventory(root)
 
 describe('browser synchronization guard', () => {
   it('rejects fixed browser waits including optional calls and spacing', () => {
@@ -24,11 +24,11 @@ describe('browser synchronization guard', () => {
     `)).toEqual([])
   })
 
-  it('enumerates the complete source set', () => {
+  it('retains the complete web source, browser test and tooling inventory', () => {
     expect(files.length).toBeGreaterThan(20)
   })
 
-  it.each(files)('keeps browser tests and support helpers free of fixed waits: %s', (path) => {
-    expect(fixedBrowserWaits(readFileSync(path, 'utf8')), path).toEqual([])
+  it.each(files.map((file) => [relative(root, file), file] as const))('keeps %s free of fixed waits', (_name, file) => {
+    expect(fixedBrowserWaits(readFileSync(file, 'utf8')), file).toEqual([])
   })
 })

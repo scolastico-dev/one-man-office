@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { microtaskGuesses } from './completionGuard'
-import { guardSources } from './testing/guardSources'
+import { sourceInventory } from './testing/sourceInventory'
 
 const root = join(__dirname, '..')
-const files = [...guardSources(join(root, 'src')), ...guardSources(join(root, 'e2e'))]
+const files = sourceInventory(join(root, 'src'), join(root, 'e2e'))
 
 describe('completion guess guard', () => {
   it('rejects a fixed number of microtask turns', () => {
@@ -24,11 +24,13 @@ describe('completion guess guard', () => {
     expect(microtaskGuesses('async function t() { for (let i = 0; i < 3; i++) { const g = async () => { await Promise.resolve() }; g }}')).toEqual([])
   })
 
-  it('enumerates the complete source set', () => {
+  it('retains the complete web source and browser test inventory', () => {
     expect(files.length).toBeGreaterThan(100)
   })
 
-  it.each(files)('keeps web sources and browser tests free of microtask-count completion guesses: %s', (path) => {
-    expect(microtaskGuesses(readFileSync(path, 'utf8')), path).toEqual([])
+  // Each source is an independent assertion. Parser cost must not accumulate
+  // across the entire repository under a single test's execution limit.
+  it.each(files.map((file) => [relative(root, file), file] as const))('keeps %s free of microtask-count completion guesses', (_name, file) => {
+    expect(microtaskGuesses(readFileSync(file, 'utf8')), file).toEqual([])
   })
 })
