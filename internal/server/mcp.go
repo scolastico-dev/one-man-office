@@ -215,3 +215,8 @@ func (s *Server) addMCPMarks(ss []api.AgentSession) {
 		ss[i].MCP = api.MCPAgentConnected
 	}
 }
+
+// MCPListeners is the registry of the notification streams agent sessions
+// hold open on /mcp; the engine delivers language-server reports through
+// it, and embedders and tests ask it whether a session is listening.
+func (s *Server) MCPListeners() *mcpserver.Listeners { return s.mcp.listeners }
