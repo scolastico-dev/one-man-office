@@ -32,5 +32,5 @@ tempfile = "3.24.0"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 futures-util = { version = "0.3", features = ["sink"] }
-tokio = { version = "1", features = ["io-util", "net", "rt", "macros", "time"] }
+tokio = { version = "1", features = ["io-util", "net", "rt", "macros", "time", "sync"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }

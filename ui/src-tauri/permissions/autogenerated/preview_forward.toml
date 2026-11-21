@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-forward"
+description = "Enables the preview_forward command without any pre-configured scope."
+commands.allow = ["preview_forward"]
+
+[[permission]]
+identifier = "deny-preview-forward"
+description = "Denies the preview_forward command without any pre-configured scope."
+commands.deny = ["preview_forward"]
