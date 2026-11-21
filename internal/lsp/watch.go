@@ -260,7 +260,9 @@ func (s *languageServer) syncWatched() (bool, error) {
 		s.mu.Lock()
 		s.changed = true
 		for file := range s.initial {
-			s.initial[file] = false
+			if s.seen[file] {
+				s.initial[file] = false
+			}
 		}
 		s.mu.Unlock()
 		return true, s.peer.notify("workspace/didChangeWatchedFiles", map[string]any{"changes": changes})

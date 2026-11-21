@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,22 +20,25 @@ import (
 )
 
 type worktree struct {
-	manager *Manager
-	root    string
-	ctx     context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	scans   chan chan error
-	issues  *issues
-	servers map[string]*languageServer
+	manager  *Manager
+	root     string
+	ctx      context.Context
+	cancel   context.CancelFunc
+	done     chan struct{}
+	scans    chan chan error
+	issues   *issues
+	servers  map[string]*languageServer
+	skipped  map[string]string
+	failures map[string]failedServer
 }
 
 func (r *worktree) run() {
 	defer close(r.done)
 	defer r.issues.close()
 	defer func() {
-		for _, s := range r.servers {
+		for name, s := range r.servers {
 			s.stop()
+			delete(r.servers, name)
 		}
 	}()
 	ticker := time.NewTicker(r.manager.o.PollInterval)
@@ -72,12 +74,45 @@ func (r *worktree) scan() error {
 			delete(r.servers, name)
 		}
 	}
+	if r.failures == nil {
+		r.failures = map[string]failedServer{}
+	}
+	for name, f := range r.failures {
+		reg, ok := enabled[name]
+		if !ok || !reflect.DeepEqual(reg, f.registration) {
+			delete(r.failures, name)
+		}
+	}
+
 	var errs []error
 	for _, reg := range cfg.Servers {
 		if !reg.Enabled {
 			continue
 		}
-		docs, err := scanFiles(r.ctx, r.root, reg)
+		if f, failed := r.failures[reg.Name]; failed {
+			errs = append(errs, f.err)
+			continue
+		}
+		if r.skipped == nil {
+			r.skipped = map[string]string{}
+		}
+		skipped := map[string]string{}
+		docs, err := scanFiles(r.ctx, r.root, reg, func(file string, err error) {
+			key := reg.Name + "\x00" + file
+			message := err.Error()
+			skipped[key] = message
+			if r.skipped[key] != message {
+				r.manager.o.Log.Printf("lsp: %s in %s: %s not synchronized: %v", reg.Name, r.root, file, err)
+			}
+		})
+		for key := range r.skipped {
+			if strings.HasPrefix(key, reg.Name+"\x00") {
+				delete(r.skipped, key)
+			}
+		}
+		for key, message := range skipped {
+			r.skipped[key] = message
+		}
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -85,27 +120,28 @@ func (r *worktree) scan() error {
 		s := r.servers[reg.Name]
 		if s == nil && len(docs) > 0 {
 			s = &languageServer{runtime: r, reg: reg, docs: map[string]document{}, seen: map[string]bool{}, initial: map[string]bool{}, resultIDs: map[string]string{}, refresh: make(chan struct{}, 1), watchers: map[string][]fileWatcher{}, watched: map[string]string{}, watchBaselines: map[string]map[string]string{}}
-			r.servers[reg.Name] = s
-			s.err = s.start()
-			if s.err != nil {
-				r.manager.o.Log.Printf("lsp: %s in %s: %v", reg.Name, r.root, s.err)
+			if err := s.start(); err != nil {
+				s.stop()
+				r.failures[reg.Name] = failedServer{reg, err}
+				errs = append(errs, err)
+				r.manager.o.Log.Printf("lsp: %s in %s: %v", reg.Name, r.root, err)
+				continue
 			}
+			r.servers[reg.Name] = s
 		}
 		if s == nil {
-			continue
-		}
-		if s.err != nil {
-			errs = append(errs, s.err)
 			continue
 		}
 		s.clearMissing()
 		if err := s.sync(docs); err != nil {
 			var disk *diskError
-			if errors.As(err, &disk) {
+			var rpc *rpcError
+			if errors.As(err, &disk) || errors.As(err, &rpc) {
 				errs = append(errs, err)
 				continue
 			}
-			s.err = err
+			r.failures[reg.Name] = failedServer{reg, err}
+			delete(r.servers, reg.Name)
 			r.issues.clearServer(reg.Name)
 			errs = append(errs, err)
 			s.stop()
@@ -127,6 +163,11 @@ func (s *issues) clearServer(server string) {
 	}
 }
 
+type failedServer struct {
+	registration api.LSPServer
+	err          error
+}
+
 type syncOptions struct {
 	OpenClose bool            `json:"openClose"`
 	Change    int             `json:"change"`
@@ -140,13 +181,15 @@ type languageServer struct {
 	runtime     *worktree
 	reg         api.LSPServer
 	peer        *peer
-	group       *processtree.Group
+	group       interface{ Close() }
 	cancel      context.CancelFunc
 	waited      chan struct{}
-	err         error
+	stopOnce    sync.Once
+	groupOnce   sync.Once
 	syncOptions syncOptions
 	pull        *diagnosticOptions
 	refresh     chan struct{}
+	retryPull   bool
 	// mu orders document versions/baselines against the protocol reader's push
 	// reports. Disk synchronization itself runs only on the worktree worker.
 	mu             sync.Mutex
@@ -177,13 +220,15 @@ func (s *languageServer) start() error {
 		env = append(env, k+"="+v)
 	}
 	cmd.Env = env
-	cmd.Stderr = io.Discard
+	// A nil stderr goes directly to the null device. An io.Writer would create
+	// a copy pipe whose inherited writers could outlive the server process.
 	group, err := processtree.New(cmd)
 	if err != nil {
 		cancel()
 		return err
 	}
 	s.group = group
+	cmd.Cancel = func() error { s.closeGroup(); return nil }
 	in, err := cmd.StdoutPipe()
 	if err != nil {
 		s.stop()
@@ -202,7 +247,7 @@ func (s *languageServer) start() error {
 		return err
 	}
 	if err = group.Started(cmd); err != nil {
-		_ = group.Kill()
+		s.closeGroup()
 		_ = cmd.Wait()
 		_ = in.Close()
 		_ = out.Close()
@@ -210,7 +255,7 @@ func (s *languageServer) start() error {
 		return err
 	}
 	s.waited = make(chan struct{})
-	go func() { _ = cmd.Wait(); group.Close(); close(s.waited) }()
+	go func() { _ = cmd.Wait(); s.closeGroup(); close(s.waited) }()
 	s.peer = newPeer(in, out, s.handle)
 	var result struct {
 		Capabilities struct {
@@ -254,23 +299,31 @@ func (s *languageServer) start() error {
 	}
 	return nil
 }
-func (s *languageServer) stop() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	if s.group != nil {
-		_ = s.group.Kill()
-	}
-	if s.peer != nil {
-		s.peer.close()
-	}
-	if s.waited != nil {
-		<-s.waited
-	}
-	if s.group != nil {
-		s.group.Close()
-	}
+
+// Group ownership is released once across cancellation, startup failures,
+// natural exit and explicit stop. A closed waited channel permits PID reuse.
+func (s *languageServer) closeGroup() {
+	s.groupOnce.Do(func() {
+		if s.group != nil {
+			s.group.Close()
+		}
+	})
 }
+func (s *languageServer) stop() {
+	s.stopOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		s.closeGroup()
+		if s.peer != nil {
+			s.peer.close()
+		}
+		if s.waited != nil {
+			<-s.waited
+		}
+	})
+}
+
 func (s *languageServer) handle(method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "textDocument/publishDiagnostics":
@@ -495,8 +548,11 @@ func (s *languageServer) sync(next map[string]document) error {
 		changed = true
 	default:
 	}
-	if (changed || watchedChanged) && s.pull != nil {
-		if err := s.diagnostics(); err != nil {
+	if (changed || watchedChanged || s.retryPull) && s.pull != nil {
+		err := s.diagnostics()
+		var rpc *rpcError
+		s.retryPull = errors.As(err, &rpc)
+		if err != nil {
 			return err
 		}
 	}

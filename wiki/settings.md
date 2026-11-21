@@ -218,7 +218,9 @@ and follows the server's open/close, full or incremental change and save
 capabilities. Incremental replacements use UTF-16 positions. Registered LSP
 file watchers also receive changes to matching dependency/configuration files,
 including files outside the document selectors. Polling does not follow
-symlinks or enter `.git`; synchronized files are limited to 4 MiB each. Server
+symlinks or enter `.git`; selected files over 4 MiB or unreadable files are
+logged and skipped while other documents keep synchronizing. Skipped files
+are tried again on later polls. Server
 initialization options and configuration come from the registration. Changes
 to a registration restart it; disabling or removing it stops its process.
 Start/protocol failures are logged, stop the failed child, and are retried when
@@ -226,6 +228,8 @@ the registration changes or a fresh worktree runtime starts.
 
 Both pushed diagnostics and advertised document/workspace pull diagnostics are
 supported, including diagnostic refresh requests and related-document reports.
+Pull error replies during indexing keep the connection and current issues;
+the next poll, edit or refresh retries the request.
 Initial analysis establishes a baseline without nudges. After an observed file
 change, only newly appearing issues are eligible for reports. Unchanged reports
 do not restart the debounce clock, and clearing an issue removes it from a

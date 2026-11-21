@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -110,6 +112,7 @@ func TestEngineLSPHelper(t *testing.T) {
 		}
 	}
 }
+
 func TestLSPRunsAndReportsInRealManagedWorktree(t *testing.T) {
 	h := newHarness(t)
 	exe, err := os.Executable()
@@ -121,18 +124,40 @@ func TestLSPRunsAndReportsInRealManagedWorktree(t *testing.T) {
 	if err := h.st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
-	reports := make(chan lsp.Report, 1)
-	unsubscribe := h.e.LSP().Subscribe(func(r lsp.Report) { reports <- r })
+	h.e.lsp.Close()
+	h.e.lsp = lsp.New(lsp.Options{Worktrees: h.layout.Worktrees, Settings: func() api.LSPSettings { return h.st.General().LSP }, PollInterval: time.Hour})
+	var reportsMu sync.Mutex
+	reports := []lsp.Report{}
+	unsubscribe := h.e.LSP().Subscribe(func(r lsp.Report) { reportsMu.Lock(); reports = append(reports, r); reportsMu.Unlock() })
 	defer unsubscribe()
 	task := h.standalone("Diagnose edits")
 	h.approve(task)
 	h.step()
 	dev := h.live(api.RoleDeveloper, task)
 	h.waitFor("initial LSP baseline", func() bool { return len(h.e.LSP().Snapshot(dev.ID)) == 1 })
-	if err := os.WriteFile(filepath.Join(dev.Workdir, "a.txt"), []byte("new diagnostic"), 0600); err != nil {
+	staged := filepath.Join(dev.Workdir, "a.txt.pending")
+	if err := os.WriteFile(staged, []byte("new diagnostic"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	report := <-reports
+	// A scan before publication can only see the complete old file. The
+	// following rename publishes the complete new document in one operation.
+	if err := h.e.LSP().Scan(h.ctx, dev.Workdir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staged, filepath.Join(dev.Workdir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.LSP().Scan(h.ctx, dev.Workdir); err != nil {
+		t.Fatal(err)
+	}
+	h.waitFor("new diagnostic report", func() bool { reportsMu.Lock(); defer reportsMu.Unlock(); return len(reports) > 0 })
+	reportsMu.Lock()
+	observed := append([]lsp.Report{}, reports...)
+	reportsMu.Unlock()
+	if len(observed) != 1 {
+		t.Fatalf("intermediate write produced additional reports: %+v", observed)
+	}
+	report := observed[0]
 	if len(report.Issues) != 1 || report.Issues[0].Message != "new diagnostic" || !samePath(report.Worktree, dev.Workdir) || !slices.Equal(report.Sessions, []string{dev.ID}) {
 		t.Fatalf("report: %+v", report)
 	}

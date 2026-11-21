@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
@@ -35,8 +34,13 @@ func language(reg api.LSPServer, file string) string {
 	}
 	return ""
 }
-func scanFiles(ctx context.Context, root string, reg api.LSPServer) (map[string]document, error) {
+func scanFiles(ctx context.Context, root string, reg api.LSPServer, onSkip func(string, error)) (map[string]document, error) {
 	docs := map[string]document{}
+	skip := func(name string, err error) {
+		if onSkip != nil {
+			onSkip(name, err)
+		}
+	}
 	err := filepath.WalkDir(root, func(name string, d fs.DirEntry, err error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -45,7 +49,8 @@ func scanFiles(ctx context.Context, root string, reg api.LSPServer) (map[string]
 			return nil
 		}
 		if err != nil {
-			return err
+			skip(name, err)
+			return nil
 		}
 		if d.IsDir() {
 			if d.Name() == ".git" {
@@ -58,7 +63,8 @@ func scanFiles(ctx context.Context, root string, reg api.LSPServer) (map[string]
 		}
 		rel, err := filepath.Rel(root, name)
 		if err != nil {
-			return err
+			skip(name, err)
+			return nil
 		}
 		rel = filepath.ToSlash(rel)
 		lang := language(reg, rel)
@@ -67,7 +73,10 @@ func scanFiles(ctx context.Context, root string, reg api.LSPServer) (map[string]
 		}
 		data, err := homefile.Read(name, maxDocument)
 		if err != nil {
-			return fmt.Errorf("read LSP document %s: %w", rel, err)
+			if !os.IsNotExist(err) {
+				skip(rel, err)
+			}
+			return nil
 		}
 		docs[rel] = document{text: string(data), language: lang}
 		return nil

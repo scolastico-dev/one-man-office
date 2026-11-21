@@ -2,9 +2,11 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +29,7 @@ func TestLSPHelper(t *testing.T) {
 	docs := map[string]string{}
 	versions := map[string]int{}
 	refreshed := false
+	pullErrorSent := false
 	pullResults := map[string]string{}
 	respond := func(id json.RawMessage, result any) {
 		b, _ := json.Marshal(result)
@@ -88,8 +91,8 @@ func TestLSPHelper(t *testing.T) {
 			if mode == "disk" {
 				caps["textDocumentSync"] = map[string]any{"openClose": false, "change": 0}
 			}
-			if mode == "pull" || mode == "workspace" || mode == "related" || mode == "pull-watch" {
-				caps["diagnosticProvider"] = map[string]any{"identifier": "test", "interFileDependencies": true, "workspaceDiagnostics": mode == "workspace"}
+			if mode == "pull" || mode == "workspace" || mode == "related" || mode == "pull-watch" || mode == "pull-error" || mode == "workspace-error" {
+				caps["diagnosticProvider"] = map[string]any{"identifier": "test", "interFileDependencies": true, "workspaceDiagnostics": mode == "workspace" || mode == "workspace-error"}
 			}
 			respond(m.ID, map[string]any{"capabilities": caps})
 		case "initialized":
@@ -118,6 +121,17 @@ func TestLSPHelper(t *testing.T) {
 			versions[p.TextDocument.URI] = p.TextDocument.Version
 			if mode == "push" || mode == "full" || mode == "watchall" {
 				publish(p.TextDocument.URI, p.TextDocument.Text)
+			}
+			if mode == "stderr" {
+				info, err := os.Stderr.Stat()
+				if err != nil {
+					os.Exit(9)
+				}
+				if info.Mode()&os.ModeNamedPipe != 0 {
+					publish(p.TextDocument.URI, "bad stderr pipe")
+				} else {
+					publish(p.TextDocument.URI, "bad stderr file")
+				}
 			}
 		case "textDocument/didChange":
 			if len(p.ContentChanges) != 1 || (mode != "full" && p.ContentChanges[0].Range == nil) || (mode == "full" && p.ContentChanges[0].Range != nil) {
@@ -148,6 +162,11 @@ func TestLSPHelper(t *testing.T) {
 		case "textDocument/didClose":
 			delete(docs, p.TextDocument.URI)
 		case "textDocument/diagnostic":
+			if mode == "pull-error" && !pullErrorSent {
+				pullErrorSent = true
+				_ = writeMessage(os.Stdout, message{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{-32801, "Content modified"}})
+				continue
+			}
 			if p.Identifier != "test" {
 				os.Exit(7)
 			}
@@ -178,6 +197,11 @@ func TestLSPHelper(t *testing.T) {
 			pullResults[p.TextDocument.URI] = text
 			respond(m.ID, result)
 		case "workspace/diagnostic":
+			if mode == "workspace-error" && !pullErrorSent {
+				pullErrorSent = true
+				_ = writeMessage(os.Stdout, message{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{-32802, "Server cancelled"}})
+				continue
+			}
 			// Servers can leave open documents to textDocument/diagnostic.
 			respond(m.ID, map[string]any{"items": []any{}})
 		case "test/baselineUpdate":
@@ -189,6 +213,8 @@ func TestLSPHelper(t *testing.T) {
 			refreshed = true
 			_ = writeMessage(os.Stdout, message{JSONRPC: "2.0", ID: json.RawMessage(`"refresh"`), Method: "workspace/diagnostic/refresh", Params: json.RawMessage(`{}`)})
 			respond(m.ID, nil)
+		case "test/exit":
+			os.Exit(0)
 		case "test/barrier":
 			respond(m.ID, map[string]any{"documents": docs})
 		case "shutdown":
@@ -305,11 +331,12 @@ func TestRuntimeSyncIsolationAndShutdown(t *testing.T) {
 			}
 			m.mu.Lock()
 			runtime := m.roots[root]
+			server := runtime.servers["test"]
 			m.mu.Unlock()
 			m.Detach("first")
 			<-runtime.done
 			select {
-			case <-runtime.servers["test"].peer.done:
+			case <-server.peer.done:
 			default:
 				t.Fatal("server reader survived detach")
 			}
@@ -588,5 +615,130 @@ func TestRuntimeWatcherObservesEditAfterRegistrationBeforeFirstScan(t *testing.T
 	flushReports(r)
 	if len(reports) != 1 {
 		t.Fatalf("post-registration edit was swallowed: %+v", reports)
+	}
+}
+
+func TestRuntimeSkipsOversizedSelectedFileWithoutBlockingOthers(t *testing.T) {
+	m, root := fixtureManager(t, "push")
+	var logs bytes.Buffer
+	m.o.Log = log.New(&logs, "", 0)
+	putFile(t, root, "too-large.test", strings.Repeat("x", maxDocument+1))
+	putFile(t, root, "normal.test", "bad baseline")
+	if err := m.Attach("agent", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	scan(t, m, root)
+	barrier(t, m, root)
+	if got := m.Snapshot("agent"); len(got) != 1 || got[0].File != "normal.test" {
+		t.Fatalf("large file blocked normal diagnostics: %+v", got)
+	}
+	if !strings.Contains(logs.String(), "too-large.test") {
+		t.Fatalf("skipped file was not logged: %s", logs.String())
+	}
+	putFile(t, root, "normal.test", "bad updated")
+	scan(t, m, root)
+	barrier(t, m, root)
+	if got := m.Snapshot("agent"); len(got) != 1 || got[0].Message != "bad updated" {
+		t.Fatalf("updates stopped: %+v", got)
+	}
+	putFile(t, root, "too-large.test", "bad recovered")
+	scan(t, m, root)
+	barrier(t, m, root)
+	if len(m.Snapshot("agent")) != 2 {
+		t.Fatal("skipped file did not recover")
+	}
+}
+
+func TestRuntimeRetriesPullErrorWithoutStoppingServer(t *testing.T) {
+	for _, mode := range []string{"pull-error", "workspace-error"} {
+		t.Run(mode, func(t *testing.T) {
+			m, root := fixtureManager(t, mode)
+			putFile(t, root, "main.test", "bad baseline")
+			if err := m.Attach("agent", []string{root}); err != nil {
+				t.Fatal(err)
+			}
+			// Initial startup consumes the one error. An explicit following tick must
+			// retry despite unchanged files, preserving the same live connection.
+			scan(t, m, root)
+			barrier(t, m, root)
+			if got := m.Snapshot("agent"); len(got) != 1 || got[0].Message != "bad baseline" {
+				t.Fatalf("pull did not recover: %+v", got)
+			}
+			putFile(t, root, "main.test", "bad updated")
+			scan(t, m, root)
+			if got := m.Snapshot("agent"); len(got) != 1 || got[0].Message != "bad updated" {
+				t.Fatalf("server stopped after error: %+v", got)
+			}
+		})
+	}
+}
+
+func TestRuntimeStderrIsNotAnInheritedCopyPipe(t *testing.T) {
+	m, root := fixtureManager(t, "stderr")
+	putFile(t, root, "main.test", "source")
+	if err := m.Attach("agent", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	scan(t, m, root)
+	barrier(t, m, root)
+	if got := m.Snapshot("agent"); len(got) != 1 || got[0].Message != "bad stderr file" {
+		t.Fatalf("stderr can hold Wait open: %+v", got)
+	}
+	m.Detach("agent")
+}
+
+func TestRuntimeDropsStoppedServers(t *testing.T) {
+	m, root := fixtureManager(t, "push")
+	putFile(t, root, "main.test", "bad baseline")
+	if err := m.Attach("agent", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	scan(t, m, root)
+	barrier(t, m, root)
+	m.mu.Lock()
+	r := m.roots[root]
+	s := r.servers["test"]
+	m.mu.Unlock()
+	_ = s.peer.notify("test/exit", nil)
+	<-s.waited
+	if err := m.Scan(t.Context(), root); err == nil {
+		t.Fatal("server exit was not reported")
+	}
+	if len(r.servers) != 0 {
+		t.Fatal("stopped server retained for later signaling")
+	}
+	if err := m.Scan(t.Context(), root); err == nil {
+		t.Fatal("failed registration was retried without a config change")
+	}
+}
+
+func TestRuntimeDependencyEditKeepsUnreportedDocumentBaseline(t *testing.T) {
+	m, root := fixtureManager(t, "delayed")
+	putFile(t, root, "main.test", "clean")
+	putFile(t, root, "options.cfg", "clean")
+	var reports []Report
+	unsubscribe := m.Subscribe(func(r Report) { reports = append(reports, r) })
+	defer unsubscribe()
+	if err := m.Attach("agent", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	scan(t, m, root)
+	barrier(t, m, root)
+	m.mu.Lock()
+	r := m.roots[root]
+	s := r.servers["test"]
+	m.mu.Unlock()
+	_, err := s.handle("client/registerCapability", json.RawMessage(`{"registrations":[{"id":"config","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[{"globPattern":"**/*.cfg"}]}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, root, "options.cfg", "changed dependency")
+	scan(t, m, root)
+	if err := s.peer.call(t.Context(), "test/baselineUpdate", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	flushReports(r)
+	if len(reports) != 0 {
+		t.Fatalf("untouched unreported document lost its baseline: %+v", reports)
 	}
 }

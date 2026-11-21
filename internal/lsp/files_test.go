@@ -42,7 +42,7 @@ func TestWatcherGlobs(t *testing.T) {
 func TestFileScanningHonorsShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := scanFiles(ctx, t.TempDir(), api.LSPServer{}); !errors.Is(err, context.Canceled) {
+	if _, err := scanFiles(ctx, t.TempDir(), api.LSPServer{}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("scan ignored shutdown: %v", err)
 	}
 }

@@ -183,7 +183,9 @@ exposes `Manager.Worktrees`, `Snapshot`, `Ignore` and `Subscribe` for delivery;
 relative files and zero-based UTF-16 locations. Push, document/workspace pull,
 refresh and registered dependency watchers feed baseline/diff/debounce state.
 Ignored issues remain inspectable but leave pending/future batches. New
-attachments receive no replay. Agent commands, delivery and browser UI are
+attachments receive no replay. Oversized/unreadable selected files are logged
+and skipped individually; pull RPC errors retry without stopping the server.
+Group cleanup runs once across startup failure, cancellation and natural exit. Agent commands, delivery and browser UI are
 separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
 Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
