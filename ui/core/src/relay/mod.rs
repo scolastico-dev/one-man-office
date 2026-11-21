@@ -14,3 +14,8 @@ pub use state::{RelayClient, RelayStatus, SecretStore, TrustState};
 pub use streams::{RelayStream, StreamMux};
 mod setup;
 pub use setup::{RelayConnection, RelayPhase, RelayView};
+mod notifications;
+pub use notifications::{NotificationSecrets, RelayDelivery, RelayNotifier};
+
+mod received;
+pub use received::ReceivedIds;

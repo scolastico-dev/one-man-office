@@ -11,8 +11,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -26,6 +31,8 @@ import (
 
 var nativeRelayFixture = flag.Bool("native-relay-fixture", false, "serve isolated native relay board test control on stdin/stdout")
 
+var nativeRelayNotificationsFixture = flag.Bool("native-relay-notifications-fixture", false, "exercise headless notification polling without board assets")
+
 func TestNativeRelayBoardFixture(t *testing.T) {
 	if !*nativeRelayFixture {
 		return
@@ -34,7 +41,7 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 	oldGitVersion := gitVersion
 	gitVersion = func() (int, int, error) { return 2, 47, nil }
 	t.Cleanup(func() { gitVersion = oldGitVersion })
-	if !uiBuilt() {
+	if !*nativeRelayNotificationsFixture && !uiBuilt() {
 		t.Fatal("build web assets before running the native board probe")
 	}
 	layout := testHome(t)
@@ -46,6 +53,12 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 	var relayHTTP *http.Server
 	var relayDone chan struct{}
 	address := "127.0.0.1:0"
+	notificationHeld := make(chan struct{})
+	notificationRelease := make(chan struct{})
+	var notificationReply atomic.Value
+	notificationReply.Store("")
+	requests := make(map[string]bool) // handler lock below protects simultaneous GETs
+	var requestLock sync.Mutex
 	startRelay := func() {
 		listener, err := net.Listen("tcp", address)
 		if err != nil {
@@ -56,7 +69,77 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		relayHTTP = &http.Server{Handler: router}
+		relayHTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, "/notifications/") {
+				router.ServeHTTP(w, r)
+				return
+			}
+			header, e := base64.RawURLEncoding.DecodeString(r.Header.Get("Omo-Notification-Request"))
+			var poll map[string]any
+			if e != nil || json.Unmarshal(header, &poll) != nil {
+				t.Error("invalid native notification header")
+			}
+			request, _ := poll["request"].(string)
+			requestLock.Lock()
+			if request == "" || requests[request] {
+				t.Error("native notification request id reused")
+			}
+			requests[request] = true
+			requestLock.Unlock()
+			mode := notificationReply.Swap("").(string)
+			if mode == "" {
+				router.ServeHTTP(w, r)
+				return
+			}
+			record := httptest.NewRecorder()
+			router.ServeHTTP(record, r)
+			if record.Code != 200 {
+				t.Errorf("injected reply did not reach host: %d", record.Code)
+			}
+			if mode == "hold" {
+				close(notificationHeld)
+				select {
+				case <-notificationRelease:
+				case <-r.Context().Done():
+					return
+				}
+				for key, values := range record.Header() {
+					for _, value := range values {
+						w.Header().Add(key, value)
+					}
+				}
+				_, _ = w.Write(record.Body.Bytes())
+				return
+			}
+			if mode == "drop" {
+				w.WriteHeader(204)
+				return
+			}
+			if mode == "error" {
+				w.WriteHeader(503)
+				return
+			}
+			var envelope map[string]any
+			if json.Unmarshal(record.Body.Bytes(), &envelope) != nil {
+				t.Error("invalid host envelope")
+				return
+			}
+			field := map[string]string{"tamper": "ciphertext", "wrong-request": "request", "wrong-host": "host_fp", "wrong-device": "ui_id", "wrong-epoch": "pair_epoch"}[mode]
+			value, _ := envelope[field].(string)
+			if len(value) > 0 {
+				first := byte('A')
+				if value[0] == first {
+					first = 'B'
+				}
+				envelope[field] = string(first) + value[1:]
+			}
+			for key, values := range record.Header() {
+				for _, value := range values {
+					w.Header().Add(key, value)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(envelope)
+		})}
 		relayDone = make(chan struct{})
 		go func() { defer close(relayDone); _ = relayHTTP.Serve(listener) }()
 	}
@@ -73,6 +156,7 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 	origin := "http://" + address
 	var s *Server
 	var agent *testAgent
+	var ceo board.Actor
 	firstHost := true
 	startHost := func() {
 		c, err := serverconfig.Load(layout.ServerConfig)
@@ -100,6 +184,7 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		agent = runner.agent(t, session.ID)
+		ceo = board.Actor{Role: api.RoleCEO, Session: session.ID}
 	}
 	stopHost := func() {
 		if s != nil {
@@ -141,10 +226,12 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		var command struct {
-			Op   string `json:"op"`
-			AID  string `json:"aid"`
-			PIN  string `json:"pin"`
-			UIID string `json:"ui_id"`
+			Op    string `json:"op"`
+			AID   string `json:"aid"`
+			PIN   string `json:"pin"`
+			UIID  string `json:"ui_id"`
+			Count int    `json:"count"`
+			Mode  string `json:"mode"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &command); err != nil {
 			t.Fatal(err)
@@ -152,6 +239,25 @@ func TestNativeRelayBoardFixture(t *testing.T) {
 		var data any
 		var err error
 		switch command.Op {
+		case "mention":
+			ids := []string{}
+			for range command.Count {
+				comment, e := s.board.Comment(t.Context(), ceo, int64(n), api.CommentRequest{Body: "@user native notification"})
+				if e != nil {
+					err = e
+					break
+				}
+				ids = append(ids, strconv.Itoa(comment.Comment.ID))
+			}
+			data = ids
+		case "wait-notification-held":
+			<-notificationHeld
+		case "release-notification":
+			close(notificationRelease)
+		case "notification-reply":
+			notificationReply.Store(command.Mode)
+		case "connections":
+			data = s.relay.LiveConnections(command.UIID)
 		case "begin":
 			err = s.relay.PairBegin()
 		case "pending":

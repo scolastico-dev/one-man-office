@@ -159,6 +159,18 @@ pub fn write_json(root: &Path, name: &str, value: &impl Serialize) -> Result<()>
     if data.len() > MAX_JSON_BYTES {
         return Err("App configuration is too large.".into());
     }
+    atomic_write(root, name, |file| {
+        file.write_all(&data)
+            .map_err(|_| "Cannot write configuration file.".into())
+    })
+}
+
+pub(crate) fn atomic_write(
+    root: &Path,
+    name: &str,
+    write: impl FnOnce(&mut fs::File) -> Result<()>,
+) -> Result<()> {
+    fs::create_dir_all(root).map_err(|_| "Cannot create app configuration directory.")?;
     let temp = root.join(format!(".{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut options = fs::OpenOptions::new();
@@ -171,11 +183,15 @@ pub fn write_json(root: &Path, name: &str, value: &impl Serialize) -> Result<()>
         let mut file = options
             .open(&temp)
             .map_err(|_| "Cannot create configuration file.")?;
-        file.write_all(&data)
-            .and_then(|_| file.sync_all())
+        write(&mut file)?;
+        file.sync_all()
             .map_err(|_| "Cannot write configuration file.")?;
         drop(file);
         fs::rename(&temp, root.join(name)).map_err(|_| "Cannot replace configuration file.")?;
+        #[cfg(unix)]
+        fs::File::open(root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| "Cannot durably save app configuration.")?;
         Ok(())
     })();
     if result.is_err() {

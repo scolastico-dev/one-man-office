@@ -619,13 +619,30 @@ Desktop host titles have an immutable Host content prefix; setup-only ACL plus
 `trusted_setup_document` keep remote documents out of native commands. Android
 `TrustedChrome` surrounds separate setup/host WebViews with native labels, colors
 and a Connection button; `RemoteBoard` has no Tauri command interface. Relay
-notification preferences remain saved, but receipt/delivery policy belongs to
-the native notifier integration; no active system delivery is advertised yet.
+notifications use `RelayNotifier` and a separate `RelayDelivery` receipt journal,
+never the bridge/direct `/api/ui/notifications` cursor. Native GETs authenticate
+fresh outstanding request IDs and decrypt against the saved host/device/epoch/root.
+An authenticated batch atomically saves deduplicated comment IDs, pending OS
+notices and its receipt before another GET can acknowledge it. Only a matching
+authenticated acknowledgment retires the receipt; lost/invalid/204/error replies
+retain it. Authenticated `invalid_ack` clears only that stale receipt. Desktop
+persists a private streamed connection journal under an OS file lock (including
+across desktop processes); exact decimal-string ID ranges compact history
+without dropping gaps or imposing the public configuration size limit.
+Android JNI uses synchronous Keystore-
+encrypted journal callbacks and a reduced saved notification capability (no
+pairing seed), without Tauri/WebView/UI socket. Both Android scheduling modes
+retain their OS behavior. Pending delivery survives restart, and activation waits
+for the matching relay board endpoint after a cold Android launch.
 Focused checks: core cargo tests, Node bridge tests,
 `node ui/scripts/relay-probe.mjs` for real Go relay/host acceptance/recovery/restart,
 `node ui/scripts/relay-probe.mjs --board` for real embedded board/API, chunked
 upload, SSE/terminal streams and automatic host/relay recovery without re-pairing,
-and Android arm64/Windows GNU core compilation. See [native relay library](wiki/ui.md#native-relay-library).
+`node ui/scripts/relay-probe.mjs --notifications` for real GET mention batches,
+receipt loss/restart/invalid_ack and headless JVM calls into the actual JNI source,
+focused Android notification JVM tests, and Android arm64/Windows GNU shell
+compilation. Device OS scheduling/Keystore/taps and native desktop relay toasts
+remain runtime validation limits. See [native relay library](wiki/ui.md#native-relay-library).
 
 ## Native UI protocol
 

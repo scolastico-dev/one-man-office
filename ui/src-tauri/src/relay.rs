@@ -47,13 +47,18 @@ pub(crate) async fn relay_connect(
                 .ok_or("No saved relay connection for this route. Run pair begin on the host and choose Start new pairing.")?;
             config.id = old.id;
         }
-        start(&app, config, settings.new_pair, settings.admission)?;
+        start(&app, config, settings.new_pair, settings.admission, false)?;
         snapshot(&state, &app)
     }).await.map_err(|_| "Cannot prepare the native relay connection.")?
 }
 
 pub(crate) fn stop(app: &AppHandle) -> Result<()> {
     let state = app.state::<Shell>();
+    state
+        .session
+        .lock()
+        .map_err(|_| "Connection state is unavailable.")?
+        .relay_notifications = None;
     let old = state
         .relay
         .lock()
@@ -77,6 +82,7 @@ pub(crate) fn start(
     config: Config,
     new_pair: bool,
     admission: Option<String>,
+    resume_worker: bool,
 ) -> Result<()> {
     stop(app)?;
     let state = app.state::<Shell>();
@@ -95,7 +101,9 @@ pub(crate) fn start(
     #[cfg(not(target_os = "android"))]
     state.desktop.release(app, None)?;
     #[cfg(target_os = "android")]
-    crate::android_worker(app).call::<serde_json::Value>("disconnect", ())?;
+    if new_pair {
+        crate::android_worker(app).call::<serde_json::Value>("disconnect", ())?;
+    }
     windows::close_boards(app);
     {
         let mut session = state
@@ -109,6 +117,10 @@ pub(crate) fn start(
         save_config(&state.root, &config)?;
         session.config = Some(config.clone());
     }
+    if client.notification_secrets().is_ok() {
+        configure_notifications(app, &config, &client, resume_worker)?;
+    }
+    let notifier_client = client.clone();
     let owner = Arc::new(tauri::async_runtime::block_on(async {
         RelayConnection::start(client, new_pair)
     }));
@@ -121,7 +133,12 @@ pub(crate) fn start(
         let mut changes = owner.subscribe();
         loop {
             let view = changes.borrow_and_update().clone();
-            let (app, connection, config) = (handle.clone(), owner.clone(), config.clone());
+            let (app, connection, config, client) = (
+                handle.clone(),
+                owner.clone(),
+                config.clone(),
+                notifier_client.clone(),
+            );
             let phase = view.phase;
             let updated = tauri::async_runtime::spawn_blocking(move || {
                 let state = app.state::<Shell>();
@@ -133,7 +150,7 @@ pub(crate) fn start(
                     .as_ref().is_some_and(|c| Arc::ptr_eq(c, &connection));
                 if !current { return Ok::<_, String>(false); }
                 if phase == RelayPhase::Ready {
-                    if let Err(error) = open_board(&app, &config, &connection) {
+                    if let Err(error) = configure_notifications(&app,&config,&client,resume_worker).and_then(|_| open_board(&app, &config, &connection)) {
                         state.session.lock().map_err(|_| "Connection state is unavailable.")?.error = error;
                         windows::show_setup(&app);
                     }
@@ -159,6 +176,53 @@ pub(crate) fn start(
     });
     Ok(())
 }
+fn configure_notifications(
+    app: &AppHandle,
+    config: &Config,
+    client: &RelayClient,
+    resume_worker: bool,
+) -> Result<()> {
+    let state = app.state::<Shell>();
+    if state
+        .session
+        .lock()
+        .map_err(|_| "Connection state is unavailable.")?
+        .relay_notifications
+        .is_some()
+    {
+        return Ok(());
+    }
+    let secrets = client.notification_secrets()?;
+    #[cfg(target_os = "android")]
+    {
+        if config.notifications {
+            use tauri_plugin_notification::NotificationExt;
+            if app
+                .notification()
+                .request_permission()
+                .map_err(|_| "Cannot request Android notification permission.")?
+                != tauri::plugin::PermissionState::Granted
+            {
+                return Err(
+                    "Enable notifications for omo ui in Android Settings to use native polling."
+                        .into(),
+                );
+            }
+        }
+        crate::android_worker(app).call::<serde_json::Value>("configure",serde_json::json!({
+            "config":config,"secret":serde_json::to_string(&secrets).map_err(|_| "Cannot prepare relay worker credentials.")?,
+            "root":state.root,"enabled":config.notifications,"resume":resume_worker,
+        }))?;
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = (config, resume_worker);
+    state
+        .session
+        .lock()
+        .map_err(|_| "Connection state is unavailable.")?
+        .relay_notifications = Some(secrets);
+    Ok(())
+}
 fn open_board(app: &AppHandle, config: &Config, owner: &RelayConnection) -> Result<()> {
     let state = app.state::<Shell>();
     let endpoint = owner
@@ -171,9 +235,14 @@ fn open_board(app: &AppHandle, config: &Config, owner: &RelayConnection) -> Resu
     effective.relay_allow_loopback_http = false;
     effective.auth = Auth::Basic;
     effective.username = endpoint.username;
-    // Relay notification receipt policy is owned by the native relay notifier.
-    // Until it is enabled, do not announce active system delivery/suppress browser notices.
-    effective.notifications = false;
+    let polling = config.notifications
+        && state
+            .session
+            .lock()
+            .map_err(|_| "Connection state is unavailable.")?
+            .relay_notifications
+            .is_some();
+    effective.notifications = polling;
     let client = BoardClient::new(effective.clone(), endpoint.password.clone())?;
     client.connect(cfg!(target_os = "android"))?;
     let mut session = state
@@ -197,11 +266,22 @@ fn open_board(app: &AppHandle, config: &Config, owner: &RelayConnection) -> Resu
         #[cfg(target_os = "android")]
         let _ = active;
     }
-    let board = windows::open_board(app, &effective, &endpoint.password, false, None)?;
+    let board = windows::open_board(app, &effective, &endpoint.password, polling, None)?;
+    #[cfg(target_os = "android")]
+    if let Some((id, path)) = session
+        .pending_activation
+        .take()
+        .filter(|(id, _)| id == &config.id)
+    {
+        let _ = id;
+        let url = effective.destination(&path)?;
+        crate::android_worker(app)
+            .call::<serde_json::Value>("navigateBoard", serde_json::json!({"url":url.as_str()}))?;
+    }
     session.active = Some(Connection {
         client,
         secret: endpoint.password,
-        polling: false,
+        polling,
         #[cfg(not(target_os = "android"))]
         delivery: Default::default(),
         #[cfg(not(target_os = "android"))]
@@ -237,7 +317,7 @@ pub(crate) fn restore(app: &AppHandle) {
             .and_then(|s| s.config.clone())
             .filter(|c| c.mode == Mode::Relay);
         if let Some(config) = config {
-            if let Err(error) = start(&app, config, false, None) {
+            if let Err(error) = start(&app, config, false, None, true) {
                 if let Ok(mut s) = state.session.lock() {
                     s.error = error;
                 }
