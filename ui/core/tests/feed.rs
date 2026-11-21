@@ -47,6 +47,8 @@ fn fixture(
         id: Config::new_id(),
         mode: Mode::Direct,
         origin: format!("http://{address}/"),
+        host_id: String::new(),
+        relay_allow_loopback_http: false,
         auth: Auth::None,
         username: String::new(),
         notifications: true,
@@ -155,6 +157,24 @@ fn missing_history_returns_recovery_without_silently_skipping_events() {
     assert!(matches!(result.unwrap(), Poll::Recovery(_)));
     assert_eq!(d, before);
     server.join().unwrap();
+}
+
+#[test]
+fn direct_transport_refuses_relay_configuration() {
+    let config = Config {
+        id: Config::new_id(),
+        mode: Mode::Relay,
+        origin: "https://relay.example".into(),
+        host_id: "office".into(),
+        relay_allow_loopback_http: false,
+        auth: Auth::None,
+        username: String::new(),
+        notifications: true,
+        notification_mode: NotificationMode::Background,
+        remember: true,
+        stop_with_window: false,
+    };
+    assert!(BoardClient::new(config, String::new()).is_err());
 }
 
 #[test]

@@ -22,10 +22,26 @@ class PollingPlugin(private val activity:Activity):Plugin(activity) {
     private val io=Executors.newSingleThreadExecutor()
     private var webView:WebView?=null
     private var bridge:ScriptHandler?=null
+    private var chrome:TrustedChrome?=null
+    private var board:RemoteBoard?=null
     private var activation:Channel?=null
     private var pending:Intent?=null
     override fun load(webView:WebView) {
         this.webView=webView
+        chrome=TrustedChrome(activity,webView)
+        val owner=activity as androidx.activity.ComponentActivity
+        owner.onBackPressedDispatcher.addCallback(owner,object:androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val remote=board?.view
+                if(remote?.visibility==android.view.View.VISIBLE) {
+                    if(remote.canGoBack()) remote.goBack() else chrome?.showSetup()
+                } else {
+                    isEnabled=false
+                    owner.onBackPressedDispatcher.onBackPressed()
+                    isEnabled=true
+                }
+            }
+        })
         Channels.create(activity)
         pending=activity.intent
         dispatch()
@@ -52,6 +68,8 @@ class PollingPlugin(private val activity:Activity):Plugin(activity) {
     }
     @Command fun disconnect(invoke:Invoke) {
         bridge?.remove();bridge=null
+        board?.close();board=null
+        chrome?.closeBoard()
         async(invoke) {it.configure(null);it.status()}
     }
     @Command fun status(invoke:Invoke) = async(invoke) {it.status()}
@@ -63,6 +81,30 @@ class PollingPlugin(private val activity:Activity):Plugin(activity) {
         activation=invoke.parseArgs(ActivationArgs::class.java).handler
         dispatch()
         invoke.resolve()
+    }
+    @Command fun closeBoard(invoke:Invoke) {
+        board?.close();board=null
+        chrome?.closeBoard()
+        invoke.resolve()
+    }
+    @Command fun showConnection(invoke:Invoke) {
+        chrome?.showSetup()
+        invoke.resolve()
+    }
+    @Command fun openBoard(invoke:Invoke) {
+        val frame=chrome ?: return invoke.reject("Native connection frame is unavailable.")
+        try {
+            board?.close();board=null
+            frame.closeBoard()
+            board=RemoteBoard(activity,frame,JSONObject(invoke.getArgs().toString()))
+            invoke.resolve()
+        } catch(e:Exception) {
+            invoke.reject("Cannot open the board. Update Android System WebView.")
+        }
+    }
+    @Command fun navigateBoard(invoke:Invoke) {
+        try {board?.navigate(invoke.getArgs().getString("url"));invoke.resolve()}
+        catch(e:Exception) {invoke.reject("Cannot navigate the board.")}
     }
     @Command fun setBridge(invoke:Invoke) {
         val view=webView ?: return invoke.reject("Board WebView is unavailable.")

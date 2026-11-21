@@ -604,14 +604,11 @@ func TestSkillSetStartCleansLeftovers(t *testing.T) {
 	e.put("s", testpath.Abs("/nonexistent/repo.git"), "", api.SkillSetPinned, nil)
 	m := e.manager()
 	m.Start(context.Background())
-	for {
-		entries, _ := os.ReadDir(e.dir)
-		if len(entries) == 2 {
-			break
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Startup cleans abandoned folders before fetching the missing checkout.
+	// A directory snapshot between those operations is not completion: the
+	// fetch can still create its own temporary folder. Its terminal event is
+	// published only after FetchSource has removed that folder.
+	e.waitChange("s", StateFailed)
 	onlySets(t, e.dir, "s", "NOTES")
 }
 

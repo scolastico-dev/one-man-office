@@ -554,7 +554,7 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 
 ## Native UI application
 
-`ui/` is the Tauri 2 direct-host shell; only `ui/setup/` is bundled, never
+`ui/` is the Tauri 2 local/direct/relay shell; only `ui/setup/` is bundled, never
 `web/dist`. The Rust workspace separates `core` (configuration/auth validation,
 native HTTP, capabilities and notification cursor/dedup persistence) from
 `src-tauri` (setup-only command ACL, OS credentials, remote WebViews, native
@@ -570,7 +570,7 @@ behavior (`stop_with_window`, default false). Attached/direct servers never gain
 ownership; replacement instances cannot be stopped by an earlier capability.
 After control failure, native lifecycle probes the normal run.lock before
 retiring stale crash metadata; a still-held lock preserves ownership on error.
-Android refuses local mode and uses the `ui/notifications` native plugin:
+Android offers direct/relay modes, refuses local mode and uses the `ui/notifications` native plugin:
 WorkManager periodic GET polling (15 minutes or later) or a user-started dataSync
 foreground service with an ongoing notification and five-second polls. Android
 15+ dataSync runtime limits apply; timeout stops the service and reports status.
@@ -591,6 +591,61 @@ and the opt-in isolated Linux connection and local lifecycle probes.
 Build/extension details and verified platform limits:
 [omo ui](wiki/ui.md).
 
+`ui/core/src/relay` is the native version-1 relay library (RustCrypto final
+FIPS-203 ML-KEM-768, strict Go-compatible codecs, mutual proof, encrypted records,
+notification crypto). `RelayClient::open` creates/loads a private identity;
+saved profiles use `restore` to fail on missing secrets. Explicit `begin_pair`
+saves the commitment, consumed reveal and candidate root before dependent sends;
+`Pairing::accepted` and fresh `reconnect` check encrypted acceptance/ready against
+saved key, epoch and original attempt id. No automatic ceremony/root replacement.
+`SecretStore` owns atomic durable private snapshots; `omo_ui::RelaySecrets`
+adapts OS credentials, and headless Android storage can implement the same trait.
+`RelaySession::split` has a globally ordered cloneable sender and one receiver;
+its control closes the socket, erases keys and releases reconnect ownership before
+reporting completion. Bounded queues require consumers to enforce stream credits.
+`StreamMux` adds bounded streams with read-consumption credit, fair writes,
+ordered FIN and reciprocal-reset cancellation. `BoardTransport::start` supplies
+the desktop/Android private loopback board endpoint, ephemeral native Basic
+credentials and status subscriptions; it retries saved-trust authentication
+with fresh session keys after loss, never replaying requests or terminal input.
+`close` joins the listener, accepted connections and its own authentication work.
+Only headers needed for virtual Host/Origin/close and bridge authentication
+change; HTTP bodies, assets, SSE and WebSocket frames remain opaque.
+`RelayConnection` owns explicit pairing or saved-trust reconnect, public
+`RelayView` state and the bridge, joining its socket/transport on `close`.
+Config's additive `host_id` and `relay_allow_loopback_http` preserve saved
+direct/local profiles. `src-tauri/relay.rs` uses OS `RelaySecrets`, restores the
+saved route on startup and opens the board after authenticated acceptance/Ready.
+Setup displays the proved PIN/exact accept command; full raw key stays under
+Advanced. New ceremonies are explicit and receive fresh identities/randomness.
+Desktop host titles have an immutable Host content prefix; setup-only ACL plus
+`trusted_setup_document` keep remote documents out of native commands. Android
+`TrustedChrome` surrounds separate setup/host WebViews with native labels, colors
+and a Connection button; `RemoteBoard` has no Tauri command interface. Relay
+notifications use `RelayNotifier` and a separate `RelayDelivery` receipt journal,
+never the bridge/direct `/api/ui/notifications` cursor. Native GETs authenticate
+fresh outstanding request IDs and decrypt against the saved host/device/epoch/root.
+An authenticated batch atomically saves deduplicated comment IDs, pending OS
+notices and its receipt before another GET can acknowledge it. Only a matching
+authenticated acknowledgment retires the receipt; lost/invalid/204/error replies
+retain it. Authenticated `invalid_ack` clears only that stale receipt. Desktop
+persists a private streamed connection journal under an OS file lock (including
+across desktop processes); exact decimal-string ID ranges compact history
+without dropping gaps or imposing the public configuration size limit.
+Android JNI uses synchronous Keystore-
+encrypted journal callbacks and a reduced saved notification capability (no
+pairing seed), without Tauri/WebView/UI socket. Both Android scheduling modes
+retain their OS behavior. Pending delivery survives restart, and activation waits
+for the matching relay board endpoint after a cold Android launch.
+Focused checks: core cargo tests, Node bridge tests,
+`node ui/scripts/relay-probe.mjs` for real Go relay/host acceptance/recovery/restart,
+`node ui/scripts/relay-probe.mjs --board` for real embedded board/API, chunked
+upload, SSE/terminal streams and automatic host/relay recovery without re-pairing,
+`node ui/scripts/relay-probe.mjs --notifications` for real GET mention batches,
+receipt loss/restart/invalid_ack and headless JVM calls into the actual JNI source,
+focused Android notification JVM tests, and Android arm64/Windows GNU shell
+compilation. Device OS scheduling/Keystore/taps and native desktop relay toasts
+remain runtime validation limits. See [native relay library](wiki/ui.md#native-relay-library).
 Desktop **Connection… → Apps** reads the authenticated forward registry after
 `ui.forwards.tunnel.v1` negotiation. **Open preview** uses a real HTTP `.omo`
 origin (name plus stable forward ID) at the app root, with start_path only for

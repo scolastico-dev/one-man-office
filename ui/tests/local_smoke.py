@@ -336,7 +336,7 @@ def run(args):
             for window in screen.screen().root.query_tree().children:
                 try:
                     name = window.get_wm_name()
-                    target = title + " · omo ui" if board else title
+                    target = "omo ui · Host content · " + title if board else title
                     if name == target and (visible is None or (window.get_attributes().map_state == X.IsViewable) == visible):
                         found.append(window)
                 except Exception:

@@ -3,6 +3,7 @@ mod android_auth;
 #[cfg(target_os = "android")]
 mod android_notifications;
 mod credentials;
+pub use credentials::RelaySecrets;
 #[cfg(not(target_os = "android"))]
 mod desktop;
 #[cfg(not(target_os = "android"))]
@@ -12,7 +13,10 @@ mod macos_auth;
 mod platform;
 #[cfg(windows)]
 mod preview_profile;
+mod relay;
 mod windows;
+#[cfg(windows)]
+mod windows_chrome;
 
 use omo_ui_core::{
     Auth, BoardClient, Config, Mode, NotificationMode, Recovery, Result, load_config, save_config,
@@ -44,15 +48,23 @@ struct Session {
     active: Option<Connection>,
     error: String,
     recovery: Option<Recovery>,
+    relay_view: Option<omo_ui_core::relay::RelayView>,
+    relay_notifications: Option<omo_ui_core::relay::NotificationSecrets>,
+    #[cfg(target_os = "android")]
+    pending_activation: Option<(String, String)>,
 }
 struct Shell {
+    #[cfg(target_os = "android")]
+    operation: Mutex<()>,
+    relay: Mutex<Option<std::sync::Arc<omo_ui_core::relay::RelayConnection>>>,
     root: PathBuf,
     session: Mutex<Session>,
     #[cfg(not(target_os = "android"))]
     desktop: desktop::Desktop,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct Setup {
+    relay: Option<omo_ui_core::relay::RelayView>,
     config: Option<Config>,
     android: bool,
     connected: bool,
@@ -81,7 +93,10 @@ struct Settings {
 
 fn require_setup(window: &WebviewWindow) -> Result<()> {
     // ACL also enforces the invoking document's local origin, including subframes.
-    if window.label() != "setup" {
+    let url = window
+        .url()
+        .map_err(|_| "Cannot identify the connection document.")?;
+    if window.label() != "setup" || !omo_ui_core::trusted_setup_document(&url) {
         return Err("Only the bundled connection screen can configure omo ui.".into());
     }
     Ok(())
@@ -91,14 +106,23 @@ fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
         .session
         .lock()
         .map_err(|_| "Connection state is unavailable.")?;
+    let relay = state
+        .relay
+        .lock()
+        .map_err(|_| "Relay connection state is unavailable.")?
+        .as_ref()
+        .map(|r| r.view())
+        .or_else(|| s.relay_view.clone());
     #[cfg(target_os = "android")]
     let native: serde_json::Value = android_worker(_app).call("status", ())?;
     #[cfg(target_os = "android")]
     return Ok(Setup {
+        relay,
         config: s.config.clone(),
         android: true,
         connected: s.active.is_some() || native["connected"].as_bool().unwrap_or(false),
-        polling: native["polling"].as_bool().unwrap_or(false),
+        polling: s.active.as_ref().is_some_and(|c| c.polling)
+            || native["polling"].as_bool().unwrap_or(false),
         forward_tunnel: false,
         forward_generation: String::new(),
         error: if s.error.is_empty() {
@@ -110,10 +134,13 @@ fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
     });
     #[cfg(not(target_os = "android"))]
     Ok(Setup {
+        relay,
         config: s.config.clone(),
         android: cfg!(target_os = "android"),
         connected: s.active.is_some(),
-        polling: s.active.as_ref().is_some_and(|c| c.polling),
+        polling: s.active.as_ref().is_some_and(|c| c.polling)
+            || s.relay_notifications.is_some()
+                && s.config.as_ref().is_some_and(|c| c.notifications),
         forward_tunnel: s.active.as_ref().is_some_and(|c| c.forwards.is_some()),
         forward_generation: s
             .active
@@ -135,6 +162,9 @@ async fn get_setup(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
 #[tauri::command]
 async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> Result<Setup> {
     require_setup(&window)?;
+    if settings.mode == Mode::Relay {
+        return Err("Use the native relay connection action.".into());
+    }
     if settings.mode == Mode::Local {
         return Err(if cfg!(target_os = "android") {
             "Android requires an external omo host."
@@ -144,8 +174,12 @@ async fn connect(window: WebviewWindow, app: AppHandle, settings: Settings) -> R
         .into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(not(target_os = "android"))]
         let state = app.state::<Shell>();
+        #[cfg(target_os = "android")]
+        let _operation = state
+            .operation
+            .lock()
+            .map_err(|_| "Connection operation state is unavailable.")?;
         #[cfg(not(target_os = "android"))]
         let _operation = state
             .desktop
@@ -163,6 +197,7 @@ fn open_connection(
     local_config: Option<Config>,
 ) -> Result<Setup> {
     let state = app.state::<Shell>();
+    relay::stop(app)?;
     let mut s = state
         .session
         .lock()
@@ -171,6 +206,8 @@ fn open_connection(
         id: Config::new_id(),
         mode: settings.mode,
         origin: settings.origin,
+        host_id: String::new(),
+        relay_allow_loopback_http: false,
         auth: settings.auth,
         username: settings.username,
         notifications: settings.notifications,
@@ -272,6 +309,7 @@ fn open_connection(
     let board_label = board.label().to_string();
     #[cfg(target_os = "android")]
     let _ = board;
+    s.relay_view = None;
     s.config = Some(config);
     s.active = Some(Connection {
         client,
@@ -299,6 +337,11 @@ async fn disconnect(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
     require_setup(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Shell>();
+        #[cfg(target_os = "android")]
+        let _operation = state
+            .operation
+            .lock()
+            .map_err(|_| "Connection operation state is unavailable.")?;
         #[cfg(not(target_os = "android"))]
         let _operation = state
             .desktop
@@ -307,6 +350,7 @@ async fn disconnect(window: WebviewWindow, app: AppHandle) -> Result<Setup> {
             .map_err(|_| "Local operation state is unavailable.")?;
         #[cfg(not(target_os = "android"))]
         state.desktop.release(&app, None)?;
+        relay::stop(&app)?;
         let mut s = state
             .session
             .lock()
@@ -541,24 +585,39 @@ fn poll(app: &AppHandle) -> Result<bool> {
     if s.recovery.is_some() {
         return Ok(false);
     }
+    if let Some(config) = s.config.clone().filter(|c| c.mode == Mode::Relay) {
+        if !config.notifications {
+            return Ok(false);
+        }
+        let Some(secrets) = s.relay_notifications.clone() else {
+            return Ok(false);
+        };
+        let result = omo_ui_core::poll_relay_saved(&state.root, &config, secrets, |n| {
+            show_notification(app, &config, n)
+        });
+        return match result {
+            Ok(Poll::More) => {
+                s.error.clear();
+                Ok(true)
+            }
+            Ok(Poll::Idle) => {
+                s.error.clear();
+                Ok(false)
+            }
+            Err(error) => {
+                s.error = error;
+                Ok(false)
+            }
+            Ok(Poll::Recovery(_)) => Err("Unexpected relay cursor recovery.".into()),
+        };
+    }
     let Some(c) = s.active.as_mut().filter(|c| c.polling) else {
         return Ok(false);
     };
     let config = c.client.config.clone();
     let result = c.client.poll(
         &mut c.delivery,
-        |n| {
-            let title = omo_ui_core::notification_text(&n.title, 80, false);
-            let body = omo_ui_core::notification_text(&n.body, 160, cfg!(target_os = "linux"));
-            app.notification()
-                .builder()
-                .title(title)
-                .body(body)
-                .extra("connection", &config.id)
-                .extra("destination", &n.destination)
-                .show()
-                .map_err(|_| "Cannot submit the system notification.".into())
-        },
+        |n| show_notification(app, &config, n),
         |d| write_json(&state.root, &format!("{}.json", config.id), d),
     );
     match result {
@@ -581,6 +640,21 @@ fn poll(app: &AppHandle) -> Result<bool> {
         }
     }
 }
+#[cfg(not(target_os = "android"))]
+fn show_notification(app: &AppHandle, config: &Config, n: &omo_ui_core::Notice) -> Result<()> {
+    app.notification()
+        .builder()
+        .title(omo_ui_core::notification_text(&n.title, 80, false))
+        .body(omo_ui_core::notification_text(
+            &n.body,
+            160,
+            cfg!(target_os = "linux"),
+        ))
+        .extra("connection", &config.id)
+        .extra("destination", &n.destination)
+        .show()
+        .map_err(|_| "Cannot submit the system notification.".into())
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -592,6 +666,7 @@ pub fn run() {
             disconnect,
             recover,
             local_connect,
+            relay::relay_connect,
             get_forwards,
             preview_forward,
             expose_forward,
@@ -604,6 +679,9 @@ pub fn run() {
                 Err(e) => (None, e),
             };
             app.manage(Shell {
+                #[cfg(target_os = "android")]
+                operation: Mutex::new(()),
+                relay: Mutex::new(None),
                 root,
                 #[cfg(not(target_os = "android"))]
                 desktop: desktop::Desktop::default(),
@@ -614,6 +692,7 @@ pub fn run() {
                 }),
             });
             windows::create_setup(app.handle())?;
+            relay::restore(app.handle());
             #[cfg(target_os = "android")]
             {
                 let handle = app.handle().clone();
@@ -717,11 +796,26 @@ fn android_worker(
 #[cfg(target_os = "android")]
 fn activate_android(app: &AppHandle, id: &str, path: &str) {
     let state = app.state::<Shell>();
+    let Ok(_operation) = state.operation.lock() else {
+        return;
+    };
     let Ok(mut s) = state.session.lock() else {
         return;
     };
-    let Some(config) = s.config.clone().filter(|c| c.id == id) else {
+    let Some(saved) = s.config.clone().filter(|c| c.id == id) else {
         return;
+    };
+    let config = if saved.mode == Mode::Relay {
+        let Some(active) = s.active.as_ref() else {
+            if saved.destination(path).is_ok() {
+                // A cold notification launch can beat relay restoration/Ready.
+                s.pending_activation = Some((id.into(), path.into()));
+            }
+            return;
+        };
+        active.client.config.clone()
+    } else {
+        saved
     };
     let Ok(url) = config.destination(path) else {
         return;
@@ -739,12 +833,20 @@ fn activate_android(app: &AppHandle, id: &str, path: &str) {
     let Ok(client) = BoardClient::new(config.clone(), secret.clone()) else {
         return;
     };
-    if let Ok(window) = windows::open_board(app, &config, &secret, config.notifications, None) {
-        let _ = window.navigate(url);
+    let polling = if config.mode == Mode::Direct
+        && s.config.as_ref().is_some_and(|c| c.mode == Mode::Relay)
+    {
+        s.relay_notifications.is_some() && config.notifications
+    } else {
+        config.notifications
+    };
+    if windows::open_board(app, &config, &secret, polling, None).is_ok() {
+        let _ = android_worker(app)
+            .call::<serde_json::Value>("navigateBoard", serde_json::json!({"url":url.as_str()}));
         s.active = Some(Connection {
             client,
             secret,
-            polling: config.notifications,
+            polling,
         });
     }
 }

@@ -6,7 +6,7 @@ const source = readFileSync(new URL('../setup/app.js',import.meta.url),'utf8');
 // Run the real setup against a form adapter and resolve on action()'s completed
 // render, rather than waiting a guessed number of event-loop turns.
 async function setup(state, replies = {}) {
-  const elements = new Map(); const fields = new Map(); const calls=[]; let submit; let finish;
+  const elements = new Map(); const fields = new Map(); const calls=[]; let submit; let finish; let update;
   const loaded = new Promise(resolve => { finish=resolve; });
   const button={set disabled(value){if(!value)finish();}};
   const local={remove(){this.removed=true}};
@@ -21,10 +21,10 @@ async function setup(state, replies = {}) {
   const element=id=>{if(!elements.has(id)){const node=make(id==='forward-app'?'select':'div');node.addEventListener=(name,fn)=>listeners.set(id+':'+name,fn);elements.set(id,node)}return elements.get(id)};
   const form={elements:{namedItem:field},querySelectorAll(){return [button]},addEventListener(name,fn){if(name==='submit')submit=fn}};
   const document={querySelector(){return form},getElementById:element,createElement:make};
-  const window={__TAURI__:{core:{async invoke(name,args){calls.push([name,args]);return Object.hasOwn(replies,name)?replies[name]:state}}},addEventListener(){}};
+  const window={__TAURI__:{event:{listen(name,fn){update=fn}},core:{async invoke(name,args){calls.push([name,args]);return Object.hasOwn(replies,name)?replies[name]:state}}},addEventListener(){}};
   vm.runInNewContext(source,{document,window});
   await loaded;
-  return {field,element,local,calls,async click(id){
+  return {field,element,local,calls,update(state){update({payload:state})},async click(id){
     const completed = new Promise(resolve => { finish=resolve; });
     listeners.get(id+':click')();await completed;
   },async clickNode(node){
@@ -66,6 +66,62 @@ test('desktop local connection retains notification and owned-server close setti
   assert.equal(settings.notifications,true);
   assert.equal(settings.remember,true);
   assert.equal(settings.stop_with_window,true);
+});
+
+test('Android retains relay choice and submits separate relay settings', async () => {
+  const state={android:true,connected:false,polling:false,error:'',config:{mode:'relay',origin:'https://relay.example',host_id:'office',auth:'none',username:'',notifications:true,remember:true,notification_mode:'background'},relay:{phase:'failed'}};
+  const ui=await setup(state);
+  assert.equal(ui.field('mode').value,'relay');
+  assert.equal(ui.element('mode-label').hidden,false);
+  assert.equal(ui.element('relay').hidden,false);
+  assert.equal(ui.element('direct').disabled,true);
+  ui.field('admission').value='relay-password';
+  await ui.submit();
+  const [command,{settings}]=ui.calls.at(-1);
+  assert.equal(command,'relay_connect');
+  assert.equal(settings.origin,'https://relay.example');
+  assert.equal(settings.host_id,'office');
+  assert.equal(settings.admission,'relay-password');
+  assert.equal(settings.new_pair,false);
+  assert.equal(ui.field('admission').value,'');
+});
+test('only proved pairing exposes PIN and full key is inside Advanced', async () => {
+  const info={aid:'abcdefghijklmnopqrstuv',pin:'007026',public_key:'FULL_RAW_MLKEM_KEY'};
+  const ui=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'awaiting_accept',pairing:info}});
+  assert.equal(ui.element('pairing').hidden,false);
+  assert.equal(ui.element('pair-pin').textContent,'007026');
+  assert.equal(ui.element('pair-command').textContent,'omo relay pair accept -- abcdefghijklmnopqrstuv 007026');
+  assert.equal(ui.element('pair-key-command').textContent,'omo relay pair accept --public-key FULL_RAW_MLKEM_KEY -- abcdefghijklmnopqrstuv');
+  const html=readFileSync(new URL('../setup/index.html',import.meta.url),'utf8');
+  assert.match(html,/<details[^>]*>[\s\S]*?<summary>Advanced<\/summary>[\s\S]*?id="pair-public-key"[\s\S]*?id="pair-key-command"[\s\S]*?<\/details>/);
+  const failed=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'failed',pairing:null}});
+  assert.equal(failed.element('pairing').hidden,true);
+  assert.match(failed.element('relay-status').textContent,/explicit|new pairing/i);
+});
+
+test('pairing commands protect leading-hyphen attempt ids and keys and preserve leading-zero PINs', async (t) => {
+  // Canonical unpadded base64url for 16/1184 bytes starting with 0xf8.
+  const aid='-AAAAAAAAAAAAAAAAAAAAA';
+  const public_key='-'+ 'A'.repeat(1578);
+  const ui=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'awaiting_accept',pairing:{aid,pin:'007026',public_key}}});
+  assert.equal(ui.element('pair-pin').textContent,'007026');
+  await t.test('PIN command', () => {
+    assert.equal(ui.element('pair-command').textContent,'omo relay pair accept -- -AAAAAAAAAAAAAAAAAAAAA 007026');
+  });
+  await t.test('full-key command', () => {
+    assert.equal(ui.element('pair-key-command').textContent,`omo relay pair accept --public-key ${public_key} -- -AAAAAAAAAAAAAAAAAAAAA`);
+  });
+});
+
+test('failure events never retry pairing and a new ceremony requires its own user action',async()=>{
+  const state={android:false,connected:false,error:'',config:{mode:'relay',origin:'https://relay.example',host_id:'office',auth:'none',remember:true},relay:{phase:'failed'}};
+  const ui=await setup(state);
+  const count=ui.calls.length;
+  ui.update({...state,relay:{phase:'failed'}});
+  assert.equal(ui.calls.length,count);
+  await ui.click('new-pair');
+  assert.equal(ui.calls.at(-1)[0],'relay_connect');
+  assert.equal(ui.calls.at(-1)[1].settings.new_pair,true);
 });
 test('desktop forward controls require a connected server with negotiated tunnel support', async () => {
   for (const [android,connected,forward_tunnel,visible] of [[true,true,true,false],[false,false,true,false],[false,true,false,false],[false,true,true,true]]) {

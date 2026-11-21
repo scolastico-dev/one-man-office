@@ -611,6 +611,9 @@ func TestGracefulCloseCrossingDataReclaimsSlots(t *testing.T) {
 			r := record("stream.data", id)
 			r.Data = []byte("crossed close")
 			p.in <- r
+			if credit := <-p.out; credit.Type != "stream.credit" || credit.ID != relayproto.Counter(id) || credit.Bytes != 13 {
+				t.Fatal("crossed close did not drain credit", credit)
+			}
 			p.in <- record("stream.fin", id)
 			c = openPeer(t, m, p, id+2) // ordered dispatch barrier
 			m.mu.Lock()
@@ -621,4 +624,103 @@ func TestGracefulCloseCrossingDataReclaimsSlots(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFullCloseDrainsCrossedDataBeforeRetirement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, p := newPeer(t)
+		c := openPeer(t, m, p, 1).(*Conn)
+		written := make(chan error, 1)
+		go func() { _, err := c.Write([]byte("response")); written <- err }()
+		if r := <-p.out; r.Type != "stream.data" || string(r.Data) != "response" {
+			t.Fatal(r)
+		}
+		if err := <-written; err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if r := <-p.out; r.Type != "stream.fin" {
+			t.Fatal(r)
+		}
+		data := record("stream.data", 1)
+		data.Data = []byte("crossed")
+		p.in <- data
+		p.in <- record("stream.fin", 1)
+		credit := record("stream.credit", 1)
+		credit.Bytes = 8
+		p.in <- credit
+		// The unbuffered peer holds the final drain grant inside Send. Receive
+		// has processed FIN and credit; neither selection nor full Close is EOF
+		// for this grant's serialization.
+		synctest.Wait()
+		m.mu.Lock()
+		retained, buffered := m.streams[1] == c, len(c.input)
+		m.mu.Unlock()
+		if !retained || buffered != 0 {
+			t.Fatalf("closed stream lost its drain credit: retained=%v buffered=%d", retained, buffered)
+		}
+		if r := <-p.out; r.Type != "stream.credit" || r.Bytes != 7 {
+			t.Fatal(r)
+		}
+		synctest.Wait()
+		m.mu.Lock()
+		remaining := len(m.streams)
+		m.mu.Unlock()
+		if remaining != 0 {
+			t.Fatal("graceful drain did not retire", remaining)
+		}
+		openPeer(t, m, p, 3)
+	})
+}
+
+func TestQueuedFINMustNotFollowFullCloseReset(t *testing.T) {
+	// Drive the real state transitions while the shared writer is occupied:
+	// no record can be selected until CloseWrite, incoming data and Close ran.
+	m := &Mux{
+		streams: map[relayproto.Counter]*Conn{},
+		wake:    make(chan struct{}, 1),
+		changed: make(chan struct{}),
+	}
+	c := &Conn{mux: m, id: 1, opened: true, sendCredit: relayproto.InitialCredit, recvCredit: relayproto.InitialCredit}
+	m.streams[1] = c
+	m.order = []*Conn{c}
+	if err := c.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	data := record("stream.data", 1)
+	data.Data = []byte("unread")
+	if err := m.dispatch(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item := m.nextLocked()
+	if item == nil || item.record.Type != "stream.reset" {
+		t.Fatal("full close did not replace queued FIN with reset", item)
+	}
+	// Complete the local reset, leaving its reciprocal acknowledgment pending.
+	c.sending = false
+	m.retireLocked(c)
+	if m.streams[1] != c {
+		t.Fatal("reset retired before reciprocal completion")
+	}
+	if item := m.nextLocked(); item != nil {
+		t.Fatalf("record after reset: %s (id %d)", item.record.Type, item.record.ID)
+	}
+	// Crossed bytes are still validated/discarded, never granted or enqueued.
+	if err := m.dispatch(data); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.input) != 0 || c.credit != 0 || m.nextLocked() != nil {
+		t.Fatal("crossed data revived a resetting stream")
+	}
+	if err := m.dispatch(record("stream.reset", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.streams) != 0 || len(m.order) != 0 {
+		t.Fatal("reciprocal reset did not retire")
+	}
 }

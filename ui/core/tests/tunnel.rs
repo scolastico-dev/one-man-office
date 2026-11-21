@@ -21,6 +21,8 @@ fn config(address: std::net::SocketAddr, auth: Auth) -> Config {
         id: Config::new_id(),
         mode: Mode::Direct,
         origin: format!("http://{address}"),
+        host_id: String::new(),
+        relay_allow_loopback_http: false,
         auth,
         username: "user".into(),
         notifications: false,

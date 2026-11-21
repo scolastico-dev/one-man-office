@@ -6,7 +6,7 @@ the selected server supplies the board, plugins and forwarded applications.
 
 ## Connect
 
-Start the app, choose **An external omo host**, and enter its origin, for
+Start the app, choose **An external omo host directly**, and enter its origin, for
 example `http://localhost:8090` or `https://office.example`. Enter the login
 token separately, or select username/password or no authentication to match
 the server. The address must contain no path, query, fragment or credentials.
@@ -73,9 +73,103 @@ normal service lifecycle proves the old instance is gone and allows close,
 Exit or Disconnect to finish. A failed control request while that lock is held
 keeps ownership and reports the error for retry.
 
-Android exposes only direct connection. Native validation and the local
+Android offers direct and relay connections. Native validation and the local
 runtime refuse local start/install there.
 
+## Connect through a relay
+
+Desktop offers **Local omo**, **An external omo host directly**, and **An external
+omo host through relay**. Android offers the two external choices. Select the
+relay choice and enter its HTTPS origin (no slash/path, query, fragment or
+credentials), the omo host's client id, and an optional separate relay admission
+password. An explicit checkbox permits HTTP only for a loopback relay.
+
+For a new device, run `omo relay pair begin` on the host's local command line,
+then click **Start new pairing** in the app. The app creates a post-quantum device
+identity in the native credential store and proves possession with the host.
+Only after mutual proof does Connection show the six-digit PIN (including leading
+zeroes) and the exact command:
+
+```sh
+omo relay pair accept -- <aid> <PIN>
+```
+
+Run that command locally on the real host. Acceptance is the entire ceremony:
+the app loads the host's board automatically, with no second confirmation or
+invitation. **Advanced** contains the entire raw public key and the alternative
+`omo relay pair accept --public-key <full-public-key> -- <aid>` command. A fingerprint
+is not a replacement for the full key.
+
+The `--` ends flag parsing so an attempt id starting with `-` remains an
+argument. Put optional flags such as `--name <label>` before `--`.
+
+**Connect** uses saved trust only. The app restores its relay connection after a
+restart and reconnects with fresh session keys after host/relay loss. It never
+starts another pairing automatically. Disconnect cancels and waits for this
+connection's socket/bridge to close and closes its board windows. After a failed,
+expired or cancelled ceremony, start a fresh host ceremony and explicitly choose
+**Start new pairing**. If the earlier device may have been accepted, unregister
+it on the host before replacing it. Saved candidate trust can instead recover an
+acceptance whose reply was lost. Missing private state is an error; restoration
+never silently creates a replacement identity.
+
+Relay identities, host pins, roots and admission passwords stay in the native
+credential store. Public settings contain the route and connection preferences.
+The board is served through an authenticated private loopback bridge over the
+encrypted relay; bridge credentials never enter page JavaScript. Relay admission
+and TLS routing do not grant host authority. This UI does not bundle the board.
+
+System notifications also work through the relay. Both desktop and Android use
+native `GET /notifications/<host_id>/<ui_id>` checks with the saved paired
+notification root, request MAC and optional separate relay admission Basic
+credentials. The app verifies and decrypts each host reply itself; notification
+checks need no UI WebSocket, board bridge, Tauri event loop or running WebView.
+A restored trusted connection can poll while the board reconnects.
+
+Relay notification IDs are comment IDs, independent of the direct event feed.
+The host starts a new registration at zero, so retained older user mentions are
+included. The native journal atomically saves received IDs, queued OS notices
+and the exact batch/through/token receipt before acknowledging a batch with the
+next authenticated GET. A matching authenticated acknowledgment replaces the
+receipt with the next batch or authenticated empty state. Lost, altered, wrong
+context and HTTP 204/error replies retain it; 204 means unavailable, not proved
+empty. Authenticated `invalid_ack` clears only the stale receipt, preserving IDs
+and queued deliveries before retrying with no acknowledgment. Host, relay, app
+and worker restarts preserve this chain without generating new pairing keys.
+
+Desktop uses the private `<connection-id>-relay-notifications.json` journal;
+Android uses a separate Keystore-encrypted `relay-notifications-<connection-id>`
+file in private no-backup storage. Connection/mode changes preserve these
+journals, preventing replay when returning to a saved connection. Received IDs
+use exact compact ranges with decimal-string endpoints, retaining gaps and the
+full uint64 range through Android JSON. Desktop history is streamed separately
+from the bounded public configuration format and has no fixed history-size
+cutoff; an OS file lock serializes all desktop processes sharing the journal.
+OS delivery
+is retried from saved pending notices before polling again. Android uses stable
+connection/comment notification tags to replace a replay after a crash without
+a second alert. A desktop crash between OS submission and saving completion can
+repeat a notification. Clicks open the ticket/comment through that connection's
+relay board bridge; a cold Android launch waits for the saved relay to be ready.
+Old-connection clicks cannot navigate the new board.
+
+## Recognize the Connection screen
+
+On desktop, the app-owned window is titled **omo ui · Connection**. Every board
+and child document's native title starts with **omo ui · Host content ·**, followed
+by bounded plain document text. A page cannot replace that prefix with its own
+Connection title. Host HTML fullscreen is disabled on WebKit so it cannot hide
+the native frame. On Windows, a native window subclass preserves the caption
+and nonclient frame even if WebView2 requests fullscreen. Remote windows have
+no configuration or pairing command ACL.
+
+Android keeps the bundled Connection WebView separate from the native host
+WebView. An app-owned blue surrounding frame says **omo ui · Trusted Connection**;
+remote content gets a brown frame saying **omo ui · Host content**, with a native
+**Connection** button. These widgets live outside page HTML, ignore page titles,
+and remain visible when a document requests fullscreen. Native Connection actions
+switch to the trusted view. The host WebView has no Tauri JavaScript command
+interface, and visiting a local-looking URL there never grants setup authority.
 ## Desktop app previews and local ports
 
 On Linux, Windows and macOS 14 or later, open **Connection…**, then under
@@ -129,9 +223,10 @@ omo WebSocket transport. Windows profile deletion waits for WebView2's
 Desktop system notifications are enabled in the connection screen. Capability
 exchange uses the [Native UI API](ui-api.md); an older server without that
 endpoint still opens, with native polling disabled. Server and app versions do
-not have to match. Android uses the same feed and system-notification feature flags.
+not have to match. This capability/event-cursor protocol is for direct/local
+connections; relay notification checks follow the receipt chain above.
 
-A new connection starts after current server history. On desktop, polling runs in native code every five seconds after catching up,
+A new direct/local connection starts after current server history. On desktop, polling runs in native code every five seconds after catching up,
 independently of WebView visibility. Android scheduling is described below.
 Empty pages with more events are drained immediately. Received IDs and the
 string cursor are persisted per connection; the browser bell's seen marker is
@@ -201,15 +296,19 @@ notification feed still open with native polling disabled.
 The app requests Android 13+ notification permission when connecting with native
 notifications enabled. **Board notifications** and **Foreground polling** have
 separate system channels. If permission or a required channel is blocked,
-checks retain the cursor and report the problem in Connection. Re-enable them
+checks retain the cursor or relay receipt and report the problem in Connection. Re-enable them
 in Android Settings and reconnect. Android's stop/force-stop and manufacturer
 battery controls can suspend work; opening and reconnecting restores it.
 
-Both modes use authenticated plain GET requests through the same Rust feed and
-delivery journal as desktop. There is no Firebase, Google push or Google services
+Both modes use native authenticated GET polling through the same Rust delivery
+path as desktop: the direct feed for direct connections, and relay GET decryption
+and durable receipts for relay connections. There is no Firebase, Google push or Google services
 account. Native jobs contain only a random scheduling generation, never a token
 or password. The work configuration is encrypted with an Android Keystore key
-in the app's private no-backup directory. Disconnect invalidates it and cancels
+in the app's private no-backup directory. For relay workers this contains only
+the notification context/root and optional relay admission password, never the
+pairing private key or application session keys. Receipt/queued notice storage
+is also encrypted. Disconnect invalidates work configuration and cancels
 periodic and foreground work. Turning notifications off retains the current
 connection for existing notification taps while cancelling all polling.
 Changing modes replaces the prior scheduler;
@@ -462,6 +561,187 @@ Only the bundled `setup` document has the explicit connection and app-forward co
 Board/proxy views have no remote capabilities, shell/process/filesystem plugins,
 or arbitrary native HTTP endpoint. Their injected bridge exposes a notification
 marker and a configure action, not a general native API.
+
+## Native relay library
+
+`ui/core/src/relay` implements the existing [version-1 relay protocol](relay-protocol.md)
+in native Rust, without a Go process. It provides committed pairing, mutual
+ML-KEM-768 possession proofs, authenticated records/reconnect and notification
+request/envelope cryptography. Its native stream multiplexer and private board
+bridge carry host HTTP, SSE and WebSocket traffic. The shell uses `RelayConnection`
+for setup/window wiring and `RelayNotifier` for independent native notification
+GET checks.
+
+The entry points for those consumers are:
+
+- `wire::Route::new(origin, host_id, allow_loopback_http)` validates the exact
+  configured origin/name used in every transcript. Production uses verified
+  WSS/HTTPS. HTTP/WS requires explicit loopback development opt-in.
+- `RelayClient::open(Arc<dyn SecretStore>, key, route, admission)` creates a new
+  identity only if the secret entry is absent. Use `RelayClient::restore` for
+  an existing saved profile: missing secrets fail instead of generating another
+  identity. Clone one client to share its state; never open the same storage
+  key concurrently. `RelayStatus` is public metadata only.
+- `begin_pair().await` is an explicit human-authorized ceremony. It returns
+  `Pairing`, with `info()` exposing `aid`, the six-character `pin`, full
+  `public_key`, `host_fp` and `ui_id` only after verifying the possession proof.
+  The UI should show `omo relay pair accept --name <label> -- <aid> <PIN>`;
+  full-key acceptance belongs behind advanced options. `accepted().await`
+  validates the encrypted acceptance and returns `RelaySession`.
+- `reconnect().await` authenticates against the saved host key/epoch and checks
+  encrypted active `ready` with the original attempt id before sending
+  `ready.ack`. This also recovers a lost acceptance reply from a saved candidate;
+  an unaccepted candidate gains no authority. Reconnect never generates a new
+  ceremony or notification root. `discard_unproved_attempt` is an explicit
+  local operation and refuses a candidate with a saved root, since it may
+  already have been accepted on the host.
+- `RelaySession::split` gives a cloneable `RecordSender` and one
+  `RecordReceiver`. Sender calls serialize sealing **and** writing globally;
+  the receive consumer demultiplexes all stream records. `control()` supplies
+  status subscriptions, cancellation and async `close()` that waits for socket
+  release and key erasure. Old handles can remain closed while a new session
+  connects. Dropping a pending send after sealing closes the session; uncertain
+  records are never replayed. Socket reader/writer loops continuously service
+  Ping/Pong and use bounded queues (32 records); overload terminates a session.
+  Consumers must implement the protocol's bounded stream credits and read
+  concurrently, rather than treating a socket write as peer application receipt.
+- `StreamMux::new(session)` owns one receive demultiplexer and a round-robin
+  writer. `open().await` returns a `RelayStream` implementing Tokio
+  `AsyncRead`/`AsyncWrite` only after `stream.opened`. It enforces sequential
+  odd ids, 64 slots, 65,536-byte receive windows and 16,384-byte data records.
+  Credit returns only on consumption; one pending output record per stream
+  bounds buffering. `shutdown` sends ordered write FIN while reads continue;
+  dropping an unfinished stream resets it. Reset snapshots retain their slots
+  until reciprocal reset, validating crossed credit/data/FIN without buffering
+  cancelled payloads. `close().await` joins the record/socket driver.
+- `crypto::{NotificationContext, new_poll, open_notification}` and the strict
+  `wire` notification codecs provide the request MAC, outstanding-request binding
+  and response authentication/decryption. Request randomness comes from
+  `crypto::random_bytes`.
+- `RelayClient::notification_secrets()` exports a private notification-only
+  capability after accepted trust. `RelayNotifier::poll` uses it without a UI
+  session, persisting a fresh sole outstanding request before each GET.
+  `RelayDelivery` records received comment IDs, pending OS deliveries and the
+  authenticated receipt in whole atomic replacements. `poll_relay_saved` adapts
+  the desktop private journal; Android JNI uses the same poller with synchronous
+  encrypted journal callbacks. Platform operation/worker locks serialize a
+  connection's checks through persistence and OS delivery.
+
+`SecretStore` loads/saves one private snapshot atomically and durably, with a
+missing entry distinct from unavailable storage. Snapshots contain the private
+seed, admission password, consumed attempt marker, host candidate/pin, original
+attempt id, epoch and notification root; none belongs in public settings.
+Snapshots use the same 32 KiB encoded limit for reads and writes, checked before
+replacement; this includes worst-case JSON escaping of a 4 KiB admission password.
+Saves precede commitment, reveal, final proof and trust transitions. A failed
+storage write latches the client closed until storage is repaired and it is reconstructed.
+`omo_ui::RelaySecrets` adapts the existing desktop/Android credential store using
+separate `relay:<key>` entries. Android's headless worker loads its reduced
+notification capability and journal from Keystore-encrypted saved files without
+opening that pairing credential store or starting Tauri/a WebView.
+Credential-store size/availability failures are surfaced and never fall back to
+public files. A saved candidate with lost secrets requires restoring those
+secrets or unregistering the possible host registration before a new ceremony.
+
+Crypto uses [RustCrypto `ml-kem` 0.3.4](https://docs.rs/ml-kem/0.3.4/ml_kem/) with final FIPS 203 seed/key/ciphertext
+encodings and OS cryptographic randomness, SHA-384/HMAC/HKDF and AES-256-GCM.
+The crate describes its implementation as unaudited; fixture interoperability
+is not an independent protocol audit or certification. Tests use the existing
+NIST ACVP and protocol fixtures, including PIN `007026`, both proofs, record
+keys/ciphertexts and notification MACs/envelopes.
+
+```sh
+cd ui
+cargo test -p omo-ui-core
+node --test tests/*.test.mjs
+# Optional real Go relay/host integration, no OS WebViews:
+node scripts/relay-probe.mjs
+# Actual embedded board assets/API/upload/SSE/terminal and automatic recovery:
+# npm --prefix ../web ci first if its dependencies are missing.
+node scripts/relay-probe.mjs --board
+# Real host mentions, GET receipts/restarts and headless JNI (JDK required):
+node scripts/relay-probe.mjs --notifications
+```
+
+The integration probe builds an isolated Go fixture and exercises PIN/full-key
+acceptance, interception/loss of acceptance, UI/host/relay reconstruction,
+unaccepted-candidate denial, concurrent ordered record senders and reconnect
+with retained closed handles. It removes its private temporary state and joins
+its child processes. Relay core compilation has been checked on Linux x86_64,
+Android arm64 and Windows x64 GNU; this is not Android/Windows device runtime
+or OS credential-store evidence.
+
+### Native board adapter
+
+`BoardTransport::start(client, session: Option<RelaySession>).await` returns the
+connection-owned adapter for desktop and Android. Pass the session returned by
+`Pairing::accepted` to use a freshly accepted connection, or `None` to authenticate
+with saved trust. A live unrelated session makes `start(None)` fail with busy;
+clone one client for shared state rather than opening its secret entry twice.
+
+`endpoint()` returns `BoardEndpoint { origin, username, password }`. These are
+fresh, ephemeral **bridge** Basic credentials, unrelated to relay admission or
+endpoint cryptographic secrets. Use the existing native WebView Basic-auth
+callbacks with `Auth::Basic` and realm `omo`; keep the endpoint credentials only
+in the owning native connection, out of saved profiles, URLs and JavaScript.
+The endpoint is deliberately not serializable or debug-printable. The listener
+binds only `127.0.0.1` on an allocated port, requires its exact Host and Basic
+credential, and rejects foreign/null Origins, cross-site Fetch Metadata,
+ambiguous header framing and relay/private credential headers. Requests without
+credentials receive a Basic challenge. It has no CORS grant or native-command
+capability. Remote documents retain the shell's existing command boundary.
+
+The bridge sends origin-form HTTP/1.1 over each authorized encrypted stream,
+replacing Host/Origin with `omo-relay.invalid` / `http://omo-relay.invalid` and
+removing bridge authentication. Ordinary connections use `Connection: close`;
+WebSocket upgrades retain their headers, subprotocol and opaque frames. Bodies,
+chunking, application JSON, assets and streamed responses are not rewritten or
+buffered as whole messages. No arbitrary upstream or host HTTP fallback exists.
+
+`status()` and `subscribe()` expose `Connecting`, `Ready`, `Reconnecting`,
+`Unavailable`, `Stopped`. The shell should watch Ready to load/reload its board
+document. The same loopback endpoint survives reconnects during this owner.
+After loss, the adapter authenticates with fresh session keys and the saved
+host key/epoch/attempt, retrying after 1, 2, 4, 8, 16 and then 30 seconds. A host
+not registered yet remains retryable. Failure, admission denial or revocation
+stays visible as Unavailable; none starts a new pairing or replaces trust.
+Offline requests return 503. The adapter never replays HTTP requests, uncertain
+writes or terminal input. Board subscriptions reopen through their existing
+Last-Event-ID/resync and terminal replay/message-ack behavior.
+
+Own one adapter with the configured connection and call `close().await` on
+disconnect/replacement: it closes the listener, cancels and joins every accepted
+connection and its own authentication/socket work before reporting Stopped.
+Drop requests cancellation; explicit close observes completion. `RelayConnection`
+and the shell own setup/native chrome. Notification receipts use the separate
+headless GET path and never the board bridge's direct event cursor.
+
+The `--notifications` probe uses the production host/relay without board assets
+or a UI socket during checks. It exercises real user mentions, multiple batches,
+authenticated empty versus offline 204, lost acknowledgment replies, envelope
+ciphertext/host/device/epoch/request tampering, receipt recovery after host/relay
+restart, and authenticated `invalid_ack`. It also builds the actual JNI source
+as a standalone host library and calls it from a JVM adapter, checking durable
+journal callbacks, injected save failure, blocked OS delivery and ticket/comment
+destinations. This validates JNI without a Tauri loop or WebView; it does not
+exercise Android's real Keystore, WorkManager/foreground OS scheduling, permission
+prompts or notification taps on a device. Focused Robolectric tests cover both
+scheduler modes, encrypted storage/recreation and immutable activation intents.
+
+The `--board` probe builds the real Vue board and a test-only control-pipe
+fixture around the production Go server and relay, without a host browser
+listener. It checks actual assets/API, an exact multi-window chunked PNG upload,
+SSE live/resume/resync, terminal binary output/input and message acknowledgments,
+host/relay loss and delayed host registration, saved-trust UI reconstruction,
+no duplicate uncertain write or terminal input, revocation and joined shutdown.
+Protocol unit tests use exact records and consumption events, not elapsed time.
+Transport compilation is checked for Linux desktop, Windows GNU and Android
+arm64. The native setup owner is also exercised against the real Go board for
+acceptance and saved restoration. For the relay setup integration, Android debug
+APK compilation and focused Robolectric tests (including native frame switching,
+notification storage and scheduling) pass; Windows GNU shell compilation passes. This development host lacks
+WebKitGTK development files, an attached Android device, and the Apple SDK, so
+relay loading in an OS WebView and Windows/macOS runtime chrome remain unverified.
 
 ## Focused native smoke
 

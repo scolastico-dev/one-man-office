@@ -303,6 +303,7 @@ mod permissions {
             "disconnect",
             "recover",
             "local_connect",
+            "relay_connect",
             "get_forwards",
             "preview_forward",
             "expose_forward",

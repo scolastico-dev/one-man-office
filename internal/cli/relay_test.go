@@ -76,3 +76,64 @@ func TestRelayConfigCommandValues(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestRelayAcceptLeadingHyphenValues(t *testing.T) {
+	isolate(t)
+	old := newRelayClient
+	t.Cleanup(func() { newRelayClient = old })
+	// Canonical unpadded base64url for 16/1184 bytes starting with 0xf8.
+	const aid = "-AAAAAAAAAAAAAAAAAAAAA"
+	key := "-" + strings.Repeat("A", 1578)
+	for _, name := range []string{"", "phone"} {
+		for _, fullKey := range []bool{false, true} {
+			mode := "PIN"
+			want := api.RelayAcceptRequest{AID: aid, PIN: "007026", Name: name}
+			args := []string{"relay", "pair", "accept"}
+			if name != "" {
+				args = append(args, "--name", name)
+			}
+			if fullKey {
+				mode = "full-key"
+				want.PIN, want.PublicKey = "", key
+				args = append(args, "--public-key", key, "--", aid)
+			} else {
+				args = append(args, "--", aid, "007026")
+			}
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				var got api.RelayAcceptRequest
+				calls := 0
+				newRelayClient = func() (*apiclient.Client, error) {
+					return apiclient.NewWithTransport(apiclient.HandlerTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls++
+						if r.Method != http.MethodPost || r.URL.Path != "/api/relay/pair/accept" {
+							t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+						}
+						if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+							t.Fatal(err)
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(api.RelayAccepted{AID: aid, Device: api.RelayDevice{State: "active"}})
+					})), ""), nil
+				}
+				if _, err := execute(t.Context(), args...); err != nil {
+					t.Fatalf("accept command failed: %v", err)
+				}
+				if calls != 1 || got != want {
+					t.Fatalf("accept request mismatch: calls=%d, aid=%q, pin=%q, name=%q, public key matches=%t", calls, got.AID, got.PIN, got.Name, got.PublicKey == want.PublicKey)
+				}
+			})
+		}
+	}
+	for _, args := range [][]string{
+		{"--", aid},
+		{"--public-key", key, "--", aid, "007026"},
+	} {
+		newRelayClient = func() (*apiclient.Client, error) {
+			t.Fatal("invalid credential selection reached the host")
+			return nil, nil
+		}
+		if _, err := execute(t.Context(), append([]string{"relay", "pair", "accept"}, args...)...); err == nil || err.Error() != "provide either PIN or --public-key" {
+			t.Fatalf("credential selection validation: %v", err)
+		}
+	}
+}

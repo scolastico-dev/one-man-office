@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub enum Mode {
     Direct,
     Local,
+    Relay,
 }
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +37,10 @@ pub struct Config {
     pub id: String,
     pub mode: Mode,
     pub origin: String,
+    #[serde(default)]
+    pub host_id: String,
+    #[serde(default)]
+    pub relay_allow_loopback_http: bool,
     pub auth: Auth,
     pub username: String,
     pub notifications: bool,
@@ -49,6 +54,16 @@ impl Config {
     pub fn validate(&mut self, android: bool) -> Result<()> {
         if android && self.mode == Mode::Local {
             return Err("Android requires an external omo host.".into());
+        }
+        if self.mode == Mode::Relay {
+            Uuid::parse_str(&self.id).map_err(|_| "Invalid connection identity.")?;
+            let route = crate::relay::wire::Route::new(&self.origin, &self.host_id, self.relay_allow_loopback_http)
+                .map_err(|_| "Enter a relay HTTPS origin and a host client id (letters, digits, _ or -; at most 64 characters). HTTP requires explicit loopback permission.")?;
+            if self.auth != Auth::None || !self.username.is_empty() || !self.remember {
+                return Err("Relay identities require native credential storage, without board login credentials.".into());
+            }
+            self.origin = route.origin;
+            return Ok(());
         }
         if android && self.notifications && self.auth != Auth::None && !self.remember {
             return Err("Android notifications require Remember credentials so checks can survive process restarts.".into());
@@ -135,10 +150,27 @@ pub fn load_config(root: &Path, android: bool) -> Result<Option<Config>> {
     c.validate(android)?;
     Ok(Some(c))
 }
+const MAX_JSON_BYTES: usize = 1024 * 1024;
+
 /// Atomic replacement in the same directory; failure leaves the last complete file intact.
 pub fn write_json(root: &Path, name: &str, value: &impl Serialize) -> Result<()> {
     fs::create_dir_all(root).map_err(|_| "Cannot create app configuration directory.")?;
     let data = serde_json::to_vec_pretty(value).map_err(|_| "Cannot encode app configuration.")?;
+    if data.len() > MAX_JSON_BYTES {
+        return Err("App configuration is too large.".into());
+    }
+    atomic_write(root, name, |file| {
+        file.write_all(&data)
+            .map_err(|_| "Cannot write configuration file.".into())
+    })
+}
+
+pub(crate) fn atomic_write(
+    root: &Path,
+    name: &str,
+    write: impl FnOnce(&mut fs::File) -> Result<()>,
+) -> Result<()> {
+    fs::create_dir_all(root).map_err(|_| "Cannot create app configuration directory.")?;
     let temp = root.join(format!(".{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut options = fs::OpenOptions::new();
@@ -151,11 +183,15 @@ pub fn write_json(root: &Path, name: &str, value: &impl Serialize) -> Result<()>
         let mut file = options
             .open(&temp)
             .map_err(|_| "Cannot create configuration file.")?;
-        file.write_all(&data)
-            .and_then(|_| file.sync_all())
+        write(&mut file)?;
+        file.sync_all()
             .map_err(|_| "Cannot write configuration file.")?;
         drop(file);
         fs::rename(&temp, root.join(name)).map_err(|_| "Cannot replace configuration file.")?;
+        #[cfg(unix)]
+        fs::File::open(root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| "Cannot durably save app configuration.")?;
         Ok(())
     })();
     if result.is_err() {
@@ -171,10 +207,10 @@ pub fn read_json<T: DeserializeOwned>(root: &Path, name: &str) -> Result<Option<
     };
     let mut data = Vec::new();
     Read::by_ref(&mut file)
-        .take(1024 * 1024 + 1)
+        .take(MAX_JSON_BYTES as u64 + 1)
         .read_to_end(&mut data)
         .map_err(|_| "Cannot read app configuration.")?;
-    if data.len() > 1024 * 1024 {
+    if data.len() > MAX_JSON_BYTES {
         return Err("App configuration is too large.".into());
     }
     serde_json::from_slice(&data)

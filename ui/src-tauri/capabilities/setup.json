@@ -15,6 +15,9 @@
     "allow-get-forwards",
     "allow-preview-forward",
     "allow-expose-forward",
-    "allow-stop-forward"
+    "allow-stop-forward",
+    "allow-relay-connect",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

@@ -33,8 +33,9 @@ interface WorkStore {
     fun load(): WorkConfig?
     fun save(work: WorkConfig?)
 }
-class EncryptedWorkStore(context: Context, private val encryptionKey: (() -> SecretKey)? = null): WorkStore {
-    private val file = AtomicFile(File(context.noBackupFilesDir,"notification-work"))
+// One atomic, encrypted JSON value; absence differs from denied/corrupt storage.
+private class EncryptedJsonStore(context: Context, name: String, private val encryptionKey: (() -> SecretKey)? = null) {
+    private val file = AtomicFile(File(context.noBackupFilesDir,name))
     private fun key(): SecretKey {
         encryptionKey?.let {return it()}
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
@@ -45,7 +46,7 @@ class EncryptedWorkStore(context: Context, private val encryptionKey: (() -> Sec
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    override fun load(): WorkConfig? {
+    fun load(): JSONObject? {
         val bytes=try { file.readFully() } catch(missing:FileNotFoundException) {
             // openRead recovers a committed .bak before opening the base. Never
             // short-circuit that recovery, including on Android's legacy writer.
@@ -64,13 +65,30 @@ class EncryptedWorkStore(context: Context, private val encryptionKey: (() -> Sec
         require(bytes.size>12)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,bytes.copyOfRange(0,12)))
-        return WorkConfig.parse(JSONObject(String(cipher.doFinal(bytes.copyOfRange(12,bytes.size)),Charsets.UTF_8)))
+        return JSONObject(String(cipher.doFinal(bytes.copyOfRange(12,bytes.size)),Charsets.UTF_8))
     }
-    override fun save(work:WorkConfig?) {
+    fun save(work:JSONObject?) {
         if(work==null) {file.delete();return}
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply {init(Cipher.ENCRYPT_MODE,key())}
-        val bytes=cipher.iv + cipher.doFinal(work.json().toString().toByteArray(Charsets.UTF_8))
+        val bytes=cipher.iv + cipher.doFinal(work.toString().toByteArray(Charsets.UTF_8))
         val stream=file.startWrite()
         try {stream.write(bytes);file.finishWrite(stream)} catch(e:Exception) {file.failWrite(stream);throw e}
     }
+}
+
+class EncryptedWorkStore(context: Context, encryptionKey: (() -> SecretKey)? = null): WorkStore {
+    private val storage=EncryptedJsonStore(context,"notification-work",encryptionKey)
+    override fun load(): WorkConfig? = storage.load()?.let(WorkConfig::parse)
+    override fun save(work: WorkConfig?) = storage.save(work?.json())
+}
+// Kept independently of the active job: switching modes/connections never loses
+// a receipt or queued OS delivery. The connection UUID scopes the encrypted file.
+class EncryptedRelayJournal(context: Context, id: String, encryptionKey: (() -> SecretKey)? = null) {
+    private val storage: EncryptedJsonStore
+    init {
+        require(java.util.UUID.fromString(id).toString()==id)
+        storage=EncryptedJsonStore(context,"relay-notifications-$id",encryptionKey)
+    }
+    fun load(): String = storage.load()?.toString() ?: ""
+    fun save(value: String) = storage.save(JSONObject(value))
 }

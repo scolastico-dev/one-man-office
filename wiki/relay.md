@@ -118,7 +118,7 @@ only the individual read-only test secret is mounted from the host.
 omo can keep one outbound encrypted relay connection, preserving its host key,
 routing name and paired devices across restarts. It opens no additional inbound
 port and needs no host TLS certificate. The following sections describe host commands and
-private state. The native UI is separate work. The host installs application and notification
+private state. The native UI is a separate application. The host installs application and notification
 consumers; absent consumer callbacks grant no access.
 The exact wire and crypto contract is [Relay protocol](relay-protocol.md).
 
@@ -139,12 +139,16 @@ omo relay disconnect
 
 omo relay pair begin
 omo relay pair pending
-omo relay pair accept <aid> <six-digit-PIN> --name phone
-omo relay pair accept <aid> --public-key <full-unpadded-base64url-key> --name tablet
+omo relay pair accept --name phone -- <aid> <six-digit-PIN>
+omo relay pair accept --public-key <full-unpadded-base64url-key> --name tablet -- <aid>
 omo relay pair cancel
 omo relay devices
 omo relay unregister <ui-id>
 ```
+
+Keep options before `--`: attempt ids are random base64url and may start with
+`-`. The full public key remains the value of `--public-key`, before `--`, even
+when the key starts with `-`. Keep all six PIN digits, including leading zeroes.
 
 Without either name flag, connect reuses the saved client id, or generates and
 saves 16 random bytes as unpadded base64url on first use. A changed relay origin
@@ -293,7 +297,10 @@ request. Upgraded connections remain bidirectional for terminal frames,
 subprotocol `omo`, replay markers, input/message acknowledgments and close
 frames. SSE reconnects in a new stream using the ordinary Last-Event-ID/resync
 contract. Uncertain writes, including terminal input, are never automatically
-replayed by this transport. The native UI itself is separate work.
+replayed by this transport. The [native UI adapter](ui.md#native-board-adapter)
+implements these streams and supplies a private loopback endpoint for desktop
+and Android WebViews, with separate ephemeral Basic credentials and native
+status/reconnect/close APIs. Setup/window integration remains a separate consumer.
 
 Streams have at most 65,536 bytes of outstanding credit in each direction;
 records carry at most 16,384 data bytes. Reading bytes grants credit, so a slow

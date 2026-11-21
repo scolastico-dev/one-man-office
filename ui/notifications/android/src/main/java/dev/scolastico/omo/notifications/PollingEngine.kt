@@ -10,17 +10,21 @@ interface Feed {
     fun poll(work: WorkConfig, deliver: (JSONObject) -> Boolean): JSONObject
     fun recover(work: WorkConfig, replay: Boolean): JSONObject
 }
-class NativeFeed: Feed {
+class NativeFeed(private val context: Context): Feed {
     init { System.loadLibrary("omo_ui") }
     private external fun pollFeed(config: String, root: String, secret: String, sink: DeliverySink, baseline: Boolean): String
     private external fun recoverFeed(config: String, root: String, recovery: String, replay: Boolean): String
-    override fun baseline(work: WorkConfig) = JSONObject(pollFeed(work.config.toString(),work.root,work.secret,DeliverySink {false},true))
+    override fun baseline(work: WorkConfig) = if(work.config.optString("mode")=="relay") JSONObject()
+        else JSONObject(pollFeed(work.config.toString(),work.root,work.secret,DeliverySink({false}),true))
     override fun poll(work: WorkConfig, deliver: (JSONObject) -> Boolean) =
-        JSONObject(pollFeed(work.config.toString(),work.root,work.secret,DeliverySink(deliver),false))
+        JSONObject(pollFeed(work.config.toString(),work.root,work.secret,DeliverySink(deliver,if(work.config.optString("mode")=="relay") EncryptedRelayJournal(context,work.id) else null),false))
     override fun recover(work: WorkConfig, replay: Boolean) = JSONObject(recoverFeed(work.config.toString(),work.root,work.recovery!!.toString(),replay))
 }
-class DeliverySink(private val submit: (JSONObject) -> Boolean) {
-    // Invoked synchronously by JNI, before it persists the accepted ID.
+class DeliverySink(private val submit: (JSONObject) -> Boolean, private val journal: EncryptedRelayJournal? = null) {
+    // JNI performs receipt/notice persistence before a later GET can acknowledge.
+    fun loadJournal(): String = requireNotNull(journal).load()
+    fun saveJournal(value: String): Boolean { requireNotNull(journal).save(value); return true }
+    // OS submission completion is journaled synchronously after delivery.
     fun deliver(json: String): Boolean = submit(JSONObject(json))
 }
 class PollingEngine(private val context: Context, private val store: WorkStore, private val feed: Feed) {
@@ -41,6 +45,14 @@ class PollingEngine(private val context: Context, private val store: WorkStore, 
             val secret=if(config.optBoolean("remember")) args!!.getString("secret") else ""
             WorkConfig(config,secret,args!!.getString("root"),UUID.randomUUID().toString(),enabled=enabled)
         } else null
+        // App startup must not erase the saved work while a cold notification
+        // intent is being validated. An explicit reconnect still restarts work.
+        if(args?.optBoolean("resume")==true && next!=null) {
+            val previous=store.load()
+            fun fields(config: JSONObject) = config.keys().asSequence().associateWith {config.get(it)}
+            if(previous!=null && fields(previous.config)==fields(next.config) &&
+                previous.secret==next.secret && previous.root==next.root && previous.enabled==next.enabled) return@synchronized
+        }
         // Durable invalidation precedes cancellation; an already executing old job
         // will observe a different generation even if Android delivers it later.
         store.save(null)
@@ -111,6 +123,6 @@ class PollingEngine(private val context: Context, private val store: WorkStore, 
 object RuntimePolling {
     private var instance: PollingEngine?=null
     @Synchronized fun engine(context: Context): PollingEngine = instance ?: PollingEngine(
-        context.applicationContext,EncryptedWorkStore(context.applicationContext),NativeFeed()
+        context.applicationContext,EncryptedWorkStore(context.applicationContext),NativeFeed(context.applicationContext)
     ).also { instance=it }
 }

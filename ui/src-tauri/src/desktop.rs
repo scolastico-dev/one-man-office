@@ -220,6 +220,7 @@ fn close(app: &AppHandle, label: Option<String>, mut intent: CloseIntent) -> Res
             if action == CloseAction::StopAndExit {
                 owned.expect("owned stop policy").stop_owned()?;
             }
+            crate::relay::stop(app)?;
             if let Some(connection) = state
                 .session
                 .lock()
