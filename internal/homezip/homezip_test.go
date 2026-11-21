@@ -74,6 +74,15 @@ func (h *testHome) fill(t *testing.T) {
 	g := st.General()
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Someone", "TOKEN": "secret-value"}
 	g.Limits.Tasks = 3
+	g.LSP = api.LSPSettings{
+		Debounce: api.Duration(750 * time.Millisecond), ForceChat: []string{api.CLICodex},
+		Servers: []api.LSPServer{{
+			Name: "go", Enabled: true, Command: "gopls", Args: []string{"serve"}, Env: map[string]string{"MODE": "literal"},
+			Files:                 []api.LSPFileSelector{{Pattern: "*.go", LanguageID: "go"}},
+			InitializationOptions: map[string]any{"nested": map[string]any{"list": []any{true, nil}}},
+			Configuration:         map[string]any{"gopls": map[string]any{"staticcheck": true}},
+		}},
+	}
 	if err := st.SetGeneralIf("", g); err != nil {
 		t.Fatal(err)
 	}
