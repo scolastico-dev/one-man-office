@@ -15,7 +15,6 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
-	"net/url"
 )
 
 // The fake is a real stdio child. It validates root/cwd and protocol content,
@@ -107,8 +106,8 @@ func TestLSPHelper(t *testing.T) {
 		case "workspace/didChangeWatchedFiles":
 			if mode == "disk" {
 				for _, c := range p.Changes {
-					u, _ := url.Parse(c.URI)
-					b, _ := os.ReadFile(filepath.FromSlash(u.Path))
+					name, _ := uriFilePath(c.URI)
+					b, _ := os.ReadFile(filepath.FromSlash(name))
 					docs[c.URI] = string(b)
 					publish(c.URI, string(b))
 				}
