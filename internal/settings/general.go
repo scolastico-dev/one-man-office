@@ -68,6 +68,7 @@ func Defaults() General {
 		Branches:    api.BranchSettings{Template: branchname.Default},
 		PluginLists: []string{},
 		MCP:         api.MCPSettings{Enabled: true, Inject: api.MCPInject{Claude: true, Codex: true}},
+		LSP:         api.LSPSettings{Servers: []api.LSPServer{}, Debounce: Duration(500 * time.Millisecond), ForceChat: []string{}},
 	}
 }
 
@@ -198,6 +199,9 @@ func (g General) Validate() error {
 		return fieldErr("branches.template", "%s", err.Error())
 	}
 	if err := validatePluginLists(g.PluginLists); err != nil {
+		return err
+	}
+	if err := validateLSP(g.LSP); err != nil {
 		return err
 	}
 	return validateEnv("agent_env", g.AgentEnv)
@@ -391,6 +395,7 @@ func (g General) normalize() General {
 		g.AgentEnv = map[string]string{}
 	}
 	g.Usage = cloneUsage(g.Usage)
+	g.LSP = cloneLSP(g.LSP)
 	g.PluginLists = slices.Clone(g.PluginLists)
 	if g.PluginLists == nil {
 		g.PluginLists = []string{}
@@ -408,6 +413,7 @@ func (g General) clone() General {
 	g.WorkspaceRoots = roots
 	g.AgentEnv = maps.Clone(g.AgentEnv)
 	g.Usage = cloneUsage(g.Usage)
+	g.LSP = cloneLSP(g.LSP)
 	g.PluginLists = slices.Clone(g.PluginLists)
 	return g
 }

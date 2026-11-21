@@ -425,8 +425,16 @@ func (s *Store) written(path string, data []byte) {
 	s.files[path] = st
 }
 
-// writeFile writes an item file atomically and records it.
+// writeFile writes an item file atomically and records it. Apply the reader's
+// bound after encoding: JSON/YAML field limits alone do not bound YAML output.
 func (s *Store) writeFile(path string, data []byte) error {
+	if k, _, ok := s.kindOf(s.relPath(path)); ok && int64(len(data)) > k.limit {
+		code := api.CodeValidation
+		if k.section == SectionGeneral {
+			code = api.CodeInvalidSettings
+		}
+		return apiError(code, fieldErr("", "the encoded settings file must be at most %d KiB", k.limit>>10))
+	}
 	if err := globalhome.WriteFileAtomic(path, data, 0o600); err != nil {
 		return api.Errorf(api.CodeInternal, "write %s: %v", path, err)
 	}

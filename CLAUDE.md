@@ -148,7 +148,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 
 ## Settings
 
-Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
+Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, MCP, LSP, Environment, Limits, Review, Plugins, General, Backup) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
 
 Routes, all in `registerRoutes` tables (`internal/server/settings.go`, `setup.go`, `discovery.go`): `/api/settings` (GET, PUT whole, PATCH by key; `POST /api/settings/branch-preview`), `/api/profiles` (+ `/{name}/catalog-models`, which adds the catalog models a profile lacks), `/api/roles`, `/api/prompts` (+ `/preview`), `/api/projects` (+ `/scan`, `/rescan`, and `POST /batch` with `{ids, action: remove|disable|enable}`, answered per id: `{results: [{id, done, error?}]}`; 422 for a bad action, no or more than 1000 ids or a repeated id), `/api/folders`, `/api/agent-setup/detect`, `/api/settings/agent-env/check`. Who may call: only the user may call all of them, except `GET /api/projects` and `GET /api/models`, which agents may call (models: only the selectable ones). Every other settings route answers an agent session 403, because prompts, environments, profile commands and arguments are code that runs as the user. A route cannot be added without a rule (`userOnly`, `agentRead` for GET, `agentWrite` for a write agents may make within the board's rules: the image upload and the removal of a project from a ticket): `registerRoutes` panics on a row without one, and `TestNoGuardedRouteOutsideTable`, `TestSettingsRouteTableAccess` (which walks every row, the image rows with paths inside each role's scope), `TestImageRoutesInTable` and `TestAgentReadsNoCodeExecutionSettings` pin it.
 
@@ -161,6 +161,71 @@ Recorded diffs. When a ticket is merged or pushed for export, each project with 
 Profiles: `DELETE /api/profiles/{name}` answers 409 `in_use` with `details.roles` while roles list its models; `?detach=true` takes them out of those roles first and answers `{detached: [{role, models}]}` (the Agents page asks a second time naming the roles). Open tickets on one of its models refuse both, without `details.roles`.
 
 Revisions: `GET` answers carry a `revision` (16 hex characters of the file's SHA-256; `"0"` when the file does not exist). A write from the browser sends it as `If-Match: "<revision>"`; the store re-reads the file under its locks and answers 409 `stale_settings` when it changed on disk, also inside the poll interval. `If-Match: "0"` on a profile means create only. No header means no check (the CLI and API clients). A hand edit found while writing is loaded and announced with `source: "disk"` in `settings.changed`; the pages show "Changed on disk" for it.
+
+Language-server configuration: `api/lsp.go` exports `LSPSettings`, `LSPServer`
+and `LSPFileSelector`; `General.LSP` lives in `settings.yaml` and the existing
+user-only settings GET/PUT/PATCH flow. Defaults: `servers: []`,
+`debounce: 500ms` (0s–1m), `force_chat: []` (Profile.CLI values; chat overrides
+an active MCP notification listener). Named stdio registrations have explicit
+enablement, command/args/literal env, ordered `{pattern, language_id}` selectors,
+and opaque JSON objects `initialization_options`/`configuration`. The cwd is
+always the managed worktree root; there is no install or cwd option. First
+matching selector wins: case-sensitive `path.Match`, slashless against the
+basename at any depth, otherwise against the slash-separated worktree-relative
+path; no **, backslash, colon or empty/dot/parent components. Validation and
+deep copies are in `settings/lsp.go`; the same settings revision, last-valid
+state, event and backup/import machinery applies. PATCH still rejects null
+settings but permits null inside the opaque JSON objects. `internal/lsp` implements the worktree runtime: engine startup validates
+recorded Git worktrees, attaches sessions (all PM worktrees), and releases
+servers/pollers on failed starts, session ends and shutdown. `Engine.LSP()`
+exposes `Manager.Worktrees`, `Snapshot`, `Ignore` and `Subscribe` for delivery;
+`Report` carries worktree, eligible sessions and stable `Issue` identities with
+relative files and zero-based UTF-16 locations. Push, document/workspace pull,
+refresh and registered dependency watchers feed baseline/diff/debounce state.
+Ignored issues remain inspectable but leave pending/future batches. New
+attachments receive no replay. Oversized/unreadable selected files are logged
+and skipped individually; pull RPC errors retry without stopping the server.
+Group cleanup runs once across startup failure, cancellation and natural exit.
+The lazy `lsp/LspPage.vue` uses `useGeneralForm(['lsp'])`
+and the shared SettingsPage save/discard, leave guard, revision conflicts and
+hand-edit notices. `LspServerEditor` edits registrations and ordered selectors;
+`LspJsonField` keeps invalid JSON text local and blocks Save until it is fixed,
+discarded or its registration is removed.
+Delivery (`engine/lspnotify.go`): the engine subscribes to the manager and a
+queue goroutine tells each `Report.Sessions` entry once, over its confirmed MCP
+notification stream (`Options.Listeners`, the server's `mcpserver.Listeners`)
+unless the session's profile program is in `force_chat`, and otherwise through
+`Engine.Notify` (chat / `omo ai wait`). `Listeners.Notify` is true only when an
+established stream took the write; a stream is registered at its `GET /mcp`
+with `Accept: text/event-stream` as an agent identity (`mcpserver/listen.go`),
+sends a probe notification (one-time token) after its opening line and counts
+as confirmed only once the agent returned that token through `omo ai lsp
+confirm TOKEN` / tool `lsp_confirm` (`aicmd/lsp.go`, `POST /api/lsp/confirm`,
+`Listeners.Confirm`, route rule `agentWrite`); it is gone on disconnect, write
+failure or a 5 s write timeout, and a new stream is probed again (stale tokens
+confirm nothing). Notifications are JSON-RPC
+`notifications/message` (logger `omo`, level `error`). The stdio bridge
+(`mcpbridge/listen.go`) holds that stream for its session only after its
+client sent `logging/setLevel` (a protocol version without it never listens), and forwards each notification with
+`ServerSession.Log`. Using tools, `Seen`, injection or capabilities never
+confirms a listener. `omo ai lsp ignore ID` / tool `lsp_ignore` (`aicmd/lsp.go`,
+`POST /api/lsp/ignore`, route rule `agentWrite`, `Engine.IgnoreLSPIssue`)
+suppresses an issue of the caller's own worktrees (developer, reviewer, PM).
+Checks: engine `TestLSP`, mcpserver `TestListener`, mcpbridge
+`TestBridgeForwardsNotifications`, server `TestLSPIgnore`/`TestMCPNotificationStream`.
+Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
+Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
+settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
+and TypeScript checks, plus focused LspPage, settings navigation and resource
+tests. Runtime: `go test ./internal/lsp`, engine `TestLSP`,
+and existing engine lifecycle checks; fake stdio processes only.
+
+Settings writes enforce each section's read limit on the final encoded bytes
+in `Store.writeFile`, before disk or active state changes. YAML expansion and
+combined registrations can exceed a file's bound despite passing individual
+field limits; `TestSettingsWriterRespectsEverySectionReadLimit` guards every
+section and `TestLSPRejectsOversizedYAMLBeforeChangingSettings` guards both
+general write entry points.
 
 Reading files: every read of a file in the home goes through `internal/homefile` (see the package map), with a limit per kind of file (settings and project files 1 MiB, prompts 256 KiB, `server.yaml` 64 KiB, the token 4 KiB). A link, a named pipe, a device or a file over its limit is refused, so a bad file in the home cannot hang the poll or fill memory. Windows read handles share deletion as well as reads/writes, so an in-flight reader can coexist with a file replacement; opened-file identity and reparse-point checks still apply. Directory renames still require child handles to close on Windows: plugin runtime loads, public asset reads and installation-record reads share a tree read lock with the installer, which holds the write lock from activation through settings commit or rollback. Fetching and staging happen outside that lock.
 

@@ -36,7 +36,7 @@ func (e *Engine) Ready(ctx context.Context, a board.Actor) (string, error) {
 	nt := e.nt
 	nt.mu.Lock()
 	mb := nt.box(a.Session)
-	lines := mb.takeQueue()
+	notes := mb.takeQueue()
 	nt.mu.Unlock()
 	e.syncState(ctx, a.Session, mb)
 	if !e.hasEntry(a.Session) {
@@ -44,7 +44,7 @@ func (e *Engine) Ready(ctx context.Context, a board.Actor) (string, error) {
 		nt.drop(a.Session)
 		nt.mu.Unlock()
 	}
-	if len(lines) > 0 {
+	if lines := notificationLines(notes); len(lines) > 0 {
 		prompt += "\n\nNotifications that arrived while you started:\n" + strings.Join(lines, "\n")
 	}
 	return prompt, nil

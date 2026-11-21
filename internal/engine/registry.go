@@ -21,6 +21,8 @@ type entry struct {
 	// slot is the agent slot the session fills (for failure accounting).
 	slot     failKey
 	delivery agents.Delivery
+	// cli is the program of the session's profile (api.CLIClaude, ...).
+	cli string
 	// started is when the process was started, by the engine's clock.
 	started time.Time
 	// ready is set once the agent acknowledged its start (omo ai ready).

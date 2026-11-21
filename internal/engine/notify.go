@@ -77,11 +77,14 @@ type notifier struct {
 type mailbox struct {
 	// queue holds lines not yet delivered: held until the agent runs omo
 	// ai ready, or until the grace period ends.
-	queue []string
+	queue []notification
 	// timer types the queue when the grace period ends.
 	timer *time.Timer
 	// waiter is the parked omo ai wait of the session, if any.
 	waiter *waiter
+	// waitGeneration distinguishes a resumed wait from a newer caller,
+	// including one already released while the older wait was rendering.
+	waitGeneration uint64
 	// timeouts counts the consecutive waits that ended by timeout.
 	timeouts int
 	// stateMu orders the session state writes (it is not guarded by
@@ -99,7 +102,7 @@ const (
 
 // waiter is one parked omo ai wait.
 type waiter struct {
-	lines []string
+	lines []notification
 	why   int
 	// wake is closed when the wait is released by a delivery, a newer
 	// wait or the end of its session.
@@ -154,7 +157,7 @@ func (w *waiter) release(why int) {
 
 // takeQueue empties a mailbox's queue and stops its timer. The caller holds
 // notifier.mu.
-func (mb *mailbox) takeQueue() []string {
+func (mb *mailbox) takeQueue() []notification {
 	lines := mb.queue
 	mb.queue = nil
 	if mb.timer != nil {
@@ -790,7 +793,11 @@ func (e *Engine) bindCEOPending(id string) {
 		return
 	}
 	mb := nt.box(id)
-	mb.queue = append(nt.ceoPending, mb.queue...)
+	pending := make([]notification, 0, len(nt.ceoPending)+len(mb.queue))
+	for _, line := range nt.ceoPending {
+		pending = append(pending, func() string { return line })
+	}
+	mb.queue = append(pending, mb.queue...)
 	nt.ceoPending = nil
 }
 
@@ -870,6 +877,24 @@ func (e *Engine) deliver(id, line string, live bool) {
 	if !strings.HasPrefix(line, linePrefix) {
 		line = linePrefix + line
 	}
+	e.deliverNotification(id, func() string { return line }, live)
+}
+
+// notification retains semantic state through every queue. Rendering happens
+// at the consumer; an empty result means it was suppressed while queued.
+type notification func() string
+
+func notificationLines(notes []notification) []string {
+	lines := make([]string, 0, len(notes))
+	for _, render := range notes {
+		if line := render(); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func (e *Engine) deliverNotification(id string, render notification, live bool) {
 	en, ag, known := e.lookupAgent(id)
 	if !known && !live {
 		return
@@ -879,13 +904,13 @@ func (e *Engine) deliver(id, line string, live bool) {
 	mb := nt.box(id)
 	mb.timeouts = 0
 	if w := mb.waiter; w != nil {
-		w.lines = append(w.lines, line)
+		w.lines = append(w.lines, render)
 		w.release(waitDelivered)
 		mb.waiter = nil
 		nt.mu.Unlock()
 		return
 	}
-	mb.queue = append(mb.queue, line)
+	mb.queue = append(mb.queue, render)
 	if !known || ag == nil || en.awaitingReady() {
 		nt.mu.Unlock() // kept for omo ai ready
 		return
@@ -922,11 +947,11 @@ func (e *Engine) flush(id string) {
 	typeLines(ag, lines)
 }
 
-// typeLines types lines into an agent's terminal; agents.Notify adds the
-// prefix itself.
-func typeLines(ag agents.Agent, lines []string) {
-	for _, l := range lines {
-		ag.Notify(strings.TrimPrefix(l, linePrefix))
+// typeLines passes notifications to the terminal queue without freezing their
+// text. The agent renders them again when it owns the terminal input.
+func typeLines(ag agents.Agent, lines []notification) {
+	for _, render := range lines {
+		ag.NotifyDeferred(func() string { return strings.TrimPrefix(render(), linePrefix) })
 	}
 }
 

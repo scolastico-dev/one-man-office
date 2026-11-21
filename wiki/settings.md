@@ -22,6 +22,7 @@ Durations are written like `45s`, `15m`, `1h30m`.
 - [Prompts](#prompts)
 - [Skill sets](#skill-sets)
 - [MCP](#mcp)
+- [Language servers](#language-servers)
 - [Environment](#environment)
 - [Limits](#limits)
 - [Review](#review)
@@ -116,6 +117,223 @@ from them.
 *Servers omo relays to agents, the agent programs it is registered in and
 access for other programs.* Files: `mcpservers/<name>.yaml`, `settings.yaml`
 `mcp`. See [MCP](mcp.md).
+
+## Language servers
+
+Open **Settings → LSP** to register and configure language servers. The page
+edits the `lsp` group in `settings.yaml`, also available through the user-only
+`GET`, `PUT` and `PATCH /api/settings` routes. Enabled registrations run in
+the managed worktrees used by agents. No language server is installed automatically.
+
+**Add language server** adds an initially disabled registration. Set its unique
+name, **Command**, literal **Arguments** (one per row), **Environment overrides**
+and **File selection** (pattern and language ID). **Move up** and **Move down**
+change selector priority; the first matching selector wins. **Initialization
+options (JSON)** and **Server configuration (JSON)** accept JSON objects,
+including nested nulls. Invalid JSON is marked and blocks Save. **Remove language
+server** removes a registration from the draft. Registrations run in managed
+worktrees, with the worktree root as their working directory.
+
+Under **Reporting issues**, set **Debounce** (`500ms` by default, `0s` to disable
+the delay, at most `1m`). **Force chat by agent program** explicitly selects chat
+delivery for Claude Code, Codex, Antigravity, Gemini or Custom agents. The fallback
+sends a chat message even when the agent is listening for MCP notifications. A
+program left off uses MCP when the agent is listening, with chat as the fallback
+otherwise.
+
+Changes take effect only after **Save**; **Discard** restores stored values.
+The page asks before leaving with unsaved edits, places server field errors
+beside their fields and reports hand edits. A conflicting edit offers **Use the
+new value** or **Keep mine** before another save.
+
+The default for existing and new installations is:
+
+```yaml
+lsp:
+  servers: []
+  debounce: 500ms
+  force_chat: []
+```
+
+An example registration (the executable must already be available):
+
+```yaml
+lsp:
+  debounce: 500ms
+  force_chat: [codex]
+  servers:
+    - name: go
+      enabled: true
+      command: gopls
+      args: [serve]
+      env: {}
+      files:
+        - pattern: '*.go'
+          language_id: go
+        - pattern: go.mod
+          language_id: go.mod
+      initialization_options: {}
+      configuration:
+        gopls:
+          staticcheck: true
+```
+
+| Field | Contract |
+|---|---|
+| `servers` | Ordered list, at most 32 registrations; omitted means `[]`. |
+| `servers[].name` | Required unique name matching `[a-z0-9][a-z0-9._-]{0,63}`. |
+| `servers[].enabled` | `false` unless explicitly enabled. Disabled entries still need valid configuration. |
+| `servers[].command` | Required executable name or path, at most 4096 bytes, without hidden characters. A bare name uses `PATH`; this is not a shell command. The working directory is always the managed worktree root; there is no `cwd` field. |
+| `servers[].args` | Literal argv, default `[]`; at most 100 arguments of 4096 bytes each, no NUL. No shell expansion. |
+| `servers[].env` | Literal environment overrides, default `{}`; at most 200 variables, each value at most 32 KiB, no NUL. No variable or backtick expansion. Names follow the ordinary environment setting rules. |
+| `servers[].files` | Required list of 1–100 selectors, each with `pattern` and `language_id`; see below. |
+| `servers[].initialization_options` | JSON object for the LSP `initialize` request's `initializationOptions`, default `{}`. |
+| `servers[].configuration` | JSON object of server settings for LSP configuration requests and changes, default `{}`. |
+| `debounce` | Quiet interval before reporting changed diagnostics, `500ms` by default; `0s` disables the delay, maximum `1m`. |
+| `force_chat` | Unique agent program (`Profile.CLI`) values from `claude`, `codex`, `agy`, `gemini`, `custom`; default `[]`. For a listed program, chat delivery takes precedence even when its agent has an active MCP notification listener. |
+
+Each opaque JSON object may contain text, finite numbers, booleans, null,
+lists and objects with text keys, nested at most 64 levels, and encode to at
+most 64 KiB of JSON. Quote YAML dates/times to keep them strings. Commands,
+arguments and environment values must be valid UTF-8. Values are stored and
+returned as supplied, and never included in refusal messages or change events.
+
+File selection is case-sensitive on every OS. Selectors are tried in listed
+order; the first match supplies the file's `language_id` for that server. No
+match excludes the file from that server; several servers may select the same
+file. Language IDs are explicit, not inferred from extensions: nonempty text of
+at most 64 bytes without whitespace or hidden characters.
+
+Patterns use Go `path.Match` glob syntax: `*`, `?`, and character classes such
+as `[ch]`, each matching within one path component. A pattern without `/`
+matches the basename at any depth (`*.go` includes `main.go` and
+`internal/app/main.go`). A pattern with `/` matches the complete path relative
+to the worktree root, using `/` on every OS (`src/*.go` includes `src/main.go`
+but excludes `src/nested/main.go`). Dot-prefixed names are treated like other
+names. Patterns are at most 1024 bytes; `**`, backslashes, colons, absolute
+paths and empty, `.` or `..` components are refused. Quote wildcard patterns
+in YAML.
+
+The group uses the existing strict settings store, revisions (`If-Match`),
+hand-edit notifications, last-valid-state handling and backup/import flow.
+`PATCH {"lsp":{"debounce":"1s"}}` keeps registrations and delivery overrides.
+Patching `servers` or `force_chat` replaces that whole list; server objects
+inside a new list are complete replacements. Opaque options/configuration
+objects allow nested null values; null settings fields are refused on PATCH.
+The complete encoded `settings.yaml` must also fit the store's 1 MiB file
+limit. A save that would exceed it is refused before changing the file or
+active settings, even if each registration meets its own limits.
+
+### Runtime and diagnostics
+
+A server starts when its enabled registration selects a file in a worktree
+used by an agent. Its working directory, LSP root and workspace folder are that
+worktree. The engine validates the worktree against Git's records; it never
+starts servers in a source checkout, an export folder, the CEO's directory or
+a projectless working folder. Product managers monitor all their ticket's
+managed worktrees. Sessions sharing a worktree share its runtime; separate
+worktrees keep separate processes and diagnostic state.
+
+The runtime polls every 250ms, notices file replacement and new directories,
+and follows the server's open/close, full or incremental change and save
+capabilities. Incremental replacements use UTF-16 positions. Registered LSP
+file watchers also receive changes to matching dependency/configuration files,
+including files outside the document selectors. Polling does not follow
+symlinks or enter `.git`; selected files over 4 MiB or unreadable files are
+logged and skipped while other documents keep synchronizing. Skipped files
+are tried again on later polls. Server
+initialization options and configuration come from the registration. Changes
+to a registration restart it; disabling or removing it stops its process.
+Start/protocol failures are logged, stop the failed child, and are retried when
+the registration changes or a fresh worktree runtime starts.
+
+Both pushed diagnostics and advertised document/workspace pull diagnostics are
+supported, including diagnostic refresh requests and related-document reports.
+Pull error replies during indexing keep the connection and current issues;
+the next poll, edit or refresh retries the request.
+Initial analysis establishes a baseline without nudges. After an observed file
+change, only newly appearing issues are eligible for reports. Unchanged reports
+do not restart the debounce clock, and clearing an issue removes it from a
+queued batch. A session attached later receives future reports without replaying
+earlier notifications. The current snapshot still includes baseline and
+suppressed issues.
+
+Ignoring an issue filters pending and future notifications for that issue in
+the current worktree runtime. Other issues continue to report. It sends no
+custom ignore request to the server and does not edit source files. Ignore
+state ends when the last session leaves that worktree. Ending sessions, failed
+agent starts and omo shutdown stop polling, kill server process trees and wait
+for child cleanup.
+
+For delivery adapters, `internal/lsp.New(Options)` constructs a manager and
+`Engine.LSP()` returns the engine-owned one. `Attach(session, roots)` and
+`Detach(session)` bind its lifetime; `Close()` waits for shutdown.
+`Worktrees(session)` lists roots, `Snapshot(session)` returns `[]Issue`, and
+`Ignore(session, issueID)` suppresses an issue only in that session's attached
+worktrees. `Scan(ctx, root)` requests immediate disk synchronization (pushed
+reports remain asynchronous). `Subscribe(func(Report))` returns an unsubscribe
+function; callbacks must promptly queue delivery and must not call lifecycle
+methods. `Options.Report` is an equivalent construction-time callback.
+`Report` contains `Worktree`, eligible `Sessions` and `Issues`. Each `Issue`
+has a stable worktree-scoped `ID`, server name, relative file, zero-based
+UTF-16 range, severity, code, source and message. The runtime itself has no
+MCP/chat transport; the engine is its delivery adapter (see
+[How agents are told](#how-agents-are-told)) and uses the report's session
+eligibility.
+
+### How agents are told
+
+Each report names the sessions that may receive it, and the engine tells each
+of them once:
+
+- **Confirmed MCP listener**: omo sends the report over that session's
+  notification stream and does not also type it into the terminal. A session
+  is a *confirmed listener* only while a stream is open **and the agent
+  confirmed it**. An open stream alone is no proof: some programs only write
+  notifications to a debug log. So omo sends a probe notification when a
+  stream opens, containing a one-time token, and the agent returns it from its
+  own session with `omo ai lsp confirm TOKEN` (MCP tool `lsp_confirm`). Only
+  then does the stream count. A token of another session, a wrong token or the
+  stale token of an earlier stream confirms nothing; every new stream
+  (reconnect, omo restart, bridge reopen) is probed again. Using omo's MCP
+  tools, listing them, being injected with omo's MCP entry or advertising a
+  capability does not count either.
+- **Everything else** (no stream, a stream whose probe is unanswered, a stream
+  that was closed or failed, or a program in `force_chat`): the report is typed into the terminal as one
+  `omo:` line, or returned by `omo ai wait`, like every other notification.
+  `force_chat` wins even while a stream is open.
+
+How a stream is opened:
+
+- **Directly connected MCP agents** open the standalone notification stream of
+  the Streamable HTTP transport: a `GET` of `/mcp` with
+  `Accept: text/event-stream`, authenticated as the agent session (bearer
+  session id, or the socket's `X-Omo-Session`). omo answers with an SSE stream
+  that starts with a comment line, keeps it alive with comment lines every 15
+  seconds and sends each report as a JSON-RPC `notifications/message` (logger
+  `omo`, level `error`, the text in `data`). Closing the stream, or a write
+  that fails or does not finish within 5 seconds, ends the listener, and the
+  next report goes to chat.
+- **Agents behind `omo mcp stdio`** (Claude Code and Codex as omo starts them)
+  become listeners when their client sends `logging/setLevel`, the MCP request
+  for asking for `notifications/message`. The bridge then holds the stream
+  above for its session, passes each notification on to its client and opens
+  the stream again after omo restarts. A client that never sends it, or that
+  speaks a protocol version without `logging/setLevel`, or never answers the
+  probe, is not a listener and keeps getting chat lines.
+
+The text lists each issue as `file:line:column severity: message (id <id>)`
+(positions are one-based as editors show them), at most about 750 characters
+of issues per report with a count of the rest, and tells the agent to fix them
+or silence a wrong one.
+
+An agent silences a wrong report with `omo ai lsp ignore ID` or the MCP tool
+`lsp_ignore` (developers, reviewers and product managers). The answer confirms
+the file, position and worktree. The issue then leaves queued reports and is
+not reported again in that worktree while it stays ignored; other issues, and
+other worktrees, are unaffected. An id that names no issue of the caller's own
+worktrees is refused (`not_found`). Ignoring never touches the language server
+or the source; the issue stays visible to inspection.
 
 ## Environment
 
@@ -235,3 +453,4 @@ stay in use.
 | `branches` | `template: omo/{slug}` |
 | `plugin_lists` | `[]` |
 | `mcp` | `enabled: true`, `inject: {claude: true, codex: true}` |
+| `lsp` | `servers: []`, `debounce: 500ms`, `force_chat: []` |

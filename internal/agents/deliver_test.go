@@ -24,13 +24,14 @@ func completeWithin(t *testing.T, _ time.Duration, fn func()) {
 
 // fakeTerminal stands in for an agent PTY: it records what omo types.
 type fakeTerminal struct {
-	mu      sync.Mutex
-	typed   []string
-	prompts []string
-	done    chan struct{}
-	exitErr error
-	failing bool
-	screen  string
+	mu          sync.Mutex
+	typed       []string
+	prompts     []string
+	done        chan struct{}
+	exitErr     error
+	failing     bool
+	screen      string
+	beforeReady func()
 }
 
 func newFakeTerminal() *fakeTerminal { return &fakeTerminal{done: make(chan struct{})} }
@@ -38,6 +39,11 @@ func newFakeTerminal() *fakeTerminal { return &fakeTerminal{done: make(chan stru
 func (f *fakeTerminal) SendTextAndKeysIf(text, keys string, ready func() bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.beforeReady != nil {
+		hook := f.beforeReady
+		f.beforeReady = nil
+		hook()
+	}
 	if !ready() {
 		return false, nil
 	}
@@ -46,6 +52,42 @@ func (f *fakeTerminal) SendTextAndKeysIf(text, keys string, ready func() bool) (
 	}
 	f.typed = append(f.typed, text+keys)
 	return true, nil
+}
+
+func TestNotifyDeferredFiltersAtTerminalDelivery(t *testing.T) {
+	for _, boundary := range []string{"queued", "input-lock"} {
+		t.Run(boundary, func(t *testing.T) {
+			term := newFakeTerminal()
+			n := newNotifier(term, &inputClock{}, time.Now, 0, 0)
+			a := &ptyAgent{notes: n}
+			ignored := false
+			a.NotifyDeferred(func() string {
+				if ignored {
+					return ""
+				}
+				return "ignored issue"
+			})
+			a.NotifyDeferred(func() string {
+				if ignored {
+					return "remaining issue"
+				}
+				return "ignored issue and remaining issue"
+			})
+			a.Notify("ordinary notification")
+			if boundary == "queued" {
+				ignored = true
+			} else {
+				term.beforeReady = func() { ignored = true }
+			}
+			if wait := n.flush(); wait != 0 {
+				t.Fatalf("flush waited %v", wait)
+			}
+			got, _ := term.snapshot()
+			if len(got) != 2 || got[0] != "omo: remaining issue\r" || got[1] != "omo: ordinary notification\r" {
+				t.Fatalf("terminal received %q", got)
+			}
+		})
+	}
 }
 
 func (f *fakeTerminal) SendPartsAndKeys(parts []string, keys string) error {

@@ -648,6 +648,58 @@ export interface General {
   plugin_lists: string[]
   /** Switches of omo's MCP endpoint. */
   mcp: MCPSettings
+  lsp: LSPSettings
+}
+
+/** Registered stdio language servers in managed worktrees. */
+export interface LSPSettings {
+  servers: LSPServer[]
+  /** Quiet interval before reporting diagnostics: 0s–1m, default 500ms. */
+  debounce: Duration
+  /** Profile CLI values forcing chat delivery even with an active MCP listener. */
+  force_chat: CLI[]
+}
+
+export interface LSPServer {
+  name: string
+  enabled: boolean
+  command: string
+  args: string[]
+  /** Literal environment overrides. */
+  env: Record<string, string>
+  /** First matching selector supplies the language ID; no match excludes the file. */
+  files: LSPFileSelector[]
+  initialization_options: Record<string, unknown>
+  configuration: Record<string, unknown>
+}
+
+export interface LSPFileSelector {
+  /** Case-sensitive path.Match glob; slashless matches basename at any depth,
+   * otherwise a slash-separated worktree-relative path. No ** or backslash. */
+  pattern: string
+  language_id: string
+}
+
+export interface LSPConfirmRequest {
+  token: string
+}
+
+export interface LSPConfirmResult {
+  confirmed: boolean
+}
+
+export interface LSPIgnoreRequest {
+  id: string
+}
+
+export interface LSPIgnoreResult {
+  id: string
+  ignored: boolean
+  worktree: string
+  file: string
+  line: number
+  column: number
+  message: string
 }
 
 /** The revision of a settings item that has no file. */
