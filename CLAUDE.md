@@ -643,7 +643,14 @@ browser forward fallbacks. Required subprotocol `ui.forwards.tunnel.v1` carries
 root HTTP/1.1 as binary messages up to 64 KiB, with arbitrary boundaries and no
 half-close. A pipe gives the inner HTTP server ordinary deadline semantics;
 output drains before HTTP close ends the outer socket. Registry checks on every
-request precede the existing root proxy/activity path; SSE and nested app WS
+request precede the existing root proxy/activity path. Inner Host must be a
+loopback authority (`127.0.0.1`, `localhost`, `[::1]`, optional valid TCP port) or
+the selected forward's exact `<label>-<id>.omo` HTTP host (implicit/explicit 80);
+unrelated/malformed authorities get 421 before upstream work, including on
+keepalive and app upgrades (HTTP parser errors may return 400). The shared wire
+fixture pins the Go/Rust virtual label contract. Preview path validation runs
+only for that action; query backslashes remain data and no row's preview error
+discards the registry or blocks local exposure. SSE and nested app WS
 stream through bounded buffers. Outer handshake auth never enters app traffic.
 `ui/core/src/tunnel.rs` exports desktop-only `ForwardConnector::new(&Config,
 &str)`, async `connect(&str)` and `ForwardTunnel` (Tokio AsyncRead/AsyncWrite).

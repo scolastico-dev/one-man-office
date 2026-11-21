@@ -1,6 +1,36 @@
 {
   "protocol": "ui.forwards.tunnel.v1",
-  "request": "POST /echo?x=a%2Fb HTTP/1.1\r\nHost: demo.omo\r\nContent-Length: 5\r\n\r\nhello",
+  "request": "POST /echo?x=a%2Fb HTTP/1.1\r\nHost: localhost:8099\r\nContent-Length: 5\r\n\r\nhello",
   "responseBody": "/echo?x=a%2Fb hello",
-  "response": "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n\r\n/echo?x=a%2Fb hello"
+  "response": "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n\r\n/echo?x=a%2Fb hello",
+  "virtualHosts": [
+    {
+      "name": "",
+      "host": "app-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "My Great App!",
+      "host": "my-great-app-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "☃",
+      "host": "app-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "a☃B",
+      "host": "a-b-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaa !b",
+      "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaa-0123456789abcdef0123456789abcdef.omo"
+    },
+    {
+      "name": "---Hello__world-",
+      "host": "hello-world-0123456789abcdef0123456789abcdef.omo"
+    }
+  ]
 }

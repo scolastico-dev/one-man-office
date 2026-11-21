@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -85,6 +86,10 @@ func (s *Server) forwardTunnel(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "This Web UI forward no longer exists.", http.StatusNotFound)
 				return
 			}
+			if !forwardTunnelHostAllowed(app.Host, f) {
+				http.Error(w, "Use the selected app's virtual HTTP address or a loopback local address.", http.StatusMisdirectedRequest)
+				return
+			}
 			// Use the outer accepted address for activity/client-IP metadata. Inner Host
 			// and Origin describe the virtual/local app address, never the board origin.
 			app.RemoteAddr = r.RemoteAddr
@@ -98,6 +103,59 @@ func (s *Server) forwardTunnel(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	_ = inner.Close()
 	pumps.Wait()
+}
+
+// Inner authorities are a separate boundary from the authenticated outer Host.
+// In particular, a matching app WS Origin does not prevent DNS rebinding.
+func forwardTunnelHostAllowed(authority string, f api.ProxyForward) bool {
+	host, port := authority, uint64(80)
+	if strings.Contains(authority, ":") && authority != "[::1]" {
+		var rawPort string
+		var err error
+		host, rawPort, err = net.SplitHostPort(authority)
+		if err != nil || rawPort == "" || strings.ContainsFunc(rawPort, func(r rune) bool { return r < '0' || r > '9' }) {
+			return false
+		}
+		port, err = strconv.ParseUint(rawPort, 10, 16)
+		if err != nil || port == 0 {
+			return false
+		}
+		if strings.HasPrefix(authority, "[") {
+			if host != "::1" {
+				return false
+			}
+			host = "[::1]"
+		}
+	}
+	if host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "[::1]" {
+		return true
+	}
+	return port == 80 && strings.EqualFold(host, forwardTunnelVirtualHost(f))
+}
+
+// Keep the label in sync with RegisteredForward::virtual_host in omo-ui-core;
+// the shared wire fixture guards the address contract in both languages.
+func forwardTunnelVirtualHost(f api.ProxyForward) string {
+	var label strings.Builder
+	for i := 0; i < len(f.Name); i++ {
+		b := f.Name[i]
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		if b >= 'a' && b <= 'z' || b >= '0' && b <= '9' {
+			if label.Len() == 29 {
+				break
+			}
+			label.WriteByte(b)
+		} else if label.Len() > 0 && label.Len() < 29 && !strings.HasSuffix(label.String(), "-") {
+			label.WriteByte('-')
+		}
+	}
+	name := strings.TrimRight(label.String(), "-")
+	if name == "" {
+		name = "app"
+	}
+	return name + "-" + f.ID + ".omo"
 }
 
 // Serve needs a listener, but this tunnel has exactly one in-memory connection

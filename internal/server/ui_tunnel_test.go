@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/coder/websocket"
@@ -63,6 +64,83 @@ func tunnelRequest(t *testing.T, c net.Conn, reader *bufio.Reader, raw string) *
 	return res
 }
 
+// Host admission must run for every request, even after a legitimate request
+// on the same authenticated tunnel, and before an application upgrade.
+func TestUIForwardTunnelInnerHosts(t *testing.T) {
+	var reached atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		io.WriteString(w, "app")
+	}))
+	defer upstream.Close()
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	f := proxyForward(t, s, upstream.URL, false)
+	selected := "demo-" + f.ID + ".omo"
+	var wantReached int32
+	for _, tc := range []struct {
+		host    string
+		upgrade bool
+		want    int
+	}{
+		{"evil.example", false, 421},
+		{"127.0.0.1:8099", false, 200},
+		{"evil.example:8099", false, 421},
+		{"localhost:8099", false, 200},
+		{"[::1]:8099", false, 200},
+		{"[::1]", false, 200},
+		{"localhost", false, 200},
+		{selected, false, 200},
+		{strings.ToUpper(selected) + ":80", false, 200},
+		{"app-00000000000000000000000000000000.omo", false, 421},
+		{"other-" + f.ID + ".omo", false, 421},
+		{selected + ":443", false, 421},
+		{"127.0.0.1.evil.example:8099", false, 421},
+		{"localhost.evil.example:8099", false, 421},
+		{"127.1:8099", false, 421},
+		{"[::ffff:127.0.0.1]:8099", false, 421},
+		{"localhost:", false, 421},
+		{"localhost:0", false, 421},
+		{"localhost:65536", false, 421},
+		{"localhost:+80", false, 421},
+		{"localhost:service", false, 421},
+		// net/http rejects userinfo before the inner handler and closes HTTP.
+		{"user@localhost:8099", false, 400},
+		{"[localhost]:8099", false, 421},
+		{"[[::1]]:8099", false, 421},
+		{"evil.example:8099", true, 421},
+		{"127.0.0.1:8099", false, 200},
+	} {
+		t.Logf("inner Host %q upgrade=%v", tc.host, tc.upgrade)
+		c := dialTunnel(t, s, b, f.ID)
+		reader := bufio.NewReader(c)
+		// Each case follows a completed legitimate request on the same socket.
+		first := tunnelRequest(t, c, reader, "GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
+		if _, err := io.Copy(io.Discard, first.Body); err != nil || first.StatusCode != 200 {
+			t.Fatalf("initial local request: status=%d err=%v", first.StatusCode, err)
+		}
+		first.Body.Close()
+		wantReached++
+		raw := "GET / HTTP/1.1\r\nHost: " + tc.host + "\r\n"
+		if tc.upgrade {
+			raw += "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: http://" + tc.host + "\r\n"
+		}
+		res := tunnelRequest(t, c, reader, raw+"\r\n")
+		_, err := io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.want == 200 {
+			wantReached++
+		}
+		if res.StatusCode != tc.want || reached.Load() != wantReached {
+			t.Errorf("Host %q upgrade=%v: status=%d want=%d, upstream requests=%d want=%d", tc.host, tc.upgrade, res.StatusCode, tc.want, reached.Load(), wantReached)
+		}
+		c.Close()
+	}
+}
+
 // Losing the root mode or filtering would leak board credentials or route to a prefix.
 func TestUIForwardTunnelHTTP(t *testing.T) {
 	for _, mode := range []string{"token", "basic", "none"} {
@@ -88,7 +166,7 @@ func TestUIForwardTunnelHTTP(t *testing.T) {
 				c := dialTunnel(t, s, b, f.ID)
 				reader := bufio.NewReader(c)
 				for _, auth := range []string{tunnelHeaders(s).Get("Authorization"), "Bearer app-credential"} {
-					raw := "POST /api/echo?x=a%2Fb&__omo_proxy_grant=secret HTTP/1.1\r\nHost: demo.omo\r\nCookie: omo_proxy_session=secret; omo_proxy_forward=secret; application=yes\r\nX-Omo-Session: secret\r\nOmo-Secret: secret\r\nContent-Length: 4\r\n"
+					raw := "POST /api/echo?x=a%2Fb&__omo_proxy_grant=secret HTTP/1.1\r\nHost: localhost:8099\r\nCookie: omo_proxy_session=secret; omo_proxy_forward=secret; application=yes\r\nX-Omo-Session: secret\r\nOmo-Secret: secret\r\nContent-Length: 4\r\n"
 					if auth != "" {
 						raw += "Authorization: " + auth + "\r\n"
 					}
@@ -104,7 +182,7 @@ func TestUIForwardTunnelHTTP(t *testing.T) {
 					if res.StatusCode != 200 || string(data) != "/api/echo?x=a%2Fb "+wantAuth+" data" {
 						t.Fatalf("response: %d %q", res.StatusCode, data)
 					}
-					if res.Header.Get("Location") != "http://demo.omo/next?q=a%2Fb" || res.Header.Get("Set-Cookie") != "app=yes; Path=/" || len(res.Header.Values("Set-Cookie")) != 1 {
+					if res.Header.Get("Location") != "http://localhost:8099/next?q=a%2Fb" || res.Header.Get("Set-Cookie") != "app=yes; Path=/" || len(res.Header.Values("Set-Cookie")) != 1 {
 						t.Fatalf("rewrites: %v", res.Header)
 					}
 					if res.Header.Get("Content-Security-Policy") != "" {
@@ -114,7 +192,7 @@ func TestUIForwardTunnelHTTP(t *testing.T) {
 				if err := s.board.DeleteProxyForward(t.Context(), board.User, f.ID); err != nil {
 					t.Fatal(err)
 				}
-				res := tunnelRequest(t, c, reader, "GET / HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+				res := tunnelRequest(t, c, reader, "GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 				if res.StatusCode != 404 {
 					t.Fatalf("removed forward: %d", res.StatusCode)
 				}
@@ -200,7 +278,7 @@ func TestUIForwardTunnelStreamingAndFailure(t *testing.T) {
 	b := newBrowser(t, s)
 	f := proxyForward(t, s, upstream.URL, true)
 	c := dialTunnel(t, s, b, f.ID)
-	res := tunnelRequest(t, c, bufio.NewReader(c), "GET /events HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+	res := tunnelRequest(t, c, bufio.NewReader(c), "GET /events HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 	data := make([]byte, 13)
 	if _, err := io.ReadFull(res.Body, data); err != nil || string(data) != "data: first\n\n" {
 		t.Fatalf("stream: %q %v", data, err)
@@ -209,7 +287,7 @@ func TestUIForwardTunnelStreamingAndFailure(t *testing.T) {
 	<-finished
 	upstream.Close()
 	c = dialTunnel(t, s, b, f.ID)
-	res = tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+	res = tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 	data, err := io.ReadAll(res.Body)
 	if err != nil || res.StatusCode != 502 || !strings.Contains(string(data), "Web UI unreachable") || !strings.Contains(string(data), `href="`+b.srv.URL+`/"`) {
 		t.Fatalf("failure: %d %q %v", res.StatusCode, data, err)
@@ -244,7 +322,7 @@ func TestUIForwardTunnelApplicationWebSocketActivity(t *testing.T) {
 	outer := dialTunnel(t, s, b, f.ID)
 	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return outer, nil }}
 	defer transport.CloseIdleConnections()
-	c, res, err := websocket.Dial(t.Context(), "ws://demo.omo/socket", &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: http.Header{"Origin": {"http://demo.omo"}}, Subprotocols: []string{"app", "omo-token.secret"}})
+	c, res, err := websocket.Dial(t.Context(), "ws://app-"+f.ID+".omo/socket", &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: http.Header{"Origin": {"http://app-" + f.ID + ".omo"}}, Subprotocols: []string{"app", "omo-token.secret"}})
 	if err != nil {
 		t.Fatalf("nested WS: %v %v", err, res)
 	}
@@ -270,13 +348,22 @@ func TestUIForwardTunnelApplicationWebSocketActivity(t *testing.T) {
 }
 
 func TestUIForwardTunnelSharedFixture(t *testing.T) {
-	var fixture struct{ Protocol, Request, ResponseBody string }
+	var fixture struct {
+		Protocol, Request, ResponseBody string
+		VirtualHosts                    []struct{ Name, Host string }
+	}
 	data, err := os.ReadFile("../api/testdata/forward_tunnel_v1.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
+	}
+	for _, tc := range fixture.VirtualHosts {
+		f := api.ProxyForward{ID: "0123456789abcdef0123456789abcdef", Name: tc.Name}
+		if got := forwardTunnelVirtualHost(f); got != tc.Host {
+			t.Errorf("virtual host for %q: %q want %q", tc.Name, got, tc.Host)
+		}
 	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -321,7 +408,7 @@ func TestUIForwardTunnelTLSAndRequestTargets(t *testing.T) {
 		}
 		c := dialTunnel(t, s, b, f.ID)
 		reader := bufio.NewReader(c)
-		res := tunnelRequest(t, c, reader, "GET /root HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+		res := tunnelRequest(t, c, reader, "GET /root HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 		data, err := io.ReadAll(res.Body)
 		if err != nil {
 			t.Fatal(err)
@@ -355,7 +442,7 @@ func TestUIForwardTunnelRejectsInvalidMessagesAndStopsWithServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		data := []byte("GET / HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+		data := []byte("GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 		if kind == websocket.MessageBinary {
 			data = []byte(strings.Repeat("x", 65537))
 		}
@@ -383,7 +470,7 @@ func TestUIForwardTunnelConnectionCloseResponse(t *testing.T) {
 	b := newBrowser(t, s)
 	f := proxyForward(t, s, upstream.URL, false)
 	c := dialTunnel(t, s, b, f.ID)
-	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: demo.omo\r\nConnection: close\r\n\r\n")
+	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: localhost:8099\r\nConnection: close\r\n\r\n")
 	data, err := io.ReadAll(res.Body)
 	if err != nil || string(data) != "final response" {
 		t.Fatalf("final response %q %v", data, err)
@@ -404,7 +491,7 @@ func TestUIForwardTunnelCloseDelimitedResponse(t *testing.T) {
 	b := newBrowser(t, s)
 	f := proxyForward(t, s, upstream.URL, false)
 	c := dialTunnel(t, s, b, f.ID)
-	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.0\r\nHost: demo.omo\r\n\r\n")
+	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.0\r\nHost: localhost:8099\r\n\r\n")
 	data, err := io.ReadAll(res.Body)
 	if err != nil || string(data) != "first last" {
 		t.Fatalf("close-delimited response: %q %v", data, err)
@@ -427,7 +514,7 @@ func TestUIForwardTunnelClosingForwardBoardLink(t *testing.T) {
 	s.pluginForwards.entries[f.ID].closing = true
 	s.pluginForwards.Unlock()
 	c := dialTunnel(t, s, b, f.ID)
-	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: demo.omo\r\n\r\n")
+	res := tunnelRequest(t, c, bufio.NewReader(c), "GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n")
 	data, err := io.ReadAll(res.Body)
 	if err != nil || res.StatusCode != 404 || !strings.Contains(string(data), `href="`+b.srv.URL+`/"`) {
 		t.Fatalf("closing forward: %d %q %v", res.StatusCode, data, err)

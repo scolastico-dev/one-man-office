@@ -36,9 +36,11 @@ impl RegisteredForward {
         Ok(format!("{label}-{}.omo", self.id))
     }
     pub fn preview_url(&self) -> Result<url::Url> {
+        let path = self.start_path.split('?').next().unwrap_or_default();
         if !self.start_path.starts_with('/')
             || self.start_path.starts_with("//")
-            || self.start_path.contains(['\\', '#'])
+            || path.contains('\\')
+            || self.start_path.contains('#')
             || self.start_path.chars().any(char::is_control)
         {
             return Err("Invalid forward start path.".into());
@@ -76,9 +78,6 @@ impl BoardClient {
         }
         let registry: Registry =
             serde_json::from_slice(&reply.body).map_err(|_| "Invalid registered apps response.")?;
-        for f in &registry.forwards {
-            f.preview_url()?;
-        }
         Ok(registry.forwards)
     }
 }

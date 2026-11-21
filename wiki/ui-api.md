@@ -88,6 +88,16 @@ is reserved ahead of browser forward Referer/last-forward-cookie fallbacks.
   preview/local address in `Host`. Absolute request URLs and `CONNECT` are
   rejected with an inner HTTP 400. The app runs at `/` regardless of the forward's
   `base_path`, `strip_prefix` or `start_path`; consumers choose the initial path.
+- Every inner request, including keepalive requests and application upgrades,
+  must use a loopback authority (`127.0.0.1`, `localhost`, or `[::1]`, with an
+  optional decimal port from 1 to 65535), or the selected forward's exact virtual
+  `<label>-<id>.omo` HTTP host (port omitted or 80). DNS names match without
+  regard to case. The label is the lowercased ASCII letters/digits of the app
+  name, with runs of other bytes replaced by a hyphen, capped at 29 bytes with
+  trailing hyphens removed; an empty label becomes `app`. Unrelated hosts,
+  another forward's virtual host, and malformed authorities return inner 421
+  before contacting the upstream. HTTP parser errors may return 400 before the
+  handler. Matching a WebSocket Origin to an unrelated Host does not admit it.
 - HTTP response status, headers, chunked bodies, trailers and streaming data
   use ordinary HTTP/1.1 encoding. Uploads and responses stream with bounded
   buffers and backpressure, without collecting entire bodies. An application
@@ -144,6 +154,12 @@ boolean return; consumers use `capabilities` for tunnel discovery. Older servers
 and unknown flags remain compatible; Android builds exclude the desktop connector.
 The shared fixture `internal/api/testdata/forward_tunnel_v1.json` is exercised by
 both Go server and native Rust tests, including arbitrary message splitting.
+
+The desktop registry reader retains entries independently of preview navigation
+validation. `RegisteredForward::preview_url` validates only when preview is
+requested: backslashes are forbidden in the path and preserved as data in the
+query (for example `/?a=\b`). A preview error affects that action alone; other
+apps and local exposure, which selects only the registered ID, remain usable.
 
 ## Notification polling
 

@@ -87,7 +87,7 @@ func TestProxyForwardValidation(t *testing.T) {
 			wantCode(t, err, api.CodeValidation)
 		})
 	}
-	for _, path := range []string{"/", "/a/../b", "/a%20b?q=hello+world&x=%2F", "/?next=//example.com"} {
+	for _, path := range []string{"/", "/a/../b", "/a%20b?q=hello+world&x=%2F", "/?next=//example.com", `/?a=\b`} {
 		_, err := b.CreateProxyForward(ctx, User, api.CreateProxyForward{Port: 1, Name: "dev", StartPath: path})
 		if err != nil {
 			t.Errorf("valid path %q: %v", path, err)
