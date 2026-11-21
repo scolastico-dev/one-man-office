@@ -31,9 +31,7 @@ class RemoteBoard(private val activity:Activity,private val chrome:TrustedChrome
                 return url.scheme !in listOf("http","https") || url.host=="tauri.localhost"
             }
             override fun onReceivedHttpAuthRequest(view:WebView,handler:HttpAuthHandler,host:String,realm:String) {
-                val current=Uri.parse(view.url ?: "")
-                val configured=Uri.parse(origin)
-                if(auth=="basic" && realm=="omo" && current.scheme==configured.scheme && current.host==configured.host && current.port==configured.port && host==configured.host && handler.useHttpAuthUsernamePassword()) {
+                if(auth=="basic" && boardChallengeAllowed(origin,view.url ?: "",host,realm) && handler.useHttpAuthUsernamePassword()) {
                     handler.proceed(user,secret)
                 } else handler.cancel()
             }

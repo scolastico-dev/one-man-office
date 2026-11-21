@@ -624,7 +624,7 @@ Protocol unit tests use exact records and consumption events, not elapsed time.
 Transport compilation is checked for Linux desktop, Windows GNU and Android
 arm64. The native setup owner is also exercised against the real Go board for
 acceptance and saved restoration. For the relay setup integration, Android debug
-APK/AAB compilation and 24 Robolectric tests (including native frame switching)
+APK/AAB compilation and 26 Robolectric tests (including native frame switching)
 pass; Windows GNU shell compilation passes. This development host lacks
 WebKitGTK development files, an attached Android device, and the Apple SDK, so
 relay loading in an OS WebView and Windows/macOS runtime chrome remain unverified.
