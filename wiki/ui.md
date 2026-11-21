@@ -413,9 +413,10 @@ marker and a configure action, not a general native API.
 `ui/core/src/relay` implements the existing [version-1 relay protocol](relay-protocol.md)
 in native Rust, without a Go process. It provides committed pairing, mutual
 ML-KEM-768 possession proofs, authenticated records/reconnect and notification
-request/envelope cryptography. The setup screen, board WebView transport,
-stream multiplexing and persisted relay notification receipt policy are separate
-consumers; the shell does not yet offer a relay connection choice.
+request/envelope cryptography. Its native stream multiplexer and private board
+bridge carry host HTTP, SSE and WebSocket traffic. Setup/window wiring and
+persisted relay notification receipt policy are separate consumers; the shell
+does not yet offer a relay connection choice.
 
 The entry points for those consumers are:
 
@@ -450,6 +451,15 @@ The entry points for those consumers are:
   Ping/Pong and use bounded queues (32 records); overload terminates a session.
   Consumers must implement the protocol's bounded stream credits and read
   concurrently, rather than treating a socket write as peer application receipt.
+- `StreamMux::new(session)` owns one receive demultiplexer and a round-robin
+  writer. `open().await` returns a `RelayStream` implementing Tokio
+  `AsyncRead`/`AsyncWrite` only after `stream.opened`. It enforces sequential
+  odd ids, 64 slots, 65,536-byte receive windows and 16,384-byte data records.
+  Credit returns only on consumption; one pending output record per stream
+  bounds buffering. `shutdown` sends ordered write FIN while reads continue;
+  dropping an unfinished stream resets it. Reset snapshots retain their slots
+  until reciprocal reset, validating crossed credit/data/FIN without buffering
+  cancelled payloads. `close().await` joins the record/socket driver.
 - `crypto::{NotificationContext, new_poll, open_notification}` and the strict
   `wire` notification codecs provide the request MAC, outstanding-request binding
   and response authentication/decryption. They do not persist receipts or
@@ -483,6 +493,9 @@ cargo test -p omo-ui-core
 node --test tests/*.test.mjs
 # Optional real Go relay/host integration, no OS WebViews:
 node scripts/relay-probe.mjs
+# Actual embedded board assets/API/upload/SSE/terminal and automatic recovery:
+# npm --prefix ../web ci first if its dependencies are missing.
+node scripts/relay-probe.mjs --board
 ```
 
 The integration probe builds an isolated Go fixture and exercises PIN/full-key
@@ -492,6 +505,61 @@ with retained closed handles. It removes its private temporary state and joins
 its child processes. Relay core compilation has been checked on Linux x86_64,
 Android arm64 and Windows x64 GNU; this is not Android/Windows device runtime
 or OS credential-store evidence.
+
+### Native board adapter
+
+`BoardTransport::start(client, session: Option<RelaySession>).await` returns the
+connection-owned adapter for desktop and Android. Pass the session returned by
+`Pairing::accepted` to use a freshly accepted connection, or `None` to authenticate
+with saved trust. A live unrelated session makes `start(None)` fail with busy;
+clone one client for shared state rather than opening its secret entry twice.
+
+`endpoint()` returns `BoardEndpoint { origin, username, password }`. These are
+fresh, ephemeral **bridge** Basic credentials, unrelated to relay admission or
+endpoint cryptographic secrets. Use the existing native WebView Basic-auth
+callbacks with `Auth::Basic` and realm `omo`; keep the endpoint credentials only
+in the owning native connection, out of saved profiles, URLs and JavaScript.
+The endpoint is deliberately not serializable or debug-printable. The listener
+binds only `127.0.0.1` on an allocated port, requires its exact Host and Basic
+credential, and rejects foreign/null Origins, cross-site Fetch Metadata,
+ambiguous header framing and relay/private credential headers. Requests without
+credentials receive a Basic challenge. It has no CORS grant or native-command
+capability. Remote documents retain the shell's existing command boundary.
+
+The bridge sends origin-form HTTP/1.1 over each authorized encrypted stream,
+replacing Host/Origin with `omo-relay.invalid` / `http://omo-relay.invalid` and
+removing bridge authentication. Ordinary connections use `Connection: close`;
+WebSocket upgrades retain their headers, subprotocol and opaque frames. Bodies,
+chunking, application JSON, assets and streamed responses are not rewritten or
+buffered as whole messages. No arbitrary upstream or host HTTP fallback exists.
+
+`status()` and `subscribe()` expose `Connecting`, `Ready`, `Reconnecting`,
+`Unavailable`, `Stopped`. The shell should watch Ready to load/reload its board
+document. The same loopback endpoint survives reconnects during this owner.
+After loss, the adapter authenticates with fresh session keys and the saved
+host key/epoch/attempt, retrying after 1, 2, 4, 8, 16 and then 30 seconds. A host
+not registered yet remains retryable. Failure, admission denial or revocation
+stays visible as Unavailable; none starts a new pairing or replaces trust.
+Offline requests return 503. The adapter never replays HTTP requests, uncertain
+writes or terminal input. Board subscriptions reopen through their existing
+Last-Event-ID/resync and terminal replay/message-ack behavior.
+
+Own one adapter with the configured connection and call `close().await` on
+disconnect/replacement: it closes the listener, cancels and joins every accepted
+connection and its own authentication/socket work before reporting Stopped.
+Drop requests cancellation; explicit close observes completion. Setup screens,
+native chrome and Android notification receipt policy are not implemented by
+this adapter.
+
+The `--board` probe builds the real Vue board and a test-only control-pipe
+fixture around the production Go server and relay, without a host browser
+listener. It checks actual assets/API, an exact multi-window chunked PNG upload,
+SSE live/resume/resync, terminal binary output/input and message acknowledgments,
+host/relay loss and delayed host registration, saved-trust UI reconstruction,
+no duplicate uncertain write or terminal input, revocation and joined shutdown.
+Protocol unit tests use exact records and consumption events, not elapsed time.
+Transport compilation is checked for Linux desktop, Windows GNU and Android
+arm64; OS WebView runtime remains unvalidated here on every platform.
 
 ## Focused native smoke
 

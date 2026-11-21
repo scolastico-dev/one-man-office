@@ -87,6 +87,7 @@ impl Transport {
         route: &Route,
         admission: Option<&str>,
         gate: OwnedMutexGuard<()>,
+        completed: Option<oneshot::Sender<()>>,
     ) -> Result<Self> {
         let address = format!(
             "{}/v1/ws",
@@ -218,6 +219,9 @@ impl Transport {
                 session.close();
             }
             drop(gate);
+            if let Some(completed) = completed {
+                let _ = completed.send(());
+            }
             final_status.send_replace(if cancelled {
                 SessionStatus::Closed
             } else {
@@ -364,7 +368,7 @@ impl RelayClient {
             .map_err(|_| "Relay connection is busy.")?;
         let commit = self.inner.prepare_commit()?;
         let s = self.inner.snapshot()?;
-        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate).await?;
+        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate, None).await?;
         transition(&t.status, SessionStatus::Pairing)?;
         t.send(commit).await?;
         let host = t.handshake_receive().await?;
@@ -396,6 +400,20 @@ impl RelayClient {
     /// active registration with the original attempt id; candidates gain no
     /// authority from a successful socket attachment or from a saved root.
     pub async fn reconnect(&self) -> Result<RelaySession> {
+        self.reconnect_inner(None).await
+    }
+    // Completion belongs to exactly this attempt, even if its future is
+    // cancelled during attach/authentication before it returns a SessionControl.
+    pub(super) async fn reconnect_observed(
+        &self,
+        completed: oneshot::Sender<()>,
+    ) -> Result<RelaySession> {
+        self.reconnect_inner(Some(completed)).await
+    }
+    async fn reconnect_inner(
+        &self,
+        completed: Option<oneshot::Sender<()>>,
+    ) -> Result<RelaySession> {
         let gate = self
             .inner
             .gate
@@ -418,7 +436,7 @@ impl RelayClient {
             pair_epoch: wire::unb64(&h.epoch)?,
             pair_hash: vec![],
         };
-        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate).await?;
+        let mut t = Transport::open(&s.route, s.admission.as_deref(), gate, completed).await?;
         transition(&t.status, SessionStatus::Authenticating)?;
         let (hs, init) = UIHandshake::new(context, &id)?;
         t.send(init).await?;
@@ -586,7 +604,7 @@ mod tests {
             ));
         });
         let gate = Arc::new(AsyncMutex::new(()));
-        let t = Transport::open(&route, None, gate.clone().lock_owned().await)
+        let t = Transport::open(&route, None, gate.clone().lock_owned().await, None)
             .await
             .unwrap();
         t.install_crypto(crypto::test_support::session()).unwrap();
