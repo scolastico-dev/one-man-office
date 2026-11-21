@@ -156,3 +156,21 @@ fn missing_history_returns_recovery_without_silently_skipping_events() {
     assert_eq!(d, before);
     server.join().unwrap();
 }
+
+#[test]
+fn discovers_forward_support_without_enabling_it_on_android() {
+    for android in [false, true] {
+        let (client, server) = fixture(vec![(
+            "/api/ui/capabilities",
+            200,
+            r#"{"features":["ui.notifications.poll.v1","ui.forwards.tunnel.v1","future"]}"#,
+        )]);
+        let result = client.capabilities(android).unwrap();
+        assert!(result.notification_polling);
+        assert_eq!(
+            result.forward_tunnel,
+            !android && !cfg!(target_os = "android")
+        );
+        server.join().unwrap();
+    }
+}

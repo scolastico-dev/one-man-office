@@ -2,6 +2,7 @@ package api
 
 // UI protocol features are additive; clients ignore flags they do not know.
 const (
+	FeatureUIForwardTunnel       = "ui.forwards.tunnel.v1"
 	FeatureUICapabilities        = "ui.capabilities.v1"
 	FeatureUINotificationPolling = "ui.notifications.poll.v1"
 )

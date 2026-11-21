@@ -592,10 +592,11 @@ Build/extension details and verified platform limits:
 
 `internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
 exchanges each side's `features` list; unknown/absent client flags are harmless and
-no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`.
+no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`,
+`ui.forwards.tunnel.v1`.
 `GET /api/ui/notifications?cursor=<decimal-event-id>&limit=<0..200>` scans committed
 events in a board read transaction (`board/ui.go`), returning
-`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. Both routes
+`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. These routes
 are registered as `userOnly` in `server/ui.go` and use existing auth/Host/Origin
 checks; native HTTP clients omit Origin, with no CORS exception. Each UI retains
 its own cursor; the bell routes and mentions seen marker stay independent.
@@ -607,6 +608,22 @@ is 400; unavailable history is 409 with `reset_cursor` and `latest_cursor`.
 The existing SQLite AUTOINCREMENT sequence preserves recovery information even
 when all events have been removed. The exact protocol, examples, initial
 baselining and retry rules are in [Native UI API](wiki/ui-api.md).
+
+Desktop forward transport: `GET /api/ui/forwards/{id}/tunnel` is another
+`userOnly` route (`server/ui_tunnel.go`), reserved as a board WebSocket before
+browser forward fallbacks. Required subprotocol `ui.forwards.tunnel.v1` carries
+root HTTP/1.1 as binary messages up to 64 KiB, with arbitrary boundaries and no
+half-close. A pipe gives the inner HTTP server ordinary deadline semantics;
+output drains before HTTP close ends the outer socket. Registry checks on every
+request precede the existing root proxy/activity path; SSE and nested app WS
+stream through bounded buffers. Outer handshake auth never enters app traffic.
+`ui/core/src/tunnel.rs` exports desktop-only `ForwardConnector::new(&Config,
+&str)`, async `connect(&str)` and `ForwardTunnel` (Tokio AsyncRead/AsyncWrite).
+`BoardClient::capabilities(android)` returns independent optional notification
+and forward support; Android excludes the connector and tunnel advertisement.
+Shared Go/Rust wire fixture: `internal/api/testdata/forward_tunnel_v1.json`.
+Focused checks: server `TestUIForwardTunnel`, existing UI/auth/proxy tests and
+`cargo test -p omo-ui-core` from `ui/`. Wire and lifecycle details: [Native UI API](wiki/ui-api.md).
 
 ## Invariants
 

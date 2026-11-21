@@ -76,6 +76,14 @@ keeps ownership and reports the error for retry.
 Android exposes only direct connection. Native validation and the local
 runtime refuse local start/install there.
 
+The shared native core also supplies a desktop-only registered-forward
+transport: authenticated WebSocket connections carry root HTTP, streaming and
+application WebSocket upgrades through the configured omo host. Capability
+`ui.forwards.tunnel.v1` discovers support independently of notifications and
+server/app versions; Android never advertises it. The transport does not add
+preview windows or local-port controls by itself. Native integration entry
+points and the wire contract are in [Native UI API](ui-api.md#registered-forward-tunnel-desktop).
+
 ## Notifications and shortcuts
 
 Desktop system notifications are enabled in the connection screen. Capability
