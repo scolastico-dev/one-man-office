@@ -53,6 +53,10 @@ func NewHandler(o Options) http.Handler {
 		if id.Class == ClassAgent && o.Seen != nil {
 			o.Seen(id.Session)
 		}
+		if id.Class == ClassAgent && o.Listeners != nil && wantsStream(r) {
+			o.Listeners.serve(w, r, id.Session)
+			return
+		}
 		sdk.ServeHTTP(w, r)
 	})
 }
