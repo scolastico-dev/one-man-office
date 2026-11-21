@@ -162,6 +162,33 @@ Profiles: `DELETE /api/profiles/{name}` answers 409 `in_use` with `details.roles
 
 Revisions: `GET` answers carry a `revision` (16 hex characters of the file's SHA-256; `"0"` when the file does not exist). A write from the browser sends it as `If-Match: "<revision>"`; the store re-reads the file under its locks and answers 409 `stale_settings` when it changed on disk, also inside the poll interval. `If-Match: "0"` on a profile means create only. No header means no check (the CLI and API clients). A hand edit found while writing is loaded and announced with `source: "disk"` in `settings.changed`; the pages show "Changed on disk" for it.
 
+Language-server configuration: `api/lsp.go` exports `LSPSettings`, `LSPServer`
+and `LSPFileSelector`; `General.LSP` lives in `settings.yaml` and the existing
+user-only settings GET/PUT/PATCH flow. Defaults: `servers: []`,
+`debounce: 500ms` (0s–1m), `force_chat: []` (Profile.CLI values; chat overrides
+an active MCP notification listener). Named stdio registrations have explicit
+enablement, command/args/literal env, ordered `{pattern, language_id}` selectors,
+and opaque JSON objects `initialization_options`/`configuration`. The cwd is
+always the managed worktree root; there is no install or cwd option. First
+matching selector wins: case-sensitive `path.Match`, slashless against the
+basename at any depth, otherwise against the slash-separated worktree-relative
+path; no **, backslash, colon or empty/dot/parent components. Validation and
+deep copies are in `settings/lsp.go`; the same settings revision, last-valid
+state, event and backup/import machinery applies. PATCH still rejects null
+settings but permits null inside the opaque JSON objects. This adds the
+configuration contract only; runtime, agent commands and browser UI are
+separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
+Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
+settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
+and TypeScript checks.
+
+Settings writes enforce each section's read limit on the final encoded bytes
+in `Store.writeFile`, before disk or active state changes. YAML expansion and
+combined registrations can exceed a file's bound despite passing individual
+field limits; `TestSettingsWriterRespectsEverySectionReadLimit` guards every
+section and `TestLSPRejectsOversizedYAMLBeforeChangingSettings` guards both
+general write entry points.
+
 Reading files: every read of a file in the home goes through `internal/homefile` (see the package map), with a limit per kind of file (settings and project files 1 MiB, prompts 256 KiB, `server.yaml` 64 KiB, the token 4 KiB). A link, a named pipe, a device or a file over its limit is refused, so a bad file in the home cannot hang the poll or fill memory. Windows read handles share deletion as well as reads/writes, so an in-flight reader can coexist with a file replacement; opened-file identity and reparse-point checks still apply. Directory renames still require child handles to close on Windows: plugin runtime loads, public asset reads and installation-record reads share a tree read lock with the installer, which holds the write lock from activation through settings commit or rollback. Fetching and staging happen outside that lock.
 
 Workspace folders (`workspace_roots` in `settings.yaml`: `path`, `max_depth` 1 to 16 with default 4, `ignore`) are searched by one scanner goroutine in `internal/server/discovery.go`: at start, every `rescan_interval`, when the roots change and on "Rescan". A folder that contains a `.git` directory is a repository and becomes a project (named after its path below the root, enabled); folders inside a repository are not searched. Skipped: links, folders that match an ignore pattern (default `node_modules` and `.*`), the omo home and its `worktrees` folder, and folders beyond the depth or the visit, time and per-folder limits (the report says what was cut). A found project can be switched off but not removed while its folder lies under a root; an ignore pattern is the way out. `POST /api/projects/rescan` answers the report; `projects.scanned` is its event.

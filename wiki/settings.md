@@ -22,6 +22,7 @@ Durations are written like `45s`, `15m`, `1h30m`.
 - [Prompts](#prompts)
 - [Skill sets](#skill-sets)
 - [MCP](#mcp)
+- [Language servers](#language-servers)
 - [Environment](#environment)
 - [Limits](#limits)
 - [Review](#review)
@@ -116,6 +117,91 @@ from them.
 *Servers omo relays to agents, the agent programs it is registered in and
 access for other programs.* Files: `mcpservers/<name>.yaml`, `settings.yaml`
 `mcp`. See [MCP](mcp.md).
+
+## Language servers
+
+`settings.yaml` has an `lsp` group, also available through the user-only
+`GET`, `PUT` and `PATCH /api/settings` routes. This is the configuration
+contract; starting servers, watching files, sending notifications and a browser
+settings page are separate work. No language server is installed automatically.
+
+The default for existing and new installations is:
+
+```yaml
+lsp:
+  servers: []
+  debounce: 500ms
+  force_chat: []
+```
+
+An example registration (the executable must already be available):
+
+```yaml
+lsp:
+  debounce: 500ms
+  force_chat: [codex]
+  servers:
+    - name: go
+      enabled: true
+      command: gopls
+      args: [serve]
+      env: {}
+      files:
+        - pattern: '*.go'
+          language_id: go
+        - pattern: go.mod
+          language_id: go.mod
+      initialization_options: {}
+      configuration:
+        gopls:
+          staticcheck: true
+```
+
+| Field | Contract |
+|---|---|
+| `servers` | Ordered list, at most 32 registrations; omitted means `[]`. |
+| `servers[].name` | Required unique name matching `[a-z0-9][a-z0-9._-]{0,63}`. |
+| `servers[].enabled` | `false` unless explicitly enabled. Disabled entries still need valid configuration. |
+| `servers[].command` | Required executable name or path, at most 4096 bytes, without hidden characters. A bare name uses `PATH`; this is not a shell command. The working directory is always the managed worktree root; there is no `cwd` field. |
+| `servers[].args` | Literal argv, default `[]`; at most 100 arguments of 4096 bytes each, no NUL. No shell expansion. |
+| `servers[].env` | Literal environment overrides, default `{}`; at most 200 variables, each value at most 32 KiB, no NUL. No variable or backtick expansion. Names follow the ordinary environment setting rules. |
+| `servers[].files` | Required list of 1–100 selectors, each with `pattern` and `language_id`; see below. |
+| `servers[].initialization_options` | JSON object for the LSP `initialize` request's `initializationOptions`, default `{}`. |
+| `servers[].configuration` | JSON object of server settings for LSP configuration requests and changes, default `{}`. |
+| `debounce` | Quiet interval before reporting changed diagnostics, `500ms` by default; `0s` disables the delay, maximum `1m`. |
+| `force_chat` | Unique agent program (`Profile.CLI`) values from `claude`, `codex`, `agy`, `gemini`, `custom`; default `[]`. For a listed program, chat delivery takes precedence even when its agent has an active MCP notification listener. |
+
+Each opaque JSON object may contain text, finite numbers, booleans, null,
+lists and objects with text keys, nested at most 64 levels, and encode to at
+most 64 KiB of JSON. Quote YAML dates/times to keep them strings. Commands,
+arguments and environment values must be valid UTF-8. Values are stored and
+returned as supplied, and never included in refusal messages or change events.
+
+File selection is case-sensitive on every OS. Selectors are tried in listed
+order; the first match supplies the file's `language_id` for that server. No
+match excludes the file from that server; several servers may select the same
+file. Language IDs are explicit, not inferred from extensions: nonempty text of
+at most 64 bytes without whitespace or hidden characters.
+
+Patterns use Go `path.Match` glob syntax: `*`, `?`, and character classes such
+as `[ch]`, each matching within one path component. A pattern without `/`
+matches the basename at any depth (`*.go` includes `main.go` and
+`internal/app/main.go`). A pattern with `/` matches the complete path relative
+to the worktree root, using `/` on every OS (`src/*.go` includes `src/main.go`
+but excludes `src/nested/main.go`). Dot-prefixed names are treated like other
+names. Patterns are at most 1024 bytes; `**`, backslashes, colons, absolute
+paths and empty, `.` or `..` components are refused. Quote wildcard patterns
+in YAML.
+
+The group uses the existing strict settings store, revisions (`If-Match`),
+hand-edit notifications, last-valid-state handling and backup/import flow.
+`PATCH {"lsp":{"debounce":"1s"}}` keeps registrations and delivery overrides.
+Patching `servers` or `force_chat` replaces that whole list; server objects
+inside a new list are complete replacements. Opaque options/configuration
+objects allow nested null values; null settings fields are refused on PATCH.
+The complete encoded `settings.yaml` must also fit the store's 1 MiB file
+limit. A save that would exceed it is refused before changing the file or
+active settings, even if each registration meets its own limits.
 
 ## Environment
 
@@ -235,3 +321,4 @@ stay in use.
 | `branches` | `template: omo/{slug}` |
 | `plugin_lists` | `[]` |
 | `mcp` | `enabled: true`, `inject: {claude: true, codex: true}` |
+| `lsp` | `servers: []`, `debounce: 500ms`, `force_chat: []` |

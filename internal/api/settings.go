@@ -90,6 +90,7 @@ type General struct {
 	PluginLists []string `yaml:"plugin_lists" json:"plugin_lists"`
 	// MCP holds the switches of omo's MCP endpoint.
 	MCP MCPSettings `yaml:"mcp" json:"mcp"`
+	LSP LSPSettings `yaml:"lsp" json:"lsp"`
 }
 
 // BranchSettings holds how omo names the branches it creates for tickets.
