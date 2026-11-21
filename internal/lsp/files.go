@@ -90,7 +90,11 @@ func fileURI(file string) string {
 	}
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
-func relativeFile(root, uri string) (string, bool) {
+
+// uriFilePath turns a local file URI into a slash-separated file name. The
+// path of file:///D:/a/b is "/D:/a/b"; the slash before a drive letter is not
+// part of the name.
+func uriFilePath(uri string) (string, bool) {
 	u, err := url.Parse(uri)
 	if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") || u.RawQuery != "" || u.Fragment != "" {
 		return "", false
@@ -98,6 +102,13 @@ func relativeFile(root, uri string) (string, bool) {
 	p := u.Path
 	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
 		p = p[1:]
+	}
+	return p, true
+}
+func relativeFile(root, uri string) (string, bool) {
+	p, ok := uriFilePath(uri)
+	if !ok {
+		return "", false
 	}
 	abs := filepath.Clean(filepath.FromSlash(p))
 	if !within(root, abs) {
