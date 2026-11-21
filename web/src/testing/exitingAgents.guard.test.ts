@@ -35,17 +35,15 @@ test('the guard sees the specs and the exiting scripts', () => {
   expect(exitingRoles(readFileSync(join(e2e, 'ceo.spec.ts'), 'utf8')).map((r) => r.role)).toContain('ceo')
 })
 
-test('a spec whose restarted role exits at once waits for the last attempt and picks a session by id', () => {
+test.each(specs)('a spec whose restarted role exits at once waits for the last attempt and picks a session by id: %s', (f) => {
   const offenders: string[] = []
-  for (const f of specs) {
-    const text = readFileSync(join(e2e, f), 'utf8')
-    for (const { role, line } of exitingRoles(text)) {
-      if (role === 'ceo') continue
-      const waits = /['"`]await-line\|/.test(text.split('\n').slice(line - 1, line + 2).join('\n'))
-      if (!waits && !text.includes("waitForRestartsExhausted(omo")) offenders.push(`${f}:${line} (${role})`)
-      // A row of such a test is never the first one by position.
-      if (!waits && /\[data-session\]['"`)]*\s*\)?\s*\.first\(\)|li\[data-session\]['"`)]*\)\s*\.first\(\)/.test(text)) offenders.push(`${f}: a session row picked with first()`)
-    }
+  const text = readFileSync(join(e2e, f), 'utf8')
+  for (const { role, line } of exitingRoles(text)) {
+    if (role === 'ceo') continue
+    const waits = /['"`]await-line\|/.test(text.split('\n').slice(line - 1, line + 2).join('\n'))
+    if (!waits && !text.includes("waitForRestartsExhausted(omo")) offenders.push(`${f}:${line} (${role})`)
+    // A row of such a test is never the first one by position.
+    if (!waits && /\[data-session\]['"`)]*\s*\)?\s*\.first\(\)|li\[data-session\]['"`)]*\)\s*\.first\(\)/.test(text)) offenders.push(`${f}: a session row picked with first()`)
   }
   expect(offenders).toEqual([])
 })

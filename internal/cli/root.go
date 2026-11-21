@@ -32,6 +32,7 @@ func Root(version string) *cobra.Command {
 	// The stock template lists the help command even when it is hidden.
 	cmd.SetUsageTemplate(strings.ReplaceAll(cmd.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`))
 	addServerCommands(cmd)
+	addUILocalCommand(cmd)
 	addConfigCommand(cmd)
 	addAutostartCommands(cmd)
 	addUpdateCommand(cmd, version)

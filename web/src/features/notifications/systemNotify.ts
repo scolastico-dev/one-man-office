@@ -142,7 +142,8 @@ export function createSystemNotifier<T extends SystemItem>(deps: SystemNotifierD
   }
 
   function canShow(): boolean {
-    return enabled.value && permission() === 'granted' && deps.document.visibilityState === 'hidden'
+    const native = (globalThis as { __OMO_NATIVE_UI__?: { notifications?: boolean } }).__OMO_NATIVE_UI__?.notifications === true
+    return !native && enabled.value && permission() === 'granted' && deps.document.visibilityState === 'hidden'
   }
 
   function notify(item: T): boolean {

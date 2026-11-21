@@ -107,6 +107,7 @@ The [wiki](wiki/README.md) is the manual:
 - [Running omo](wiki/running.md), [Command line](wiki/cli.md), [Backup](wiki/backup.md), [Troubleshooting](wiki/troubleshooting.md)
 - [Outbound relay host](wiki/relay.md): local connection, pairing and device controls
 - [Upgrading from 0.11](wiki/upgrading-from-0.11.md)
+- [omo ui](wiki/ui.md): native app and local build commands
 - [Contributing](wiki/contributing.md)
 
 <picture>

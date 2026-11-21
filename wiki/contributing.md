@@ -82,6 +82,18 @@ Playwright `waitForTimeout` calls are rejected by the browser unit-test guard.
 Lower bounds, virtual clocks and diagnostic elapsed values remain valid. These
 narrow guards complement review; they do not infer the purpose of every timer.
 
+Source guards enumerate their files during test collection and register separate
+cases with the source path in each name (`test.each` / `it.each`). A scan of the
+whole tree must not share one test timeout: total parsing work grows with the
+source set and runner load. Shared declaration discovery and global inventories
+finish synchronously during collection; per-source rule checks finish before
+their case returns. Keep the full enumeration, rule self-tests and inventory
+coverage assertions when changing a guard. `web/src/testing/guardSources.test.ts`
+pins the completion/timing guards' file filters and rejection of a nested bad
+source. To diagnose aggregate timing dependence, temporarily delay each source
+scan, verify the corrected guards at several delays, then remove the probe;
+never raise a timeout or add a retry to hide the failure.
+
 Tests own their temporary homes, repositories, processes and state. Strip all
 inherited `OMO_` variables case-insensitively before setting isolated values;
 isolate HOME/XDG/git configuration and use fake agent programs. A port observed
@@ -177,6 +189,16 @@ in the shared temporary folder (`tmpdir()`, `process.pid`), and when
 `playwright test --list` leaves anything behind. In Go the same rule is
 `t.TempDir()` / `t.Cleanup` in the test that uses the resource, never a package
 variable or a deferred removal in a parent of parallel subtests.
+
+Go temporary-root fixtures must distinguish `os.TempDir()` (the platform's
+OS temporary-directory rules) from `testing.T.TempDir()` and Go builds
+(`GOTMPDIR`, falling back to the OS root when empty). The engine's long-reason
+fixture overrides `GOTMPDIR` as well as `TMPDIR`, `TMP` and `TEMP`, before the
+first `t.TempDir()` call caches its parent, and restores them through `t.Setenv`.
+It keeps the shorter Windows root budget while requiring reasons to exceed
+the 200-rune summary budget and preserving the exact full comment. Fixtures
+testing only OS allocation, such as plugin task temporary-directory leases,
+keep Go's temporary root independent.
 
 ### Gates, skips and missing programs
 

@@ -56,20 +56,18 @@ test('buttons, fields, selects and switches take their height from the control t
   expect(rule(toggle, '.toggle')).toMatch(/min-height:\s*var\(--omo-control-h\)/)
 })
 
-test('no component sets the height of a control by a number of its own', () => {
+test.each(Object.entries(sources))('no component sets the height of a control by a number of its own: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (!file.endsWith('.vue')) continue
-    const classes = new Set<string>()
-    for (const m of text.matchAll(CONTROL_TAG)) for (const c of m[2]!.split(/\s+/)) if (c && !c.startsWith('omo-') && !(c in ALLOWED)) classes.add(c)
-    const style = [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n')
-    for (const c of classes) {
-      for (const m of style.matchAll(new RegExp(`\\.${c}(?![\\w-])[^{}]*\\{([^}]*)\\}`, 'g'))) {
-        for (const d of m[1]!.matchAll(HEIGHT)) {
-          const value = d[3]!.trim()
-          if (/var\(--omo-control-h(-sm)?\)/.test(value) || /^(0|auto|none|100%)$/.test(value)) continue
-          found.push(`${file}: .${c} { ${d[2]}: ${value} }`)
-        }
+  if (!file.endsWith('.vue')) return
+  const classes = new Set<string>()
+  for (const m of text.matchAll(CONTROL_TAG)) for (const c of m[2]!.split(/\s+/)) if (c && !c.startsWith('omo-') && !(c in ALLOWED)) classes.add(c)
+  const style = [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n')
+  for (const c of classes) {
+    for (const m of style.matchAll(new RegExp(`\\.${c}(?![\\w-])[^{}]*\\{([^}]*)\\}`, 'g'))) {
+      for (const d of m[1]!.matchAll(HEIGHT)) {
+        const value = d[3]!.trim()
+        if (/var\(--omo-control-h(-sm)?\)/.test(value) || /^(0|auto|none|100%)$/.test(value)) continue
+        found.push(`${file}: .${c} { ${d[2]}: ${value} }`)
       }
     }
   }

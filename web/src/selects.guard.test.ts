@@ -21,13 +21,11 @@ test('the guard sees the files it scans', () => {
   expect(Object.keys(sources).filter((f) => f.endsWith('.vue')).length).toBeGreaterThan(50)
 })
 
-test('every select of the app uses the shared field look', () => {
+test.each(Object.entries(sources))('every select of the app uses the shared field look: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (!file.endsWith('.vue')) continue
-    for (const m of text.matchAll(/<select\b[^>]*>/g)) {
-      if (!/\bclass="[^"]*\bomo-input\b/.test(m[0])) found.push(`${file}: ${m[0]}`)
-    }
+  if (!file.endsWith('.vue')) return
+  for (const m of text.matchAll(/<select\b[^>]*>/g)) {
+    if (!/\bclass="[^"]*\bomo-input\b/.test(m[0])) found.push(`${file}: ${m[0]}`)
   }
   expect(found).toEqual([])
 })
@@ -43,17 +41,15 @@ test('the arrow of a select keeps the same distance from the right edge as the t
   expect(select).toMatch(/padding-right:[^;]*var\(--omo-input-pad-x\)/)
 })
 
-test('no component sets the side padding of a select itself: it changes the distance through --omo-input-pad-x', () => {
+test.each(Object.entries(sources))('no component sets the side padding of a select itself: it changes the distance through --omo-input-pad-x: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (!file.endsWith('.vue')) continue
-    const classes = new Set<string>()
-    for (const m of text.matchAll(/<select\b[^>]*\bclass="([^"]*)"/g)) for (const c of m[1]!.split(/\s+/)) if (c && c !== 'omo-input') classes.add(c)
-    const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? ''
-    for (const c of classes) {
-      for (const m of style.matchAll(new RegExp(`\\.${c}\\b[^{]*\\{([^}]*)\\}`, 'g'))) {
-        if (/(^|[\s;])padding(-inline|-left|-right)?\s*:/.test(m[1]!)) found.push(`${file}: .${c}`)
-      }
+  if (!file.endsWith('.vue')) return
+  const classes = new Set<string>()
+  for (const m of text.matchAll(/<select\b[^>]*\bclass="([^"]*)"/g)) for (const c of m[1]!.split(/\s+/)) if (c && c !== 'omo-input') classes.add(c)
+  const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? ''
+  for (const c of classes) {
+    for (const m of style.matchAll(new RegExp(`\\.${c}\\b[^{]*\\{([^}]*)\\}`, 'g'))) {
+      if (/(^|[\s;])padding(-inline|-left|-right)?\s*:/.test(m[1]!)) found.push(`${file}: .${c}`)
     }
   }
   expect(found).toEqual([])

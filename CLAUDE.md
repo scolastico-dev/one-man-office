@@ -116,6 +116,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 ```
 
 - `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
+- Source guards enumerate at collection and check each source in a separate path-named case, so tree size does not consume one test timeout. Shared declarations/inventories finish synchronously during collection; `web/src/testing/guardSources.test.ts` pins the completion/timing walkers' coverage and bad-source rejection.
 - Column headings and mobile tabs show full ticket totals. `TicketList.done_total` counts matching, readable Done tickets before paging in the snapshot transaction; `boardState` keeps that total current from `ticket.moved` events, independently of page/search merges. `useBoardColumns` uses it without filters and keeps visible-count/total when filtered.
 - `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
 - Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` and `/plugin-assets` are proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
@@ -551,6 +552,62 @@ mcpservers/<name>.yaml  relayed MCP servers   logs/mcp/  their logs   backups/  
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 
+## Native UI application
+
+`ui/` is the Tauri 2 direct-host shell; only `ui/setup/` is bundled, never
+`web/dist`. The Rust workspace separates `core` (configuration/auth validation,
+native HTTP, capabilities and notification cursor/dedup persistence) from
+`src-tauri` (setup-only command ACL, OS credentials, remote WebViews, native
+notifications and platform keyboard/auth settings). Run `npm ci`, `npm run dev`,
+`npm run build` and `npm run check` from `ui/`; that directory's Cargo config
+also supplies the Android Wry auth extension. Desktop local mode discovers the
+normal runtime/install (including limited GUI PATH), verifies release checksums
+on a missing install, and starts through hidden `omo ui-local start` JSON.
+`service.StartOrAttach` serializes detached launches and reports ownership only
+for its newly ready child. `local.rs` captures the random control capability;
+`desktop.rs` serializes native operations and applies owned-only tray/close/Exit
+behavior (`stop_with_window`, default false). Attached/direct servers never gain
+ownership; replacement instances cannot be stopped by an earlier capability.
+After control failure, native lifecycle probes the normal run.lock before
+retiring stale crash metadata; a still-held lock preserves ownership on error.
+Android refuses local mode and uses the `ui/notifications` native plugin:
+WorkManager periodic GET polling (15 minutes or later) or a user-started dataSync
+foreground service with an ongoing notification and five-second polls. Android
+15+ dataSync runtime limits apply; timeout stops the service and reports status.
+Authenticated Android polling requires remembered credentials. Work configuration
+is Keystore encrypted; jobs/intents carry no credentials. Both modes use the
+Rust delivery journal through JNI, without a WebView or Tauri event loop. The
+checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
+android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
+./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
+Remote pages have no native command capabilities. The board's browser notifier
+honors `__OMO_NATIVE_UI__.notifications`; the shell injects it only into its
+configured board documents while native polling is enabled. Tests: core Rust,
+Node bridge tests, affected board notification tests, focused service/CLI tests,
+and the opt-in isolated Linux connection and local lifecycle probes.
+Build/extension details and verified platform limits:
+[omo ui](wiki/ui.md).
+
+## Native UI protocol
+
+`internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
+exchanges each side's `features` list; unknown/absent client flags are harmless and
+no list is persisted. Server flags: `ui.capabilities.v1`, `ui.notifications.poll.v1`.
+`GET /api/ui/notifications?cursor=<decimal-event-id>&limit=<0..200>` scans committed
+events in a board read transaction (`board/ui.go`), returning
+`{notifications:[{id,kind,title,body,destination}],next_cursor,has_more}`. Both routes
+are registered as `userOnly` in `server/ui.go` and use existing auth/Host/Origin
+checks; native HTTP clients omit Origin, with no CORS exception. Each UI retains
+its own cursor; the bell routes and mentions seen marker stay independent.
+The scan limit counts events, so an empty page can have `has_more=true`.
+Notification IDs are stable event IDs; comment payloads and category transitions
+between committed ticket summaries generate mentions, questions, attention and
+review notices on demand, without a new queue or delivery state. Invalid syntax
+is 400; unavailable history is 409 with `reset_cursor` and `latest_cursor`.
+The existing SQLite AUTOINCREMENT sequence preserves recovery information even
+when all events have been removed. The exact protocol, examples, initial
+baselining and retry rules are in [Native UI API](wiki/ui-api.md).
+
 ## Invariants
 
 - A change is committed to SQLite before it is acknowledged, and every committed change appends an `events` row. The event stream tails that table, so clients get every event once, or an explicit `resync`.
@@ -593,6 +650,7 @@ resources; initial inline popup scripts cannot be guaranteed throttled.
 - `.github/workflows/stress.yml`: manual (`workflow_dispatch`) full-suite constrained stress, three Go race/shuffle and two Chromium rate-4 attempts by default, configurable counts; `scripts/stress/ci.sh` calls the same runner as `make stress`. Fresh per-attempt raw/JSON/artifact folders, job failure frequencies, no retries or publishing. Full acceptance is 20/10 consecutive successes.
 - `.github/workflows/nightly.yml`: scheduled test and cross build when `main` changed in the last 24 hours.
 - `.github/workflows/release.yml`: test, cross build, package, checksum and upload on a published release, then syncs the tag's `plugins/` tree to the `release` branch; run by hand (`workflow_dispatch` with `ref`) it only syncs the `plugins/` tree of that tag, branch or commit. Each sync runs `TestShippedCatalog` first.
+- `.github/workflows/ui-desktop.yml` / `ui-android.yml`: reusable native UI packaging, called by release CI with the release tag and by PR CI with a test version. Native Linux/Windows/macOS x64 and arm64 installers are unsigned; Android arm64 uses the persistent installation key from five `OMO_UI_ANDROID_*` repository secrets, with a pinned SHA256 certificate. `ui/scripts/release.mjs` validates versions/signing inputs, stages only installers or a verified APK, and writes per-target `omo-ui-<platform>-<arch>-SHA256SUMS` files without touching the CLI checksum list. Exact artifacts, commands and one-time key/fingerprint setup: [omo ui](wiki/ui.md#release-installers-and-ci).
 - `.github/workflows/publish-container.yml`: container image publishing.
 
 Release assets must keep these names, because the installers and `omo update` depend on them: `omo-{linux,darwin}-{amd64,arm64}.tar.gz`, `omo-windows-{amd64,arm64}.zip`, `SHA256SUMS`. Each archive holds the binary with `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES`; the image has them in `/usr/share/doc/omo/`. `THIRD_PARTY_NOTICES` comes from `make notices` (`tools/notices`): the Go standard library and every module linked on any release platform, from the module cache, then the npm packages whose code is in the bundle, which the web build writes to `web/third-party-notices.txt` (`vite.config.ts` `thirdPartyNotices`); a module or package without a licence file fails it. The bundle keeps the dependencies' licence comments. The Makefile injects the version with `-ldflags`; do not add a second version source.

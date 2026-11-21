@@ -91,21 +91,17 @@ test('the guard recognises a click handler that bypasses the setting', () => {
   expect('router.push(pageTarget.value)'.match(PUSH_BYPASS)).toBeNull()
 })
 
-test('every click that opens a ticket goes through openTicketLocation', () => {
+test.each(Object.entries(sources))('every click that opens a ticket goes through openTicketLocation: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (isTestingHelper(file)) continue
-    for (const m of text.matchAll(PUSH_BYPASS)) found.push(`${file}: ${text.slice(m.index!, m.index! + 60)}`)
-    if (!TICKET_HERE_CALLERS.has(file) && /\bticketHere\(/.test(text)) found.push(`${file}: calls ticketHere`)
-  }
+  if (isTestingHelper(file)) return
+  for (const m of text.matchAll(PUSH_BYPASS)) found.push(`${file}: ${text.slice(m.index!, m.index! + 60)}`)
+  if (!TICKET_HERE_CALLERS.has(file) && /\bticketHere\(/.test(text)) found.push(`${file}: calls ticketHere`)
   expect(found).toEqual([])
 })
 
-test('board, ticket and settings addresses are built with ticketLocation, ticketPageLocation, boardLocation and settingsLocation only', () => {
+test.each(Object.entries(sources))('board, ticket and settings addresses are built with ticketLocation, ticketPageLocation, boardLocation and settingsLocation only: %s', (file, text) => {
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    if (ALLOWED.has(file) || isTestingHelper(file)) continue
-    found.push(...handBuilt(file, text))
-  }
+  if (ALLOWED.has(file) || isTestingHelper(file)) return
+  found.push(...handBuilt(file, text))
   expect(found).toEqual([])
 })

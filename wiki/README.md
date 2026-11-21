@@ -40,6 +40,7 @@ other's work, and omo merges the result or opens pull requests. The
 
 ## Running it
 
+- [omo ui](ui.md): native direct-host app, build commands and platform status.
 - [Running omo](running.md): start and stop, start options, sign-in modes,
   reaching omo from another machine, reverse proxy, start at login, updating,
   Docker.
@@ -54,6 +55,8 @@ other's work, and omo merges the result or opens pull requests. The
 ## Contributing
 
 - [Contributing](contributing.md): building, testing and the map of the code.
+- [Native UI API](ui-api.md): capability flags, authenticated incremental
+  notification polling, delivery cursors and recovery.
 
 Questions and bug reports: the
 [issues page](https://github.com/scolastico-dev/one-man-office/issues).

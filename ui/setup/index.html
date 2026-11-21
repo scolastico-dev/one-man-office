@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>omo ui · Connection</title><link rel="stylesheet" href="style.css"><script src="app.js" type="module"></script></head>
+<body>
+<main>
+  <header><span class="mark" aria-hidden="true">omo</span><h1>Your office, connected.</h1><p>Open your omo board in its own window.</p></header>
+  <form id="connection">
+    <label id="mode-label">Connect to<select name="mode"><option value="direct">An external omo host</option><option value="local" hidden disabled>Local omo</option></select></label>
+    <p id="local-hint" hidden>Connect to the local omo server, or install and start it if needed. An existing server stays independent.</p>
+    <fieldset id="direct">
+      <label>Board address<input name="origin" type="url" required placeholder="http://localhost:8090" autocomplete="url" spellcheck="false"></label>
+      <p class="hint">Use the origin only. Paste the login token separately.</p>
+      <label>Authentication<select name="auth"><option value="token">Login token</option><option value="basic">Username and password</option><option value="none">No authentication</option></select></label>
+      <label id="username-label" hidden>Username<input name="username" autocomplete="username" spellcheck="false"></label>
+      <label id="secret-label"><span id="secret-title">Login token</span><input name="secret" type="password" autocomplete="current-password" spellcheck="false"></label>
+      <p id="saved-hint" class="hint" hidden>Leave the secret empty to reuse your current or saved credentials.</p>
+      <label class="check" id="remember-label"><input type="checkbox" name="remember">Remember credentials in the system credential store</label>
+      <details><summary>Connection identity</summary><p class="hint">If the database at this address was replaced, start a new notification history for it.</p><label class="check"><input name="reset_identity" type="checkbox">Treat as a new server</label></details>
+    </fieldset>
+    <label class="check" id="notifications-label"><input type="checkbox" name="notifications" checked>System notifications</label>
+    <label id="notification-mode-label" hidden>Android notification mode<select name="notification_mode"><option value="background">Background — checks every 15 minutes or later</option><option value="foreground">Foreground — frequent checks with a persistent notification</option></select><span class="hint">Android can delay background checks. Foreground polling uses more battery and may be stopped by Android. Remember credentials for checks after a restart.</span></label>
+    <label class="check" id="stop-with-window-label"><input type="checkbox" name="stop_with_window">Stop an omo server started by this app when closing its window</label>
+    <p class="hint" id="close-hint">By default, closing the window keeps an app-started server available in the tray. Tray Exit, Disconnect, or switching to an external host stops it. Servers started elsewhere stay running.</p>
+    <p id="problem" role="alert" hidden></p>
+    <p id="status" role="status">Loading connection settings…</p>
+    <div id="recovery" hidden><p>The saved cursor is outside the server’s retained history.</p><button type="button" id="replay">Replay retained notifications</button><button type="button" id="baseline">Notify from now</button></div>
+    <footer><button type="submit" id="connect">Connect</button><button type="button" id="disconnect" hidden>Disconnect</button></footer>
+  </form>
+  <p class="hint">The board and its features come from your server. Connection settings remain available from the app menu or the board’s Connection button.</p>
+</main>
+</body>
+</html>

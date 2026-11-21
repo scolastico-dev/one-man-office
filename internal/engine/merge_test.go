@@ -514,7 +514,24 @@ func TestBlockedMergeStaysInReviewWithRetry(t *testing.T) {
 }
 
 func TestOperationInProgressBlocksMerge(t *testing.T) {
+	// Supply a separate Go root before the fixture, without calling t.TempDir:
+	// testing caches its parent on the first call, before any later env changes.
+	short, err := os.MkdirTemp("", "go-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(short); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Setenv("GOTMPDIR", short)
 	useLongTempRoot(t)
+	dir := t.TempDir()
+	rel, err := filepath.Rel(os.TempDir(), dir)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		t.Fatalf("fixture directory %q is outside the long temporary root %q: %v", dir, os.TempDir(), err)
+	}
 	h := gitHarness(t)
 	n := h.skippedTask("Add b")
 	h.finishTask(n, h.project, "b.txt", "b\n")

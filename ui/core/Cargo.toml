@@ -1,0 +1,31 @@
+[package]
+name = "omo-ui-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+base64 = "0.22.1"
+flate2 = "1.1"
+humantime = "2"
+sha2 = "0.10"
+tar = "0.4"
+serde_yaml = "0.9"
+tempfile = "3.24.0"
+wait-timeout = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+url = "2.5.8"
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[dev-dependencies]
+tempfile = "3.24.0"

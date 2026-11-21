@@ -530,19 +530,16 @@ describe('Done order with the server\'s timestamp format', () => {
     expect(s.tickets.has(12)).toBe(false)
   })
 
-  test('the store compares ticket timestamps only through timeKey', () => {
-    const dir = resolve(import.meta.dirname)
+  const dir = resolve(import.meta.dirname)
+  test.each(readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts')))('the store compares ticket timestamps only through timeKey: %s', (f) => {
     const offenders: string[] = []
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue
-      readFileSync(resolve(dir, f), 'utf8')
-        .split('\n')
-        .forEach((line, i) => {
-          if (/\b(closed_at|created_at|updated_at)\b/.test(line) && !/timeKey\(/.test(line) && !/^\s*(\/\/|\*)/.test(line)) {
-            offenders.push(`${f}:${i + 1}: ${line.trim()}`)
-          }
-        })
-    }
+    readFileSync(resolve(dir, f), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (/\b(closed_at|created_at|updated_at)\b/.test(line) && !/timeKey\(/.test(line) && !/^\s*(\/\/|\*)/.test(line)) {
+          offenders.push(`${f}:${i + 1}: ${line.trim()}`)
+        }
+      })
     expect(offenders).toEqual([])
   })
 })

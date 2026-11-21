@@ -18,11 +18,8 @@ test('the guard sees the files it scans', () => {
   expect(Object.keys(sources)).toEqual(expect.arrayContaining(['/src/features/settings/mcp/McpAccess.vue', '/src/features/settings/mcp/McpServerEditor.vue', '/src/features/oauth/OAuthConsent.vue']))
 })
 
-test('no MCP page shows a toast or writes to the console', () => {
-  const found = Object.entries(sources)
-    .filter(([, text]) => /\buseToast\b|\bconsole\.[a-z]+\(/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
+test.each(Object.entries(sources))('no MCP page shows a toast or writes to the console: %s', (file, text) => {
+  expect(text, file).not.toMatch(/\buseToast\b|\bconsole\.[a-z]+\(/)
 })
 
 /** Template strings that build an address from a value, a secret or a token. */
@@ -39,16 +36,13 @@ test('the guard recognises an address built from a secret', () => {
   expect(addressesFromValues('const t = `Token ${name.value} created.`')).toHaveLength(0)
 })
 
-test('no MCP page builds an address from a value, a secret or a token', () => {
-  const found = Object.entries(sources).flatMap(([file, text]) => addressesFromValues(text).map((m) => `${file}: ${m}`))
+test.each(Object.entries(sources))('no MCP page builds an address from a value, a secret or a token: %s', (file, text) => {
+  const found = addressesFromValues(text).map((m) => `${file}: ${m}`)
   expect(found).toEqual([])
 })
 
-test('no MCP text offers wait as a tool', () => {
-  const found = Object.entries(sources)
-    .filter(([, text]) => /\bwait\b/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
+test.each(Object.entries(sources))('no MCP text offers wait as a tool: %s', (file, text) => {
+  expect(text, file).not.toMatch(/\bwait\b/)
 })
 
 // structuredClone throws in browsers on Vue's reactive proxies (props, refs of
@@ -56,10 +50,9 @@ test('no MCP text offers wait as a tool', () => {
 // code copies plain data with JSON or spreads instead.
 const appSources = import.meta.glob(['/src/**/*.{vue,ts}'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
-test('no app code clones with structuredClone', () => {
-  const found = Object.entries(appSources)
-    .filter(([file]) => !file.endsWith('.test.ts') && !/[/T]esting\.ts$/.test(file) && !file.startsWith('/src/testing/'))
-    .filter(([, text]) => /\bstructuredClone\(/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
-})
+test.each(Object.entries(appSources)
+  .filter(([file]) => !file.endsWith('.test.ts') && !/[/T]esting\.ts$/.test(file) && !file.startsWith('/src/testing/')))(
+  'no app code clones with structuredClone: %s', (file, text) => {
+    expect(text, file).not.toMatch(/\bstructuredClone\(/)
+  },
+)

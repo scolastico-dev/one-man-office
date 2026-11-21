@@ -86,6 +86,28 @@ jobs:
         run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
 
 
+  ui-desktop:
+    name: Publish native UI installers
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ui-desktop.yml
+    with:
+      version: ${{ github.event.release.tag_name }}
+      publish: true
+
+  ui-android:
+    name: Publish native UI APK
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ui-android.yml
+    with:
+      version: ${{ github.event.release.tag_name }}
+      publish: true
+    secrets: inherit
+
+
   sync-plugin-release:
     name: Sync release plugin branch
     needs: build-and-publish

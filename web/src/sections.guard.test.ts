@@ -15,16 +15,18 @@ function files(dir: string): string[] {
   })
 }
 
-test('every settings section the app compares with is one omo sends', () => {
-  const go = readFileSync(join(SRC, '../../internal/api/events.go'), 'utf8')
-  const sections = new Set([...go.matchAll(/\bSection\w+\s*=\s*"([a-z]+)"/g)].map((m) => m[1]!))
+const go = readFileSync(join(SRC, '../../internal/api/events.go'), 'utf8')
+const sections = new Set([...go.matchAll(/\bSection\w+\s*=\s*"([a-z]+)"/g)].map((m) => m[1]!))
+
+test('the section inventory includes profiles', () => {
   expect(sections.has('profiles')).toBe(true)
+})
+
+test.each(files(SRC))('every settings section the app compares with is one omo sends: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    const text = readFileSync(f, 'utf8')
-    for (const m of text.matchAll(/\bsection\)?\s*[!=]==\s*'([a-z]+)'/g)) {
-      if (!sections.has(m[1]!)) bad.push(`${relative(SRC, f).split('\\').join('/')}: ${m[1]}`)
-    }
+  const text = readFileSync(f, 'utf8')
+  for (const m of text.matchAll(/\bsection\)?\s*[!=]==\s*'([a-z]+)'/g)) {
+    if (!sections.has(m[1]!)) bad.push(`${relative(SRC, f).split('\\').join('/')}: ${m[1]}`)
   }
   expect(bad).toEqual([])
 })

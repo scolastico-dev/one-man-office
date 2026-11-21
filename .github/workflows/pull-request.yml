@@ -305,3 +305,21 @@ jobs:
 
       - name: Test Compose example
         run: ./docker/compose_test.sh
+
+
+  ui-desktop:
+    name: Build native UI installers
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/ui-desktop.yml
+    with:
+      # A fixed test version; actual releases always use their release tag.
+      version: '0.1.0'
+
+  ui-android:
+    name: Build native UI APK
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/ui-android.yml
+    with:
+      version: '0.1.0'

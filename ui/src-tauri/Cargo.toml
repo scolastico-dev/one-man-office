@@ -1,0 +1,47 @@
+[package]
+name = "omo-ui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "omo_ui"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri-plugin-omo-notifications = { path = "../notifications" }
+omo-ui-core = { path = "../core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tauri = { version = "=2.12.7", features = [] }
+tauri-plugin-notification = "=2.8.1"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri = { version = "=2.12.7", features = ["tray-icon"] }
+keyring = "4.2.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+keyring-core = "1.0.0"
+android-native-keyring-store = "1.0.0"
+jni = "0.21"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "=2.0.2"
+glib = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "=0.39.1"
+windows-core = "=0.62.2"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", features = ["NSURLAuthenticationChallenge", "NSURLProtectionSpace", "NSURLCredential", "NSURLSession", "NSString"] }

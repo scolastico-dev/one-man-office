@@ -41,28 +41,29 @@ describe('logError', () => {
 })
 
 describe('console use', () => {
-  test('logError is the only console call in the app outside tests', () => {
-    const root = resolve(import.meta.dirname, '..')
-    const files: string[] = []
-    const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
-        const p = join(dir, name)
-        if (statSync(p).isDirectory()) walk(p)
-        else if (/\.(ts|js|vue)$/.test(name) && !/\.test\.ts$/.test(name)) files.push(p)
-      }
+  const root = resolve(import.meta.dirname, '..')
+  const files: string[] = []
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) walk(p)
+      else if (/\.(ts|js|vue)$/.test(name) && !/\.test\.ts$/.test(name)) files.push(p)
     }
-    walk(root)
+  }
+  walk(root)
+  test('the console guard sees the app sources', () => {
     expect(files.length).toBeGreaterThan(20)
+  })
+
+  test.each(files)('logError is the only console call in the app outside tests: %s', (f) => {
     const offenders: string[] = []
-    for (const f of files) {
-      const rel = relative(root, f)
-      if (rel === join('api', 'log.ts')) continue
-      readFileSync(f, 'utf8')
-        .split('\n')
-        .forEach((line, i) => {
-          if (/\bconsole\s*(\.|\[)/.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`)
-        })
-    }
+    const rel = relative(root, f)
+    if (rel === join('api', 'log.ts')) return
+    readFileSync(f, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (/\bconsole\s*(\.|\[)/.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`)
+      })
     expect(offenders).toEqual([])
   })
 })
