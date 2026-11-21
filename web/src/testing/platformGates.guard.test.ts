@@ -23,9 +23,9 @@ describe('helpers that answer success on a platform they cannot inspect', () => 
     expect(gates("if (process.platform === 'win32') { cmd = 'x' }")).toHaveLength(0)
     expect(gates("const shell = process.platform === 'win32' ? 'cmd' : 'sh'")).toHaveLength(0)
   })
-  it('is not in the browser test code', () => {
+  it.each(walk(resolve('e2e')))('is not in the browser test code: %s', (path) => {
     const found: string[] = []
-    for (const path of walk(resolve('e2e'))) for (const line of gates(readFileSync(path, 'utf8'))) found.push(`${path.slice(resolve('.').length + 1)}: ${line.trim()}`)
+    for (const line of gates(readFileSync(path, 'utf8'))) found.push(`${path.slice(resolve('.').length + 1)}: ${line.trim()}`)
     expect(found).toEqual([])
   })
 })

@@ -21,18 +21,16 @@ function files(dir: string): string[] {
   })
 }
 
-test('every dynamic import shows a message with Reload when its code cannot be fetched', () => {
+test.each(files(SRC))('every dynamic import shows a message with Reload when its code cannot be fetched: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    const rel = relative(SRC, f).split('\\').join('/')
-    const lines = readFileSync(f, 'utf8').split('\n')
-    lines.forEach((line, i) => {
-      if (!/\bimport\(\s*['"]/.test(line)) return
-      if (/\b(lazyComponent|lazyRoute)\(/.test(line)) return
-      const wrapper = WRAPPED_ELSEWHERE[rel]
-      if (wrapper !== undefined && /\blazyComponent\(/.test(readFileSync(join(SRC, wrapper), 'utf8'))) return
-      bad.push(`${rel}:${i + 1}: ${line.trim()}`)
-    })
-  }
+  const rel = relative(SRC, f).split('\\').join('/')
+  const lines = readFileSync(f, 'utf8').split('\n')
+  lines.forEach((line, i) => {
+    if (!/\bimport\(\s*['"]/.test(line)) return
+    if (/\b(lazyComponent|lazyRoute)\(/.test(line)) return
+    const wrapper = WRAPPED_ELSEWHERE[rel]
+    if (wrapper !== undefined && /\blazyComponent\(/.test(readFileSync(join(SRC, wrapper), 'utf8'))) return
+    bad.push(`${rel}:${i + 1}: ${line.trim()}`)
+  })
   expect(bad).toEqual([])
 })

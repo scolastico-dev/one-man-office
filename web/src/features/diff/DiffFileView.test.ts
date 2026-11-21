@@ -121,15 +121,12 @@ describe('DiffFileView', () => {
 })
 
 describe('the diff feature', () => {
-  test('no v-html anywhere in features/diff', () => {
-    const sources = import.meta.glob(['./*.{vue,ts}', '../ticket/tabs/DiffTab.vue', '!./*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<
-      string,
-      string
-    >
+  const sources = import.meta.glob(['./*.{vue,ts}', '../ticket/tabs/DiffTab.vue', '!./*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+  test('the diff HTML guard sees the feature sources', () => {
     expect(Object.keys(sources).length).toBeGreaterThanOrEqual(6)
-    for (const [name, text] of Object.entries(sources)) {
-      expect(text, name).not.toMatch(/v-html|innerHTML|outerHTML|insertAdjacentHTML/)
-    }
+  })
+  test.each(Object.entries(sources))('no v-html anywhere in features/diff: %s', (name, text) => {
+    expect(text, name).not.toMatch(/v-html|innerHTML|outerHTML|insertAdjacentHTML/)
   })
 })
 

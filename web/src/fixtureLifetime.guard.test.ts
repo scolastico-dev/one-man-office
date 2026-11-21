@@ -13,6 +13,11 @@ const sources = (dir: string): string[] =>
     return e.isDirectory() ? sources(p) : /\.ts$/.test(e.name) ? [p] : []
   })
 
+const files = sources(e2e)
+const declared = new Map<string, Set<string>>()
+for (const f of files) for (const [name, calls] of declaredFunctions(readFileSync(f, 'utf8'))) declared.set(name, new Set([...(declared.get(name) ?? []), ...calls]))
+const helpers = allocatingHelpers(declared)
+
 describe('fixtures are not made when a browser test file loads', () => {
   it('finds a resource made at load, directly, through a helper and inside a describe', () => {
     const direct = `const dir = mkdtempSync(join(tmpdir(), 'x-'))\ntest.afterAll(() => rmSync(dir))`
@@ -43,14 +48,13 @@ describe('fixtures are not made when a browser test file loads', () => {
     expect(moduleLoadAllocations(fine, allocatingHelpers(declaredFunctions(fine)))).toEqual([])
   })
 
-  it('keeps every browser test file and its helpers free of allocation at load', () => {
-    const files = sources(e2e)
-    const declared = new Map<string, Set<string>>()
-    for (const f of files) for (const [name, calls] of declaredFunctions(readFileSync(f, 'utf8'))) declared.set(name, new Set([...(declared.get(name) ?? []), ...calls]))
-    const helpers = allocatingHelpers(declared)
-    const offenders = files.flatMap((f) => moduleLoadAllocations(readFileSync(f, 'utf8'), helpers).map((a) => `${f.slice(e2e.length + 1)}:${a.line} ${a.call} (${a.how})`))
-    expect(offenders, 'a fixture made at module load outlives or predates the tests that use it; make it a Playwright fixture (see support/omo.ts)').toEqual([])
+  it('enumerates the complete browser source set', () => {
     expect(files.length).toBeGreaterThan(60)
+  })
+
+  it.each(files)('keeps browser files free of allocation at load: %s', (f) => {
+    const offenders = moduleLoadAllocations(readFileSync(f, 'utf8'), helpers).map((a) => `${f.slice(e2e.length + 1)}:${a.line} ${a.call} (${a.how})`)
+    expect(offenders, 'a fixture made at module load outlives or predates the tests that use it; make it a Playwright fixture (see support/omo.ts)').toEqual([])
   })
 
   it('finds a spec that names its own folder in the shared temporary folder', () => {
@@ -58,10 +62,8 @@ describe('fixtures are not made when a browser test file loads', () => {
     expect(ownTemporaryFolders("const d = join(dirname(repo), 'second')\n// tmpdir() in a comment\nconst s = 'process.pid'")).toEqual([])
   })
 
-  it('keeps specs on the fixtures: no folder of their own in the shared temporary folder', () => {
-    const offenders = sources(e2e)
-      .filter((f) => f.endsWith('.spec.ts'))
-      .flatMap((f) => ownTemporaryFolders(readFileSync(f, 'utf8')).map((a) => `${f.slice(e2e.length + 1)}:${a.line} ${a.call}`))
+  it.each(files.filter((f) => f.endsWith('.spec.ts')))('keeps specs on the fixtures, without their own shared temporary folder: %s', (f) => {
+    const offenders = ownTemporaryFolders(readFileSync(f, 'utf8')).map((a) => `${f.slice(e2e.length + 1)}:${a.line} ${a.call}`)
     expect(offenders, 'use the test home (omo.home), the repo fixture or omoOptions.programs; they are removed with the test').toEqual([])
   })
 

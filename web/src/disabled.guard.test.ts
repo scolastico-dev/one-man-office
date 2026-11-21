@@ -15,15 +15,13 @@ function files(dir: string): string[] {
   })
 }
 
-test('no button binds the native disabled attribute', () => {
+test.each(files(SRC))('no button binds the native disabled attribute: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    const text = readFileSync(f, 'utf8')
-    for (const m of text.matchAll(/<button\b[^>]*>/g)) {
-      if (/\s:?disabled(=|\s|>)/.test(m[0]) || /\sv-bind:disabled=/.test(m[0])) {
-        const line = text.slice(0, m.index).split('\n').length
-        bad.push(`${relative(SRC, f).split('\\').join('/')}:${line}`)
-      }
+  const text = readFileSync(f, 'utf8')
+  for (const m of text.matchAll(/<button\b[^>]*>/g)) {
+    if (/\s:?disabled(=|\s|>)/.test(m[0]) || /\sv-bind:disabled=/.test(m[0])) {
+      const line = text.slice(0, m.index).split('\n').length
+      bad.push(`${relative(SRC, f).split('\\').join('/')}:${line}`)
     }
   }
   expect(bad, 'use v-disabled from components/ui/vDisabled.ts').toEqual([])

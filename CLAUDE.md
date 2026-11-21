@@ -115,6 +115,7 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 ```
 
 - `make web` builds `web/dist`; `make web-check` runs `npm --prefix web run typecheck` and `npm --prefix web run test` (Vitest); one file: `npm --prefix web run test -- <path>`.
+- Source guards enumerate at collection and check each source in a separate path-named case, so tree size does not consume one test timeout. Shared declarations/inventories finish synchronously during collection; `web/src/testing/guardSources.test.ts` pins the completion/timing walkers' coverage and bad-source rejection.
 - Column headings and mobile tabs show full ticket totals. `TicketList.done_total` counts matching, readable Done tickets before paging in the snapshot transaction; `boardState` keeps that total current from `ticket.moved` events, independently of page/search merges. `useBoardColumns` uses it without filters and keeps visible-count/total when filtered.
 - `make e2e` builds omo and runs the browser tests (Chromium; `npx --prefix web playwright install chromium` once). One spec: `npx --prefix web playwright test e2e/<name>.spec.ts`. Each test starts its own omo on a temporary home and a free port, paused.
 - Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` and `/plugin-assets` are proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).

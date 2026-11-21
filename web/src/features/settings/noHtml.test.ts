@@ -4,10 +4,10 @@ import { expect, test } from 'vitest'
 // write; they are rendered as text only, never as HTML.
 const sources = import.meta.glob(['./**/*.{vue,ts}', '!./**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
-test('no v-html anywhere under features/settings', () => {
+test('the HTML guard sees the settings sources', () => {
   expect(Object.keys(sources).length).toBeGreaterThan(10)
-  const found = Object.entries(sources)
-    .filter(([, text]) => /\bv-html\b|\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|renderMarkdown/.test(text))
-    .map(([file]) => file)
-  expect(found).toEqual([])
+})
+
+test.each(Object.entries(sources))('no v-html anywhere under features/settings: %s', (file, text) => {
+  expect(text, file).not.toMatch(/\bv-html\b|\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|renderMarkdown/)
 })

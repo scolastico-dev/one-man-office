@@ -15,15 +15,13 @@ function files(dir: string): string[] {
   })
 }
 
-test('the shortcut rule lives in shortcuts.ts only', () => {
+test.each(files(SRC))('the shortcut rule lives in shortcuts.ts only: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    const rel = relative(SRC, f).split('\\').join('/')
-    if (rel === HOME) continue
-    const text = readFileSync(f, 'utf8')
-    text.split('\n').forEach((line, i) => {
-      if (/function typing\s*\(/.test(line) || /querySelector(All)?\(\s*['"]dialog\[open\]/.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim()}`)
-    })
-  }
+  const rel = relative(SRC, f).split('\\').join('/')
+  if (rel === HOME) return
+  const text = readFileSync(f, 'utf8')
+  text.split('\n').forEach((line, i) => {
+    if (/function typing\s*\(/.test(line) || /querySelector(All)?\(\s*['"]dialog\[open\]/.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim()}`)
+  })
   expect(bad).toEqual([])
 })

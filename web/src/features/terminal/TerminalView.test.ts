@@ -521,21 +521,20 @@ describe('its own window', () => {
 })
 
 describe('terminal imports', () => {
-  test('no file outside features/terminal imports TerminalView.vue directly', () => {
-    const files = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/features/terminal/**'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
-    const offenders = Object.entries(files)
-      .filter(([, text]) => /TerminalView(\.vue)?['"]/.test(text))
-      .map(([file]) => file)
-    expect(Object.keys(files).length).toBeGreaterThan(50)
-    expect(offenders).toEqual([])
+  const outside = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/features/terminal/**'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+  const app = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+  test('the terminal guards see the app and TerminalView', () => {
+    expect(Object.keys(outside).length).toBeGreaterThan(50)
+    expect(Object.keys(app)).toContain('/src/features/terminal/TerminalView.vue')
   })
 
-  test('the emulator is made in TerminalView.vue only, so every terminal view copies, pastes and takes images the same way', () => {
-    const files = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
-    const makers = Object.entries(files)
-      .filter(([, text]) => /new Terminal\(/.test(text))
-      .map(([file]) => file)
-    expect(makers).toEqual(['/src/features/terminal/TerminalView.vue'])
+  test.each(Object.entries(outside))('no file outside features/terminal imports TerminalView.vue directly: %s', (file, text) => {
+    expect(text, file).not.toMatch(/TerminalView(\.vue)?['"]/)
+  })
+
+  test.each(Object.entries(app))('the emulator is made in TerminalView.vue only, so every terminal view copies, pastes and takes images the same way: %s', (file, text) => {
+    expect(/new Terminal\(/.test(text), file).toBe(file === '/src/features/terminal/TerminalView.vue')
   })
 
   test('OSC 52 has a handler of its own: the clipboard is neither swallowed nor answered', async () => {

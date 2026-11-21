@@ -6,16 +6,15 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 
-test('the tag of a listed plugin is read only through trustTagOf', () => {
+const files = readdirSync(__dirname).filter((n) => /\.(ts|vue)$/.test(n) && !/\.test\.ts$/.test(n))
+
+test.each(files)('the tag of a listed plugin is read only through trustTagOf: %s', (n) => {
   const bad: string[] = []
-  for (const n of readdirSync(__dirname)) {
-    if (!/\.(ts|vue)$/.test(n) || /\.test\.ts$/.test(n)) continue
-    readFileSync(join(__dirname, n), 'utf8')
-      .split('\n')
-      .forEach((line, i) => {
-        // p.tag, plugin.tag, props.plugin.tag … of a CatalogPlugin.
-        if (/\b(p|plugin|entry|item)\.tag\b/.test(line) && !(n === 'pluginTrust.ts' && line.includes("p.tag === 'official' || p.tag === 'recommended'"))) bad.push(`${n}:${i + 1}: ${line.trim()}`)
-      })
-  }
+  readFileSync(join(__dirname, n), 'utf8')
+    .split('\n')
+    .forEach((line, i) => {
+      // p.tag, plugin.tag, props.plugin.tag … of a CatalogPlugin.
+      if (/\b(p|plugin|entry|item)\.tag\b/.test(line) && !(n === 'pluginTrust.ts' && line.includes("p.tag === 'official' || p.tag === 'recommended'"))) bad.push(`${n}:${i + 1}: ${line.trim()}`)
+    })
   expect(bad).toEqual([])
 })

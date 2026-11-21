@@ -17,11 +17,14 @@ function unstyled(file: string, text: string): string[] {
   return found
 }
 
-test('rendered Markdown is shown only in an element with the md class', () => {
-  const bad = Object.entries(sources).flatMap(([file, text]) => unstyled(file, text))
-  expect(bad).toEqual([])
+test.each(Object.entries(sources))('rendered Markdown is shown only in an element with the md class: %s', (file, text) => {
+  expect(unstyled(file, text), file).toEqual([])
+})
+
+const using = Object.entries(sources).filter(([, text]) => /\bv-html=/.test(text)).map(([file]) => file)
+
+test('the guard sees both Markdown renderers', () => {
   // The guard looks at something: both places that render Markdown have the class.
-  const using = Object.entries(sources).filter(([, text]) => /\bv-html=/.test(text)).map(([file]) => file)
   expect(using.some((f) => f.endsWith('/comments/CommentItem.vue'))).toBe(true)
   expect(using.some((f) => f.endsWith('/ticket/DescriptionView.vue'))).toBe(true)
 })

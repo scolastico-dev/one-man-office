@@ -93,10 +93,6 @@ function colourLiterals(file: string, text: string): string[] {
   return found
 }
 
-function scan(check: (file: string, text: string) => string[]): string[] {
-  return Object.entries(sources).flatMap(([file, text]) => check(file, text))
-}
-
 describe('the checks recognise what they look for', () => {
   test('small font sizes', () => {
     const bad = 'a { font-size: 11px } b { font: 600 .7rem/1 x } <p class="text-[10px] text-2xs">'
@@ -122,16 +118,16 @@ describe('legibility of web/src', () => {
   test('the scan sees the app sources', () => {
     expect(Object.keys(sources)).toContain('/src/styles/tokens.css')
   })
-  test('no font size below 12px', () => {
-    expect(scan(smallFontSizes)).toEqual([])
+  test.each(Object.entries(sources))('no font size below 12px: %s', (file, text) => {
+    expect(smallFontSizes(file, text), file).toEqual([])
   })
-  test('no border-radius except 0', () => {
-    expect(scan(roundedCorners)).toEqual([])
+  test.each(Object.entries(sources))('no border-radius except 0: %s', (file, text) => {
+    expect(roundedCorners(file, text), file).toEqual([])
   })
-  test('the font family is named only in --omo-font', () => {
-    expect(scan(strayFontFamilies)).toEqual([])
+  test.each(Object.entries(sources))('the font family is named only in --omo-font: %s', (file, text) => {
+    expect(strayFontFamilies(file, text), file).toEqual([])
   })
-  test('colours come from tokens only', () => {
-    expect(scan(colourLiterals)).toEqual([])
+  test.each(Object.entries(sources))('colours come from tokens only: %s', (file, text) => {
+    expect(colourLiterals(file, text), file).toEqual([])
   })
 })

@@ -18,19 +18,17 @@ function files(dir: string): string[] {
   })
 }
 
-test('no app is created and nothing is rendered outside the app, except in main.ts', () => {
+test.each(files(SRC))('no app is created and nothing is rendered outside the app, except in main.ts: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    const rel = relative(SRC, f).split('\\').join('/')
-    if (ALLOWED.has(rel)) continue
-    const text = readFileSync(f, 'utf8')
-    text.split('\n').forEach((line, i) => {
-      if (/\bcreateApp\s*\(/.test(line) || /\bcreateSSRApp\s*\(/.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim()}`)
-    })
-    // `render` imported from vue mounts a vnode outside the app's tree.
-    for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]vue['"]/g)) {
-      if (/(^|[\s,])render(\s|,|$)/.test(m[1]!)) bad.push(`${rel}: imports render from vue`)
-    }
+  const rel = relative(SRC, f).split('\\').join('/')
+  if (ALLOWED.has(rel)) return
+  const text = readFileSync(f, 'utf8')
+  text.split('\n').forEach((line, i) => {
+    if (/\bcreateApp\s*\(/.test(line) || /\bcreateSSRApp\s*\(/.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim()}`)
+  })
+  // `render` imported from vue mounts a vnode outside the app's tree.
+  for (const m of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]vue['"]/g)) {
+    if (/(^|[\s,])render(\s|,|$)/.test(m[1]!)) bad.push(`${rel}: imports render from vue`)
   }
   expect(bad).toEqual([])
 })

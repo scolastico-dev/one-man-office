@@ -15,16 +15,14 @@ function files(dir: string): string[] {
   })
 }
 
-test('the review and when-approved defaults are read through defaultKind', () => {
+test.each(files(SRC))('the review and when-approved defaults are read through defaultKind: %s', (f) => {
   const bad: string[] = []
-  for (const f of files(SRC)) {
-    readFileSync(f, 'utf8')
-      .split('\n')
-      .forEach((line, i) => {
-        for (const m of line.matchAll(/(review|when_approved)_defaults\[([^\]]*)\]?/g)) {
-          if (!m[2]!.startsWith('defaultKind(')) bad.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
-        }
-      })
-  }
+  readFileSync(f, 'utf8')
+    .split('\n')
+    .forEach((line, i) => {
+      for (const m of line.matchAll(/(review|when_approved)_defaults\[([^\]]*)\]?/g)) {
+        if (!m[2]!.startsWith('defaultKind(')) bad.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
+      }
+    })
   expect(bad).toEqual([])
 })

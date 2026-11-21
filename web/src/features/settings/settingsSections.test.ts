@@ -21,19 +21,20 @@ test.each(SETTINGS_SECTIONS)('$id has a label, description and page', async (s) 
   expect(await s.component()).toBeTruthy()
 })
 
-test('the settings are loaded only when shown: nothing outside them imports their code statically', () => {
+test.each(Object.entries(sources))('the settings are loaded only when shown: nothing outside them imports their code statically: %s', (file, text) => {
   const statically = /^\s*import\s[^;]*?from\s+['"]([^'"]+)['"]/gm
   const found: string[] = []
-  for (const [file, text] of Object.entries(sources)) {
-    const inside = file.startsWith('/src/features/settings/')
-    for (const m of text.matchAll(statically)) {
-      const spec = m[1]!
-      const settingsCode = /(^|\/)features\/settings\//.test(spec) || (!inside && /^\.\.?\/(\.\.\/)*settings\//.test(spec))
-      if (!inside && settingsCode) found.push(`${file}: ${spec}`)
-      // The view and the section list import pages only dynamically.
-      if (inside && /\/(SettingsView\.vue|settingsSections\.ts)$/.test(file) && /Page\.vue$/.test(spec)) found.push(`${file}: ${spec}`)
-    }
+  const inside = file.startsWith('/src/features/settings/')
+  for (const m of text.matchAll(statically)) {
+    const spec = m[1]!
+    const settingsCode = /(^|\/)features\/settings\//.test(spec) || (!inside && /^\.\.?\/(\.\.\/)*settings\//.test(spec))
+    if (!inside && settingsCode) found.push(`${file}: ${spec}`)
+    // The view and the section list import pages only dynamically.
+    if (inside && /\/(SettingsView\.vue|settingsSections\.ts)$/.test(file) && /Page\.vue$/.test(spec)) found.push(`${file}: ${spec}`)
   }
   expect(found).toEqual([])
+})
+
+test('the router loads settings dynamically', () => {
   expect(sources['/src/router.ts']).toContain("import('./features/settings/SettingsView.vue')")
 })

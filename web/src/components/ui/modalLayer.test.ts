@@ -18,11 +18,12 @@ test('modalLayer: the topmost open modal dialog is known until it closes', () =>
 
 // The toasts follow the topmost modal dialog only when every modal dialog is
 // opened and closed through modalLayer.
-test('modalLayer guard: no other code opens or closes a dialog itself', () => {
-  const files = import.meta.glob(['../../**/*.{ts,vue}', '!../../**/*.test.ts', '!./modalLayer.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const files = import.meta.glob(['../../**/*.{ts,vue}', '!../../**/*.test.ts', '!./modalLayer.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+test('modalLayer guard sees the app sources', () => {
   expect(Object.keys(files).length).toBeGreaterThan(100)
-  const offenders = Object.entries(files)
-    .filter(([, text]) => /\.(showModal|close)\(\)/.test(text) && /HTMLDialogElement|<dialog/.test(text))
-    .map(([path]) => path)
-  expect(offenders).toEqual([])
+})
+
+test.each(Object.entries(files))('modalLayer guard: no other code opens or closes a dialog itself: %s', (path, text) => {
+  expect(/\.(showModal|close)\(\)/.test(text) && /HTMLDialogElement|<dialog/.test(text), path).toBe(false)
 })

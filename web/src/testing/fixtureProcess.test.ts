@@ -566,14 +566,15 @@ describe('tests that are skipped', () => {
     },
   }
 
-  it('are found only in the inventory, in every web test file, whatever their condition', () => {
-    const found: Record<string, number> = {}
-    for (const { path, text } of files) {
-      const n = skipsIn(text).length
-      if (n > 0) found[path] = n
+  it.each(files)('are found only in the inventory, whatever their condition: $path', ({ path, text }) => {
+    expect(skipsIn(text).length, path).toBe(allowed[path]?.count ?? 0)
+  })
+
+  it('keeps every inventory entry present, with a reason', () => {
+    for (const [path, { reason }] of Object.entries(allowed)) {
+      expect(files.map((f) => f.path), path).toContain(path)
+      expect(reason.length, path).toBeGreaterThan(20)
     }
-    expect(found).toEqual(Object.fromEntries(Object.entries(allowed).map(([path, { count }]) => [path, count])))
-    for (const [path, { reason }] of Object.entries(allowed)) expect(reason.length, path).toBeGreaterThan(20)
   })
 
   it('see a skip whose condition is a variable, a helper or a platform name, in one line or several', () => {
