@@ -59,6 +59,13 @@ impl Resources {
             .find(|f| f.id == id)
             .ok_or("That app is no longer registered. Refresh the app list.")?;
         let preview = port.is_none();
+        // Validate the selected action before creating a profile or listener.
+        // Local exposure does not use the initial preview navigation path.
+        let preview_url = if preview {
+            Some(forward.preview_url()?)
+        } else {
+            None
+        };
         #[cfg(windows)]
         let mut profile = if preview {
             Some(crate::preview_profile::Profile::new()?)
@@ -86,8 +93,8 @@ impl Resources {
             }
         })?;
         let id = omo_ui_core::Config::new_id();
-        let address = if preview {
-            forward.preview_url()?.to_string()
+        let address = if let Some(url) = preview_url {
+            url.to_string()
         } else {
             format!("http://{}/", listener.address())
         };

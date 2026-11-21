@@ -2,6 +2,23 @@
 use omo_ui_core::*;
 
 #[test]
+fn virtual_hosts_match_the_server_contract() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../internal/api/testdata/forward_tunnel_v1.json"
+    ))
+    .unwrap();
+    for case in fixture["virtualHosts"].as_array().unwrap() {
+        let app = RegisteredForward {
+            id: "0123456789abcdef0123456789abcdef".into(),
+            name: case["name"].as_str().unwrap().into(),
+            start_path: "/".into(),
+            ticket: None,
+        };
+        assert_eq!(app.virtual_host().unwrap(), case["host"].as_str().unwrap());
+    }
+}
+
+#[test]
 fn virtual_origins_are_distinct_root_addresses_and_start_path_is_only_navigation() {
     let a: RegisteredForward = serde_json::from_value(serde_json::json!({
         "id":"0123456789abcdef0123456789abcdef", "name":"My Great App!",
@@ -199,9 +216,9 @@ async fn failed_outer_handshake_is_a_clear_local_http_error_and_status() {
     server.await.unwrap();
 }
 
-#[test]
-fn registry_uses_native_auth_and_ignores_upstream_addresses() {
+fn registry(body: &str) -> Vec<RegisteredForward> {
     use std::io::{Read, Write};
+    let body = body.to_owned();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let worker = std::thread::spawn(move || {
@@ -216,7 +233,6 @@ fn registry_uses_native_auth_and_ignores_upstream_addresses() {
         assert!(request.starts_with("get /api/proxy/forwards http/1.1\r\n"));
         assert!(request.contains(&format!("authorization: bearer {}", "a".repeat(64))));
         assert!(!request.contains("origin:"));
-        let body = r#"{"forwards":[{"id":"0123456789abcdef0123456789abcdef","name":"","start_path":"/start","ticket":null,"host":"private-upstream","port":1234,"address":"https://do-not-open.example/proxy/secret"}]}"#;
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -239,11 +255,94 @@ fn registry_uses_native_auth_and_ignores_upstream_addresses() {
         "a".repeat(64),
     )
     .unwrap();
-    let apps = client.forwards().unwrap();
+    let apps = client.forwards();
+    worker.join().unwrap();
+    apps.unwrap()
+}
+
+#[test]
+fn registry_uses_native_auth_and_ignores_upstream_addresses() {
+    let apps = registry(
+        r#"{"forwards":[{"id":"0123456789abcdef0123456789abcdef","name":"","start_path":"/start","ticket":null,"host":"private-upstream","port":1234,"address":"https://do-not-open.example/proxy/secret"}]}"#,
+    );
     assert_eq!(apps.len(), 1);
     assert_eq!(
         apps[0].preview_url().unwrap().as_str(),
         "http://app-0123456789abcdef0123456789abcdef.omo/start"
     );
-    worker.join().unwrap();
+}
+
+// A preview-only path error must not discard other apps or prevent local use.
+#[test]
+fn registry_preserves_query_backslashes_and_defers_preview_validation() {
+    let apps = registry(
+        r#"{"forwards":[
+        {"id":"0123456789abcdef0123456789abcdef","name":"query","start_path":"/start?a=\\b&escaped=%2F%5C&next=?yes","ticket":null},
+        {"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"ordinary","start_path":"/","ticket":null},
+        {"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","name":"bad preview","start_path":"/\\bad-path","ticket":null}
+    ]}"#,
+    );
+    assert_eq!(apps.len(), 3);
+    assert_eq!(
+        apps[0].preview_url().unwrap().as_str(),
+        r"http://query-0123456789abcdef0123456789abcdef.omo/start?a=\b&escaped=%2F%5C&next=?yes"
+    );
+    assert_eq!(
+        apps[1].preview_url().unwrap().as_str(),
+        "http://ordinary-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.omo/"
+    );
+    assert!(apps[2].preview_url().is_err());
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        // Local selection uses only the ID, including when preview is unusable.
+        for id in [
+            ID,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ] {
+            let selected = apps.iter().find(|app| app.id == id).unwrap();
+            let board = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let service = ForwardListener::local(
+                connector(board.local_addr().unwrap()),
+                selected.id.clone(),
+                0,
+            )
+            .await
+            .unwrap();
+            let selected_id = selected.id.clone();
+            let server = tokio::spawn(async move {
+                let (tcp, _) = board.accept().await.unwrap();
+                let mut ws = accept_hdr_async(tcp, |r: &Request, mut response: Response| {
+                    assert_eq!(
+                        r.uri().path(),
+                        format!("/api/ui/forwards/{selected_id}/tunnel")
+                    );
+                    response.headers_mut().insert(
+                        "sec-websocket-protocol",
+                        "ui.forwards.tunnel.v1".parse().unwrap(),
+                    );
+                    Ok(response)
+                })
+                .await
+                .unwrap();
+                let Some(Ok(Message::Binary(data))) = ws.next().await else {
+                    panic!("missing request")
+                };
+                ws.send(Message::Binary(data)).await.unwrap();
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+            let mut client = TcpStream::connect(service.address()).await.unwrap();
+            let request = b"GET / HTTP/1.1\r\nHost: localhost:8099\r\n\r\n";
+            client.write_all(request).await.unwrap();
+            let mut response = vec![0; request.len()];
+            client.read_exact(&mut response).await.unwrap();
+            assert_eq!(response, request);
+            service.stop().await.unwrap();
+            server.await.unwrap();
+        }
+    });
 }
