@@ -91,14 +91,17 @@ Only after mutual proof does Connection show the six-digit PIN (including leadin
 zeroes) and the exact command:
 
 ```sh
-omo relay pair accept <aid> <PIN>
+omo relay pair accept -- <aid> <PIN>
 ```
 
 Run that command locally on the real host. Acceptance is the entire ceremony:
 the app loads the host's board automatically, with no second confirmation or
 invitation. **Advanced** contains the entire raw public key and the alternative
-`omo relay pair accept <aid> --public-key <full-public-key>` command. A fingerprint
+`omo relay pair accept --public-key <full-public-key> -- <aid>` command. A fingerprint
 is not a replacement for the full key.
+
+The `--` ends flag parsing so an attempt id starting with `-` remains an
+argument. Put optional flags such as `--name <label>` before `--`.
 
 **Connect** uses saved trust only. The app restores its relay connection after a
 restart and reconnects with fresh session keys after host/relay loss. It never
@@ -528,7 +531,7 @@ The entry points for those consumers are:
 - `begin_pair().await` is an explicit human-authorized ceremony. It returns
   `Pairing`, with `info()` exposing `aid`, the six-character `pin`, full
   `public_key`, `host_fp` and `ui_id` only after verifying the possession proof.
-  The UI should show `omo relay pair accept <aid> <PIN> --name <label>`;
+  The UI should show `omo relay pair accept --name <label> -- <aid> <PIN>`;
   full-key acceptance belongs behind advanced options. `accepted().await`
   validates the encrypted acceptance and returns `RelaySession`.
 - `reconnect().await` authenticates against the saved host key/epoch and checks

@@ -79,13 +79,27 @@ test('only proved pairing exposes PIN and full key is inside Advanced', async ()
   const ui=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'awaiting_accept',pairing:info}});
   assert.equal(ui.element('pairing').hidden,false);
   assert.equal(ui.element('pair-pin').textContent,'007026');
-  assert.equal(ui.element('pair-command').textContent,'omo relay pair accept abcdefghijklmnopqrstuv 007026');
-  assert.equal(ui.element('pair-key-command').textContent,'omo relay pair accept abcdefghijklmnopqrstuv --public-key FULL_RAW_MLKEM_KEY');
+  assert.equal(ui.element('pair-command').textContent,'omo relay pair accept -- abcdefghijklmnopqrstuv 007026');
+  assert.equal(ui.element('pair-key-command').textContent,'omo relay pair accept --public-key FULL_RAW_MLKEM_KEY -- abcdefghijklmnopqrstuv');
   const html=readFileSync(new URL('../setup/index.html',import.meta.url),'utf8');
   assert.match(html,/<details[^>]*>[\s\S]*?<summary>Advanced<\/summary>[\s\S]*?id="pair-public-key"[\s\S]*?id="pair-key-command"[\s\S]*?<\/details>/);
   const failed=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'failed',pairing:null}});
   assert.equal(failed.element('pairing').hidden,true);
   assert.match(failed.element('relay-status').textContent,/explicit|new pairing/i);
+});
+
+test('pairing commands protect leading-hyphen attempt ids and keys and preserve leading-zero PINs', async (t) => {
+  // Canonical unpadded base64url for 16/1184 bytes starting with 0xf8.
+  const aid='-AAAAAAAAAAAAAAAAAAAAA';
+  const public_key='-'+ 'A'.repeat(1578);
+  const ui=await setup({android:false,connected:false,polling:false,error:'',relay:{phase:'awaiting_accept',pairing:{aid,pin:'007026',public_key}}});
+  assert.equal(ui.element('pair-pin').textContent,'007026');
+  await t.test('PIN command', () => {
+    assert.equal(ui.element('pair-command').textContent,'omo relay pair accept -- -AAAAAAAAAAAAAAAAAAAAA 007026');
+  });
+  await t.test('full-key command', () => {
+    assert.equal(ui.element('pair-key-command').textContent,`omo relay pair accept --public-key ${public_key} -- -AAAAAAAAAAAAAAAAAAAAA`);
+  });
 });
 
 test('failure events never retry pairing and a new ceremony requires its own user action',async()=>{

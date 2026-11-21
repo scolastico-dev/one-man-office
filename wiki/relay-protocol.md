@@ -112,7 +112,7 @@ Host atomically records the first commit, connection, aid and C as consuming the
 
 PIN is exactly six decimal digits, leading zeros retained. For i=0,1,..., read the first u32be of `H(E("omo-relay-v1/pin",P,u32be(i)))`; take the first value less than 4,294,000,000, reduce modulo 1,000,000, zero-pad. The keys and random values in P are fixed **before** either side can know the other side's full PIN input. Do not include later KEM ciphertexts, names or acceptance messages in the PIN, since those would allow grinding after reveal. Display PIN only after commitment verification and mutual possession proof. The PIN is human comparison data, not secret key material.
 
-`omo relay pair accept <aid> <PIN> --name <label>` compares against this one immutable proved slot. `--public-key <base64url-1184-bytes>` instead of PIN compares the entire pkU supplied from the UI over the human channel; a fingerprint or truncated key does not satisfy this option. Names are local labels, never authority. A wrong PIN/key, invalid reveal/proof, timeout, cancellation, UI/relay disconnect or host restart burns the slot. An incorrect local acceptance also burns it. No retry button, duplicate commit, second socket or timer gets another challenge in that ceremony. Persist consumed state before transmitting and treat any unfinished slot on startup as spent. Require a new explicit `pair begin` and a new UI ceremony, visibly warning that it is a new attempt. A slot cannot be accepted after its connection was lost.
+`omo relay pair accept --name <label> -- <aid> <PIN>` compares against this one immutable proved slot. `omo relay pair accept --public-key <base64url-1184-bytes> --name <label> -- <aid>` instead of PIN compares the entire pkU supplied from the UI over the human channel; a fingerprint or truncated key does not satisfy this option. Names are local labels, never authority. A wrong PIN/key, invalid reveal/proof, timeout, cancellation, UI/relay disconnect or host restart burns the slot. An incorrect local acceptance also burns it. No retry button, duplicate commit, second socket or timer gets another challenge in that ceremony. Persist consumed state before transmitting and treat any unfinished slot on startup as spent. Require a new explicit `pair begin` and a new UI ceremony, visibly warning that it is a new attempt. A slot cannot be accepted after its connection was lost.
 
 This bounds an active relay to one independent six-digit substitution trial per human-authorized ceremony (approximately 1/1,000,000, rather than unlimited adaptive trials). It can steal the first slot and cause failure/denial of service. It cannot silently cycle slots, compare a typed PIN against a list of pending attempts or grind a late host random against a reused honest UI reveal. The UI must likewise refuse replaying/revealing its old commitment into another response or auto-starting a new ceremony. Explicit new human ceremonies accumulate their usual guessing probability. Commitment/SAS is an established technique, but this exact construction remains a proposed protocol. [ZRTP commitment and SAS rationale](https://www.rfc-editor.org/rfc/rfc6189#section-4.3.2).
 
@@ -218,8 +218,8 @@ omo relay status
 omo relay disconnect
 omo relay pair begin
 omo relay pair pending
-omo relay pair accept <aid> <six-digit-PIN> --name phone
-omo relay pair accept <aid> --public-key <full-base64url-key> --name tablet
+omo relay pair accept --name phone -- <aid> <six-digit-PIN>
+omo relay pair accept --public-key <full-base64url-key> --name tablet -- <aid>
 omo relay pair cancel
 omo relay devices
 omo relay unregister <ui-id>
