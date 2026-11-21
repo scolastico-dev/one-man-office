@@ -408,6 +408,89 @@ Board/proxy views have no remote capabilities, shell/process/filesystem plugins,
 or arbitrary native HTTP endpoint. Their injected bridge exposes a notification
 marker and a configure action, not a general native API.
 
+## Native relay library
+
+`ui/core/src/relay` implements the existing [version-1 relay protocol](relay-protocol.md)
+in native Rust, without a Go process. It provides committed pairing, mutual
+ML-KEM-768 possession proofs, authenticated records/reconnect and notification
+request/envelope cryptography. The setup screen, board WebView transport,
+stream multiplexing and persisted relay notification receipt policy are separate
+consumers; the shell does not yet offer a relay connection choice.
+
+The entry points for those consumers are:
+
+- `wire::Route::new(origin, host_id, allow_loopback_http)` validates the exact
+  configured origin/name used in every transcript. Production uses verified
+  WSS/HTTPS. HTTP/WS requires explicit loopback development opt-in.
+- `RelayClient::open(Arc<dyn SecretStore>, key, route, admission)` creates a new
+  identity only if the secret entry is absent. Use `RelayClient::restore` for
+  an existing saved profile: missing secrets fail instead of generating another
+  identity. Clone one client to share its state; never open the same storage
+  key concurrently. `RelayStatus` is public metadata only.
+- `begin_pair().await` is an explicit human-authorized ceremony. It returns
+  `Pairing`, with `info()` exposing `aid`, the six-character `pin`, full
+  `public_key`, `host_fp` and `ui_id` only after verifying the possession proof.
+  The UI should show `omo relay pair accept <aid> <PIN> --name <label>`;
+  full-key acceptance belongs behind advanced options. `accepted().await`
+  validates the encrypted acceptance and returns `RelaySession`.
+- `reconnect().await` authenticates against the saved host key/epoch and checks
+  encrypted active `ready` with the original attempt id before sending
+  `ready.ack`. This also recovers a lost acceptance reply from a saved candidate;
+  an unaccepted candidate gains no authority. Reconnect never generates a new
+  ceremony or notification root. `discard_unproved_attempt` is an explicit
+  local operation and refuses a candidate with a saved root, since it may
+  already have been accepted on the host.
+- `RelaySession::split` gives a cloneable `RecordSender` and one
+  `RecordReceiver`. Sender calls serialize sealing **and** writing globally;
+  the receive consumer demultiplexes all stream records. `control()` supplies
+  status subscriptions, cancellation and async `close()` that waits for socket
+  release and key erasure. Old handles can remain closed while a new session
+  connects. Dropping a pending send after sealing closes the session; uncertain
+  records are never replayed. Socket reader/writer loops continuously service
+  Ping/Pong and use bounded queues (32 records); overload terminates a session.
+  Consumers must implement the protocol's bounded stream credits and read
+  concurrently, rather than treating a socket write as peer application receipt.
+- `crypto::{NotificationContext, new_poll, open_notification}` and the strict
+  `wire` notification codecs provide the request MAC, outstanding-request binding
+  and response authentication/decryption. They do not persist receipts or
+  delivery policy. Request randomness comes from `crypto::random_bytes`.
+
+`SecretStore` loads/saves one private snapshot atomically and durably, with a
+missing entry distinct from unavailable storage. Snapshots contain the private
+seed, admission password, consumed attempt marker, host candidate/pin, original
+attempt id, epoch and notification root; none belongs in public settings. Saves
+precede commitment, reveal, final proof and trust transitions. Any failed save
+latches the client closed until storage is repaired and it is reconstructed.
+`omo_ui::RelaySecrets` adapts the existing desktop/Android credential store using
+separate `relay:<key>` entries. Android headless worker storage can implement the
+same trait without Tauri or a WebView; worker wiring is not provided here.
+Credential-store size/availability failures are surfaced and never fall back to
+public files. A saved candidate with lost secrets requires restoring those
+secrets or unregistering the possible host registration before a new ceremony.
+
+Crypto uses [RustCrypto `ml-kem` 0.3.4](https://docs.rs/ml-kem/0.3.4/ml_kem/) with final FIPS 203 seed/key/ciphertext
+encodings and OS cryptographic randomness, SHA-384/HMAC/HKDF and AES-256-GCM.
+The crate describes its implementation as unaudited; fixture interoperability
+is not an independent protocol audit or certification. Tests use the existing
+NIST ACVP and protocol fixtures, including PIN `007026`, both proofs, record
+keys/ciphertexts and notification MACs/envelopes.
+
+```sh
+cd ui
+cargo test -p omo-ui-core
+node --test tests/*.test.mjs
+# Optional real Go relay/host integration, no OS WebViews:
+node scripts/relay-probe.mjs
+```
+
+The integration probe builds an isolated Go fixture and exercises PIN/full-key
+acceptance, interception/loss of acceptance, UI/host/relay reconstruction,
+unaccepted-candidate denial, concurrent ordered record senders and reconnect
+with retained closed handles. It removes its private temporary state and joins
+its child processes. Relay core compilation has been checked on Linux x86_64,
+Android arm64 and Windows x64 GNU; this is not Android/Windows device runtime
+or OS credential-store evidence.
+
 ## Focused native smoke
 
 `ui/tests/native_smoke.py` is an opt-in Linux probe. It needs Python GObject

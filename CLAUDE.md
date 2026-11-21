@@ -588,6 +588,23 @@ and the opt-in isolated Linux connection and local lifecycle probes.
 Build/extension details and verified platform limits:
 [omo ui](wiki/ui.md).
 
+`ui/core/src/relay` is the native version-1 relay library (RustCrypto final
+FIPS-203 ML-KEM-768, strict Go-compatible codecs, mutual proof, encrypted records,
+notification crypto). `RelayClient::open` creates/loads a private identity;
+saved profiles use `restore` to fail on missing secrets. Explicit `begin_pair`
+saves the commitment, consumed reveal and candidate root before dependent sends;
+`Pairing::accepted` and fresh `reconnect` check encrypted acceptance/ready against
+saved key, epoch and original attempt id. No automatic ceremony/root replacement.
+`SecretStore` owns atomic durable private snapshots; `omo_ui::RelaySecrets`
+adapts OS credentials, and headless Android storage can implement the same trait.
+`RelaySession::split` has a globally ordered cloneable sender and one receiver;
+its control closes the socket, erases keys and releases reconnect ownership before
+reporting completion. Bounded queues require consumers to enforce stream credits.
+This library does not add the setup choice, board WebView/multiplexer or Android
+relay receipt/delivery policy. Focused checks: core cargo tests, Node bridge tests,
+`node ui/scripts/relay-probe.mjs` for real Go relay/host acceptance/recovery/restart,
+and Android arm64/Windows GNU core compilation. See [native relay library](wiki/ui.md#native-relay-library).
+
 ## Native UI protocol
 
 `internal/api/ui.go` defines additive UI wire types and flags. `POST /api/ui/capabilities`
