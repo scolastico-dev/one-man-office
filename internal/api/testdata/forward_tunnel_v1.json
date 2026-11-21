@@ -1,0 +1,6 @@
+{
+  "protocol": "ui.forwards.tunnel.v1",
+  "request": "POST /echo?x=a%2Fb HTTP/1.1\r\nHost: demo.omo\r\nContent-Length: 5\r\n\r\nhello",
+  "responseBody": "/echo?x=a%2Fb hello",
+  "response": "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n\r\n/echo?x=a%2Fb hello"
+}

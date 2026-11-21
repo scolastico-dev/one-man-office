@@ -130,10 +130,14 @@ func (s *Server) setProxyCookie(w http.ResponseWriter, r *http.Request, name, va
 }
 
 func (s *Server) proxyPage(w http.ResponseWriter, r *http.Request, status int, message string) {
+	proxyPageWithBoardURL(w, status, message, s.proxyBoardURL(r))
+}
+
+func proxyPageWithBoardURL(w http.ResponseWriter, status int, message, boardURL string) {
 	setSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!doctype html><html lang="en"><meta charset="utf-8"><title>omo Web UI</title><p>%s</p><a id="board" href="%s/">Back to board</a></html>`, html.EscapeString(message), html.EscapeString(s.proxyBoardURL(r)))
+	fmt.Fprintf(w, `<!doctype html><html lang="en"><meta charset="utf-8"><title>omo Web UI</title><p>%s</p><a id="board" href="%s/">Back to board</a></html>`, html.EscapeString(message), html.EscapeString(boardURL))
 }
 
 func (s *Server) serveProxyInternal(w http.ResponseWriter, r *http.Request) {
@@ -290,10 +294,10 @@ func sameProxyOrigin(raw, origin string) bool {
 }
 
 func (s *Server) boardWebSocket(r *http.Request) bool {
-	// The mux's registered pattern identifies the two board-owned sockets;
+	// The mux's registered pattern identifies board-owned sockets;
 	// /api as a whole must remain available to application WebSockets.
 	_, pattern := s.mux.Handler(r)
-	return pattern == "GET /api/agents/{id}/terminal" || pattern == "GET /api/terminals/{id}/socket"
+	return pattern == "GET /api/agents/{id}/terminal" || pattern == "GET /api/terminals/{id}/socket" || pattern == "GET /api/ui/forwards/{id}/tunnel"
 }
 
 // routeProxy runs after Host validation and before every board-only middleware.
@@ -380,9 +384,14 @@ func (s *Server) routeProxy(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) serveProxyForward(w http.ResponseWriter, r *http.Request, f api.ProxyForward, mode proxy.Mode) {
+	s.serveProxyForwardWithBoardURL(w, r, f, mode, s.proxyBoardURL(r))
+}
+
+// The tunnel's app origin differs from the authenticated outer board origin.
+func (s *Server) serveProxyForwardWithBoardURL(w http.ResponseWriter, r *http.Request, f api.ProxyForward, mode proxy.Mode, boardURL string) {
 	tracked, done, ok := s.trackForwardRequest(w, r, f.ID, f.Plugin != "")
 	if !ok {
-		s.proxyPage(w, r, 404, "This Web UI forward no longer exists.")
+		proxyPageWithBoardURL(w, 404, "This Web UI forward no longer exists.", boardURL)
 		return
 	}
 	defer done()
@@ -394,7 +403,7 @@ func (s *Server) serveProxyForward(w http.ResponseWriter, r *http.Request, f api
 		r = r.Clone(r.Context())
 		r.Header.Set("Origin", f.Scheme+"://"+net.JoinHostPort(f.Host, strconv.Itoa(f.Port)))
 	}
-	r = proxy.WithRequestContext(r, proxy.RequestContext{PublicScheme: origin.Scheme, PublicHost: origin.Host, BoardURL: s.proxyBoardURL(r), RemoveAuthorization: s.proxyAuthorizationIsOmo(r), OnError: func(error) { s.log.Printf("Web UI forward %s: upstream connection failed", f.ID) }})
+	r = proxy.WithRequestContext(r, proxy.RequestContext{PublicScheme: origin.Scheme, PublicHost: origin.Host, BoardURL: boardURL, RemoveAuthorization: s.proxyAuthorizationIsOmo(r), OnError: func(error) { s.log.Printf("Web UI forward %s: upstream connection failed", f.ID) }})
 	s.proxyTransport.Handler(f, mode).ServeHTTP(w, r)
 }
 

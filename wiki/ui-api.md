@@ -2,8 +2,8 @@
 
 Native UI clients load the board from their configured omo server. These
 additive endpoints support capability discovery and system notification
-polling without a WebSocket or a second notification queue. Shared Go wire
-types live in `internal/api/ui.go`. The board's `web/src/api/types.ts` mirrors
+polling without a second notification queue, plus a desktop forward tunnel over
+WebSockets. Shared Go wire types live in `internal/api/ui.go`. The board's `web/src/api/types.ts` mirrors
 `UICapabilities`, `UINotification`, `UINotificationFeed` and
 `UINotificationCursorReset`; `web/src/api/types.test.ts` guards field parity
 with the Go API types. Notification IDs and all feed and recovery cursors
@@ -11,7 +11,7 @@ are strings in both languages.
 
 ## Authentication and access
 
-Both endpoints are **user-only**, over the normal API transport:
+All endpoints are **user-only**, over the normal API transport:
 
 - Token mode: `Authorization: Bearer <login token>`.
 - Basic mode: HTTP Basic authentication with the configured credentials.
@@ -26,7 +26,8 @@ Origin or CORS exception is granted. Requests bearing a cross-site Origin
 when Origin checking is enabled. Host validation still applies. Remote
 addresses must satisfy the existing `public_url` / `allowed_hosts` rules.
 Credentials belong in headers, never in a notification destination or URL.
-Both routes return `Cache-Control: no-store`.
+API responses and the tunnel handshake return `Cache-Control: no-store`.
+Forwarded application responses keep the application's own headers.
 
 ## Feature exchange
 
@@ -42,13 +43,14 @@ poll and display system notifications sends:
 The server returns its own list:
 
 ```json
-{"features":["ui.capabilities.v1","ui.notifications.poll.v1"]}
+{"features":["ui.capabilities.v1","ui.notifications.poll.v1","ui.forwards.tunnel.v1"]}
 ```
 
 | Flag | Meaning |
 |---|---|
 | `ui.capabilities.v1` | This capability exchange contract is supported. |
 | `ui.notifications.poll.v1` | The incremental GET feed below is supported. |
+| `ui.forwards.tunnel.v1` | Root HTTP byte-stream tunnel to an existing registered forward. Advertised by the server and desktop native clients; never by Android. |
 | `ui.notifications.system.v1` | A client can display native system notifications; this is a client flag, not a server promise. |
 
 Unknown flag strings are harmless. An omitted `features` field, `null`, or
@@ -58,8 +60,90 @@ exchange does not change another UI's behavior. Clients ignore unknown
 response fields and flags, and enable optional behavior only when both
 sides support the required feature. On older servers, `404 not_found` for
 this endpoint means discovery is unavailable; the client may still open
-the board and disable notification polling. Request fields other than
-`features` are rejected by the API's usual strict JSON decoder.
+the board and disable notification polling and forward tunnels. Request fields
+other than `features` are rejected by the API's usual strict JSON decoder.
+
+## Registered-forward tunnel (desktop)
+
+`GET /api/ui/forwards/{id}/tunnel` upgrades to a WebSocket with the required
+subprotocol `ui.forwards.tunnel.v1`. Select the ID from the existing
+`GET /api/proxy/forwards` registry. The server chooses the registered target;
+the endpoint accepts no host, port or target URL. Authentication uses the
+configured connection's token/Basic header, or no credentials in none mode.
+Native clients omit Origin. The normal outer Host/Origin and user-only checks
+apply before upgrade, including on external omo hosts. This board-owned socket
+is reserved ahead of browser forward Referer/last-forward-cookie fallbacks.
+
+### Wire contract
+
+- One outer WebSocket represents one HTTP/1.1 connection, including sequential
+  keepalive requests. Open independent tunnels for concurrent HTTP connections.
+- Every application data message is **binary**, at most **65536 bytes**. Concatenate
+  their payloads in order in each direction. Message boundaries have no meaning
+  to HTTP and may bisect headers, bodies or application WebSocket frames.
+  Empty binary messages contribute no bytes. Text messages and oversized messages
+  fail the connection. Control ping/pong/close frames remain WebSocket controls.
+  Compression is not negotiated.
+- Send origin-form HTTP requests, e.g. `GET /assets/app.js HTTP/1.1` with the
+  preview/local address in `Host`. Absolute request URLs and `CONNECT` are
+  rejected with an inner HTTP 400. The app runs at `/` regardless of the forward's
+  `base_path`, `strip_prefix` or `start_path`; consumers choose the initial path.
+- HTTP response status, headers, chunked bodies, trailers and streaming data
+  use ordinary HTTP/1.1 encoding. Uploads and responses stream with bounded
+  buffers and backpressure, without collecting entire bodies. An application
+  WebSocket starts with its normal inner HTTP upgrade; after its 101, carry its
+  WebSocket wire bytes through the same binary byte stream. This is a nested
+  WebSocket, with app frames independent of outer framing.
+- HTTP `Connection: close` drains the final response then sends a normal
+  WebSocket close, so close-delimited HTTP bodies end with clean EOF.
+  Closing/dropping either outer endpoint, a protocol/I/O error, cancellation or
+  server shutdown ends both directions and cancels active upstream work. There
+  is no TCP half-close or reconnect/resume within a tunnel. A new connection
+  starts a new tunnel; callers decide whether an interrupted request is safe
+  to retry.
+
+Missing/removed forwards return outer HTTP 404 before upgrade. Missing required
+subprotocol returns HTTP 400; malformed upgrades return HTTP 400 or 426, and
+authentication/access failures retain 401/403. Every inner HTTP request rechecks registry liveness;
+a forward removed after the handshake returns inner 404 on the next request.
+Existing SSE/upgrade streams retain the shared proxy's behavior: removing the
+record does not forcibly close them. An upstream connection or TLS failure is
+an inner HTTP 502 with the existing “Web UI unreachable” explanation, leaving
+the forward registered.
+
+The tunnel reuses the root/subdomain proxy data plane: the registered upstream
+TLS verification setting, direct target pools, redirect/cookie rewriting and
+plugin request/WebSocket activity all apply. Redirects to the registered target
+use the inner app Host at its root; same-origin app WebSocket Origin is translated
+to the target. Foreign app origins stay subject to the upstream's checks.
+The outer board Authorization and cookies are never copied into inner requests.
+Defensive filtering also removes recognized omo Authorization, reserved omo
+cookies/headers/grant queries and `omo-token.*` app subprotocols from inner traffic;
+ordinary app credentials survive. The accepted outer peer supplies client-IP
+metadata. Board CSP/cache headers are not added to app responses.
+
+### Reusable Rust API
+
+`omo-ui-core` exports these entry points:
+
+| Entry point | Contract |
+|---|---|
+| `BoardClient::capabilities(&self, android: bool) -> Result<ServerCapabilities>` | Blocking native capability exchange, independent of notification preferences. `notification_polling` and `forward_tunnel` are optional booleans; Android always reports tunnel support as false. |
+| `tunnel_supported(status: u16, body: &[u8]) -> Result<bool>` | Parse the server tunnel flag, ignoring unknown flags/fields. Missing flags or HTTP 404 return false; other HTTP errors or invalid JSON are errors. Enable only alongside the client's own supported flags. |
+| `ForwardConnector::new(config: &Config, secret: &str) -> Result<ForwardConnector>` | Validate the configured board origin/auth and retain handshake credentials only in native memory. Clone for independent connections. Available only on desktop. |
+| `ForwardConnector::connect(&self, forward_id: &str) -> Result<ForwardTunnel>` (async) | Connect through the configured board's ws/wss endpoint, require negotiated v1 and validate the lowercase 32-hex registry ID. Requires a Tokio runtime with I/O/time enabled. A 20-second handshake budget does not limit the established stream. |
+| `ForwardTunnel` | Tokio `AsyncRead + AsyncWrite + Unpin + Send`; usable with `tokio::io::split`, `copy_bidirectional`, or an inner WebSocket client. Writes emit bounded binary chunks; flush sends pending output. Shutdown closes both directions; normal/going-away close is EOF, error close codes remain failures; drop immediately releases the network connection without background workers. |
+
+The native connector verifies the **board** TLS certificate using public roots,
+never follows redirects and never sends traffic directly to the app. Handshake
+HTTP failures report their status without echoing credentials or server bodies.
+The app target's TLS policy is owned solely by the server's registered forward.
+`features(android, notifications)` advertises the tunnel on desktop independently
+of notifications. `BoardClient::connect` preserves its notification-enabled
+boolean return; consumers use `capabilities` for tunnel discovery. Older servers
+and unknown flags remain compatible; Android builds exclude the desktop connector.
+The shared fixture `internal/api/testdata/forward_tunnel_v1.json` is exercised by
+both Go server and native Rust tests, including arbitrary message splitting.
 
 ## Notification polling
 

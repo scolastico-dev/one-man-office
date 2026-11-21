@@ -13,3 +13,8 @@ pub mod lifecycle;
 
 pub mod local;
 pub use local::*;
+
+#[cfg(not(target_os = "android"))]
+pub mod tunnel;
+#[cfg(not(target_os = "android"))]
+pub use tunnel::*;

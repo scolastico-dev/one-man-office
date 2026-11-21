@@ -31,7 +31,7 @@ func TestUICapabilityExchange(t *testing.T) {
 		got := okJSON[struct {
 			Features []string `json:"features"`
 		}](t, u, 200, "POST", "/api/ui/capabilities", request)
-		if !slices.Contains(got.Features, "ui.capabilities.v1") || !slices.Contains(got.Features, "ui.notifications.poll.v1") || slices.Contains(got.Features, "future.unknown") {
+		if !slices.Contains(got.Features, "ui.capabilities.v1") || !slices.Contains(got.Features, "ui.notifications.poll.v1") || !slices.Contains(got.Features, "ui.forwards.tunnel.v1") || slices.Contains(got.Features, "future.unknown") {
 			t.Fatalf("server features: %+v", got)
 		}
 	}
