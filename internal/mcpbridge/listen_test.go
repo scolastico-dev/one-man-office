@@ -10,9 +10,16 @@ import (
 
 // connectLogging starts a bridge for session and connects an MCP client
 // that collects the log notifications it receives.
-func connectLogging(t *testing.T, o *omo, session, version string) (*mcp.ClientSession, chan string, *syncBuffer) {
+func connectLogging(t *testing.T, o *omo, session, version string, env map[string]string) (*mcp.ClientSession, chan string, *syncBuffer) {
 	t.Helper()
-	cmd := bridgeCmd(map[string]string{"OMO_AGENT_ID": session, "OMO_SOCKET": o.socket})
+	all := map[string]string{"OMO_AGENT_ID": session, "OMO_SOCKET": o.socket}
+	if env != nil {
+		all = map[string]string{"OMO_AGENT_ID": session}
+		for k, v := range env {
+			all[k] = v
+		}
+	}
+	cmd := bridgeCmd(all)
 	stderr := &syncBuffer{}
 	cmd.Stderr = stderr
 	got := make(chan string, 8)
@@ -48,7 +55,7 @@ func TestBridgeForwardsNotificationsOfAListeningClient(t *testing.T) {
 	id, _ := o.ceoSession()
 	for _, v := range []string{"2025-06-18", "2025-11-25"} {
 		t.Run("version "+v, func(t *testing.T) {
-			cs, got, stderr := connectLogging(t, o, id, v)
+			cs, got, stderr := connectLogging(t, o, id, v, nil)
 			if err := cs.SetLoggingLevel(context.Background(), &mcp.SetLoggingLevelParams{Level: "error"}); err != nil {
 				t.Fatalf("logging/setLevel: %v\nbridge: %s", err, stderr)
 			}
@@ -81,5 +88,27 @@ func TestBridgeClientThatOnlyUsesToolsIsNotListening(t *testing.T) {
 	}
 	if o.srv.MCPListeners().Confirmed(id) {
 		t.Fatal("a client that only used tools is confirmed as a listener")
+	}
+}
+
+// omo restarting ends the stream; the bridge opens it again on the same
+// home, so the listening client is confirmed again and receives what omo
+// sends next.
+func TestBridgeListenerReturnsAfterOmoRestarts(t *testing.T) {
+	o := newOmo(t)
+	id, _ := o.ceoSession()
+	cs, got, stderr := connectLogging(t, o, id, "2025-06-18", map[string]string{"OMO_HOME": o.home})
+	if err := cs.SetLoggingLevel(context.Background(), &mcp.SetLoggingLevelParams{Level: "error"}); err != nil {
+		t.Fatalf("logging/setLevel: %v\nbridge: %s", err, stderr)
+	}
+	waitListening(t, o, id, true)
+	o.close()
+	o.start()
+	waitListening(t, o, id, true)
+	if !o.srv.MCPListeners().Notify(id, "after the restart") {
+		t.Fatal("the restarted omo could not notify the listener")
+	}
+	if text := <-got; !strings.Contains(text, "after the restart") {
+		t.Fatalf("the client received %q", text)
 	}
 }
