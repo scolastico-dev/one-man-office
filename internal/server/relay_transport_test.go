@@ -271,6 +271,58 @@ func terminalFrame(t *testing.T, c *websocket.Conn, match func(websocket.Message
 		}
 	}
 }
+
+func bufferRelayTerminalFrames(t *testing.T, u *relayUI, c *websocket.Conn) {
+	t.Helper()
+	// Empty input still receives an acknowledgment, without depending on a
+	// platform's PTY startup output or changing the underlying process input.
+	for range 2 {
+		if err := c.Write(t.Context(), websocket.MessageBinary, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for {
+		u.mu.Lock()
+		stream := u.streams[relayproto.Counter(u.next-2)]
+		ready := bytes.Count(stream.input, []byte(`{"type":"input-ack"}`)) == 2
+		err, changed := u.err, u.changed
+		u.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			break
+		}
+		select {
+		case <-changed:
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		}
+	}
+	// Reading one of the published frames leaves the next one buffered in
+	// the WebSocket reader, independently of subsequent transport closure.
+	if _, _, err := c.Read(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func relayTerminalRevoked(t *testing.T, u *relayUI, c *websocket.Conn) {
+	t.Helper()
+	// Wait for the authenticated session's reader to finish. Revocation
+	// cannot retract terminal frames already delivered to the HTTP/WebSocket
+	// reader, so drain those bytes before asserting the viewer reaches EOF.
+	<-u.done
+	for {
+		if _, _, err := c.Read(t.Context()); err != nil {
+			break
+		}
+	}
+	if conn, err := u.dial(t.Context(), "tcp", ""); err == nil {
+		conn.Close()
+		t.Fatal("revoked session admitted another stream")
+	}
+}
+
 func TestRelayTerminalFramesAcknowledgmentsAndRevocation(t *testing.T) {
 	runner := &testRunner{}
 	s, origin := relayFixture(t, runner)
@@ -327,12 +379,11 @@ func TestRelayTerminalFramesAcknowledgmentsAndRevocation(t *testing.T) {
 	}
 	ca = relayTerminal(t, a, agent.termID)
 	terminalFrame(t, ca, isReplay)
+	bufferRelayTerminalFrames(t, a, ca)
 	if e := s.relay.Unregister(a.uiID); e != nil {
 		t.Fatal(e)
 	}
-	if _, _, e := ca.Read(context.Background()); e == nil {
-		t.Fatal("revoked terminal remained open")
-	}
+	relayTerminalRevoked(t, a, ca)
 	if agent.term.Info().State != "running" {
 		t.Fatal("revoking a viewer killed its agent")
 	}
@@ -519,17 +570,16 @@ func TestRelayRevocationPreservesUnderlyingUserShell(t *testing.T) {
 			return kind == websocket.MessageText && bytes.Contains(data, []byte("replay-end"))
 		})
 	}
+	bufferRelayTerminalFrames(t, a, ca)
 	if e := s.relay.Unregister(a.uiID); e != nil {
 		t.Fatal(e)
 	}
-	if _, _, e := ca.Read(context.Background()); e == nil {
-		t.Fatal("revoked viewer remained connected")
-	}
+	relayTerminalRevoked(t, a, ca)
 	term, ok := s.shells.Terminal(shell.ID)
 	if !ok || term.Info().State != "running" {
 		t.Fatal("viewer revocation ended the shell")
 	}
-	if e := cb.Write(context.Background(), websocket.MessageBinary, []byte("after-revoke\n")); e != nil {
+	if e := cb.Write(context.Background(), websocket.MessageBinary, []byte("after-revoke\r")); e != nil {
 		t.Fatal(e)
 	}
 	terminalFrame(t, cb, func(kind websocket.MessageType, data []byte) bool {
