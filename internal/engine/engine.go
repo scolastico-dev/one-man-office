@@ -75,11 +75,16 @@ type Options struct {
 	MCP func() api.MCPSettings
 	// LSP optionally supplies the runtime and report callback; nil constructs one.
 	LSP *lsp.Manager
+	// Listeners reaches agent sessions over MCP notification streams they
+	// confirmed; nil means no session has one, so every language-server
+	// report goes to chat.
+	Listeners LSPListeners
 }
 
 // Engine runs agents for the board. Create it with New, then Run it.
 type Engine struct {
 	lsp    *lsp.Manager
+	lspOut lspDelivery
 	o      Options
 	b      *board.Board
 	st     *settings.Store
@@ -214,6 +219,7 @@ func New(o Options) *Engine {
 	if e.lsp == nil {
 		e.lsp = lsp.New(lsp.Options{Worktrees: o.Layout.Worktrees, Settings: func() api.LSPSettings { return e.st.General().LSP }, Log: e.log})
 	}
+	e.subscribeLSP()
 	if e.now == nil {
 		e.now = time.Now
 	}
@@ -398,6 +404,7 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 	}
 	wg.Wait()
 	e.watchers.Wait()
+	e.stopLSPDelivery()
 	e.lsp.Close()
 	if snap, err := e.b.EngineSnapshot(ctx); err == nil {
 		for _, s := range snap.Sessions {

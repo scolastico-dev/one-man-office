@@ -757,7 +757,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	}
 	es := board.EngineSession{ID: sess.ID, Role: r.role, Ticket: r.ticket, Project: r.project, Purpose: r.purpose,
 		ReviewRound: r.round, State: api.SessionStarting, Name: name, Model: r.model, Workdir: r.workdir}
-	en := &entry{sess: es, slot: slotKey(es), delivery: agents.ResolveDelivery(prof.PromptDelivery),
+	en := &entry{sess: es, slot: slotKey(es), delivery: agents.ResolveDelivery(prof.PromptDelivery), cli: prof.CLI,
 		finished: make(chan struct{})}
 	e.mu.Lock()
 	if e.stopping {
