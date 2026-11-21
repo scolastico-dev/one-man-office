@@ -4,6 +4,8 @@ fn config() -> Config {
         id: "3381221a-1afb-43cb-9b9b-27d3e140296b".into(),
         mode: Mode::Direct,
         origin: "https://board.example".into(),
+        host_id: String::new(),
+        relay_allow_loopback_http: false,
         auth: Auth::Token,
         username: String::new(),
         notifications: true,
@@ -482,4 +484,48 @@ fn oversized_json_save_preserves_previous_readable_snapshot() {
         read_json::<serde_json::Value>(dir.path(), "state.json").unwrap(),
         Some(previous)
     );
+}
+
+#[test]
+fn relay_profiles_validate_routes_without_changing_saved_direct_profiles() {
+    let mut json = serde_json::to_value(config()).unwrap();
+    json["mode"] = "relay".into();
+    json["origin"] = "https://RELAY.example:443".into();
+    json["host_id"] = "office_1".into();
+    json["auth"] = "none".into();
+    json["remember"] = true.into();
+    let decoded = serde_json::from_value::<Config>(json.clone());
+    assert!(
+        decoded.is_ok(),
+        "relay setup must have a saved public profile"
+    );
+    let mut relay = decoded.unwrap();
+    relay.validate(true).unwrap();
+    assert_eq!(relay.origin, "https://relay.example");
+    for (field, value) in [
+        ("host_id", ""),
+        ("host_id", "office/other"),
+        ("origin", "https://relay.example/path"),
+        ("origin", "http://relay.example"),
+        ("origin", "http://127.0.0.1:8000"),
+    ] {
+        let mut invalid = json.clone();
+        invalid[field] = value.into();
+        assert!(
+            serde_json::from_value::<Config>(invalid)
+                .unwrap()
+                .validate(true)
+                .is_err()
+        );
+    }
+    let mut saved = serde_json::to_value(config()).unwrap();
+    saved.as_object_mut().unwrap().remove("host_id");
+    saved
+        .as_object_mut()
+        .unwrap()
+        .remove("relay_allow_loopback_http");
+    serde_json::from_value::<Config>(saved)
+        .unwrap()
+        .validate(false)
+        .unwrap();
 }

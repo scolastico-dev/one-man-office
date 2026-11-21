@@ -25,3 +25,7 @@ footer { display: flex; gap: 10px; margin: 20px 0; }
 details { margin-top: 16px; }
 summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 [hidden] { display: none !important; }
+
+pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+#pair-pin { font: 700 32px monospace; letter-spacing: .2em; }
+#pairing { border: 2px solid var(--accent); padding: 16px; border-radius: 8px; }

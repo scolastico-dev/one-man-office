@@ -15,6 +15,7 @@ pub fn configure(window: &WebviewWindow, config: &Config, secret: &str) -> Resul
                 let webview = view.inner();
                 if let Some(settings) = webview.settings() {
                     settings.set_enable_developer_extras(false);
+                    settings.set_enable_fullscreen(false);
                 }
                 if config.auth == omo_ui_core::Auth::Basic {
                     let origin: tauri::Url = config.origin.parse().expect("validated origin");
@@ -57,8 +58,19 @@ pub fn configure(window: &WebviewWindow, config: &Config, secret: &str) -> Resul
         use windows_core::{HSTRING, Interface};
         let config = config.clone();
         let secret = secret.to_string();
+        let protected = window.clone();
         window
             .with_webview(move |view| unsafe {
+                // Fail closed before any host document is navigated.
+                if protected
+                    .hwnd()
+                    .ok()
+                    .and_then(|hwnd| crate::windows_chrome::install(hwnd.0).ok())
+                    .is_none()
+                {
+                    let _ = protected.destroy();
+                    return;
+                }
                 let Ok(core) = view.controller().CoreWebView2() else {
                     return;
                 };

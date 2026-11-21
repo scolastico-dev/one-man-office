@@ -47,6 +47,8 @@ fn fixture(
         id: Config::new_id(),
         mode: Mode::Direct,
         origin: format!("http://{address}/"),
+        host_id: String::new(),
+        relay_allow_loopback_http: false,
         auth: Auth::None,
         username: String::new(),
         notifications: true,

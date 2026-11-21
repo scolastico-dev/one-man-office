@@ -464,3 +464,73 @@ async fn bridge_recovers_after_host_and_relay_loss_without_pairing_and_revocatio
     assert!(head.starts_with("HTTP/1.1 503"));
     board.close().await;
 }
+
+#[tokio::test]
+async fn native_setup_owner_accepts_then_loads_and_restores_saved_trust() {
+    use omo_ui_core::relay::{RelayConnection, RelayPhase};
+    let mut f = Fixture::start();
+    let store = Arc::new(Secrets::default());
+    let client = RelayClient::open(
+        store.clone(),
+        "setup",
+        f.route(),
+        Some(f.info["admission"].as_str().unwrap().into()),
+    )
+    .unwrap();
+    let identity = client.identity_id().unwrap();
+    f.command(json!({"op":"begin"}));
+    let owner = RelayConnection::start(client, true);
+    let mut state = owner.subscribe();
+    loop {
+        if state.borrow_and_update().phase == RelayPhase::AwaitingAccept {
+            break;
+        }
+        state.changed().await.unwrap();
+    }
+    let info = state.borrow().pairing.clone().unwrap();
+    assert_eq!(info.pin.len(), 6);
+    assert_eq!(
+        omo_ui_core::relay::wire::unb64(&info.public_key)
+            .unwrap()
+            .len(),
+        1184
+    );
+    f.command(json!({"op":"pending"}));
+    f.command(json!({"op":"accept","aid":info.aid,"pin":info.pin}));
+    loop {
+        if state.borrow_and_update().phase == RelayPhase::Ready {
+            break;
+        }
+        state.changed().await.unwrap();
+    }
+    assert!(state.borrow().pairing.is_none());
+    let endpoint = owner.endpoint().unwrap();
+    let (head, body) = response(&endpoint, "GET", "/", "", b"").await;
+    ok(&head);
+    assert!(
+        String::from_utf8(body)
+            .unwrap()
+            .contains("<script type=\"module\"")
+    );
+    owner.close().await;
+    assert!(
+        TcpStream::connect(endpoint.origin.trim_start_matches("http://"))
+            .await
+            .is_err()
+    );
+    drop(owner);
+    let saved = RelayClient::restore(store, "setup", f.route()).unwrap();
+    assert_eq!(saved.identity_id().unwrap(), identity);
+    let owner = RelayConnection::start(saved, false);
+    let mut state = owner.subscribe();
+    loop {
+        if state.borrow_and_update().phase == RelayPhase::Ready {
+            break;
+        }
+        state.changed().await.unwrap();
+    }
+    let endpoint = owner.endpoint().unwrap();
+    let (head, _) = response(&endpoint, "GET", "/api/me", "", b"").await;
+    ok(&head);
+    owner.close().await;
+}

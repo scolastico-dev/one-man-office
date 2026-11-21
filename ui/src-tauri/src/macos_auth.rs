@@ -34,6 +34,18 @@ pub fn configure(window: &WebviewWindow, config: &Config, secret: &str) -> Resul
     window
         .with_webview(move |view| unsafe {
             let webview = view.inner().cast::<AnyObject>();
+            // Host HTML fullscreen must not hide the native trust frame.
+            let configuration: *mut AnyObject = msg_send![webview, configuration];
+            let preferences: *mut AnyObject = msg_send![configuration, preferences];
+            let supported: bool =
+                msg_send![preferences, respondsToSelector: sel!(setElementFullscreenEnabled:)];
+            if supported {
+                let _: () = msg_send![preferences, setElementFullscreenEnabled: false];
+            } else {
+                let value = objc2_foundation::NSNumber::new_bool(false);
+                let key = NSString::from_str("fullScreenEnabled");
+                let _: () = msg_send![preferences, setValue: &*value, forKey: &*key];
+            }
             pointer.store(webview as usize, std::sync::atomic::Ordering::Relaxed);
             let delegate: *mut AnyObject = msg_send![webview, navigationDelegate];
             if delegate.is_null() {
