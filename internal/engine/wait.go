@@ -63,6 +63,12 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 			nt.mu.Unlock()
 			return "", api.Errorf(api.CodeConflict, "a newer omo ai wait of this session replaced this one")
 		}
+		if !resuming {
+			// A newer call replaces a suppressed wait even when queued
+			// notifications let the newer call return without parking.
+			mb.waitGeneration++
+			generation = mb.waitGeneration
+		}
 		if lines := notificationLines(mb.takeQueue()); len(lines) > 0 {
 			nt.mu.Unlock()
 			return strings.Join(lines, "\n"), nil
@@ -72,8 +78,6 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 		}
 		w := &waiter{wake: make(chan struct{})}
 		mb.waiter = w
-		mb.waitGeneration++
-		generation = mb.waitGeneration
 		nt.mu.Unlock()
 		e.syncState(ctx, a.Session, mb)
 
