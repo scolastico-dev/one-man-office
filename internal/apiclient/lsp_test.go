@@ -27,3 +27,20 @@ func TestLSPIgnoreClient(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
+
+func TestLSPConfirmClient(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/lsp/confirm" || r.Header.Get(SessionHeader) != "agent" {
+			t.Errorf("request %s %s %v", r.Method, r.URL, r.Header)
+		}
+		var got api.LSPConfirmRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil || got.Token != "tok" {
+			t.Errorf("body %+v %v", got, err)
+		}
+		io.WriteString(w, `{"confirmed":true}`)
+	})
+	res, err := NewWithTransport(HandlerTransport(h), "agent").LSPConfirm(context.Background(), "tok")
+	if err != nil || !res.Confirmed {
+		t.Fatalf("%+v %v", res, err)
+	}
+}

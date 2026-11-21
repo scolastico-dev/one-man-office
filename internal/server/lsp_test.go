@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -58,42 +59,67 @@ func TestLSPIgnoreIsAnMCPToolForWorkingRoles(t *testing.T) {
 	}
 }
 
-// A GET of /mcp with Accept: text/event-stream as an agent session is its
-// notification stream: the session counts as listening while it is open and
-// established, and no other session does.
-func TestMCPNotificationStreamConfirmsOnlyItsOwnSession(t *testing.T) {
-	s, _ := engineServer(t, &testRunner{}, fakeProfile(), false)
-	one := liveSession(t, s, api.RoleDeveloper).ID
-	two := liveSession(t, s, api.RoleReviewer).ID
+// openStream opens the notification stream of session over the socket and
+// returns its reader and the token of the probe that came first.
+func openNotificationStream(t *testing.T, s *Server, session string) (*bufio.Reader, context.CancelFunc, string) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, mcpSocket(t, s), nil)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set(SessionHeader, one)
+	req.Header.Set(SessionHeader, session)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("status %d type %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 	rd := bufio.NewReader(resp.Body)
-	if line, err := rd.ReadString('\n'); err != nil || !strings.HasPrefix(line, ":") {
-		t.Fatalf("opening line %q %v", line, err)
+	var token string
+	for token == "" {
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no probe: %v", err)
+		}
+		if m := regexp.MustCompile("lsp confirm ([0-9a-f]+)`").FindStringSubmatch(line); m != nil {
+			token = m[1]
+		}
 	}
+	return rd, cancel, token
+}
+
+// A GET of /mcp with Accept: text/event-stream as an agent session is its
+// notification stream. It sends a probe; the session counts as listening only
+// after its own session returned the probe's token, and no other session does.
+func TestMCPNotificationStreamNeedsItsProbeConfirmed(t *testing.T) {
+	s, _ := engineServer(t, &testRunner{}, fakeProfile(), false)
+	one := liveSession(t, s, api.RoleDeveloper).ID
+	two := liveSession(t, s, api.RoleReviewer).ID
+	rd, cancel, token := openNotificationStream(t, s, one)
 	listeners := s.mcp.listeners
-	if !listeners.Confirmed(one) {
-		t.Fatal("an established stream does not confirm its session")
+	if listeners.Confirmed(one) || listeners.Notify(one, "too early") {
+		t.Fatal("an open stream with an unanswered probe counts as listening")
 	}
-	if listeners.Confirmed(two) {
-		t.Fatal("another session is confirmed")
+	// The other session cannot confirm it; a wrong token is refused.
+	for _, c := range []struct{ session, token string }{{two, token}, {one, "0000"}} {
+		rec := socketDo(t, s, "POST", "/api/lsp/confirm", api.LSPConfirmRequest{Token: c.token}, c.session)
+		wantStatus(t, rec.Code, http.StatusNotFound)
+	}
+	if listeners.Confirmed(one) || listeners.Confirmed(two) {
+		t.Fatal("a refused confirmation confirmed a session")
+	}
+	rec := socketDo(t, s, "POST", "/api/lsp/confirm", api.LSPConfirmRequest{Token: token}, one)
+	wantStatus(t, rec.Code, http.StatusOK)
+	if !listeners.Confirmed(one) || listeners.Confirmed(two) {
+		t.Fatal("the session's own token did not confirm exactly its session")
 	}
 	got := make(chan string, 1)
 	go func() {
 		for {
 			line, err := rd.ReadString('\n')
-			if err != nil || strings.HasPrefix(line, "event:") {
+			if err != nil || strings.Contains(line, "hello") {
 				got <- line
 				return
 			}
@@ -102,13 +128,26 @@ func TestMCPNotificationStreamConfirmsOnlyItsOwnSession(t *testing.T) {
 	if !listeners.Notify(one, "hello") {
 		t.Fatal("a confirmed stream refused a notification")
 	}
-	if line := <-got; !strings.Contains(line, "event: message") {
+	if line := <-got; !strings.Contains(line, "hello") {
 		t.Fatalf("the client received %q", line)
 	}
 	cancel()
 	if err := listeners.Wait(t.Context(), one, false); err != nil {
 		t.Fatal(err)
 	}
+	// A reconnect is unconfirmed until it is confirmed again; the old token is stale.
+	_, _, fresh := openNotificationStream(t, s, one)
+	if fresh == token || listeners.Confirmed(one) {
+		t.Fatal("a new stream inherited the confirmation")
+	}
+	wantStatus(t, socketDo(t, s, "POST", "/api/lsp/confirm", api.LSPConfirmRequest{Token: token}, one).Code, http.StatusNotFound)
+	wantStatus(t, socketDo(t, s, "POST", "/api/lsp/confirm", api.LSPConfirmRequest{Token: fresh}, one).Code, http.StatusOK)
+}
+
+func TestLSPConfirmRefusesTheUser(t *testing.T) {
+	s, _ := engineServer(t, &testRunner{}, fakeProfile(), false)
+	rec := socketDo(t, s, "POST", "/api/lsp/confirm", api.LSPConfirmRequest{Token: "x"}, "")
+	wantStatus(t, rec.Code, http.StatusForbidden)
 }
 
 // A request for a stream without a session of an agent is the SDK's own

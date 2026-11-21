@@ -198,8 +198,12 @@ unless the session's profile program is in `force_chat`, and otherwise through
 `Engine.Notify` (chat / `omo ai wait`). `Listeners.Notify` is true only when an
 established stream took the write; a stream is registered at its `GET /mcp`
 with `Accept: text/event-stream` as an agent identity (`mcpserver/listen.go`),
-is confirmed once its opening line is written, and is gone on disconnect,
-write failure or a 5 s write timeout. Notifications are JSON-RPC
+sends a probe notification (one-time token) after its opening line and counts
+as confirmed only once the agent returned that token through `omo ai lsp
+confirm TOKEN` / tool `lsp_confirm` (`aicmd/lsp.go`, `POST /api/lsp/confirm`,
+`Listeners.Confirm`, route rule `agentWrite`); it is gone on disconnect, write
+failure or a 5 s write timeout, and a new stream is probed again (stale tokens
+confirm nothing). Notifications are JSON-RPC
 `notifications/message` (logger `omo`, level `error`). The stdio bridge
 (`mcpbridge/listen.go`) holds that stream for its session only after its
 client sent `logging/setLevel` (a protocol version without it never listens), and forwards each notification with

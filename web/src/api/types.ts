@@ -680,6 +680,14 @@ export interface LSPFileSelector {
   language_id: string
 }
 
+export interface LSPConfirmRequest {
+  token: string
+}
+
+export interface LSPConfirmResult {
+  confirmed: boolean
+}
+
 export interface LSPIgnoreRequest {
   id: string
 }

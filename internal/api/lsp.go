@@ -61,3 +61,16 @@ type LSPIgnoreResult struct {
 	Column   int    `json:"column"`
 	Message  string `json:"message"`
 }
+
+// LSPConfirmRequest is the body of POST /api/lsp/confirm: the token of the
+// probe omo sent over the caller's MCP notification stream.
+type LSPConfirmRequest struct {
+	Token string `json:"token"`
+}
+
+// LSPConfirmResult says the probe's token was accepted: from now on, while
+// that stream stays open, omo tells the caller about language-server issues
+// over MCP instead of in the terminal.
+type LSPConfirmResult struct {
+	Confirmed bool `json:"confirmed"`
+}

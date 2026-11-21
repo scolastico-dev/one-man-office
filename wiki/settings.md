@@ -288,11 +288,18 @@ of them once:
 
 - **Confirmed MCP listener**: omo sends the report over that session's
   notification stream and does not also type it into the terminal. A session
-  is a *confirmed listener* only while a stream is open and established.
-  Using omo's MCP tools, listing them, being injected with omo's MCP entry or
-  advertising a capability does not count.
-- **Everything else** (no stream, a stream that was closed or failed, or a
-  program in `force_chat`): the report is typed into the terminal as one
+  is a *confirmed listener* only while a stream is open **and the agent
+  confirmed it**. An open stream alone is no proof: some programs only write
+  notifications to a debug log. So omo sends a probe notification when a
+  stream opens, containing a one-time token, and the agent returns it from its
+  own session with `omo ai lsp confirm TOKEN` (MCP tool `lsp_confirm`). Only
+  then does the stream count. A token of another session, a wrong token or the
+  stale token of an earlier stream confirms nothing; every new stream
+  (reconnect, omo restart, bridge reopen) is probed again. Using omo's MCP
+  tools, listing them, being injected with omo's MCP entry or advertising a
+  capability does not count either.
+- **Everything else** (no stream, a stream whose probe is unanswered, a stream
+  that was closed or failed, or a program in `force_chat`): the report is typed into the terminal as one
   `omo:` line, or returned by `omo ai wait`, like every other notification.
   `force_chat` wins even while a stream is open.
 
@@ -312,8 +319,8 @@ How a stream is opened:
   for asking for `notifications/message`. The bridge then holds the stream
   above for its session, passes each notification on to its client and opens
   the stream again after omo restarts. A client that never sends it, or that
-  speaks a protocol version without `logging/setLevel`, is not
-  a listener and keeps getting chat lines.
+  speaks a protocol version without `logging/setLevel`, or never answers the
+  probe, is not a listener and keeps getting chat lines.
 
 The text lists each issue as `file:line:column severity: message (id <id>)`
 (positions are one-based as editors show them), at most about 750 characters

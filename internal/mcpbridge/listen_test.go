@@ -2,6 +2,7 @@ package mcpbridge
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -47,6 +48,20 @@ func waitListening(t *testing.T, o *omo, session string, want bool) {
 	}
 }
 
+var probeToken = regexp.MustCompile("lsp confirm ([0-9a-f]+)`")
+
+// nextProbe waits for the probe omo sends over a new stream and returns its
+// token: it reaches the client through the bridge.
+func nextProbe(t *testing.T, got chan string) string {
+	t.Helper()
+	text := <-got
+	m := probeToken.FindStringSubmatch(text)
+	if m == nil {
+		t.Fatalf("the first notification is no probe: %q", text)
+	}
+	return m[1]
+}
+
 // A stdio client that asks for notifications (logging/setLevel) is a
 // listener omo confirms through the bridge's own stream; what omo sends
 // reaches that client as a log notification.
@@ -58,6 +73,13 @@ func TestBridgeForwardsNotificationsOfAListeningClient(t *testing.T) {
 			cs, got, stderr := connectLogging(t, o, id, v, nil)
 			if err := cs.SetLoggingLevel(context.Background(), &mcp.SetLoggingLevelParams{Level: "error"}); err != nil {
 				t.Fatalf("logging/setLevel: %v\nbridge: %s", err, stderr)
+			}
+			token := nextProbe(t, got)
+			if o.srv.MCPListeners().Confirmed(id) || o.srv.MCPListeners().Notify(id, "unconfirmed") {
+				t.Fatal("a stream whose probe is unanswered counts as listening")
+			}
+			if !o.srv.MCPListeners().Confirm(id, token) {
+				t.Fatal("the probe's token was refused")
 			}
 			waitListening(t, o, id, true)
 			if !o.srv.MCPListeners().Notify(id, "issue over stdio") {
@@ -101,9 +123,21 @@ func TestBridgeListenerReturnsAfterOmoRestarts(t *testing.T) {
 	if err := cs.SetLoggingLevel(context.Background(), &mcp.SetLoggingLevelParams{Level: "error"}); err != nil {
 		t.Fatalf("logging/setLevel: %v\nbridge: %s", err, stderr)
 	}
-	waitListening(t, o, id, true)
+	old := nextProbe(t, got)
+	if !o.srv.MCPListeners().Confirm(id, old) {
+		t.Fatal("the probe's token was refused")
+	}
 	o.close()
 	o.start()
+	// The restarted omo knows nothing of the old confirmation: the reopened
+	// stream brings a new probe, and until it is confirmed there is no listener.
+	fresh := nextProbe(t, got)
+	if o.srv.MCPListeners().Confirmed(id) || o.srv.MCPListeners().Confirm(id, old) {
+		t.Fatal("the old confirmation survived the restart")
+	}
+	if !o.srv.MCPListeners().Confirm(id, fresh) {
+		t.Fatal("the new probe's token was refused")
+	}
 	waitListening(t, o, id, true)
 	if !o.srv.MCPListeners().Notify(id, "after the restart") {
 		t.Fatal("the restarted omo could not notify the listener")

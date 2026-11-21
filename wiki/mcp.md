@@ -55,9 +55,12 @@ entry from omo and cannot be registered.
 (see [How agents are told](settings.md#how-agents-are-told)) as MCP
 notifications instead of terminal lines. Through the bridge, a client becomes a
 listener by sending `logging/setLevel`; a directly connected client opens a
-`GET /mcp` stream with `Accept: text/event-stream`. Merely using the tools is
-not listening, and a stream that closes returns the agent to terminal lines.
-The tool `lsp_ignore` (`omo ai lsp ignore ID`) silences a wrong report.
+`GET /mcp` stream with `Accept: text/event-stream`. Omo
+sends a probe notification with a token over every new stream; the agent
+answers it with `omo ai lsp confirm TOKEN` (tool `lsp_confirm`), and only then
+does omo count it as a listener. Merely using the tools, or an unanswered
+probe, is not listening, and a stream that closes returns the agent to
+terminal lines. The tool `lsp_ignore` (`omo ai lsp ignore ID`) silences a wrong report.
 
 **General switches**:
 

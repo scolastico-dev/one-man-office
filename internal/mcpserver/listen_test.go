@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -79,13 +80,91 @@ func readReady(t *testing.T, rd *bufio.Reader) {
 	}
 }
 
+var probeToken = regexp.MustCompile("lsp confirm ([0-9a-f]+)`")
+
+// readProbe consumes the opening line and returns the token of the probe the
+// stream sends after it.
+func readProbe(t *testing.T, rd *bufio.Reader) string {
+	t.Helper()
+	readReady(t, rd)
+	var msg struct {
+		Params struct {
+			Data string `json:"data"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(readEvent(t, rd)), &msg); err != nil {
+		t.Fatal(err)
+	}
+	m := probeToken.FindStringSubmatch(msg.Params.Data)
+	if m == nil {
+		t.Fatalf("the first notification is no probe: %q", msg.Params.Data)
+	}
+	return m[1]
+}
+
+// openConfirmed opens a stream of session and confirms its probe.
+func openConfirmed(t *testing.T, l *Listeners, session string) (*bufio.Reader, context.CancelFunc, <-chan struct{}) {
+	t.Helper()
+	rd, cancel, done := openListener(t, l, session)
+	if !l.Confirm(session, readProbe(t, rd)) {
+		t.Fatal("the probe's own token was not accepted")
+	}
+	return rd, cancel, done
+}
+
+func TestListenerNeedsItsProbeConfirmed(t *testing.T) {
+	l := NewListeners()
+	rd, _, _ := openListener(t, l, "s1")
+	token := readProbe(t, rd)
+	// An open stream with an unanswered probe is not listening.
+	if l.Confirmed("s1") || l.Notify("s1", "x") {
+		t.Fatal("an unconfirmed stream counts as a listener")
+	}
+	for name, c := range map[string]struct{ session, token string }{
+		"another session": {"s2", token}, "wrong token": {"s1", "0000"}, "empty token": {"s1", ""},
+	} {
+		if l.Confirm(c.session, c.token) || l.Confirmed("s1") {
+			t.Errorf("%s confirmed the stream", name)
+		}
+	}
+	if !l.Confirm("s1", token) || !l.Confirmed("s1") {
+		t.Fatal("the right token did not confirm")
+	}
+	if err := l.Wait(t.Context(), "s1", true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A new stream needs a new confirmation, and the old token is stale.
+func TestListenerReconnectNeedsANewConfirmation(t *testing.T) {
+	l := NewListeners()
+	rd, cancel, done := openListener(t, l, "s1")
+	old := readProbe(t, rd)
+	if !l.Confirm("s1", old) {
+		t.Fatal("not confirmed")
+	}
+	cancel()
+	<-done
+	rd2, _, _ := openListener(t, l, "s1")
+	fresh := readProbe(t, rd2)
+	if fresh == old {
+		t.Fatal("a new stream reused the token")
+	}
+	if l.Confirm("s1", old) || l.Confirmed("s1") {
+		t.Fatal("the stale token confirmed the new stream")
+	}
+	if !l.Confirm("s1", fresh) || !l.Confirmed("s1") {
+		t.Fatal("the new token did not confirm")
+	}
+}
+
 func TestListenerConfirmedOnlyOnceTheStreamIsEstablished(t *testing.T) {
 	l := NewListeners()
 	if l.Confirmed("s1") || l.Notify("s1", "x") {
 		t.Fatal("a session that never listened is confirmed")
 	}
-	rd, _, _ := openListener(t, l, "s1")
-	readReady(t, rd)
+	rd, _, _ := openConfirmed(t, l, "s1")
+	_ = rd
 	if err := l.Wait(t.Context(), "s1", true); err != nil || !l.Confirmed("s1") {
 		t.Fatal("an established stream is not confirmed")
 	}
@@ -96,10 +175,8 @@ func TestListenerConfirmedOnlyOnceTheStreamIsEstablished(t *testing.T) {
 
 func TestListenerDeliversNotificationToItsOwnSessionOnly(t *testing.T) {
 	l := NewListeners()
-	one, _, _ := openListener(t, l, "s1")
-	two, _, _ := openListener(t, l, "s2")
-	readReady(t, one)
-	readReady(t, two)
+	one, _, _ := openConfirmed(t, l, "s1")
+	two, _, _ := openConfirmed(t, l, "s2")
 
 	got := make(chan string, 1)
 	go func() { got <- readEvent(t, one) }()
@@ -133,8 +210,7 @@ func TestListenerDeliversNotificationToItsOwnSessionOnly(t *testing.T) {
 
 func TestListenerDisconnectEndsConfirmation(t *testing.T) {
 	l := NewListeners()
-	rd, cancel, done := openListener(t, l, "s1")
-	readReady(t, rd)
+	_, cancel, done := openConfirmed(t, l, "s1")
 	cancel()
 	<-done
 	if l.Confirmed("s1") || l.Notify("s1", "x") {
@@ -144,8 +220,7 @@ func TestListenerDisconnectEndsConfirmation(t *testing.T) {
 
 func TestListenerWriteFailureIsNotDelivery(t *testing.T) {
 	l := NewListeners()
-	rd, _, done := openListener(t, l, "s1")
-	readReady(t, rd)
+	_, _, done := openConfirmed(t, l, "s1")
 	// the client side of the pipe breaks without the request ending.
 	l.mu.Lock()
 	var ls *listener

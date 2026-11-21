@@ -52,3 +52,25 @@ func TestLSPIgnoreConfirmsSuppressionInTheWorktree(t *testing.T) {
 		t.Fatalf("raw answer %s", res.Value)
 	}
 }
+
+func TestLSPConfirmIsOneCommandForEveryAgentSession(t *testing.T) {
+	c, ok := byTool("lsp_confirm")
+	if !ok || strings.Join(c.Path, " ") != "lsp confirm" || c.CommandLineOnly {
+		t.Fatalf("lsp confirm: %v %+v", ok, c.Path)
+	}
+	for _, a := range audiences {
+		if !c.Sees(a) {
+			t.Errorf("%s/%s does not see it", a.Role, a.Purpose)
+		}
+	}
+	var got api.LSPConfirmRequest
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		json.NewEncoder(w).Encode(api.LSPConfirmResult{Confirmed: true})
+	})
+	client := apiclient.NewWithTransport(apiclient.HandlerTransport(h), "")
+	res, err := c.Run(context.Background(), client, proxyTestInput(c, `{"token":"abc123"}`, t))
+	if err != nil || got.Token != "abc123" || !strings.Contains(res.Text, "confirmed") || !strings.Contains(string(res.Value), `"confirmed":true`) {
+		t.Fatalf("%+v %v %+v", got, err, res)
+	}
+}

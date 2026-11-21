@@ -2,6 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,10 +15,15 @@ import (
 
 // A listener is the open notification stream of an agent session: a GET of
 // /mcp that accepts text/event-stream, the standalone stream the Streamable
-// HTTP transport gives a server for notifications it sends on its own. omo
-// treats a session as listening only while such a stream is open and the
-// opening line has been written to it; a session that merely used the
-// endpoint, listed its tools or advertised a capability is not listening.
+// HTTP transport gives a server for notifications it sends on its own. An open
+// stream does not prove that the agent program shows notifications to the
+// model, so omo sends a probe over each new stream: a notification carrying a
+// one-time token that the agent returns with `omo ai lsp confirm TOKEN` (the
+// tool lsp_confirm) from its own session. A session counts as listening only
+// while a stream is open and its probe was confirmed; a new stream (reconnect,
+// omo restart, bridge reopen) needs a new confirmation. A session that merely
+// used the endpoint, listed its tools or advertised a capability is not
+// listening.
 //
 // What a listener receives is a JSON-RPC notifications/message (the MCP
 // logging notification) with the logger "omo", the level "error" (so that no
@@ -48,22 +56,49 @@ type listener struct {
 	mu    sync.Mutex // serializes writes; guards ready and dead
 	w     http.ResponseWriter
 	rc    *http.ResponseController
-	ready bool // the opening line was written
-	dead  bool // a write failed
-	end   chan struct{}
+	ready bool   // the opening line was written
+	dead  bool   // a write failed
+	token string // the probe's one-time token
+	// confirmed is set when the agent returned token.
+	confirmed bool
+	end       chan struct{}
 }
 
 // Confirmed reports whether session has an established, working stream.
 func (l *Listeners) Confirmed(session string) bool {
 	for _, ls := range l.of(session) {
 		ls.mu.Lock()
-		ok := ls.ready && !ls.dead
+		ok := ls.ready && ls.confirmed && !ls.dead
 		ls.mu.Unlock()
 		if ok {
 			return true
 		}
 	}
 	return false
+}
+
+// Confirm marks the stream whose probe carried token as confirmed, for the
+// session that returned it. It reports whether it did: a token of another
+// session's stream, a stale token of a stream that is gone and a wrong token
+// confirm nothing.
+func (l *Listeners) Confirm(session, token string) bool {
+	if token == "" {
+		return false
+	}
+	ok := false
+	for _, ls := range l.of(session) {
+		ls.mu.Lock()
+		if ls.ready && !ls.dead && subtle.ConstantTimeCompare([]byte(ls.token), []byte(token)) == 1 {
+			ls.confirmed, ok = true, true
+		}
+		ls.mu.Unlock()
+	}
+	if ok {
+		l.mu.Lock()
+		l.signalLocked()
+		l.mu.Unlock()
+	}
+	return ok
 }
 
 // Notify sends text to the streams of session and reports whether a
@@ -142,7 +177,7 @@ func (l *Listeners) Wait(ctx context.Context, session string, want bool) error {
 func (ls *listener) write(frame string) bool {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
-	if !ls.ready || ls.dead {
+	if !ls.ready || !ls.confirmed || ls.dead {
 		return false
 	}
 	return ls.send(frame)
@@ -171,7 +206,12 @@ func (ls *listener) send(frame string) bool {
 // serve holds the notification stream of session open until the client goes
 // away or a write fails.
 func (l *Listeners) serve(w http.ResponseWriter, r *http.Request, session string) {
-	ls := &listener{w: w, rc: http.NewResponseController(w), end: make(chan struct{})}
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		http.Error(w, "no randomness", http.StatusInternalServerError)
+		return
+	}
+	ls := &listener{w: w, rc: http.NewResponseController(w), end: make(chan struct{}), token: hex.EncodeToString(raw[:])}
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-store")
@@ -184,13 +224,15 @@ func (l *Listeners) serve(w http.ResponseWriter, r *http.Request, session string
 	w.WriteHeader(http.StatusOK)
 	ls.ready = ls.send(": omo notification stream\n\n")
 	ready := ls.ready
+	if ready {
+		if probe, err := notificationFrame(probeText(ls.token)); err == nil {
+			ready = ls.send(probe)
+		}
+	}
 	ls.mu.Unlock()
 	if !ready {
 		return
 	}
-	l.mu.Lock()
-	l.signalLocked()
-	l.mu.Unlock()
 	tick := time.NewTicker(keepAlive)
 	defer tick.Stop()
 	for {
@@ -210,6 +252,13 @@ func (l *Listeners) serve(w http.ResponseWriter, r *http.Request, session string
 			ls.mu.Unlock()
 		}
 	}
+}
+
+// probeText is the notification that asks the agent to confirm that it sees
+// notifications from omo.
+func probeText(token string) string {
+	return "omo checks that you receive notifications from omo over MCP. Confirm it now by running `omo ai lsp confirm " + token +
+		"` (MCP tool lsp_confirm). Until you do, omo tells you about language-server issues in the terminal instead."
 }
 
 // notificationFrame is the SSE event that carries text to the agent.
