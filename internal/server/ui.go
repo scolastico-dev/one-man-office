@@ -9,6 +9,7 @@ import (
 
 func (s *Server) registerUI(mux *http.ServeMux) {
 	s.registerRoutes(mux, []apiRoute{
+		{"GET /api/ui/forwards/{id}/tunnel", s.forwardTunnel, userOnly},
 		{"POST /api/ui/capabilities", s.exchangeUICapabilities, userOnly},
 		{"GET /api/ui/notifications", s.getUINotifications, userOnly},
 	})
@@ -22,7 +23,7 @@ func (s *Server) exchangeUICapabilities(w http.ResponseWriter, r *http.Request) 
 	}
 	// Client flags describe that UI only, not global server state. Unknown or
 	// absent flags never prevent the client from using the features it knows.
-	writeJSON(w, http.StatusOK, api.UICapabilities{Features: []string{api.FeatureUICapabilities, api.FeatureUINotificationPolling}})
+	writeJSON(w, http.StatusOK, api.UICapabilities{Features: []string{api.FeatureUICapabilities, api.FeatureUINotificationPolling, api.FeatureUIForwardTunnel}})
 }
 
 func (s *Server) getUINotifications(w http.ResponseWriter, r *http.Request) {

@@ -16,6 +16,12 @@ function modes() {
   element('secret-title').textContent = auth === 'basic' ? 'Password' : 'Login token';
 }
 function render(state, load = false) {
+  if (!state.connected || current?.forward_generation !== state.forward_generation) {
+    element('forward-app').replaceChildren();
+    showExposures([]);
+    for (const id of ['preview-forward','expose-forward']) element(id).disabled = true;
+    if (state.connected) element('forward-exposure-status').textContent = 'Refresh apps and status to see active previews and exposures.';
+  }
   current = state;
   if (load && state.config) {
     for (const name of ['mode','origin','auth','username','notification_mode']) field(name).value = state.config[name];
@@ -38,6 +44,7 @@ function render(state, load = false) {
   element('status').textContent = state.connected ? (state.error ? 'Connected. Notification status needs attention.' : state.polling ? 'Connected. System notifications are active.' : 'Connected. Native notification polling is off or unavailable on this server.') : 'Choose your board to connect.';
   element('problem').textContent = state.error;
   element('problem').hidden = !state.error;
+  element('forwards').hidden = state.android || !state.connected || !state.forward_tunnel;
   modes();
 }
 async function action(fn) {
@@ -74,3 +81,55 @@ element('disconnect').addEventListener('click', () => void action(async () => re
 for (const [id,replay] of [['replay',true],['baseline',false]]) element(id).addEventListener('click', () => void action(async () => render(await invoke('recover',{replay}))));
 window.addEventListener('focus', () => { if (!busy) void invoke('get_setup').then(state => render(state)).catch(() => {}); });
 void action(async () => render(await invoke('get_setup'), true));
+
+let forwardBusy = false;
+function showExposures(exposures) {
+  element('forward-exposures').replaceChildren();
+  element('forward-exposure-status').textContent = exposures.length ? `${exposures.length} active` : 'No previews or local exposures are active.';
+  for (const exposure of exposures) {
+    const item = document.createElement('li');
+    const text = document.createElement('p');
+    text.textContent = `${exposure.name}: ${exposure.address} — ${exposure.error || (exposure.preview ? 'Preview available' : 'Listening')}`;
+    const stop = document.createElement('button');
+    stop.type = 'button'; stop.textContent = exposure.preview ? 'Close preview' : 'End exposure';
+    stop.addEventListener('click', () => void forwardAction(async () => showExposures(await invoke('stop_forward', {id:exposure.id}))));
+    item.append(text, stop); element('forward-exposures').append(item);
+  }
+}
+async function forwardAction(fn) {
+  if (forwardBusy || element('forwards').hidden) return;
+  forwardBusy = true;
+  element('forward-problem').hidden = true;
+  for (const button of element('forwards').querySelectorAll('button')) button.disabled = true;
+  try { await fn(); } catch (error) {
+    element('forward-problem').textContent = typeof error === 'string' ? error : 'Cannot update app forwarding.';
+    element('forward-problem').hidden = false;
+  } finally {
+    forwardBusy = false;
+    for (const button of element('forwards').querySelectorAll('button')) button.disabled = false;
+    for (const id of ['preview-forward','expose-forward']) element(id).disabled = !element('forward-app').value;
+  }
+}
+async function refreshForwards() {
+  const view = await invoke('get_forwards');
+  const select = element('forward-app');
+  const selected = select.value;
+  select.replaceChildren();
+  for (const app of view.forwards) {
+    const option = document.createElement('option'); option.value = app.id;
+    option.textContent = `${app.name || 'App'}${app.ticket ? ` · Ticket ${app.ticket}` : ''} · ${app.id.slice(0,8)}`;
+    select.append(option);
+  }
+  if (view.forwards.some(app => app.id === selected)) select.value = selected;
+  element('forward-status').textContent = view.forwards.length ? 'Apps open at their root address.' : 'No apps are registered. Refresh after starting an app.';
+  showExposures(view.exposures);
+  if (view.error) {
+    element('forward-problem').textContent=view.error;
+    element('forward-problem').hidden=false;
+  }
+}
+element('refresh-forwards').addEventListener('click', () => void forwardAction(refreshForwards));
+element('preview-forward').addEventListener('click', () => void forwardAction(async () => showExposures(await invoke('preview_forward', {id:element('forward-app').value}))));
+element('expose-forward').addEventListener('click', () => void forwardAction(async () => showExposures(await invoke('expose_forward', {id:element('forward-app').value,port:element('forward-port').value}))));
+
+window.addEventListener('omo-forwards-changed', () => void forwardAction(refreshForwards));

@@ -76,6 +76,54 @@ keeps ownership and reports the error for retry.
 Android exposes only direct connection. Native validation and the local
 runtime refuse local start/install there.
 
+## Desktop app previews and local ports
+
+On Linux, Windows and macOS 14 or later, open **Connection…**, then under
+**Apps** choose **Refresh apps and status**. Select one of the connected omo's
+registered apps. No upstream host or internal ID needs to be entered.
+
+**Open preview** opens a native window at a real HTTP address such as
+`http://my-app-0123456789abcdef0123456789abcdef.omo/`. The name includes the
+forward's identity, so duplicate or empty names remain distinct. The app runs
+at that origin's root; its registered start path/query is used only for the
+first navigation. These addresses resolve inside preview windows without
+system DNS or hosts-file changes. Root assets, HTTP uploads/responses, streams
+and application WebSockets travel through the connected omo, including an
+external host. Related app popups retain that routing and the same native
+keyboard/clipboard settings. Preview navigation stays within the selected app.
+
+To use an app from another program, enter an available **Local port**, then
+choose **Expose on this computer**. The displayed `http://127.0.0.1:<port>/`
+address listens only on this computer's IPv4 loopback interface. The app runs
+at `/`; append its start path if needed. Invalid/occupied ports are reported
+in Connection. Connection and upstream errors appear in the requesting app or
+in the exposure's status; **Refresh apps and status** updates the list. Local
+exposures can still be ended when the remote registry is unreachable.
+
+Use **End exposure** to release a local port or **Close preview** to close a
+preview family. Closing its last preview window also retires its listener.
+Disconnect, reconnect/reconfiguration and app exit close every preview and
+local exposure, including active streams. Keeping an owned local omo in the
+tray preserves the active connection and its exposures. Nothing recreates
+exposures after reconnect/restart, and server ownership rules remain unchanged.
+
+These controls require negotiated capability `ui.forwards.tunnel.v1`,
+independently of notifications. Against an older server without support, the
+board still opens and the controls are unavailable. Android neither offers
+nor advertises these desktop features; its native entry points refuse them.
+Preview documents receive no board auth bootstrap or setup command capability.
+Only the bundled Connection screen can read the registry or manage exposures.
+The transport contract is in [Native UI API](ui-api.md#registered-forward-tunnel-desktop).
+
+Native routing uses Tauri's per-WebView SOCKS proxy configuration: WebKitGTK's
+website data manager on Linux, a separate WebView2 environment on Windows,
+and WKWebsiteDataStore proxy configurations on macOS. The latter requires
+macOS 14+, which is the app's minimum macOS version. The private loopback SOCKS
+listener accepts only its selected virtual hostname at HTTP port 80; it never
+resolves or dials app targets. Each accepted connection uses the authenticated
+omo WebSocket transport. Windows profile deletion waits for WebView2's
+`BrowserProcessExited` event, after every related view releases its resources.
+
 ## Notifications and shortcuts
 
 Desktop system notifications are enabled in the connection screen. Capability
@@ -200,6 +248,10 @@ npm run android:dev
 
 CI needs those same SDK/NDK/JDK and Rust components, Node/npm, accepted SDK
 licenses, and dependency access to crates.io, Google Maven and Maven Central.
+Gradle resolves Maven Central artifacts through Google's public mirror first,
+including `buildSrc` plugin dependencies, to avoid Central's shared-runner rate
+limits. Google Maven and the Gradle plugin portal remain available for their
+own artifacts, with Maven Central as fallback.
 The checked-in Gradle wrapper downloads Gradle 9.6.1 and uses AGP 9.3.1 / Kotlin
 2.2.10. Platform/target SDK is pinned to the available stable SDK 36 rather than
 the generated template's unavailable SDK 37. The scoped Wry class extension in
@@ -374,6 +426,9 @@ all warnings. Never upload the private keystore to either console.
   or a running Tauri event loop.
 - `ui/src-tauri/src/lib.rs`: the bundled setup's commands are `get_setup`,
   `connect({settings})`, `disconnect`, `recover({replay})` and `local_connect`.
+  Desktop-only setup commands are `get_forwards`, `preview_forward({id})`,
+  `expose_forward({id,port})` and `stop_forward({id})`. They use the active
+  connection; remote pages cannot invoke them.
   Settings have `mode`, `origin`, `auth`, `username`, `secret`, `notifications`,
   `notification_mode` (`background` or `foreground`), `remember`, `reset_identity`
   and `stop_with_window` (default false). Results contain public configuration, platform,
@@ -403,7 +458,7 @@ all warnings. Never upload the private keystore to either console.
   service, encrypted work storage, channels and activation routing. Desktop uses
   the Rust notification plugin. Neither depends on a visible board or JS timer.
 
-Only the bundled `setup` document has the five explicit command permissions.
+Only the bundled `setup` document has the explicit connection and app-forward command permissions.
 Board/proxy views have no remote capabilities, shell/process/filesystem plugins,
 or arbitrary native HTTP endpoint. Their injected bridge exposes a notification
 marker and a configure action, not a general native API.
@@ -444,6 +499,36 @@ Android device behavior have not been run on their platforms. WebView2 notificat
 activation is limited by the plugin to on-screen toasts, not entries already
 in Action Center. This host has no macOS SDK. Android build and JVM evidence is recorded above;
 device permission/background behavior still needs native-platform verification.
+
+Focused desktop-forward checks:
+
+```sh
+cd ui
+npm run check
+cargo fmt --all --check
+cargo test -p omo-ui --lib --locked   # compiled command ACL and bulk cleanup
+cd ..
+# From the repository root, for a real Linux native preview/port probe:
+go test -c -o bin/ui-server-fixture ./internal/server
+dbus-run-session -- python3 ui/tests/forwards_smoke.py --fixture "$PWD/bin/ui-server-fixture"
+```
+
+The probe uses the existing standalone HTTP server fixture, a private X display,
+isolated home/config/cache/temp roots and a synthetic root app. It does not
+start omo's CLI, socket, engine or agents. `--host <prefix>` accepts extracted
+native dependencies through a read-only Bubblewrap library overlay. It checks
+actual document origin, credentials/API isolation, root assets, independently
+flushed SSE, application WebSocket echo, related popups, shortcut/clipboard
+input, last-preview close, occupied ports, local HTTP and active-stream cleanup
+on reconnect, disconnect and external-server UI exit. The main preview calls
+the raw native IPC transport and verifies actual ACL denials; compiled native
+ACL tests independently guard board/setup/preview/related-child labels and
+origins. Related WebKit child IPC promises did not settle in this environment,
+so compiled ACL coverage establishes their command permissions; the child
+probe also verifies absent board credentials and native wrappers. Native Linux WebKitGTK is exercised; Windows is cross-compiled,
+Android is compile/bridge checked, and macOS runtime remains unverified on this
+Linux host. No Windows browser-exit/profile deletion or macOS native smoke was
+run here.
 
 Implementation references: [Tauri capabilities](https://v2.tauri.app/security/capabilities/),
 [WebviewWindowBuilder](https://docs.rs/tauri/2.12.7/tauri/webview/struct.WebviewWindowBuilder.html),

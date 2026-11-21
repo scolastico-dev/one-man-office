@@ -13,3 +13,17 @@ pub mod lifecycle;
 
 pub mod local;
 pub use local::*;
+
+#[cfg(not(target_os = "android"))]
+pub mod tunnel;
+#[cfg(not(target_os = "android"))]
+pub use tunnel::*;
+
+#[cfg(not(target_os = "android"))]
+pub mod forwards;
+#[cfg(not(target_os = "android"))]
+pub use forwards::*;
+#[cfg(not(target_os = "android"))]
+mod forward_listener;
+#[cfg(not(target_os = "android"))]
+pub use forward_listener::*;

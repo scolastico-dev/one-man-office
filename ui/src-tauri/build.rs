@@ -6,6 +6,10 @@ fn main() {
             "disconnect",
             "recover",
             "local_connect",
+            "get_forwards",
+            "preview_forward",
+            "expose_forward",
+            "stop_forward",
         ]),
     ))
     .expect("Tauri build configuration failed");

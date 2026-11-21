@@ -102,7 +102,10 @@ pub fn open_board(
     let window = builder
         .build()
         .map_err(|_| "Cannot create the board WebView.")?;
-    crate::platform::configure(&window, config, secret)?;
+    if let Err(error) = crate::platform::configure(&window, config, secret) {
+        let _ = window.destroy();
+        return Err(error);
+    }
     if !child {
         let handle = app.clone();
         let main_label = window.label().to_string();
@@ -116,9 +119,10 @@ pub fn open_board(
                 );
             }
         });
-        window
-            .navigate(target)
-            .map_err(|_| "Cannot open the board.")?;
+        if window.navigate(target).is_err() {
+            let _ = window.destroy();
+            return Err("Cannot open the board.".into());
+        }
     }
     Ok(window)
 }
@@ -256,4 +260,132 @@ pub fn create_setup(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         });
     }
     Ok(window)
+}
+
+/// A separate ephemeral WebView uses a scoped native SOCKS proxy: its URL is
+/// genuinely HTTP at the virtual host. No board script or credentials are installed.
+#[cfg(not(target_os = "android"))]
+pub fn open_preview(
+    app: &AppHandle,
+    group: &str,
+    address: &str,
+    proxy: std::net::SocketAddr,
+    profile: Option<std::path::PathBuf>,
+    mut prepare_profile: Option<&mut dyn FnMut(&WebviewWindow) -> Result<()>>,
+    features: Option<NewWindowFeatures>,
+) -> Result<WebviewWindow> {
+    let target: tauri::Url = address.parse().map_err(|_| "Invalid preview address.")?;
+    let origin = target.origin().ascii_serialization();
+    let label = format!("preview-{group}-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    let (child_app, child_group, child_address) =
+        (app.clone(), group.to_string(), address.to_string());
+    let navigation_origin = origin.clone();
+    let child_origin = origin.clone();
+    let child_profile = profile.clone();
+    let child = features.is_some();
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::External("about:blank".parse().expect("blank")),
+    )
+    .title(format!("{origin} · omo preview"))
+    .inner_size(1280., 840.)
+    .min_inner_size(360., 480.)
+    .incognito(true)
+    .devtools(false)
+    .zoom_hotkeys_enabled(false)
+    .disable_drag_drop_handler()
+    .enable_clipboard_access()
+    .proxy_url(format!("socks5://{proxy}").parse().expect("loopback proxy"))
+    .initialization_script(include_str!("preview.js"))
+    .on_navigation(move |url| {
+        url.as_str() == "about:blank" || url.origin().ascii_serialization() == navigation_origin
+    })
+    .on_new_window(move |url, features| {
+        if url.as_str() != "about:blank" && url.origin().ascii_serialization() != child_origin {
+            return NewWindowResponse::Deny;
+        }
+        match open_preview(
+            &child_app,
+            &child_group,
+            &child_address,
+            proxy,
+            child_profile.clone(),
+            None,
+            Some(features),
+        ) {
+            Ok(window) => NewWindowResponse::Create { window },
+            Err(_) => NewWindowResponse::Deny,
+        }
+    })
+    .on_document_title_changed(move |window, title| {
+        let clean: String = title
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(120)
+            .collect();
+        let _ = window.set_title(&format!("{clean} · {origin}"));
+    });
+    // WebView2 environments sharing a data folder must share proxy arguments.
+    // Keep each preview family separate from the board and other previews.
+    #[cfg(windows)]
+    {
+        if let Some(profile) = profile {
+            builder = builder.data_directory(profile);
+        }
+    }
+    if let Some(features) = features {
+        builder = builder.window_features(features);
+    }
+    let window = builder
+        .build()
+        .map_err(|_| "Cannot create the app preview WebView.")?;
+    let config = omo_ui_core::Config {
+        id: group.into(),
+        mode: omo_ui_core::Mode::Direct,
+        origin: target.origin().ascii_serialization(),
+        auth: omo_ui_core::Auth::None,
+        username: String::new(),
+        notifications: false,
+        notification_mode: omo_ui_core::NotificationMode::Background,
+        remember: false,
+        stop_with_window: false,
+    };
+    let app_closed = app.clone();
+    let closed_group = group.to_string();
+    let closed_label = window.label().to_string();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            crate::forwards::retired_window(
+                &app_closed,
+                closed_group.clone(),
+                closed_label.clone(),
+            );
+        }
+    });
+    let ready = (|| -> Result<()> {
+        if let Some(prepare) = prepare_profile.as_mut() {
+            prepare(&window)?;
+        }
+        crate::platform::configure(&window, &config, "")?;
+        if !child {
+            window
+                .navigate(target)
+                .map_err(|_| "Cannot open the app preview.")?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = ready {
+        let _ = window.destroy();
+        return Err(error);
+    }
+    Ok(window)
+}
+#[cfg(not(target_os = "android"))]
+pub fn close_preview(app: &AppHandle, group: &str) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(&format!("preview-{group}-")) {
+            let _ = window.destroy();
+        }
+    }
 }

@@ -63,6 +63,7 @@ jobs:
         run: |
           cargo fmt --all --check
           npm run check
+          cargo test -p omo-ui --lib --locked
 
       - name: Build unsigned installer from release version
         run: npm run build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"

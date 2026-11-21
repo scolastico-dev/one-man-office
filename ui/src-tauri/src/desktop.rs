@@ -220,6 +220,15 @@ fn close(app: &AppHandle, label: Option<String>, mut intent: CloseIntent) -> Res
             if action == CloseAction::StopAndExit {
                 owned.expect("owned stop policy").stop_owned()?;
             }
+            if let Some(connection) = state
+                .session
+                .lock()
+                .map_err(|_| "Connection state is unavailable.")?
+                .active
+                .as_mut()
+            {
+                crate::forwards::close_connection(app, connection)?;
+            }
             remove_tray(app);
             state.desktop.exiting.store(true, Ordering::SeqCst);
             app.exit(0);
