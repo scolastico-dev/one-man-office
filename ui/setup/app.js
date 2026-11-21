@@ -41,9 +41,9 @@ function render(state, load = false) {
   const info = relay?.phase === 'awaiting_accept' ? relay.pairing : null;
   element('pairing').hidden = !info;
   element('pair-pin').textContent = info?.pin || '';
-  element('pair-command').textContent = info ? `omo relay pair accept ${info.aid} ${info.pin}` : '';
+  element('pair-command').textContent = info ? `omo relay pair accept -- ${info.aid} ${info.pin}` : '';
   element('pair-public-key').textContent = info?.public_key || '';
-  element('pair-key-command').textContent = info ? `omo relay pair accept ${info.aid} --public-key ${info.public_key}` : '';
+  element('pair-key-command').textContent = info ? `omo relay pair accept --public-key ${info.public_key} -- ${info.aid}` : '';
   element('relay-status').textContent = {pairing:'Proving the host and this device…',awaiting_accept:'Accept on the host. The board opens automatically.',connecting:'Reconnecting with saved trust…',ready:'Relay connected.',reconnecting:'Connection lost. Reconnecting with saved trust…',unavailable:'Host or relay unavailable. Retrying saved trust only.',failed:'Pairing failed or expired. Reconnect saved trust, or explicitly start a new pairing.',cancelled:'Cancelled. Reconnect saved trust, or explicitly start a new pairing.'}[relay?.phase] || '';
   element('disconnect').hidden = !state.connected && !['pairing','awaiting_accept','connecting','reconnecting','unavailable'].includes(relay?.phase);
   element('notification-mode-label').hidden = !state.android;

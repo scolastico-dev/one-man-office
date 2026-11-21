@@ -139,12 +139,16 @@ omo relay disconnect
 
 omo relay pair begin
 omo relay pair pending
-omo relay pair accept <aid> <six-digit-PIN> --name phone
-omo relay pair accept <aid> --public-key <full-unpadded-base64url-key> --name tablet
+omo relay pair accept --name phone -- <aid> <six-digit-PIN>
+omo relay pair accept --public-key <full-unpadded-base64url-key> --name tablet -- <aid>
 omo relay pair cancel
 omo relay devices
 omo relay unregister <ui-id>
 ```
+
+Keep options before `--`: attempt ids are random base64url and may start with
+`-`. The full public key remains the value of `--public-key`, before `--`, even
+when the key starts with `-`. Keep all six PIN digits, including leading zeroes.
 
 Without either name flag, connect reuses the saved client id, or generates and
 saves 16 random bytes as unpadded base64url on first use. A changed relay origin
