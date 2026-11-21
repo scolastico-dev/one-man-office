@@ -175,12 +175,20 @@ basename at any depth, otherwise against the slash-separated worktree-relative
 path; no **, backslash, colon or empty/dot/parent components. Validation and
 deep copies are in `settings/lsp.go`; the same settings revision, last-valid
 state, event and backup/import machinery applies. PATCH still rejects null
-settings but permits null inside the opaque JSON objects. This adds the
-configuration contract only; runtime, agent commands and browser UI are
+settings but permits null inside the opaque JSON objects. `internal/lsp` implements the worktree runtime: engine startup validates
+recorded Git worktrees, attaches sessions (all PM worktrees), and releases
+servers/pollers on failed starts, session ends and shutdown. `Engine.LSP()`
+exposes `Manager.Worktrees`, `Snapshot`, `Ignore` and `Subscribe` for delivery;
+`Report` carries worktree, eligible sessions and stable `Issue` identities with
+relative files and zero-based UTF-16 locations. Push, document/workspace pull,
+refresh and registered dependency watchers feed baseline/diff/debounce state.
+Ignored issues remain inspectable but leave pending/future batches. New
+attachments receive no replay. Agent commands, delivery and browser UI are
 separate work. Full schema and bounds: [Language servers](wiki/settings.md#language-servers).
 Focused checks: settings `TestLSP`, server `TestLSPSettings` plus existing
 settings/revision/null/access tests, homezip `TestRoundTrip`, web API contract
-and TypeScript checks.
+and TypeScript checks. Runtime: `go test ./internal/lsp`, engine `TestLSP`,
+and existing engine lifecycle checks; fake stdio processes only.
 
 Settings writes enforce each section's read limit on the final encoded bytes
 in `Store.writeFile`, before disk or active state changes. YAML expansion and

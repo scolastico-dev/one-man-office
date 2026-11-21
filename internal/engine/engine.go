@@ -27,6 +27,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/lsp"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
@@ -72,10 +73,13 @@ type Options struct {
 	// MCP returns the MCP settings: whether Claude Code and Codex agents
 	// get omo's MCP bridge for their session. nil means on for both.
 	MCP func() api.MCPSettings
+	// LSP optionally supplies the runtime and report callback; nil constructs one.
+	LSP *lsp.Manager
 }
 
 // Engine runs agents for the board. Create it with New, then Run it.
 type Engine struct {
+	lsp    *lsp.Manager
 	o      Options
 	b      *board.Board
 	st     *settings.Store
@@ -199,11 +203,16 @@ func New(o Options) *Engine {
 		minWait:  MinWait,
 		pins:     &pinStore{},
 	}
+
 	if o.Layout.Run != "" {
 		e.pins.path = filepath.Join(o.Layout.Run, pinsFile)
 	}
 	if e.log == nil {
 		e.log = log.New(io.Discard, "", 0)
+	}
+	e.lsp = o.LSP
+	if e.lsp == nil {
+		e.lsp = lsp.New(lsp.Options{Worktrees: o.Layout.Worktrees, Settings: func() api.LSPSettings { return e.st.General().LSP }, Log: e.log})
 	}
 	if e.now == nil {
 		e.now = time.Now
@@ -389,6 +398,7 @@ func (e *Engine) halt(ctx context.Context, reason string) {
 	}
 	wg.Wait()
 	e.watchers.Wait()
+	e.lsp.Close()
 	if snap, err := e.b.EngineSnapshot(ctx); err == nil {
 		for _, s := range snap.Sessions {
 			if err := e.b.EndSession(ctx, s.ID, reason, api.SessionEndShutdown); err != nil {
