@@ -600,9 +600,19 @@ adapts OS credentials, and headless Android storage can implement the same trait
 `RelaySession::split` has a globally ordered cloneable sender and one receiver;
 its control closes the socket, erases keys and releases reconnect ownership before
 reporting completion. Bounded queues require consumers to enforce stream credits.
-This library does not add the setup choice, board WebView/multiplexer or Android
-relay receipt/delivery policy. Focused checks: core cargo tests, Node bridge tests,
+`StreamMux` adds bounded streams with read-consumption credit, fair writes,
+ordered FIN and reciprocal-reset cancellation. `BoardTransport::start` supplies
+the desktop/Android private loopback board endpoint, ephemeral native Basic
+credentials and status subscriptions; it retries saved-trust authentication
+with fresh session keys after loss, never replaying requests or terminal input.
+`close` joins the listener, accepted connections and its own authentication work.
+Only headers needed for virtual Host/Origin/close and bridge authentication
+change; HTTP bodies, assets, SSE and WebSocket frames remain opaque.
+This library does not add the setup choice/window wiring or Android relay
+receipt/delivery policy. Focused checks: core cargo tests, Node bridge tests,
 `node ui/scripts/relay-probe.mjs` for real Go relay/host acceptance/recovery/restart,
+`node ui/scripts/relay-probe.mjs --board` for real embedded board/API, chunked
+upload, SSE/terminal streams and automatic host/relay recovery without re-pairing,
 and Android arm64/Windows GNU core compilation. See [native relay library](wiki/ui.md#native-relay-library).
 
 ## Native UI protocol

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const board = process.argv.includes('--board');
 const work = await mkdtemp(path.join(tmpdir(), 'omo-ui-relay-probe-'));
 const executable = path.join(work, process.platform === 'win32' ? 'relayhost.exe' : 'relayhost');
 const env = { ...process.env, TMPDIR: work, TMP: work, TEMP: work, GOTMPDIR: work };
@@ -48,8 +49,11 @@ function run(command, args, cwd, extraEnv = {}) {
 }
 
 try {
-  await run('go', ['build', '-o', executable, './ui/core/tests/support/relayhost'], root);
-  await run('cargo', ['test', '-p', 'omo-ui-core', '--features', 'relay-integration', '--test', 'relay_native'],
+  if (board) await run('npm', ['--prefix', 'web', 'run', 'build'], root);
+  await run('go', board
+    ? ['test', '-c', '-o', executable, './internal/server']
+    : ['build', '-o', executable, './ui/core/tests/support/relayhost'], root);
+  await run('cargo', ['test', '-p', 'omo-ui-core', '--features', 'relay-integration', '--test', board ? 'relay_board' : 'relay_native'],
     path.join(root, 'ui'), { OMO_UI_RELAY_FIXTURE: executable });
 } catch (error) {
   console.error(error.message);
