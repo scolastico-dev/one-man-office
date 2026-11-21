@@ -151,3 +151,20 @@ fn trusted_candidate_and_root_survive_maximum_escaped_admission_update() {
     );
     assert_eq!(*v.value.lock().unwrap(), durable);
 }
+
+#[test]
+fn notification_export_requires_accepted_trust_and_contains_no_pairing_key() {
+    let v = Arc::new(Vault::default());
+    let c = client(&v);
+    assert!(c.notification_secrets().is_err());
+    let commit = c.inner.prepare_commit().unwrap();
+    c.inner.reveal(&contribution(&commit)).unwrap();
+    c.inner.save_root(&[9; 32]).unwrap();
+    assert!(c.notification_secrets().is_err());
+    c.inner.trust().unwrap();
+    let exported = serde_json::to_value(c.notification_secrets().unwrap()).unwrap();
+    assert_eq!(exported["context"]["ui_id"], c.identity_id().unwrap());
+    assert_eq!(exported["root"], wire::b64(&[9; 32]));
+    assert!(exported.get("seed").is_none());
+    assert!(exported.get("attempt").is_none());
+}

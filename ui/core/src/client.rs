@@ -44,6 +44,11 @@ pub struct BoardClient {
 impl BoardClient {
     pub fn new(mut config: Config, secret: String) -> Result<Self> {
         config.validate(cfg!(target_os = "android"))?;
+        if config.mode == crate::Mode::Relay {
+            return Err(
+                "Relay connections require the native relay notification transport.".into(),
+            );
+        }
         let authorization = config.authorization(&secret)?;
         let client = Client::builder()
             .redirect(Policy::none())

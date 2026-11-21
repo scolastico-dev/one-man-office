@@ -53,3 +53,7 @@ required-features = ["relay-integration"]
 [[test]]
 name = "relay_board"
 required-features = ["relay-integration"]
+
+[[test]]
+name = "relay_notifications_live"
+required-features = ["relay-integration"]

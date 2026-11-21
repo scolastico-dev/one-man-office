@@ -116,10 +116,39 @@ The board is served through an authenticated private loopback bridge over the
 encrypted relay; bridge credentials never enter page JavaScript. Relay admission
 and TLS routing do not grant host authority. This UI does not bundle the board.
 
-The notification checkbox and Android scheduling preference are saved for relay
-connections. Relay receipt/delivery scheduling is a separate native integration;
-until it is active, relay connections negotiate capabilities without claiming
-system delivery and leave browser notifications available.
+System notifications also work through the relay. Both desktop and Android use
+native `GET /notifications/<host_id>/<ui_id>` checks with the saved paired
+notification root, request MAC and optional separate relay admission Basic
+credentials. The app verifies and decrypts each host reply itself; notification
+checks need no UI WebSocket, board bridge, Tauri event loop or running WebView.
+A restored trusted connection can poll while the board reconnects.
+
+Relay notification IDs are comment IDs, independent of the direct event feed.
+The host starts a new registration at zero, so retained older user mentions are
+included. The native journal atomically saves received IDs, queued OS notices
+and the exact batch/through/token receipt before acknowledging a batch with the
+next authenticated GET. A matching authenticated acknowledgment replaces the
+receipt with the next batch or authenticated empty state. Lost, altered, wrong
+context and HTTP 204/error replies retain it; 204 means unavailable, not proved
+empty. Authenticated `invalid_ack` clears only the stale receipt, preserving IDs
+and queued deliveries before retrying with no acknowledgment. Host, relay, app
+and worker restarts preserve this chain without generating new pairing keys.
+
+Desktop uses the private `<connection-id>-relay-notifications.json` journal;
+Android uses a separate Keystore-encrypted `relay-notifications-<connection-id>`
+file in private no-backup storage. Connection/mode changes preserve these
+journals, preventing replay when returning to a saved connection. Received IDs
+use exact compact ranges with decimal-string endpoints, retaining gaps and the
+full uint64 range through Android JSON. Desktop history is streamed separately
+from the bounded public configuration format and has no fixed history-size
+cutoff; an OS file lock serializes all desktop processes sharing the journal.
+OS delivery
+is retried from saved pending notices before polling again. Android uses stable
+connection/comment notification tags to replace a replay after a crash without
+a second alert. A desktop crash between OS submission and saving completion can
+repeat a notification. Clicks open the ticket/comment through that connection's
+relay board bridge; a cold Android launch waits for the saved relay to be ready.
+Old-connection clicks cannot navigate the new board.
 
 ## Recognize the Connection screen
 
@@ -144,9 +173,10 @@ interface, and visiting a local-looking URL there never grants setup authority.
 Desktop system notifications are enabled in the connection screen. Capability
 exchange uses the [Native UI API](ui-api.md); an older server without that
 endpoint still opens, with native polling disabled. Server and app versions do
-not have to match. Android uses the same feed and system-notification feature flags.
+not have to match. This capability/event-cursor protocol is for direct/local
+connections; relay notification checks follow the receipt chain above.
 
-A new connection starts after current server history. On desktop, polling runs in native code every five seconds after catching up,
+A new direct/local connection starts after current server history. On desktop, polling runs in native code every five seconds after catching up,
 independently of WebView visibility. Android scheduling is described below.
 Empty pages with more events are drained immediately. Received IDs and the
 string cursor are persisted per connection; the browser bell's seen marker is
@@ -216,15 +246,19 @@ notification feed still open with native polling disabled.
 The app requests Android 13+ notification permission when connecting with native
 notifications enabled. **Board notifications** and **Foreground polling** have
 separate system channels. If permission or a required channel is blocked,
-checks retain the cursor and report the problem in Connection. Re-enable them
+checks retain the cursor or relay receipt and report the problem in Connection. Re-enable them
 in Android Settings and reconnect. Android's stop/force-stop and manufacturer
 battery controls can suspend work; opening and reconnecting restores it.
 
-Both modes use authenticated plain GET requests through the same Rust feed and
-delivery journal as desktop. There is no Firebase, Google push or Google services
+Both modes use native authenticated GET polling through the same Rust delivery
+path as desktop: the direct feed for direct connections, and relay GET decryption
+and durable receipts for relay connections. There is no Firebase, Google push or Google services
 account. Native jobs contain only a random scheduling generation, never a token
 or password. The work configuration is encrypted with an Android Keystore key
-in the app's private no-backup directory. Disconnect invalidates it and cancels
+in the app's private no-backup directory. For relay workers this contains only
+the notification context/root and optional relay admission password, never the
+pairing private key or application session keys. Receipt/queued notice storage
+is also encrypted. Disconnect invalidates work configuration and cancels
 periodic and foreground work. Turning notifications off retains the current
 connection for existing notification taps while cancelling all polling.
 Changing modes replaces the prior scheduler;
@@ -478,8 +512,8 @@ in native Rust, without a Go process. It provides committed pairing, mutual
 ML-KEM-768 possession proofs, authenticated records/reconnect and notification
 request/envelope cryptography. Its native stream multiplexer and private board
 bridge carry host HTTP, SSE and WebSocket traffic. The shell uses `RelayConnection`
-for setup/window wiring; persisted relay notification receipt policy is a
-separate consumer.
+for setup/window wiring and `RelayNotifier` for independent native notification
+GET checks.
 
 The entry points for those consumers are:
 
@@ -525,8 +559,16 @@ The entry points for those consumers are:
   cancelled payloads. `close().await` joins the record/socket driver.
 - `crypto::{NotificationContext, new_poll, open_notification}` and the strict
   `wire` notification codecs provide the request MAC, outstanding-request binding
-  and response authentication/decryption. They do not persist receipts or
-  delivery policy. Request randomness comes from `crypto::random_bytes`.
+  and response authentication/decryption. Request randomness comes from
+  `crypto::random_bytes`.
+- `RelayClient::notification_secrets()` exports a private notification-only
+  capability after accepted trust. `RelayNotifier::poll` uses it without a UI
+  session, persisting a fresh sole outstanding request before each GET.
+  `RelayDelivery` records received comment IDs, pending OS deliveries and the
+  authenticated receipt in whole atomic replacements. `poll_relay_saved` adapts
+  the desktop private journal; Android JNI uses the same poller with synchronous
+  encrypted journal callbacks. Platform operation/worker locks serialize a
+  connection's checks through persistence and OS delivery.
 
 `SecretStore` loads/saves one private snapshot atomically and durably, with a
 missing entry distinct from unavailable storage. Snapshots contain the private
@@ -537,8 +579,9 @@ replacement; this includes worst-case JSON escaping of a 4 KiB admission passwor
 Saves precede commitment, reveal, final proof and trust transitions. A failed
 storage write latches the client closed until storage is repaired and it is reconstructed.
 `omo_ui::RelaySecrets` adapts the existing desktop/Android credential store using
-separate `relay:<key>` entries. Android headless worker storage can implement the
-same trait without Tauri or a WebView; worker wiring is not provided here.
+separate `relay:<key>` entries. Android's headless worker loads its reduced
+notification capability and journal from Keystore-encrypted saved files without
+opening that pairing credential store or starting Tauri/a WebView.
 Credential-store size/availability failures are surfaced and never fall back to
 public files. A saved candidate with lost secrets requires restoring those
 secrets or unregistering the possible host registration before a new ceremony.
@@ -559,6 +602,8 @@ node scripts/relay-probe.mjs
 # Actual embedded board assets/API/upload/SSE/terminal and automatic recovery:
 # npm --prefix ../web ci first if its dependencies are missing.
 node scripts/relay-probe.mjs --board
+# Real host mentions, GET receipts/restarts and headless JNI (JDK required):
+node scripts/relay-probe.mjs --notifications
 ```
 
 The integration probe builds an isolated Go fixture and exercises PIN/full-key
@@ -611,8 +656,20 @@ Own one adapter with the configured connection and call `close().await` on
 disconnect/replacement: it closes the listener, cancels and joins every accepted
 connection and its own authentication/socket work before reporting Stopped.
 Drop requests cancellation; explicit close observes completion. `RelayConnection`
-and the shell own setup/native chrome; Android notification receipt policy is
-a separate integration.
+and the shell own setup/native chrome. Notification receipts use the separate
+headless GET path and never the board bridge's direct event cursor.
+
+The `--notifications` probe uses the production host/relay without board assets
+or a UI socket during checks. It exercises real user mentions, multiple batches,
+authenticated empty versus offline 204, lost acknowledgment replies, envelope
+ciphertext/host/device/epoch/request tampering, receipt recovery after host/relay
+restart, and authenticated `invalid_ack`. It also builds the actual JNI source
+as a standalone host library and calls it from a JVM adapter, checking durable
+journal callbacks, injected save failure, blocked OS delivery and ticket/comment
+destinations. This validates JNI without a Tauri loop or WebView; it does not
+exercise Android's real Keystore, WorkManager/foreground OS scheduling, permission
+prompts or notification taps on a device. Focused Robolectric tests cover both
+scheduler modes, encrypted storage/recreation and immutable activation intents.
 
 The `--board` probe builds the real Vue board and a test-only control-pipe
 fixture around the production Go server and relay, without a host browser
@@ -624,8 +681,8 @@ Protocol unit tests use exact records and consumption events, not elapsed time.
 Transport compilation is checked for Linux desktop, Windows GNU and Android
 arm64. The native setup owner is also exercised against the real Go board for
 acceptance and saved restoration. For the relay setup integration, Android debug
-APK/AAB compilation and 26 Robolectric tests (including native frame switching)
-pass; Windows GNU shell compilation passes. This development host lacks
+APK compilation and focused Robolectric tests (including native frame switching,
+notification storage and scheduling) pass; Windows GNU shell compilation passes. This development host lacks
 WebKitGTK development files, an attached Android device, and the Apple SDK, so
 relay loading in an OS WebView and Windows/macOS runtime chrome remain unverified.
 

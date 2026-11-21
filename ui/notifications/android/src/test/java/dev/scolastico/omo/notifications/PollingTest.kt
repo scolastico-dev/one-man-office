@@ -140,6 +140,63 @@ class PollingTest {
         assertThrows(IllegalArgumentException::class.java) {engine.configure(arg)}
         assertNull(store.load())
     }
+    @Test fun relay_background_and_foreground_workers_keep_notification_secrets_private() {
+        for(mode in listOf("background","foreground")) {
+            val arg=args(mode).put("secret","private-notification-root")
+            arg.getJSONObject("config").put("mode","relay").put("auth","none")
+            engine.configure(arg)
+            val work=store.load()!!
+            val restarted=PollingEngine(context,store,feed)
+            assertFalse(restarted.step(work.generation,mode))
+            assertEquals("private-notification-root",restarted.current()!!.secret)
+            if(mode=="foreground") {
+                val intent=shadowOf(context as android.app.Application).nextStartedService
+                assertEquals(setOf("generation"),intent.extras!!.keySet())
+            } else {
+                val scheduled=WorkManager.getInstance(context).getWorkInfosForUniqueWork(Scheduler.WORK).get().single { !it.state.isFinished }
+                val spec=androidx.work.impl.WorkManagerImpl.getInstance(context).workDatabase.workSpecDao().getWorkSpec(scheduled.id.toString())!!
+                assertEquals(setOf("generation"),spec.input.keyValueMap.keys)
+            }
+            engine.configure(null)
+        }
+    }
+    @Test fun encrypted_relay_journal_retains_receipt_ids_and_pending_delivery_after_restart() {
+        val key=javax.crypto.spec.SecretKeySpec(ByteArray(32) {11},"AES")
+        val id=java.util.UUID.randomUUID().toString()
+        val journal=EncryptedRelayJournal(context,id) {key}
+        val pending=JSONObject().put("receipt","private-receipt").put("received",org.json.JSONArray(listOf("18446744073709551615")))
+            .put("pending",org.json.JSONArray(listOf(JSONObject().put("destination","/7?tab=comments&comment=18"))))
+        journal.save(pending.toString())
+        val disk=java.io.File(context.noBackupFilesDir,"relay-notifications-$id").readBytes()
+        assertFalse(String(disk,Charsets.ISO_8859_1).contains("private-receipt"))
+        val restored=EncryptedRelayJournal(context,id) {key}
+        assertEquals(pending.toString(),restored.load())
+        val sink=DeliverySink({false},restored)
+        assertEquals(pending.toString(),sink.loadJournal())
+        val acknowledged=JSONObject(pending.toString()).put("receipt",JSONObject.NULL)
+        assertTrue(sink.saveJournal(acknowledged.toString()))
+        assertEquals(acknowledged.toString(),EncryptedRelayJournal(context,id) {key}.load())
+        val other=EncryptedRelayJournal(context,java.util.UUID.randomUUID().toString()) {key}
+        assertEquals("",other.load())
+        assertThrows(IllegalArgumentException::class.java) {EncryptedRelayJournal(context,"../escape") {key}}
+    }
+    @Test fun startup_resume_preserves_the_job_and_notification_activation_during_relay_restoration() {
+        val arg=args().put("secret","private-notification-root")
+        arg.getJSONObject("config").put("mode","relay").put("auth","none")
+        engine.configure(arg)
+        val before=store.load()!!
+        assertTrue(Channels.deliver(context,before,JSONObject().put("id","comment:18").put("title","Question").put("body","Choose").put("destination","/7?tab=comments&comment=18")))
+        val intent=shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.single().contentIntent
+        val tapped=shadowOf(intent).savedIntent
+        val restarted=PollingEngine(context,store,feed)
+        restarted.configure(arg.put("resume",true))
+        assertEquals(before.generation,store.load()!!.generation)
+        assertNotNull(restarted.activation(tapped))
+        assertFalse(restarted.step(before.generation,"background"))
+        assertEquals(1,feed.calls)
+        restarted.configure(arg.put("resume",false))
+        assertNotEquals(before.generation,store.load()!!.generation)
+    }
     class TestService: PollingService({ engine }, DirectExecutor()) {
         companion object { lateinit var engine: PollingEngine }
     }

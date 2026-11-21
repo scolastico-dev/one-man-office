@@ -43,6 +43,9 @@ struct Session {
     error: String,
     recovery: Option<Recovery>,
     relay_view: Option<omo_ui_core::relay::RelayView>,
+    relay_notifications: Option<omo_ui_core::relay::NotificationSecrets>,
+    #[cfg(target_os = "android")]
+    pending_activation: Option<(String, String)>,
 }
 struct Shell {
     #[cfg(target_os = "android")]
@@ -125,7 +128,9 @@ fn snapshot(state: &Shell, _app: &AppHandle) -> Result<Setup> {
         config: s.config.clone(),
         android: cfg!(target_os = "android"),
         connected: s.active.is_some(),
-        polling: s.active.as_ref().is_some_and(|c| c.polling),
+        polling: s.active.as_ref().is_some_and(|c| c.polling)
+            || s.relay_notifications.is_some()
+                && s.config.as_ref().is_some_and(|c| c.notifications),
         error: s.error.clone(),
         recovery: s.recovery.clone(),
     })
@@ -448,24 +453,39 @@ fn poll(app: &AppHandle) -> Result<bool> {
     if s.recovery.is_some() {
         return Ok(false);
     }
+    if let Some(config) = s.config.clone().filter(|c| c.mode == Mode::Relay) {
+        if !config.notifications {
+            return Ok(false);
+        }
+        let Some(secrets) = s.relay_notifications.clone() else {
+            return Ok(false);
+        };
+        let result = omo_ui_core::poll_relay_saved(&state.root, &config, secrets, |n| {
+            show_notification(app, &config, n)
+        });
+        return match result {
+            Ok(Poll::More) => {
+                s.error.clear();
+                Ok(true)
+            }
+            Ok(Poll::Idle) => {
+                s.error.clear();
+                Ok(false)
+            }
+            Err(error) => {
+                s.error = error;
+                Ok(false)
+            }
+            Ok(Poll::Recovery(_)) => Err("Unexpected relay cursor recovery.".into()),
+        };
+    }
     let Some(c) = s.active.as_mut().filter(|c| c.polling) else {
         return Ok(false);
     };
     let config = c.client.config.clone();
     let result = c.client.poll(
         &mut c.delivery,
-        |n| {
-            let title = omo_ui_core::notification_text(&n.title, 80, false);
-            let body = omo_ui_core::notification_text(&n.body, 160, cfg!(target_os = "linux"));
-            app.notification()
-                .builder()
-                .title(title)
-                .body(body)
-                .extra("connection", &config.id)
-                .extra("destination", &n.destination)
-                .show()
-                .map_err(|_| "Cannot submit the system notification.".into())
-        },
+        |n| show_notification(app, &config, n),
         |d| write_json(&state.root, &format!("{}.json", config.id), d),
     );
     match result {
@@ -487,6 +507,21 @@ fn poll(app: &AppHandle) -> Result<bool> {
             Ok(false)
         }
     }
+}
+#[cfg(not(target_os = "android"))]
+fn show_notification(app: &AppHandle, config: &Config, n: &omo_ui_core::Notice) -> Result<()> {
+    app.notification()
+        .builder()
+        .title(omo_ui_core::notification_text(&n.title, 80, false))
+        .body(omo_ui_core::notification_text(
+            &n.body,
+            160,
+            cfg!(target_os = "linux"),
+        ))
+        .extra("connection", &config.id)
+        .extra("destination", &n.destination)
+        .show()
+        .map_err(|_| "Cannot submit the system notification.".into())
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -636,6 +671,10 @@ fn activate_android(app: &AppHandle, id: &str, path: &str) {
     };
     let config = if saved.mode == Mode::Relay {
         let Some(active) = s.active.as_ref() else {
+            if saved.destination(path).is_ok() {
+                // A cold notification launch can beat relay restoration/Ready.
+                s.pending_activation = Some((id.into(), path.into()));
+            }
             return;
         };
         active.client.config.clone()
@@ -658,13 +697,20 @@ fn activate_android(app: &AppHandle, id: &str, path: &str) {
     let Ok(client) = BoardClient::new(config.clone(), secret.clone()) else {
         return;
     };
-    if windows::open_board(app, &config, &secret, config.notifications, None).is_ok() {
+    let polling = if config.mode == Mode::Direct
+        && s.config.as_ref().is_some_and(|c| c.mode == Mode::Relay)
+    {
+        s.relay_notifications.is_some() && config.notifications
+    } else {
+        config.notifications
+    };
+    if windows::open_board(app, &config, &secret, polling, None).is_ok() {
         let _ = android_worker(app)
             .call::<serde_json::Value>("navigateBoard", serde_json::json!({"url":url.as_str()}));
         s.active = Some(Connection {
             client,
             secret,
-            polling: config.notifications,
+            polling,
         });
     }
 }
