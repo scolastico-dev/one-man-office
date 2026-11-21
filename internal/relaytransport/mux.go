@@ -138,6 +138,10 @@ func (m *Mux) dispatch(r relayproto.PlainRecord) error {
 		c.recvCredit -= len(r.Data)
 		if !c.closed {
 			c.input = append(c.input, r.Data...)
+		} else if !c.resetting {
+			// Full Close drains crossed input without retaining its payload.
+			// The peer still needs consumption credit to finish its direction.
+			c.credit += len(r.Data)
 		}
 	case "stream.credit":
 		if uint64(r.Bytes) > uint64(relayproto.InitialCredit-c.sendCredit) {
@@ -194,15 +198,18 @@ func (m *Mux) removeLocked(c *Conn) {
 func (m *Mux) retireLocked(c *Conn) {
 	// Retain the final credit exchange: in-flight grants remain valid until all
 	// bytes in both directions were consumed, even when FIN already arrived.
-	// Full Close may discard crossed input without granting consumption credit;
-	// the ordered peer FIN still proves that no further input can arrive.
+	// Full Close drains crossed input too. A selected grant/FIN/reset must
+	// complete its ordered send before its slot can leave the capacity count.
+	if c.sending {
+		return
+	}
 	if c.resetting {
 		if c.resetSent && c.peerReset {
 			m.removeLocked(c)
 		}
 		return
 	}
-	if c.localFin && c.remoteFin && c.sendCredit == relayproto.InitialCredit && len(c.input) == 0 && c.credit == 0 && (c.closed || c.recvCredit == relayproto.InitialCredit) {
+	if c.localFin && c.remoteFin && c.sendCredit == relayproto.InitialCredit && len(c.input) == 0 && c.credit == 0 && c.recvCredit == relayproto.InitialCredit {
 		m.removeLocked(c)
 	}
 }
@@ -259,6 +266,7 @@ func (m *Mux) nextLocked() *sendItem {
 			continue
 		}
 		m.controlTurn = true
+		c.sending = true
 		return item
 	}
 	if len(m.refused) > 0 {
@@ -289,6 +297,9 @@ func (m *Mux) write() {
 		e := m.records.Send(m.ctx, item.record)
 		m.mu.Lock()
 		c := item.conn
+		if c != nil {
+			c.sending = false
+		}
 		if item.op != nil {
 			item.op.finish(e)
 		}

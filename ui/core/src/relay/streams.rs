@@ -39,6 +39,7 @@ struct Slot {
     fin_queued: bool,
     local_fin: bool,
     remote_fin: bool,
+    draining: bool,
     reset: Option<&'static str>,
     resetting: bool,
     reset_sent: bool,
@@ -70,6 +71,9 @@ impl Slot {
         self.wake();
     }
     fn retired(&self) -> bool {
+        if self.sending {
+            return false;
+        }
         if self.resetting {
             return self.reset_sent && self.peer_reset;
         }
@@ -208,7 +212,11 @@ impl Machine {
                     }
                     s.recv_credit -= data.len();
                     if !s.resetting {
-                        s.input.extend(data);
+                        if s.draining {
+                            s.credit += data.len();
+                        } else {
+                            s.input.extend(data);
+                        }
                     }
                 }
                 "stream.credit" => {
@@ -402,7 +410,8 @@ impl StreamMux {
         self.closed().await;
     }
 }
-/// One bounded HTTP/1.1 byte connection. Drop cancels; shutdown half-closes.
+/// One bounded HTTP/1.1 byte connection. Shutdown half-closes; Drop cancels
+/// unfinished work or drains the final credit exchange after a committed FIN.
 pub struct RelayStream {
     shared: Arc<Shared>,
     id: u64,
@@ -411,10 +420,19 @@ pub struct RelayStream {
 impl Drop for RelayStream {
     fn drop(&mut self) {
         let mut m = self.shared.machine.lock().unwrap();
-        if let Some(s) = m.slots.get(&self.id) {
-            if s.remote_fin && s.input.is_empty() {
-                m.finish(self.id);
+        if let Some(s) = m.slots.get_mut(&self.id) {
+            if s.input.is_empty()
+                && (s.local_fin
+                    || (s.remote_fin && s.pending.is_empty() && s.send_credit == CREDIT))
+            {
+                // FIN already committed a graceful close, or all outbound work
+                // completed. Drain crossed input and its final credit exchange:
+                // a late reset could otherwise target a retired peer slot.
+                s.draining = true;
+                s.fin_queued = true;
             } else {
+                // Peer FIN alone does not promise consumption of our data.
+                // Cancel abandoned work instead of waiting forever for credit.
                 m.reset(self.id, "cancelled");
             }
         }

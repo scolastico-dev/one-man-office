@@ -3,7 +3,8 @@ use futures_util::{SinkExt, StreamExt};
 use omo_ui_core::{
     Result,
     relay::{
-        BoardEndpoint, BoardTransport, RelayClient, SecretStore, TransportStatus, wire::Route,
+        BoardEndpoint, BoardTransport, RelayClient, SecretStore, StreamMux, TransportStatus,
+        wire::Route,
     },
 };
 use serde_json::{Value, json};
@@ -375,6 +376,55 @@ async fn real_board_assets_api_streamed_upload_sse_and_terminal_share_encryption
 }
 fn safely_text(r: &Message) -> &str {
     r.to_text().unwrap()
+}
+
+#[tokio::test]
+async fn crossed_full_closes_reuse_native_and_real_go_host_slots() {
+    let mut f = Fixture::start();
+    let client = RelayClient::open(
+        Arc::new(Secrets::default()),
+        "crossed-closes",
+        f.route(),
+        Some(f.info["admission"].as_str().unwrap().into()),
+    )
+    .unwrap();
+    f.command(json!({"op":"begin"}));
+    let pairing = client.begin_pair().await.unwrap();
+    f.command(json!({"op":"pending"}));
+    f.command(json!({"op":"accept","aid":pairing.info().aid,"pin":pairing.info().pin}));
+    let mux = StreamMux::new(pairing.accepted().await.unwrap());
+    let request = b"GET /api/me HTTP/1.1\r\nHost: omo-relay.invalid\r\nConnection: close\r\n\r\n";
+    // Leave a response unread on an unrelated stream throughout the churn.
+    let mut other = mux.open().await.unwrap();
+    other.write_all(request).await.unwrap();
+    for iteration in 0..160 {
+        let mut stream = mux.open().await.expect("same authenticated session");
+        stream.write_all(request).await.unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200"));
+        // Receiving EOF is the exact barrier: production net/http has fully
+        // closed its Conn and its FIN has reached the native stream machine.
+        stream.write_all(b"crossed close").await.unwrap();
+        if iteration % 2 == 0 {
+            // No yield between queueing these bytes and Drop: cancellation
+            // must discard pending output instead of queuing a blocked FIN.
+            drop(stream);
+        } else {
+            // Commit data and FIN before Drop. The closed host must drain the
+            // crossed bytes and return credit; a late reset could target an
+            // already gracefully retired id. More than 64 of EACH lifecycle
+            // must complete without reconnecting or exhausting either mux.
+            stream.flush().await.unwrap();
+            stream.shutdown().await.unwrap();
+            drop(stream);
+        }
+    }
+    let mut response = Vec::new();
+    other.read_to_end(&mut response).await.unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    drop(other);
+    mux.close().await;
 }
 
 #[tokio::test]
