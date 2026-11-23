@@ -66,7 +66,7 @@ jobs:
           cargo test -p omo-ui --lib --locked
 
       - name: Build unsigned installer from release version
-        run: npm run build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
+        run: npm run build -- --ci --verbose --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
 
       - name: Stage installer and its checksum
         run: node scripts/release.mjs desktop "target/${{ matrix.target }}/release/bundle" dist "${{ matrix.platform }}" "${{ matrix.arch }}" "$RELEASE_TAG"

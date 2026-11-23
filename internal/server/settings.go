@@ -843,7 +843,8 @@ var generalFields = func() map[string]generalField {
 
 // patchSettings changes only the top-level keys of settings.yaml the body
 // names: objects are merged key by key into the current value, everything
-// else is replaced. Unknown keys at any depth and null anywhere are refused.
+// else is replaced. Unknown keys and null settings are refused; opaque LSP
+// JSON objects may contain null values.
 // Reading the current value, merging, validating and writing happen under the store's lock, so the change is all or nothing.
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
@@ -877,7 +878,8 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, e)
 			return
 		}
-		if at, ok := nullIn(top[key], key); ok {
+		t := reflect.TypeFor[api.General]().Field(generalFields[key].index).Type
+		if at, ok := nullIn(top[key], key, t); ok {
 			e := api.Errorf(api.CodeBadRequest, "invalid request body: %s cannot be null", at)
 			e.Details = api.FieldDetail{Field: at}
 			writeError(w, r, e)
@@ -937,8 +939,10 @@ func replaceNamed(v reflect.Value, raw json.RawMessage) {
 	}
 }
 
-// nullIn reports the dotted key of the first null in a JSON value, if any.
-func nullIn(raw json.RawMessage, field string) (string, bool) {
+// nullIn reports the first null setting. Interface-valued leaves of the
+// schema are opaque JSON (LSP options/configuration), where null is valid.
+// The containing object itself still must not be null.
+func nullIn(raw json.RawMessage, field string, t reflect.Type) (string, bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any
@@ -946,22 +950,40 @@ func nullIn(raw json.RawMessage, field string) (string, bool) {
 		// Malformed JSON is refused by the decoding that follows.
 		return "", false
 	}
-	return firstNull(v, field)
+	return firstNull(v, field, t)
 }
 
-func firstNull(v any, at string) (string, bool) {
+func firstNull(v any, at string, t reflect.Type) (string, bool) {
+	if t != nil && t.Kind() == reflect.Interface {
+		return "", false
+	}
 	switch v := v.(type) {
 	case nil:
 		return at, true
 	case map[string]any:
 		for _, k := range sortedNames(v) {
-			if found, ok := firstNull(v[k], at+"."+k); ok {
+			var sub reflect.Type
+			if t != nil {
+				switch t.Kind() {
+				case reflect.Struct:
+					if f, ok := jsonField(t, k); ok {
+						sub = f.Type
+					}
+				case reflect.Map:
+					sub = t.Elem()
+				}
+			}
+			if found, ok := firstNull(v[k], at+"."+k, sub); ok {
 				return found, true
 			}
 		}
 	case []any:
+		var sub reflect.Type
+		if t != nil && (t.Kind() == reflect.Slice || t.Kind() == reflect.Array) {
+			sub = t.Elem()
+		}
 		for i, e := range v {
-			if found, ok := firstNull(e, at+"."+strconv.Itoa(i)); ok {
+			if found, ok := firstNull(e, at+"."+strconv.Itoa(i), sub); ok {
 				return found, true
 			}
 		}

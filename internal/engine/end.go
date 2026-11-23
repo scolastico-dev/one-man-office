@@ -31,6 +31,7 @@ func (e *Engine) end(ctx context.Context, id, reason string, kinds ...api.Sessio
 		ag = en.agent
 	}
 	e.mu.Unlock()
+	e.lsp.Detach(id)
 	if !ok {
 		if err := e.b.EndSession(ctx, id, reason, kind); err != nil {
 			e.log.Printf("engine: end a session: %s", scrub(err, id))
@@ -65,6 +66,7 @@ func (e *Engine) watch(en *entry) {
 	defer e.watchers.Done()
 	ctx := context.Background()
 	<-en.agent.Exited()
+	e.lsp.Detach(en.sess.ID)
 	_ = en.agent.Kill()
 	timer := time.NewTimer(endTimeout)
 	select {

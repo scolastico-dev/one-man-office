@@ -61,13 +61,13 @@ test('sections load lazily and the nav marks the current one', async () => {
   const { w, router } = await mountSettings('/settings/limits?project=demo&q=x')
   expect(w.get('nav').attributes('aria-labelledby')).toBeTruthy()
   expect(w.get(`#${w.get('nav').attributes('aria-labelledby')}`).text()).toBe('Settings')
-  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Usage', 'Prompts', 'Skill sets', 'MCP', 'Environment', 'Limits', 'Review', 'Plugins', 'General', 'Backup'])
-  expect(links(w)[2]!.attributes('href')).toBe('/settings/roles?project=demo&q=x')
+  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Usage', 'Prompts', 'Skill sets', 'MCP', 'LSP', 'Environment', 'Limits', 'Review', 'Plugins', 'General', 'Backup'])
+  expect(w.get('nav a[data-section="roles"]').attributes('href')).toBe('/settings/roles?project=demo&q=x')
   expect(current(w)).toEqual(['limits'])
   expect(title(w)).toBe('Limits')
   expect(w.text()).toContain('Tasks and stories in work, health checks and time limits.')
 
-  await links(w)[2]!.trigger('click')
+  await w.get('nav a[data-section="roles"]').trigger('click')
   await flushPromises()
   await vi.dynamicImportSettled()
   await flushPromises()
@@ -113,7 +113,7 @@ test('at 390 px the section list is a page of its own and each section links bac
   expect(w.get('h1').text()).toBe('Settings')
   expect(current(w)).toEqual([])
 
-  await links(w)[8]!.trigger('click')
+  await w.get('nav a[data-section="limits"]').trigger('click')
   await flushPromises()
   await vi.dynamicImportSettled()
   await flushPromises()
@@ -180,6 +180,27 @@ test('leave guard: closing the tab is asked by the browser while dirty only', as
   dirty.value = false
   await flushPromises()
   expect(ev()).toBe(false)
+})
+
+test('the LSP page keeps invalid JSON edits when leaving is cancelled and discards them on request', async () => {
+  const { w, router } = await mountSettings('/settings/lsp?project=demo')
+  expect(current(w)).toEqual(['lsp'])
+  expect(title(w)).toBe('LSP')
+  await w.findAll('button').find((b) => b.text() === 'Add language server')!.trigger('click')
+  await w.get('[data-field="lsp.servers.0.configuration"]').setValue('{')
+  const leaving = router.push('/settings/limits?project=demo')
+  await flushPromises()
+  expect(w.get('[data-question]').text()).toContain('Leave without saving?')
+  await w.get('[data-question-cancel]').trigger('click')
+  await leaving
+  expect(router.currentRoute.value.fullPath).toBe('/settings/lsp?project=demo')
+  expect((w.get('[data-field="lsp.servers.0.configuration"]').element as HTMLTextAreaElement).value).toBe('{')
+  await w.findAll('button').find((b) => b.text() === 'Discard')!.trigger('click')
+  expect(w.find('[data-lsp-server]').exists()).toBe(false)
+  await router.push('/settings/limits?project=demo')
+  await vi.dynamicImportSettled()
+  await flushPromises()
+  expect(title(w)).toBe('Limits')
 })
 
 test('leave guard: two dirty forms on one page ask once', async () => {

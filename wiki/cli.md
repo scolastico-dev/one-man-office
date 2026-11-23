@@ -343,6 +343,53 @@ Global Flags:
       --json   print the server's JSON answer instead of text
 ```
 
+### `omo ai lsp confirm`
+
+```text
+When an MCP notification stream of yours opens, omo sends a probe over
+it, a notification that contains a token. If you can read that notification,
+run this command with the token (or call the MCP tool lsp_confirm). omo then
+tells you about language-server issues over MCP instead of typing them into
+the terminal. Without the confirmation omo keeps using the terminal. A new
+stream (a reconnect, a restart of omo) sends a new probe. A token that does
+not belong to a stream of your own session is refused.
+
+Usage:
+  omo ai lsp confirm TOKEN [flags]
+
+Examples:
+  omo ai lsp confirm 3f9a1c0be2d84a6f
+
+Flags:
+  -h, --help   help for confirm
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
+### `omo ai lsp ignore`
+
+```text
+Silence a language-server issue that omo reported in your worktree and
+that is wrong or not yours to fix. ID is the id in the notification, written
+"(id ...)" after the issue. The issue is no longer reported to you, not in
+reports already waiting and not when it comes up again; the language server
+keeps reporting it, and other issues are reported as before. Nothing changes
+for other worktrees. An id that names no issue of your worktree is refused.
+
+Usage:
+  omo ai lsp ignore ID [flags]
+
+Examples:
+  omo ai lsp ignore 3f9a1c0be2d84a6f
+
+Flags:
+  -h, --help   help for ignore
+
+Global Flags:
+      --json   print the server's JSON answer instead of text
+```
+
 ### `omo ai model`
 
 ```text

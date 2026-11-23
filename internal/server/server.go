@@ -31,6 +31,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/homezip"
 	"github.com/scolastico-dev/one-man-office/internal/images"
+	"github.com/scolastico-dev/one-man-office/internal/mcpserver"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/proxy"
@@ -272,6 +273,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if err := s.startPlugins(ctx); err != nil {
 		return nil, err
 	}
+	s.mcp.listeners = mcpserver.NewListeners()
 	if o.Runner != nil {
 		// The engine gets a git client of its own: it carries the agents'
 		// environment, and its long operations do not hold up the board's
@@ -279,7 +281,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		s.engine = engine.New(engine.Options{
 			Board: s.board, Settings: s.settings, Git: gitops.New(), Layout: o.Layout, Runner: o.Runner,
 			Socket: s.socketEndpoint, Emit: s.emitEngineEvent, Log: s.log,
-			Usage: s.usageView(), MCP: s.mcpSettings,
+			Usage: s.usageView(), MCP: s.mcpSettings, Listeners: s.mcp.listeners,
 		})
 	}
 	s.shells = s.newShells()

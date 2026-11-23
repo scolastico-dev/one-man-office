@@ -72,8 +72,9 @@ func Run(ctx context.Context, o Options) error {
 	b := &bridge{o: o}
 	b.srv = mcp.NewServer(&mcp.Implementation{Name: "omo", Version: o.Version}, &mcp.ServerOptions{
 		Instructions: fallbackInstructions,
-		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}},
+		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}, Logging: &mcp.LoggingCapabilities{}},
 	})
+	b.ctx = ctx
 	b.srv.AddReceivingMiddleware(b.forward)
 	b.up = &upstream{dial: o.Dial, session: o.Session, version: o.Version, progress: b.progress}
 	defer b.up.close()
@@ -89,10 +90,15 @@ type bridge struct {
 	o   Options
 	srv *mcp.Server
 	up  *upstream
+	// ctx is the bridge's own lifetime, not a request's.
+	ctx context.Context
 
 	mu sync.Mutex
-	// session is the client's session, for progress notifications.
+	// session is the client's session, for progress and log notifications.
 	session *mcp.ServerSession
+	// listening is set once the client asked for notifications; the stream
+	// to omo then runs until the bridge ends.
+	listening bool
 }
 
 // forward answers tools/list and tools/call from omo, and puts omo's
@@ -123,6 +129,13 @@ func (b *bridge) forward(next mcp.MethodHandler) mcp.MethodHandler {
 		case "tools/list":
 			p, _ := req.GetParams().(*mcp.ListToolsParams)
 			return b.up.listTools(ctx, p)
+		case "logging/setLevel":
+			// A client that asks for notifications says it listens for them.
+			res, err := next(ctx, method, req)
+			if err == nil {
+				b.startListening()
+			}
+			return res, err
 		case "tools/call":
 			p, ok := req.GetParams().(*mcp.CallToolParamsRaw)
 			if !ok || p == nil {
