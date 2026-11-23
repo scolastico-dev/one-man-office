@@ -65,8 +65,17 @@ jobs:
           npm run check
           cargo test -p omo-ui --lib --locked
 
+      - name: Keep Spotlight off the disk images
+        # bundle_dmg.sh creates, attaches and detaches a disk image within seconds;
+        # Spotlight indexing the freshly mounted volume makes hdiutil fail with
+        # "Resource busy" on the macOS runners.
+        if: matrix.platform == 'darwin'
+        run: sudo mdutil -a -i off
+
       - name: Build unsigned installer from release version
-        run: npm run build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
+        # --verbose on macOS prints bundle_dmg.sh's own output, which Tauri hides
+        # otherwise, so a failed disk image names its cause in the log.
+        run: npm run build -- --ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" ${{ matrix.platform == 'darwin' && '--verbose' || '' }} --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
 
       - name: Stage installer and its checksum
         run: node scripts/release.mjs desktop "target/${{ matrix.target }}/release/bundle" dist "${{ matrix.platform }}" "${{ matrix.arch }}" "$RELEASE_TAG"
