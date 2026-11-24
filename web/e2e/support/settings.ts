@@ -11,6 +11,7 @@ const CONTENT: Record<SettingsSection, readonly string[]> = {
   prompts: ['[data-prompt-row]'],
   skills: ['[data-skillset-list], [data-no-skillsets]'],
   mcp: ['[data-mcp-server-list], [data-no-mcp-servers]', '[data-mcp-enabled]', '[data-mcp-clients], [data-no-mcp-clients]', '[data-mcp-tokens], [data-no-mcp-tokens]', '[data-mcp-takeover], [data-no-takeover]'],
+  lsp: ['[data-field="lsp.debounce"]', '[data-force-chat="codex"]'],
   environment: ['[data-env-table]'],
   limits: ['[data-field="limits.tasks"]'],
   review: ['[data-field="review_defaults.story"]'],

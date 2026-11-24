@@ -187,6 +187,7 @@ func Commands() []Command {
 	out = append(out, miscCommands()...)
 	out = append(out, imageCommands()...)
 	out = append(out, proxyCommands()...)
+	out = append(out, lspCommands()...)
 	return out
 }
 
@@ -198,6 +199,7 @@ func Groups() []Group {
 		{Path: []string{"project"}, Use: "project", Short: "List and search the registered projects", Example: "  omo ai project list"},
 		{Path: []string{"model"}, Use: "model", Short: "List the models you may choose for tickets", Example: "  omo ai model list"},
 		{Path: []string{"image"}, Use: "image", Short: "Images on tickets: add one, then write its reference into a comment or description", Example: "  omo ai image add 12 ./screenshot.png"},
+		{Path: []string{"lsp"}, Use: "lsp", Short: "Language-server issues omo reports in your worktree", Example: "  omo ai lsp confirm TOKEN"},
 		{Path: []string{"proxy"}, Use: "proxy", Short: "Register, list and remove web UI forwards", Example: "  omo ai proxy add --port 5173 --name \"dev server\""},
 	}
 }

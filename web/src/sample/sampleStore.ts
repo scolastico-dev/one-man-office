@@ -15,6 +15,7 @@ const general: General = {
   branches: { template: 'omo/{slug}' },
   plugin_lists: [],
   mcp: { enabled: true, inject: { claude: true, codex: true } },
+  lsp: { servers: [], debounce: '500ms', force_chat: [] },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },

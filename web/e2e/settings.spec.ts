@@ -12,6 +12,7 @@ const SECTIONS = [
   ['prompts', 'Prompts'],
   ['skills', 'Skill sets'],
   ['mcp', 'MCP'],
+  ['lsp', 'LSP'],
   ['environment', 'Environment'],
   ['limits', 'Limits'],
   ['review', 'Review'],

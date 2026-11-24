@@ -172,7 +172,7 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 	}
 	sess, err := e.spawn(ctx, spawnRequest{
 		role: a.role, ticket: a.ticket, project: project, purpose: purposeOrWork(a.purpose), round: round,
-		model: model, workdir: dir, job: job, sessions: snap.Sessions,
+		model: model, workdir: dir, job: job, sessions: snap.Sessions, worktrees: t.Projects,
 	})
 	var counted *countedError
 	if err != nil {
@@ -710,13 +710,14 @@ func (s *starter) undoCut(c cutBranch) {
 
 // spawnRequest describes one agent to start on a session of its own.
 type spawnRequest struct {
-	role    api.Role
-	ticket  int64 // 0 for the CEO
-	project string
-	purpose api.Purpose
-	round   int
-	model   string
-	workdir string
+	role      api.Role
+	ticket    int64 // 0 for the CEO
+	project   string
+	purpose   api.Purpose
+	round     int
+	model     string
+	workdir   string
+	worktrees []board.EngineProject
 	// job, when set, learns the session id once the session exists.
 	job *startJob
 	// sessions are the live sessions, whose names are taken.
@@ -756,7 +757,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 	}
 	es := board.EngineSession{ID: sess.ID, Role: r.role, Ticket: r.ticket, Project: r.project, Purpose: r.purpose,
 		ReviewRound: r.round, State: api.SessionStarting, Name: name, Model: r.model, Workdir: r.workdir}
-	en := &entry{sess: es, slot: slotKey(es), delivery: agents.ResolveDelivery(prof.PromptDelivery),
+	en := &entry{sess: es, slot: slotKey(es), delivery: agents.ResolveDelivery(prof.PromptDelivery), cli: prof.CLI,
 		finished: make(chan struct{})}
 	e.mu.Lock()
 	if e.stopping {
@@ -800,9 +801,11 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 			e.startWarnings(context.WithoutCancel(ctx), r.ticket, name, []string{msg})
 		},
 	}
+	e.attachLSP(ctx, r, sess.ID)
 	en.started = e.now()
 	ag, err := e.o.Runner.Start(spec)
 	if err != nil {
+		e.lsp.Detach(sess.ID)
 		e.mu.Lock()
 		delete(e.entries, sess.ID)
 		e.mu.Unlock()

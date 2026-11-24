@@ -40,7 +40,10 @@ type Options struct {
 	Settings func() api.MCPSettings
 	// Seen records a request of an agent session.
 	Seen func(session string)
-	Log  *log.Logger
+	// Listeners holds the notification streams agent sessions open with a
+	// GET of the endpoint; nil switches that off.
+	Listeners *Listeners
+	Log       *log.Logger
 	// Version is omo's version, sent as the server's version.
 	Version string
 }

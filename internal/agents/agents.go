@@ -169,6 +169,10 @@ type Agent interface {
 	// at most MaxNotifyLength characters. Lines keep their order; lines
 	// still queued when the process exits are dropped.
 	Notify(line string)
+	// NotifyDeferred renders a notification when it can actually be typed,
+	// including after waiting for the terminal input lock. An empty result
+	// drops it. render must be safe to call repeatedly and return promptly.
+	NotifyDeferred(render func() string)
 	// Kill ends the process and every process it started, also after the
 	// main process exited on its own.
 	Kill() error

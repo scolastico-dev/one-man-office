@@ -21,7 +21,11 @@ const relayedSeparator = "__"
 
 const (
 	agentInstructions = "omo's board tools, named after the `omo ai` commands (`omo ai ticket show` is the tool ticket_show), " +
-		"and the tools of the servers omo relays, named <server>__<tool>. `omo ai wait` is no tool: run it in the terminal."
+		"and the tools of the servers omo relays, named <server>__<tool>. `omo ai wait` is no tool: run it in the terminal. " +
+		"Language-server issues in your worktree reach you as notifications/message on the stream you open with a GET of this endpoint " +
+		"(Accept: text/event-stream), or, through `omo mcp stdio`, once you send logging/setLevel. omo first sends a probe notification with a token: " +
+		"answer it with the tool lsp_confirm; until you do, and whenever the stream is gone, issues come as an `omo:` line in the terminal. " +
+		"A wrong report is silenced with the tool lsp_ignore."
 	noSessionInstructions = "This connection is not tied to an omo agent session, so it offers none of omo's board tools: " +
 		"use the `omo ai` commands in the terminal for those. The tools here belong to the servers omo relays, named <server>__<tool>."
 )
@@ -52,6 +56,10 @@ func NewHandler(o Options) http.Handler {
 		}
 		if id.Class == ClassAgent && o.Seen != nil {
 			o.Seen(id.Session)
+		}
+		if id.Class == ClassAgent && o.Listeners != nil && wantsStream(r) {
+			o.Listeners.serve(w, r, id.Session)
+			return
 		}
 		sdk.ServeHTTP(w, r)
 	})

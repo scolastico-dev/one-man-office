@@ -50,7 +50,7 @@ test('settingsLocation builds /settings/usage, /settings/skills, /settings/plugi
 })
 
 test('the settings sections are known by name', () => {
-  expect(SETTINGS_SECTIONS_IN_ORDER).toEqual(['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'mcp', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'])
+  expect(SETTINGS_SECTIONS_IN_ORDER).toEqual(['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'mcp', 'lsp', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'])
   expect(isSettingsSection('roles')).toBe(true)
   expect(isSettingsSection('nope')).toBe(false)
   expect(isSettingsSection(undefined)).toBe(false)

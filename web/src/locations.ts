@@ -87,7 +87,7 @@ export function boardLocation(from: From): AppLocation {
 }
 
 /** The sections of the settings, in the order the section list shows them. */
-export const SETTINGS_SECTIONS_IN_ORDER = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'mcp', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'] as const
+export const SETTINGS_SECTIONS_IN_ORDER = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'mcp', 'lsp', 'environment', 'limits', 'review', 'plugins', 'general', 'backup'] as const
 
 /** One section of the settings: the last part of `/settings/<section>`. */
 export type SettingsSection = (typeof SETTINGS_SECTIONS_IN_ORDER)[number]

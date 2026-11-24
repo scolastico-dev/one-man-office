@@ -377,6 +377,9 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"GET /api/proxy/forwards":         agentRead,
 		"POST /api/proxy/forwards":        agentWrite,
 		"DELETE /api/proxy/forwards/{id}": agentWrite,
+		// Ignoring a language-server issue of the caller's own worktree.
+		"POST /api/lsp/ignore":  agentWrite,
+		"POST /api/lsp/confirm": agentWrite,
 	}
 	for pattern, access := range got {
 		if access != userOnly && nonUserRows[pattern] != access {

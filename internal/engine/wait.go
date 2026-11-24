@@ -51,84 +51,110 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 	}
 
 	nt := e.nt
-	nt.mu.Lock()
-	mb := nt.box(a.Session)
-	if lines := mb.takeQueue(); len(lines) > 0 {
-		nt.mu.Unlock()
-		return strings.Join(lines, "\n"), nil
-	}
-	if old := mb.waiter; old != nil {
-		old.release(waitReplaced)
-	}
-	w := &waiter{wake: make(chan struct{})}
-	mb.waiter = w
-	nt.mu.Unlock()
-	e.syncState(ctx, a.Session, mb)
-
+	deadline := time.Now().Add(timeout)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	timedOut := false
-	select {
-	case <-w.wake:
-	case <-timer.C:
-		timedOut = true
-	case <-ctx.Done():
-	case <-ag.Exited():
-	case <-en.finished:
-	}
-
-	nt.mu.Lock()
-	if mb.waiter == w {
-		mb.waiter = nil
-	}
-	if w.why == waitOpen {
-		// Nothing was handed to this wait; from now on nothing will be.
-		w.why = waitEnded
-		close(w.wake)
-	} else {
-		timedOut = false
-	}
-	var reason string
-	var err error
-	timeouts := 0
-	requeued := false
-	switch {
-	case w.why == waitDelivered && ctx.Err() == nil:
-		reason = strings.Join(w.lines, "\n")
-	case w.why == waitDelivered:
-		// The caller is gone: keep the lines for the agent's next wait,
-		// or to be typed.
-		mb.queue = append(w.lines, mb.queue...)
-		if nt.grace > 0 && mb.timer == nil {
-			id := a.Session
-			mb.timer = time.AfterFunc(nt.grace, func() { e.flush(id) })
+	var generation uint64
+	resuming := false
+	for {
+		nt.mu.Lock()
+		mb := nt.box(a.Session)
+		if resuming && mb.waitGeneration != generation {
+			nt.mu.Unlock()
+			return "", api.Errorf(api.CodeConflict, "a newer omo ai wait of this session replaced this one")
 		}
-		requeued = nt.grace <= 0
-		err = ctx.Err()
-	case w.why == waitReplaced:
-		err = api.Errorf(api.CodeConflict, "a newer omo ai wait of this session replaced this one")
-	case timedOut:
-		mb.timeouts++
-		timeouts = mb.timeouts
-	case ctx.Err() != nil:
-		err = ctx.Err()
-	default:
-		err = api.Errorf(api.CodeConflict, "this agent session has ended")
-	}
-	nt.mu.Unlock()
-	if w.why != waitReplaced {
+		if !resuming {
+			// A newer call replaces a suppressed wait even when queued
+			// notifications let the newer call return without parking.
+			mb.waitGeneration++
+			generation = mb.waitGeneration
+		}
+		if lines := notificationLines(mb.takeQueue()); len(lines) > 0 {
+			nt.mu.Unlock()
+			return strings.Join(lines, "\n"), nil
+		}
+		if old := mb.waiter; old != nil {
+			old.release(waitReplaced)
+		}
+		w := &waiter{wake: make(chan struct{})}
+		mb.waiter = w
+		nt.mu.Unlock()
 		e.syncState(ctx, a.Session, mb)
+
+		timedOut := false
+		select {
+		case <-w.wake:
+		case <-timer.C:
+			timedOut = true
+		case <-ctx.Done():
+		case <-ag.Exited():
+		case <-en.finished:
+		}
+
+		nt.mu.Lock()
+		if mb.waiter == w {
+			mb.waiter = nil
+		}
+		if w.why == waitOpen {
+			// Nothing was handed to this wait; from now on nothing will be.
+			w.why = waitEnded
+			close(w.wake)
+		} else {
+			timedOut = false
+		}
+		var reason string
+		var err error
+		timeouts := 0
+		delivered := false
+		requeued := false
+		switch {
+		case w.why == waitDelivered && ctx.Err() == nil:
+			delivered = true
+		case w.why == waitDelivered:
+			// The caller is gone: keep the lines for the agent's next wait,
+			// or to be typed.
+			mb.queue = append(w.lines, mb.queue...)
+			if nt.grace > 0 && mb.timer == nil {
+				id := a.Session
+				mb.timer = time.AfterFunc(nt.grace, func() { e.flush(id) })
+			}
+			requeued = nt.grace <= 0
+			err = ctx.Err()
+		case w.why == waitReplaced:
+			err = api.Errorf(api.CodeConflict, "a newer omo ai wait of this session replaced this one")
+		case timedOut:
+			mb.timeouts++
+			timeouts = mb.timeouts
+		case ctx.Err() != nil:
+			err = ctx.Err()
+		default:
+			err = api.Errorf(api.CodeConflict, "this agent session has ended")
+		}
+		nt.mu.Unlock()
+		if w.why != waitReplaced {
+			e.syncState(ctx, a.Session, mb)
+		}
+		if requeued {
+			e.flush(a.Session)
+		}
+		if err != nil {
+			return "", err
+		}
+		if delivered {
+			reason = strings.Join(notificationLines(w.lines), "\n")
+			if reason == "" {
+				// Keep waiting for a useful notification, with the original
+				// deadline even if the timer raced the suppressed delivery.
+				timer.Reset(time.Until(deadline))
+				resuming = true
+				continue
+			}
+		}
+		if timeouts > 0 {
+			reason = e.timeoutReason(ctx, a, timeout, timeouts)
+		}
+		return reason, nil
 	}
-	if requeued {
-		e.flush(a.Session)
-	}
-	if err != nil {
-		return "", err
-	}
-	if timeouts > 0 {
-		reason = e.timeoutReason(ctx, a, timeout, timeouts)
-	}
-	return reason, nil
 }
 
 // timeoutReason is the answer of a wait that timed out, the n-th in a row.
