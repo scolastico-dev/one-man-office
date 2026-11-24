@@ -109,3 +109,20 @@ test('every desktop installer build logs the bundler subprocess output', async (
   assert.equal(builds.length, 1, 'expected exactly one installer build command');
   assert.match(builds[0], /\bnpm run build -- (?:\S+ )*--verbose\b/);
 });
+
+test('the macOS disk image is packed from a folder, never from a mounted writable image', async () => {
+  assert.deepEqual(release.diskImageArguments('omo ui', '/src', '/out/omo ui.dmg'),
+    ['create', '-volname', 'omo ui', '-srcfolder', '/src', '-fs', 'HFS+', '-format', 'UDZO', '-ov', '/out/omo ui.dmg']);
+  const root = await mkdtemp(join(tmpdir(), 'omo-ui-release-dmg-'));
+  try {
+    await mkdir(join(root, 'macos'), { recursive: true });
+    await assert.rejects(release.buildDiskImage(root), /exactly one \.app/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  const workflow = await readFile(new URL('../../.github/workflows/ui-desktop.yml', import.meta.url), 'utf8');
+  for (const line of workflow.split('\n').filter(line => /platform: darwin/.test(line))) {
+    assert.match(line, /bundle: app\b/, 'Tauri must build only the app; the disk image is packed by release.mjs diskimage');
+  }
+  assert.match(workflow, /release\.mjs diskimage/);
+});

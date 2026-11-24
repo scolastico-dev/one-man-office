@@ -431,7 +431,9 @@ ui_release_tag=0.9.2
 npm run build -- --ci --target x86_64-unknown-linux-gnu --bundles deb --config "$(node scripts/release.mjs config "$ui_release_tag")"
 node scripts/release.mjs desktop target/x86_64-unknown-linux-gnu/release/bundle dist linux amd64 "$ui_release_tag"
 # Windows: x86_64-pc-windows-msvc or aarch64-pc-windows-msvc, --bundles nsis.
-# macOS: x86_64-apple-darwin or aarch64-apple-darwin, --bundles dmg.
+# macOS: x86_64-apple-darwin or aarch64-apple-darwin, --bundles app, then
+# node scripts/release.mjs diskimage target/<target>/release/bundle (hdiutil packs the
+# folder; Tauri's own dmg bundler fails to eject its writable image on CI runners).
 # Stage with platform windows/darwin and architecture amd64/arm64 respectively.
 
 # Android: export the five OMO_UI_ANDROID_* variables listed below first,

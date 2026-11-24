@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, copyFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -67,6 +67,34 @@ export async function stageDesktop(bundle, out, platform, arch, tag) {
   await stage(join(dir, files[0].name), out, `omo-ui-${version}-${platform}-${arch}${extension}`, `omo-ui-${platform}-${arch}-SHA256SUMS`);
 }
 
+// The disk image is packed from a folder in one hdiutil call. Tauri's own dmg
+// bundler mounts a writable image and ejects it again, and that eject fails on
+// the macOS runners ("Resource busy") whenever something still holds the volume.
+export function diskImageArguments(volume, source, image) {
+  return ['create', '-volname', volume, '-srcfolder', source, '-fs', 'HFS+', '-format', 'UDZO', '-ov', image];
+}
+
+export async function buildDiskImage(bundle) {
+  const apps = (await readdir(join(bundle, 'macos'), { withFileTypes: true }))
+    .filter(entry => entry.isDirectory() && entry.name.endsWith('.app'));
+  if (apps.length !== 1) throw new Error(`Expected exactly one .app bundle in ${join(bundle, 'macos')}`);
+  const name = apps[0].name.slice(0, -'.app'.length);
+  const out = join(bundle, 'dmg');
+  const work = await mkdtemp(join(tmpdir(), 'omo-ui-dmg-'));
+  try {
+    const source = join(work, 'image');
+    await mkdir(source);
+    // ditto keeps the bundle's symbolic links, modes and extended attributes.
+    run('ditto', [join(bundle, 'macos', apps[0].name), join(source, apps[0].name)]);
+    await symlink('/Applications', join(source, 'Applications'));
+    await rm(out, { recursive: true, force: true });
+    await mkdir(out, { recursive: true });
+    run('hdiutil', diskImageArguments(name, source, join(out, `${name}.dmg`)));
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: ui, stdio: 'inherit', ...options });
   if (result.error || result.status !== 0) throw new Error(`${command} failed; no release artifact was staged`);
@@ -112,8 +140,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     if (command === 'config') console.log(JSON.stringify(releaseConfig(args[0])));
     else if (command === 'desktop') await stageDesktop(...args);
+    else if (command === 'diskimage') await buildDiskImage(args[0]);
     else if (command === 'android') await android(args[0], process.env);
-    else throw new Error('Usage: release.mjs config TAG | desktop BUNDLE OUT PLATFORM ARCH TAG | android TAG');
+    else throw new Error('Usage: release.mjs config TAG | diskimage BUNDLE | desktop BUNDLE OUT PLATFORM ARCH TAG | android TAG');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
