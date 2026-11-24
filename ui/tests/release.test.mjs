@@ -126,3 +126,16 @@ test('the macOS disk image is packed from a folder, never from a mounted writabl
   }
   assert.match(workflow, /release\.mjs diskimage/);
 });
+
+// services.gradle.org timed out on a runner (the wrapper reads with a 10 s limit),
+// so the wrapper takes the same zip from Gradle's GitHub release, which the
+// runners reach as reliably as the rest of the job, and checks its digest.
+test('the Gradle wrapper downloads the pinned distribution from GitHub and verifies it', async () => {
+  const text = await readFile(new URL('../src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties', import.meta.url), 'utf8');
+  const properties = Object.fromEntries(text.split('\n').filter(line => /^[A-Za-z0-9]+=/.test(line)).map(line => line.split(/=(.*)/s).slice(0, 2)));
+  const version = /gradle-(\d+\.\d+(?:\.\d+)?)-bin\.zip$/.exec(properties.distributionUrl)?.[1];
+  assert.ok(version, 'distributionUrl must name a gradle-<version>-bin.zip');
+  assert.equal(properties.distributionUrl,
+    `https\\://github.com/gradle/gradle-distributions/releases/download/v${version}/gradle-${version}-bin.zip`);
+  assert.match(properties.distributionSha256Sum, /^[a-f0-9]{64}$/);
+});
