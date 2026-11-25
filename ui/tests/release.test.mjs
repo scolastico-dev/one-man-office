@@ -139,3 +139,36 @@ test('the Gradle wrapper downloads the pinned distribution from GitHub and verif
     `https\\://github.com/gradle/gradle-distributions/releases/download/v${version}/gradle-${version}-bin.zip`);
   assert.match(properties.distributionSha256Sum, /^[a-f0-9]{64}$/);
 });
+
+test('the Android unit tests run Robolectric offline on jars Gradle resolved', async () => {
+  // Robolectric downloads the Android jar of each tested SDK from Maven when it
+  // is not told otherwise, which made the tests depend on the network.
+  const plugin = new URL('../notifications/android/', import.meta.url);
+  const build = await readFile(new URL('build.gradle.kts', plugin), 'utf8');
+  assert.match(build, /systemProperty\("robolectric\.offline",\s*"true"\)/);
+  assert.match(build, /systemProperty\("robolectric\.dependency\.dir",/);
+  assert.match(build, /dependsOn\(stageRobolectricSdks\)/);
+
+  // The artifact Robolectric 4.16 uses for each SDK; a test that names another
+  // SDK must add it here and to the build file.
+  const artifacts = {
+    27: '8.1.0-robolectric-4611349-i7',
+    35: '15-robolectric-13954326-i7',
+  };
+  const root = new URL('src/test/java/dev/scolastico/omo/notifications/', plugin);
+  const used = new Set();
+  for (const name of await readdir(root)) {
+    const source = await readFile(new URL(name, root), 'utf8');
+    for (const [, list] of source.matchAll(/sdk\s*=\s*\[([^\]]*)\]/g)) {
+      for (const sdk of list.split(',').map(value => value.trim()).filter(Boolean)) used.add(sdk);
+    }
+  }
+  assert.ok(used.size > 0, 'no @Config(sdk = ...) found');
+  for (const sdk of used) {
+    assert.ok(artifacts[sdk], `SDK ${sdk} has no known Robolectric artifact`);
+    assert.ok(
+      build.includes(`"${sdk}" to "${artifacts[sdk]}"`),
+      `SDK ${sdk} is not staged in build.gradle.kts`,
+    );
+  }
+});

@@ -367,6 +367,13 @@ cd src-tauri/gen/android
 ./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest
 ```
 
+Robolectric runs offline: `ui/notifications/android/build.gradle.kts` resolves the
+Android jar of each tested SDK (27 and 35) as a Gradle dependency, stages them in
+`build/robolectric-sdks` and sets `robolectric.offline` and
+`robolectric.dependency.dir`, so no test downloads anything or reads `~/.m2`. A test
+that names another SDK needs its jar listed there (`ui/tests/release.test.mjs`
+checks it).
+
 The Android tests use Robolectric SDK 35 (plus SDK 27/35 crash-backup recovery),
 controlled WorkManager/executors,
 private stores and Rust local HTTP fixtures. They cover scheduler exclusivity,
