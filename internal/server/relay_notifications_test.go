@@ -242,3 +242,27 @@ func TestRelayNotificationsUntrustedGETNeverConsumes(t *testing.T) {
 		t.Fatal("offline empty", code, err)
 	}
 }
+
+// A device paired through the relay starts after the mentions that exist at
+// the pairing, as the direct connection does; later mentions are delivered.
+func TestRelayNotificationsStartAfterHistoryAtPairing(t *testing.T) {
+	s, relayURL := relayFixture(t)
+	pm, n, old := pmMentionsUser(t, s, "before pairing")
+	newRelayUI(t, s, relayURL, nil)
+	devices, err := s.relay.Devices()
+	if err != nil || len(devices) != 1 {
+		t.Fatal(devices, err)
+	}
+	d := devices[0]
+	if page, _ := decryptedPoll(t, s, relayURL, d, nil); len(page.Notifications) != 0 {
+		t.Fatalf("old mention delivered after pairing: %+v", page.Notifications)
+	}
+	res, err := s.board.Comment(t.Context(), board.Actor{Role: api.RolePM, Session: pm.ID, Ticket: int64(n)}, int64(n), api.CommentRequest{Body: "@user after pairing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := decryptedPoll(t, s, relayURL, d, nil)
+	if len(page.Notifications) != 1 || page.Notifications[0].ID != relayproto.Counter(res.Comment.ID) || page.Notifications[0].ID <= relayproto.Counter(old) {
+		t.Fatalf("mention after pairing: %+v", page.Notifications)
+	}
+}

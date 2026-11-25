@@ -225,9 +225,6 @@ func (v State) validate() error {
 		if d.LastAck != nil && (!validReceipt(*d.LastAck) || d.LastAck.Through != d.Cursor) {
 			return ErrState
 		}
-		if d.Cursor > 0 && d.LastAck == nil {
-			return ErrState
-		}
 		if d.Pending != nil {
 			p := d.Pending
 			if !validReceipt(p.Receipt) || len(p.IDs) == 0 || len(p.IDs) > 50 || p.Receipt.Through != p.IDs[len(p.IDs)-1] {

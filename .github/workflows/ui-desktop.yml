@@ -21,8 +21,8 @@ jobs:
           - { runner: ubuntu-24.04-arm, platform: linux, arch: arm64, target: aarch64-unknown-linux-gnu, bundle: deb }
           - { runner: windows-latest, platform: windows, arch: amd64, target: x86_64-pc-windows-msvc, bundle: nsis }
           - { runner: windows-11-arm, platform: windows, arch: arm64, target: aarch64-pc-windows-msvc, bundle: nsis }
-          - { runner: macos-15-intel, platform: darwin, arch: amd64, target: x86_64-apple-darwin, bundle: dmg }
-          - { runner: macos-15, platform: darwin, arch: arm64, target: aarch64-apple-darwin, bundle: dmg }
+          - { runner: macos-15-intel, platform: darwin, arch: amd64, target: x86_64-apple-darwin, bundle: app }
+          - { runner: macos-15, platform: darwin, arch: arm64, target: aarch64-apple-darwin, bundle: app }
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -67,6 +67,13 @@ jobs:
 
       - name: Build unsigned installer from release version
         run: npm run build -- --ci --verbose --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}" --config "$(node scripts/release.mjs config "$RELEASE_TAG")"
+
+      - name: Pack the macOS disk image
+        if: matrix.platform == 'darwin'
+        # Tauri's dmg bundler mounts and ejects a writable image, and the eject
+        # fails with "Resource busy" on the runners. hdiutil packs the app
+        # folder directly and never needs that eject.
+        run: node scripts/release.mjs diskimage "target/${{ matrix.target }}/release/bundle"
 
       - name: Stage installer and its checksum
         run: node scripts/release.mjs desktop "target/${{ matrix.target }}/release/bundle" dist "${{ matrix.platform }}" "${{ matrix.arch }}" "$RELEASE_TAG"

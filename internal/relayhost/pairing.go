@@ -103,6 +103,14 @@ func (m *Manager) PairPending() (PendingPair, error) {
 	return PendingPair{Phase: v.Pair.Phase, Expires: v.Pair.Expires, AID: base64.RawURLEncoding.EncodeToString(v.Pair.Transcript.AID), UIID: ui}, nil
 }
 func (m *Manager) PairAccept(aid []byte, pin string, pk []byte, name string) (Device, error) {
+	// Read before any lock: a mention that arrives meanwhile is still delivered.
+	var baseline relayproto.Counter
+	if m.opts.Baseline != nil {
+		var e error
+		if baseline, e = m.opts.Baseline(m.ctx); e != nil {
+			return Device{}, e
+		}
+	}
 	m.admin.Lock()
 	defer m.admin.Unlock()
 	m.mu.Lock()
@@ -138,7 +146,7 @@ func (m *Manager) PairAccept(aid []byte, pin string, pk []byte, name string) (De
 	a := action.Acceptance
 	ui, _ := relayproto.Fingerprint("ui", a.Transcript.PKU)
 	// Do not replace existing trust. Re-pairing requires unregister.
-	d := Device{UIID: ui, PublicKey: bytes.Clone(a.Transcript.PKU), PairEpoch: bytes.Clone(a.Transcript.PairEpoch), NotificationRoot: bytes.Clone(a.NotificationRoot), AID: bytes.Clone(a.Transcript.AID), Name: name, AcceptedAt: time.Now().UTC(), State: Active}
+	d := Device{UIID: ui, PublicKey: bytes.Clone(a.Transcript.PKU), PairEpoch: bytes.Clone(a.Transcript.PairEpoch), NotificationRoot: bytes.Clone(a.NotificationRoot), AID: bytes.Clone(a.Transcript.AID), Name: name, AcceptedAt: time.Now().UTC(), State: Active, Cursor: baseline}
 	e = m.store.Update(func(v *State) error {
 		for _, old := range v.Devices {
 			if old.UIID == ui {

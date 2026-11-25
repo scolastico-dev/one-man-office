@@ -109,3 +109,66 @@ test('every desktop installer build logs the bundler subprocess output', async (
   assert.equal(builds.length, 1, 'expected exactly one installer build command');
   assert.match(builds[0], /\bnpm run build -- (?:\S+ )*--verbose\b/);
 });
+
+test('the macOS disk image is packed from a folder, never from a mounted writable image', async () => {
+  assert.deepEqual(release.diskImageArguments('omo ui', '/src', '/out/omo ui.dmg'),
+    ['create', '-volname', 'omo ui', '-srcfolder', '/src', '-fs', 'HFS+', '-format', 'UDZO', '-ov', '/out/omo ui.dmg']);
+  const root = await mkdtemp(join(tmpdir(), 'omo-ui-release-dmg-'));
+  try {
+    await mkdir(join(root, 'macos'), { recursive: true });
+    await assert.rejects(release.buildDiskImage(root), /exactly one \.app/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  const workflow = await readFile(new URL('../../.github/workflows/ui-desktop.yml', import.meta.url), 'utf8');
+  for (const line of workflow.split('\n').filter(line => /platform: darwin/.test(line))) {
+    assert.match(line, /bundle: app\b/, 'Tauri must build only the app; the disk image is packed by release.mjs diskimage');
+  }
+  assert.match(workflow, /release\.mjs diskimage/);
+});
+
+// services.gradle.org timed out on a runner (the wrapper reads with a 10 s limit),
+// so the wrapper takes the same zip from Gradle's GitHub release, which the
+// runners reach as reliably as the rest of the job, and checks its digest.
+test('the Gradle wrapper downloads the pinned distribution from GitHub and verifies it', async () => {
+  const text = await readFile(new URL('../src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties', import.meta.url), 'utf8');
+  const properties = Object.fromEntries(text.split('\n').filter(line => /^[A-Za-z0-9]+=/.test(line)).map(line => line.split(/=(.*)/s).slice(0, 2)));
+  const version = /gradle-(\d+\.\d+(?:\.\d+)?)-bin\.zip$/.exec(properties.distributionUrl)?.[1];
+  assert.ok(version, 'distributionUrl must name a gradle-<version>-bin.zip');
+  assert.equal(properties.distributionUrl,
+    `https\\://github.com/gradle/gradle-distributions/releases/download/v${version}/gradle-${version}-bin.zip`);
+  assert.match(properties.distributionSha256Sum, /^[a-f0-9]{64}$/);
+});
+
+test('the Android unit tests run Robolectric offline on jars Gradle resolved', async () => {
+  // Robolectric downloads the Android jar of each tested SDK from Maven when it
+  // is not told otherwise, which made the tests depend on the network.
+  const plugin = new URL('../notifications/android/', import.meta.url);
+  const build = await readFile(new URL('build.gradle.kts', plugin), 'utf8');
+  assert.match(build, /systemProperty\("robolectric\.offline",\s*"true"\)/);
+  assert.match(build, /systemProperty\("robolectric\.dependency\.dir",/);
+  assert.match(build, /dependsOn\(stageRobolectricSdks\)/);
+
+  // The artifact Robolectric 4.16 uses for each SDK; a test that names another
+  // SDK must add it here and to the build file.
+  const artifacts = {
+    27: '8.1.0-robolectric-4611349-i7',
+    35: '15-robolectric-13954326-i7',
+  };
+  const root = new URL('src/test/java/dev/scolastico/omo/notifications/', plugin);
+  const used = new Set();
+  for (const name of await readdir(root)) {
+    const source = await readFile(new URL(name, root), 'utf8');
+    for (const [, list] of source.matchAll(/sdk\s*=\s*\[([^\]]*)\]/g)) {
+      for (const sdk of list.split(',').map(value => value.trim()).filter(Boolean)) used.add(sdk);
+    }
+  }
+  assert.ok(used.size > 0, 'no @Config(sdk = ...) found');
+  for (const sdk of used) {
+    assert.ok(artifacts[sdk], `SDK ${sdk} has no known Robolectric artifact`);
+    assert.ok(
+      build.includes(`"${sdk}" to "${artifacts[sdk]}"`),
+      `SDK ${sdk} is not staged in build.gradle.kts`,
+    );
+  }
+});

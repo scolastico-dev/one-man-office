@@ -17,7 +17,7 @@ func (s *Server) initRelay() error {
 	if e != nil {
 		return e
 	}
-	manager, e := relayhost.NewManager(store, relayhost.Options{Callbacks: relayhost.Callbacks{ServeSession: s.serveRelaySession, PollNotifications: s.pollRelayNotifications}, Origin: s.opts.Config.RelayURL, Enabled: s.opts.Config.RelayEnabled, SaveConfig: func(origin string, enabled bool) error {
+	manager, e := relayhost.NewManager(store, relayhost.Options{Callbacks: relayhost.Callbacks{ServeSession: s.serveRelaySession, PollNotifications: s.pollRelayNotifications}, Baseline: s.relayMentionBaseline, Origin: s.opts.Config.RelayURL, Enabled: s.opts.Config.RelayEnabled, SaveConfig: func(origin string, enabled bool) error {
 		config, e := serverconfig.Load(s.opts.Layout.ServerConfig)
 		if e != nil {
 			return e

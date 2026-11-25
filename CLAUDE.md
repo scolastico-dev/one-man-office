@@ -644,7 +644,7 @@ is Keystore encrypted; jobs/intents carry no credentials. Both modes use the
 Rust delivery journal through JNI, without a WebView or Tauri event loop. The
 checked-in Gradle target uses SDK 36 / NDK 29 / JDK 21; do not regenerate it with
 android:init. Focused platform tests: from ui/src-tauri/gen/android after a build,
-./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest.
+./gradlew --no-daemon :tauri-plugin-omo-notifications:testDebugUnitTest. Robolectric runs offline on jars Gradle resolves (`build.gradle.kts`, one entry per SDK a test names; guarded in `ui/tests/release.test.mjs`).
 Root buildscript/project repositories and buildSrc's plugin/dependency repositories
 prefer Google's Maven Central mirror before Central; keep these scopes aligned
 so plugin-portal redirects do not reintroduce shared-runner HTTP 429 failures.

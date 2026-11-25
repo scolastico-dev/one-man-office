@@ -156,3 +156,16 @@ func relayPreview(s string, max int) (string, bool) {
 	}
 	return s[:end], true
 }
+
+// RelayMentionsHead is the ID of the newest retained mention of the user, 0
+// when there is none. A device paired now starts its cursor there.
+func (b *Board) RelayMentionsHead(ctx context.Context, a Actor) (relayproto.Counter, error) {
+	if err := userOnly(a, "read relay notifications"); err != nil {
+		return 0, err
+	}
+	var head int64
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(c.id), 0)`+mentionsOfUser).Scan(&head)
+	})
+	return relayproto.Counter(head), err
+}
