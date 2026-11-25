@@ -60,7 +60,7 @@ jobs:
           key: gradle-dist-${{ hashFiles('ui/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           # v3's default includes the retired "tools" package.
           packages: platform-tools
